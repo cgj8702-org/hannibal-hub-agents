@@ -329,10 +329,15 @@ Use this as the practical implementation order for the standalone service.
 ## Open Questions
 
 - Which queue or broker best fits the target deployment?
+- Answer: Unsure
 - Should the first release support comments only, or comments plus PR reviews?
+- Answer: Both
 - Should branch writes be disabled by default?
+- Answer: No
 - Which model should be the production default after validation?
+- Answer: gemma-4-31b-it and gemma-4-26b-4a-it
 - Which policies should gate mutation actions versus read-only analysis?
+- Answer: Unsure
 
 ## Final Boundary Reminder
 
