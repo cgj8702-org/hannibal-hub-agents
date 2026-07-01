@@ -238,50 +238,50 @@ Use this as the practical implementation order for the standalone service.
 
 ### 1. Set the project boundary
 
-- [ ] Create a new repository for the webhook agent service
-- [ ] Choose a separate deployment target
-- [ ] Create separate secret storage and environment variables
-- [ ] Define the repo as independent from Hannibal Hub / `chatbot-repo`
+- [x] Create a new repository for the webhook agent service
+- [x] Choose a separate deployment target
+- [x] Create separate secret storage and environment variables
+- [x] Define the repo as independent from Hannibal Hub / `chatbot-repo`
 
 ### 2. Register the GitHub App
 
-- [ ] Create the GitHub App in GitHub settings
-- [ ] Generate the webhook secret
-- [ ] Generate and store the private key
-- [ ] Record the App ID
-- [ ] Select the minimal permissions needed for the first release
-- [ ] Subscribe to the webhook events the app will actually handle
+- [x] Create the GitHub App in GitHub settings
+- [x] Generate the webhook secret
+- [x] Generate and store the private key
+- [x] Record the App ID
+- [x] Select the minimal permissions needed for the first release
+- [x] Subscribe to the webhook events the app will actually handle
 
 ### 3. Scaffold the service
 
-- [ ] Create the standalone FastAPI app for webhook ingress
-- [ ] Add a health endpoint
-- [ ] Add config loading for secrets, queue settings, and model settings
-- [ ] Add structured logging from the start
+- [x] Create the standalone FastAPI app for webhook ingress
+- [x] Add a health endpoint
+- [x] Add config loading for secrets, queue settings, and model settings
+- [x] Add structured logging from the start
 
 ### 4. Build webhook verification
 
-- [ ] Read the raw request body
-- [ ] Verify the GitHub HMAC signature
-- [ ] Reject invalid signatures immediately
-- [ ] Capture the GitHub delivery ID for idempotency
-- [ ] Return `202 Accepted` as soon as the job is enqueued
+- [x] Read the raw request body
+- [x] Verify the GitHub HMAC signature
+- [x] Reject invalid signatures immediately
+- [x] Capture the GitHub delivery ID for idempotency
+- [x] Return `202 Accepted` as soon as the job is enqueued
 
 ### 5. Add durable job processing
 
-- [ ] Choose the queue or broker
-- [ ] Implement enqueue logic from the webhook receiver
-- [ ] Implement worker consumption logic
-- [ ] Add retry policy and backoff
-- [ ] Add dead-letter handling or a failure sink
+- [x] Choose the queue or broker
+- [x] Implement enqueue logic from the webhook receiver
+- [x] Implement worker consumption logic
+- [x] Add retry policy and backoff
+- [x] Add dead-letter handling or a failure sink
 - [ ] Confirm a restarted process does not lose work
 
 ### 6. Implement GitHub App authentication
 
-- [ ] Generate a JWT from the app private key
-- [ ] Exchange the JWT for an installation access token
-- [ ] Cache installation tokens until near expiry
-- [ ] Refresh tokens automatically when needed
+- [x] Generate a JWT from the app private key
+- [x] Exchange the JWT for an installation access token
+- [x] Cache installation tokens until near expiry
+- [x] Refresh tokens automatically when needed
 
 ### 7. Gather event context
 
@@ -293,29 +293,29 @@ Use this as the practical implementation order for the standalone service.
 
 ### 8. Build the agent core
 
-- [ ] Define the system instruction
-- [ ] Define strict tool schemas
-- [ ] Validate all tool arguments before execution
-- [ ] Use the current Google GenAI Interactions API pattern
-- [ ] Keep side effects behind explicit policy checks
-- [ ] Preserve a trace ID across queue, worker, model, and writeback steps
+- [x] Define the system instruction
+- [x] Define strict tool schemas
+- [x] Validate all tool arguments before execution
+- [x] Use the current Google GenAI Interactions API pattern
+- [x] Keep side effects behind explicit policy checks
+- [x] Preserve a trace ID across queue, worker, model, and writeback steps
 
 ### 9. Implement GitHub writeback
 
-- [ ] Add issue comments
-- [ ] Add PR review comments
-- [ ] Add review submissions if needed
-- [ ] Add branch or commit updates only if policy allows them
-- [ ] Make writebacks idempotent
+- [x] Add issue comments
+- [x] Add PR review comments
+- [x] Add review submissions if needed
+- [x] Add branch or commit updates only if policy allows them
+- [x] Make writebacks idempotent
 
 ### 10. Add operational guardrails
 
-- [ ] Log each major lifecycle transition
-- [ ] Record job success and failure states
-- [ ] Handle transient errors with retries
-- [ ] Surface permanent failures clearly
+- [x] Log each major lifecycle transition
+- [x] Record job success and failure states
+- [x] Handle transient errors with retries
+- [x] Surface permanent failures clearly
 - [ ] Apply backpressure when the queue or model provider is saturated
-- [ ] Store secrets outside the codebase
+- [x] Store secrets outside the codebase
 
 ### 11. Validate the first release
 
@@ -324,7 +324,7 @@ Use this as the practical implementation order for the standalone service.
 - [ ] Confirm the worker can authenticate as the GitHub App installation
 - [ ] Confirm the agent can gather context and call the model
 - [ ] Confirm the agent can write back to GitHub safely
-- [ ] Confirm the project remains fully separate from Hannibal Hub
+- [x] Confirm the project remains fully separate from Hannibal Hub
 
 ## Open Questions
 
