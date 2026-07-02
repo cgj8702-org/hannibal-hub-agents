@@ -440,6 +440,17 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
             "and output a call to the `update_pr_description` tool containing the filled-out template in the `body` argument, "
             "setting `ready_for_review` to true.\n"
         )
+    elif "pr_diff" in raw:
+        # Diff injected without template - this is a review request
+        extra_context += (
+            f"\n=== PR CODE DIFF ===\n{raw['pr_diff']}\n"
+            "\nINSTRUCTION:\n"
+            "The user requested a code review (e.g., via `/review` comment).\n"
+            "You MUST analyze the PR Code Diff above thoroughly and output a call to either:\n"
+            "1. `submit_review` with detailed review comments (preferred for formal reviews), OR\n"
+            "2. `add_review_comment` with your analysis\n"
+            "Include specific code feedback, potential issues, and suggestions for improvement.\n"
+        )
 
     return (
         "You are the planner for a GitHub App agent. Your role is to decide "
