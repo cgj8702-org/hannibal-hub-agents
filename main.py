@@ -1,5 +1,6 @@
-import uvicorn
 import logging
+
+import uvicorn
 
 # Configure logging for the entry point
 logging.basicConfig(
