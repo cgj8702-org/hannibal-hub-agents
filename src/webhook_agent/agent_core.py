@@ -795,6 +795,15 @@ class AgentCore:
 
         # Execute each action behind writeback policy
         results: list[ActionResult] = []
+        if has_get_diff and "files" in locals():
+            results.append(
+                ActionResult(
+                    tool="get_pr_diff",
+                    success=True,
+                    detail=f"Fetched diff for {files.totalCount} file(s)",
+                )
+            )
+
         for act in actions:
             # Writeback policy check
             policy_reason = check_writeback_policy(event, act)
