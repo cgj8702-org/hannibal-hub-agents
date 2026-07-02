@@ -336,7 +336,9 @@ def _issue_schemas() -> list[dict[str, Any]]:
     ]
 
 
-def _tool_declarations_for_event(canonical: str) -> list[dict[str, Any]]:
+def _tool_declarations_for_event(
+    canonical: str, raw_payload: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Return the tool schema set appropriate for a given canonical event type.
 
     Keeps the schema tight and action-oriented — only the tools relevant for
@@ -345,7 +347,13 @@ def _tool_declarations_for_event(canonical: str) -> list[dict[str, Any]]:
     tools: list[dict[str, Any]] = []
     tools.extend(_common_schemas())
 
-    if canonical.startswith("pull_request."):
+    # Check if the event is a pull request event OR an issue comment on a pull request
+    is_pr = canonical.startswith("pull_request.") or (
+        canonical.startswith("issue_comment.")
+        and "pull_request" in raw_payload.get("issue", {})
+    )
+
+    if is_pr:
         tools.extend(_pr_review_schemas())
         tools.extend(_pr_lifecycle_schemas())
         tools.extend(_issue_schemas())
@@ -484,7 +492,9 @@ class GemmaPlanner:
         else:
             planner_event = event
 
-        tools = _tool_declarations_for_event(planner_event.canonical)
+        tools = _tool_declarations_for_event(
+            planner_event.canonical, planner_event.raw_payload
+        )
         prompt = _build_event_prompt(planner_event, trace_id)
 
         logger.debug(
