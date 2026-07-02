@@ -735,7 +735,9 @@ class AgentCore:
             # Remove get_pr_diff from actions to execute later
             actions = [act for act in actions if act["tool"] != "get_pr_diff"]
 
-            pr_number = pr_data.get("number")
+            pr_number = raw_payload.get("pull_request", {}).get(
+                "number"
+            ) or raw_payload.get("issue", {}).get("number")
             if pr_number:
                 try:
                     repo = self.gh.get_repo(repo_full_name)
