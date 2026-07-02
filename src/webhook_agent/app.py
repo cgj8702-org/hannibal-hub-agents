@@ -1,7 +1,7 @@
 """FastAPI webhook receiver — normalizes incoming GitHub webhook payloads.
 
-Every delivery is parsed, normalized to a consistent shape, and published to
-Pub/Sub for downstream processing by the worker.
+Every delivery is parsed, normalized to a consistent shape, and placed in an
+internal queue for asynchronous processing by the WebhookProcessor.
 
 Normalized event structure:
 {
@@ -17,6 +17,7 @@ Normalized event structure:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -27,12 +28,11 @@ import stat
 import subprocess
 import urllib.request
 from contextlib import asynccontextmanager
-from os import environ
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 
-from .enqueue import publish_webhook_message
+from .processor import WebhookProcessor
 
 logger = logging.getLogger("app")
 
@@ -40,10 +40,54 @@ logger = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
 
+# Global state for the queue and processor
+state = {
+    "queue": asyncio.Queue(),
+    "processor": None,
+    "worker_task": None,
+}
+
+
+async def webhook_worker():
+    """Background worker that consumes events from the queue."""
+    logger.info("🚀 Webhook background worker started.")
+    processor = state["processor"]
+    while True:
+        try:
+            # Wait for an event from the queue
+            event = await state["queue"].get()
+            try:
+                # Process the event (this is a synchronous call, so we run it in a thread)
+                await asyncio.to_thread(processor.process_event, event)
+            except (RuntimeError, ConnectionError, TimeoutError):
+                logger.exception("💥 Recoverable error processing event from queue")
+            except Exception:
+                logger.exception("💥 Unexpected error processing event from queue")
+            finally:
+                state["queue"].task_done()
+        except asyncio.CancelledError:
+            logger.info("🛑 Webhook background worker shutting down.")
+            break
+        except Exception:
+            logger.exception("💥 Unexpected error in webhook worker loop")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    # Initialize Processor
+    try:
+        state["processor"] = WebhookProcessor()
+    except (KeyError, ValueError, TypeError) as e:
+        logger.error(
+            f"💥 Failed to initialize WebhookProcessor due to config error: {e}"
+        )
+        # We don't raise here to allow the server to start, but webhooks will fail
+
+    # Start the background worker
+    state["worker_task"] = asyncio.create_task(webhook_worker())
+
+    # Cloudflare Tunnel Setup
     cf_token = os.environ.get("CF_TUNNEL_TOKEN")
     tunnel_process = None
     if cf_token:
@@ -62,7 +106,7 @@ async def lifespan(app: FastAPI):
                     st = os.stat(cf_bin)
                     os.chmod(cf_bin, st.st_mode | stat.S_IEXEC)
                     logger.info("✅ cloudflared binary downloaded and made executable.")
-                except Exception as e:
+                except (urllib.error.URLError, OSError) as e:
                     logger.error(f"💥 Failed to download cloudflared: {e}")
                     cf_bin = None
 
@@ -70,16 +114,21 @@ async def lifespan(app: FastAPI):
             logger.info("🚀 Starting Cloudflare Tunnel...")
             log_file = "/tmp/cloudflared_tunnel.log"
             try:
-                tunnel_process = subprocess.Popen(
-                    [cf_bin, "tunnel", "run", "--token", cf_token],
-                    stdout=open(log_file, "w"),
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
+                # Use asyncio.to_thread to avoid blocking the event loop with Popen and open()
+                def start_tunnel():
+                    with open(log_file, "w") as f:
+                        return subprocess.Popen(
+                            [cf_bin, "tunnel", "run", "--token", cf_token],
+                            stdout=f,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                        )
+
+                tunnel_process = await asyncio.to_thread(start_tunnel)
                 logger.info(
                     f"✅ Cloudflare Tunnel process started. Logs redirected to {log_file}"
                 )
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 logger.error(f"💥 Failed to start Cloudflare Tunnel: {e}")
         else:
             logger.error(
@@ -89,6 +138,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if state["worker_task"]:
+        logger.info("🛑 Cancelling background worker...")
+        state["worker_task"].cancel()
+        try:
+            await state["worker_task"]
+        except asyncio.CancelledError:
+            pass
+
     if tunnel_process:
         logger.info("🛑 Terminating Cloudflare Tunnel process...")
         tunnel_process.terminate()
@@ -126,11 +183,7 @@ def normalize_payload(
     raw_payload: dict[str, Any],
     delivery_id: str,
 ) -> dict[str, Any]:
-    """Normalize incoming webhook payload into a consistent event envelope.
-
-    Every downstream consumer (worker, agent core) should rely on the top-level
-    keys documented in this module rather than crawling the raw payload directly.
-    """
+    """Normalize incoming webhook payload into a consistent event envelope."""
     return {
         "delivery_id": delivery_id,
         "event_name": event_name,
@@ -160,7 +213,7 @@ async def webhook(
     1. Read raw body
     2. Verify signature using ``WEBHOOK_SECRET`` env var (optional)
     3. Parse JSON body and normalize into a consistent event envelope
-    4. Publish the normalized event to Pub/Sub for downstream workers
+    4. Enqueue the normalized event for background processing
     """
     body = await request.body()
     secret = os.environ.get("WEBHOOK_SECRET")
@@ -195,31 +248,15 @@ async def webhook(
         normalized["repository"].get("full_name") if normalized["repository"] else None,
     )
 
-    # Publish to Pub/Sub
+    # Enqueue for background processing
     try:
-        topic = environ.get("PUBSUB_TOPIC")
-        if topic:
-            publish_webhook_message(
-                topic,
-                payload=normalized,
-                attributes={
-                    "delivery_id": delivery_id,
-                    "event_name": event_name,
-                    "action": str(normalized["action"] or ""),
-                },
-            )
-            logger.info(
-                "📨 Enqueued delivery: delivery=%s event=%s topic=%s",
-                delivery_id,
-                event_name,
-                topic,
-            )
-        else:
-            logger.warning(
-                "⚠️  PUBSUB_TOPIC not set; skipping enqueue for delivery: %s",
-                delivery_id,
-            )
-    except Exception:
-        logger.exception("💥 Failed to enqueue delivery: %s", delivery_id)
+        state["queue"].put_nowait(normalized)
+        logger.info(
+            "📨 Enqueued delivery: delivery=%s event=%s", delivery_id, event_name
+        )
+    except asyncio.QueueFull:
+        logger.error("💥 Queue full; failed to enqueue delivery: %s", delivery_id)
+        # We still return 202 because we don't want to block GitHub,
+        # but the event is lost if the queue is full/broken.
 
     return Response(status_code=202)
