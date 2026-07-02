@@ -509,3 +509,34 @@ class TestAgentCoreRun:
         results = core.run(ev, "owner/repo")
         assert len(results) == 1
         assert results[0].success is True
+
+    def test_update_pr_description_marks_ready_for_review(self):
+        # Test non-dry-run mode to verify the ready_for_review logic
+        core = AgentCore(gh_client=MagicMock(), dry_run=False)
+        ev = {
+            "delivery_id": "test-005",
+            "event_name": "pull_request",
+            "action": "opened",
+            "canonical": "pull_request.opened",
+            "sender": {"login": "human"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {
+                "pull_request": {"number": 42, "body": "/create"},
+                "action": "opened",
+            },
+        }
+        # Need to mock the environment to allow mutations
+        import os
+
+        old_val = os.environ.get("ALLOW_AUTOMATED_MUTATIONS")
+        os.environ["ALLOW_AUTOMATED_MUTATIONS"] = "1"
+        try:
+            results = core.run(ev, "owner/repo")
+            assert len(results) == 1
+            assert results[0].success is True
+            assert "ready for review" in results[0].detail
+        finally:
+            if old_val is None:
+                os.environ.pop("ALLOW_AUTOMATED_MUTATIONS", None)
+            else:
+                os.environ["ALLOW_AUTOMATED_MUTATIONS"] = old_val

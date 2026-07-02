@@ -608,8 +608,15 @@ class AgentCore:
 
                 detail_msg = f"updated PR #{pr.number}"
                 if args.get("ready_for_review"):
-                    pr._requester.requestJsonAndCheck("POST", f"{pr.url}/ready")
-                    detail_msg += " and marked ready for review"
+                    try:
+                        pr.edit(draft=False)
+                        detail_msg += " and marked ready for review"
+                    except Exception as e:
+                        return ActionResult(
+                            tool=tool,
+                            success=False,
+                            detail=f"failed to mark ready for review: {e}",
+                        )
 
                 return ActionResult(
                     tool=tool,
