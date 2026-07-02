@@ -307,7 +307,7 @@ class AgentCore:
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
             # Read-only: log but don't mutate
-            logger.info("trace=%s PR synchronize — no action taken", trace_id)
+            logger.debug("trace=%s PR synchronize — no action taken", trace_id)
 
         # --- issue_comment.created ---
         elif canonical == "issue_comment.created":
@@ -351,7 +351,7 @@ class AgentCore:
 
         # --- pull_request_review.submitted ---
         elif canonical == "pull_request_review.submitted":
-            logger.info("trace=%s review submitted — no automatic follow-up", trace_id)
+            logger.debug("trace=%s review submitted — no automatic follow-up", trace_id)
 
         # --- pull_request_review_requested ---
         elif canonical == "pull_request_review_requested":
@@ -369,19 +369,19 @@ class AgentCore:
 
         # --- label.* events ---
         elif canonical.startswith("label."):
-            logger.info("trace=%s label event — no automatic action", trace_id)
+            logger.debug("trace=%s label event — no automatic action", trace_id)
 
         # --- installation.* events ---
         elif canonical.startswith("installation."):
-            logger.info("trace=%s installation event — no automatic action", trace_id)
+            logger.debug("trace=%s installation event — no automatic action", trace_id)
 
         # --- ping ---
         elif canonical == "ping":
-            logger.info("trace=%s ping received — no action needed", trace_id)
+            logger.debug("trace=%s ping received — no action needed", trace_id)
 
         # --- unknown ---
         else:
-            logger.info(
+            logger.debug(
                 "trace=%s unknown canonical event=%s — no action", trace_id, canonical
             )
 
