@@ -307,7 +307,7 @@ class AgentCore:
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
             # Read-only: log but don't mutate
-            logger.info("trace=%s PR synchronize — no action taken", trace_id)
+            logger.debug("trace=%s PR synchronize — no action taken", trace_id)
 
         # --- issue_comment.created ---
         elif canonical == "issue_comment.created":
@@ -351,7 +351,7 @@ class AgentCore:
 
         # --- pull_request_review.submitted ---
         elif canonical == "pull_request_review.submitted":
-            logger.info("trace=%s review submitted — no automatic follow-up", trace_id)
+            logger.debug("trace=%s review submitted — no automatic follow-up", trace_id)
 
         # --- pull_request_review_requested ---
         elif canonical == "pull_request_review_requested":
@@ -369,19 +369,19 @@ class AgentCore:
 
         # --- label.* events ---
         elif canonical.startswith("label."):
-            logger.info("trace=%s label event — no automatic action", trace_id)
+            logger.debug("trace=%s label event — no automatic action", trace_id)
 
         # --- installation.* events ---
         elif canonical.startswith("installation."):
-            logger.info("trace=%s installation event — no automatic action", trace_id)
+            logger.debug("trace=%s installation event — no automatic action", trace_id)
 
         # --- ping ---
         elif canonical == "ping":
-            logger.info("trace=%s ping received — no action needed", trace_id)
+            logger.debug("trace=%s ping received — no action needed", trace_id)
 
         # --- unknown ---
         else:
-            logger.info(
+            logger.debug(
                 "trace=%s unknown canonical event=%s — no action", trace_id, canonical
             )
 
@@ -589,19 +589,11 @@ class AgentCore:
             elif tool == "get_pr_diff":
                 pr = repo.get_pull(args["pr_number"])
                 files = pr.get_files()
-                diff_summary = []
-                for f in files:
-                    diff_summary.append(
-                        f"File: {f.filename}\n"
-                        f"Status: {f.status}\n"
-                        f"Additions: {f.additions}, Deletions: {f.deletions}\n"
-                        f"Patch:\n{f.patch}\n"
-                        f"{'-' * 40}"
-                    )
+                files_list = [f.filename for f in files]
                 return ActionResult(
                     tool=tool,
                     success=True,
-                    detail="\n".join(diff_summary),
+                    detail=f"Fetched diff for {len(files_list)} file(s): {files_list}",
                 )
             elif tool == "update_pr_description":
                 pr = repo.get_pull(args["pr_number"])
@@ -708,7 +700,7 @@ class AgentCore:
 
                     raw_payload["pr_diff"] = diff_text
                     raw_payload["pr_template"] = template_content
-                    logger.info(
+                    logger.debug(
                         "Injected PR diff and template (%s) into payload", template_path
                     )
             except Exception as e:
@@ -725,7 +717,7 @@ class AgentCore:
             raw_payload=raw_payload,
         )
 
-        logger.info(
+        logger.debug(
             "agent run trace=%s canonical=%s repo=%s dry_run=%s",
             trace_id,
             event.canonical,
@@ -735,6 +727,84 @@ class AgentCore:
 
         # Plan tool calls
         actions = self.decide(event, trace_id=trace_id)
+
+        # If gemma planned 'get_pr_diff', we execute it first, inject the result, and re-plan!
+        has_get_diff = any(act["tool"] == "get_pr_diff" for act in actions)
+        if has_get_diff:
+            logger.info("🔄 Agent planned get_pr_diff. Executing and re-planning...")
+            # Remove get_pr_diff from actions to execute later
+            actions = [act for act in actions if act["tool"] != "get_pr_diff"]
+
+            pr_number = pr_data.get("number")
+            if pr_number:
+                try:
+                    repo = self.gh.get_repo(repo_full_name)
+                    pr = repo.get_pull(pr_number)
+                    files = pr.get_files()
+                    diff_summary = []
+                    is_dev_only = True
+                    for f in files:
+                        filename = f.filename or ""
+                        if not (
+                            filename.startswith("dev/")
+                            or filename.startswith("scripts/")
+                            or filename.startswith(".agents/")
+                            or filename == "AGENTS.md"
+                            or filename == "GEMINI.md"
+                        ):
+                            is_dev_only = False
+                        diff_summary.append(
+                            f"File: {filename} ({f.status})\n"
+                            f"Patch:\n{f.patch}\n"
+                            f"{'-' * 40}"
+                        )
+                    diff_text = "\n".join(diff_summary)
+
+                    template_content = ""
+                    template_path = (
+                        ".github/PULL_REQUEST_TEMPLATE/prod_pull_request_template.md"
+                    )
+                    if is_dev_only:
+                        template_path = (
+                            ".github/PULL_REQUEST_TEMPLATE/dev_pull_request_template.md"
+                        )
+
+                    try:
+                        content_file = repo.get_contents(template_path)
+                        template_content = content_file.decoded_content.decode("utf-8")
+                    except Exception:
+                        try:
+                            content_file = repo.get_contents(
+                                ".github/pull_request_template.md"
+                            )
+                            template_content = content_file.decoded_content.decode(
+                                "utf-8"
+                            )
+                        except Exception:
+                            template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
+
+                    raw_payload["pr_diff"] = diff_text
+                    raw_payload["pr_template"] = template_content
+
+                    # Re-construct event with injected payload
+                    event = CanonicalEvent(
+                        canonical=canonical,
+                        delivery_id=event.delivery_id,
+                        event_name=event.event_name,
+                        action=event.action,
+                        sender=event.sender,
+                        installation=event.installation,
+                        repository=event.repository,
+                        raw_payload=raw_payload,
+                    )
+
+                    # Re-plan!
+                    new_actions = self.decide(event, trace_id=trace_id)
+                    actions.extend(new_actions)
+                except Exception as e:
+                    logger.exception(
+                        "💥 Failed to execute get_pr_diff and re-plan: %s", e
+                    )
 
         # Execute each action behind writeback policy
         results: list[ActionResult] = []
@@ -759,7 +829,7 @@ class AgentCore:
 
             res = self.execute_action(repo_full_name, act, trace_id)
             results.append(res)
-            logger.info(
+            logger.debug(
                 "action result trace=%s tool=%s success=%s detail=%s",
                 trace_id,
                 res.tool,

@@ -62,6 +62,10 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+# Silence verbose third-party loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
+
 # ---------------------------------------------------------------------------
 # Bot identity — used for loop-avoidance
 # ---------------------------------------------------------------------------

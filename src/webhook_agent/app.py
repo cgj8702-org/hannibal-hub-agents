@@ -36,6 +36,10 @@ from .enqueue import publish_webhook_message
 
 logger = logging.getLogger("app")
 
+# Silence verbose third-party loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
