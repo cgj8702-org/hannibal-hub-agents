@@ -652,11 +652,11 @@ class AgentCore:
         # Build canonical event from normalized data
         canonical = event_data.get("canonical", "") or self._infer_canonical(event_data)
 
-        # Pre-fetch PR diff and templates if /create trigger is present in PR body
+        # Pre-fetch PR diff and templates only on pull_request.opened when /create trigger is present
         raw_payload = event_data.get("raw_payload", {})
         pr_data = raw_payload.get("pull_request", {})
         pr_body = pr_data.get("body") or ""
-        if canonical.startswith("pull_request.") and "/create" in pr_body:
+        if canonical == "pull_request.opened" and "/create" in pr_body:
             try:
                 repo = self.gh.get_repo(repo_full_name)
                 pr_number = pr_data.get("number")
