@@ -272,6 +272,48 @@ def _pr_lifecycle_schemas() -> list[dict[str, Any]]:
                 "required": ["branch_name", "file_path", "file_content"],
             },
         },
+        {
+            "type": "function",
+            "name": "get_pr_diff",
+            "description": "Fetch the file diffs and changed files in a pull request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pr_number": {
+                        "type": "integer",
+                        "description": "Pull request number",
+                    },
+                },
+                "required": ["pr_number"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "update_pr_description",
+            "description": "Update a pull request's description (body), title, or mark it as ready for review.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pr_number": {
+                        "type": "integer",
+                        "description": "Pull request number",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "New pull request description (Markdown)",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional new pull request title",
+                    },
+                    "ready_for_review": {
+                        "type": "boolean",
+                        "description": "Set to true to transition draft pull requests to ready-for-review",
+                    },
+                },
+                "required": ["pr_number"],
+            },
+        },
     ]
 
 
@@ -375,6 +417,18 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
         extra_context = (
             f"Review State: {review.get('state', 'N/A')}\n"
             f"Review Body Snippet: {review.get('body', '')[:200]}\n"
+        )
+
+    # Check for injected diff/template context
+    if "pr_diff" in raw and "pr_template" in raw:
+        extra_context += (
+            f"\n=== PR CODE DIFF ===\n{raw['pr_diff']}\n"
+            f"\n=== PR TEMPLATE TO FILL OUT ===\n{raw['pr_template']}\n"
+            "\nINSTRUCTION:\n"
+            "The user used `/create` in the pull request description.\n"
+            "You MUST parse the PR Code Diff above, fill out the provided PR Template completely with a detailed explanation of the changes, "
+            "and output a call to the `update_pr_description` tool containing the filled-out template in the `body` argument, "
+            "setting `ready_for_review` to true.\n"
         )
 
     return (
