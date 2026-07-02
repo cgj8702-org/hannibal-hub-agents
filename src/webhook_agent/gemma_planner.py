@@ -487,7 +487,7 @@ class GemmaPlanner:
         tools = _tool_declarations_for_event(planner_event.canonical)
         prompt = _build_event_prompt(planner_event, trace_id)
 
-        logger.info(
+        logger.debug(
             "gemma planner request trace=%s canonical=%s tools=%s",
             trace_id,
             planner_event.canonical,
@@ -514,14 +514,14 @@ class GemmaPlanner:
             )
 
         if interaction.output_text:
-            logger.info(
+            logger.debug(
                 "gemma planner text trace=%s model=%s text=%s",
                 trace_id,
                 self.model,
                 interaction.output_text,
             )
 
-        logger.info(
+        logger.debug(
             "gemma planner trace=%s model=%s planned_actions=%s",
             trace_id,
             self.model,

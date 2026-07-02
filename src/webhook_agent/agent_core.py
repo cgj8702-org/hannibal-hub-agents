@@ -589,19 +589,11 @@ class AgentCore:
             elif tool == "get_pr_diff":
                 pr = repo.get_pull(args["pr_number"])
                 files = pr.get_files()
-                diff_summary = []
-                for f in files:
-                    diff_summary.append(
-                        f"File: {f.filename}\n"
-                        f"Status: {f.status}\n"
-                        f"Additions: {f.additions}, Deletions: {f.deletions}\n"
-                        f"Patch:\n{f.patch}\n"
-                        f"{'-' * 40}"
-                    )
+                files_list = [f.filename for f in files]
                 return ActionResult(
                     tool=tool,
                     success=True,
-                    detail="\n".join(diff_summary),
+                    detail=f"Fetched diff for {len(files_list)} file(s): {files_list}",
                 )
             elif tool == "update_pr_description":
                 pr = repo.get_pull(args["pr_number"])
@@ -708,7 +700,7 @@ class AgentCore:
 
                     raw_payload["pr_diff"] = diff_text
                     raw_payload["pr_template"] = template_content
-                    logger.info(
+                    logger.debug(
                         "Injected PR diff and template (%s) into payload", template_path
                     )
             except Exception as e:
@@ -725,7 +717,7 @@ class AgentCore:
             raw_payload=raw_payload,
         )
 
-        logger.info(
+        logger.debug(
             "agent run trace=%s canonical=%s repo=%s dry_run=%s",
             trace_id,
             event.canonical,
@@ -759,7 +751,7 @@ class AgentCore:
 
             res = self.execute_action(repo_full_name, act, trace_id)
             results.append(res)
-            logger.info(
+            logger.debug(
                 "action result trace=%s tool=%s success=%s detail=%s",
                 trace_id,
                 res.tool,
