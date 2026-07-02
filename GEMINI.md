@@ -7,7 +7,7 @@ Please follow these protocols to ensure team coordination remains professional, 
 * **Aesthetic Boundaries:** Use strictly UTF-8 encoding. Emojis are permitted in string literals (e.g., logs and print statements), UI, and Markdown docs, but remain strictly prohibited in syntax, variable names, or inline comments.
 * **Non-Destructive Operations:** Prohibited from using `rm`, `rmdir`, or `dd` commands on source code, documentation, or assets.
 * **Dependency Management:** All environment management must use  **`uv`** . Execute `uv sync` immediately following any modification to `pyproject.toml`.
-* **Linting Compliance:** Execute the **`ruff-all`** workflow for linting and formatting validation prior to task completion.
+* **Linting Compliance:** Execute the **`ruff-all`** bash script for linting and formatting validation prior to task completion.
 * **Precision Editing:** Default to targeted surgical edits over complete file rewrites.
 * **Rollback Strategy:** Every automated deployment, data mutation, or complex file manipulation MUST include a deterministic rollback protocol to recover from partial failures.
 
