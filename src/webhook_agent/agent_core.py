@@ -92,7 +92,7 @@ def validate_merge_pr_args(args: dict[str, Any]) -> None:
 
 def validate_add_label_args(args: dict[str, Any]) -> None:
     if not isinstance(args.get("labels"), list) or not all(
-        isinstance(l, str) for l in args["labels"]
+        isinstance(lbl, str) for lbl in args["labels"]
     ):
         raise ToolValidationError("add_label.labels must be a list of strings")
 

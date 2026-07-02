@@ -2,6 +2,11 @@ import hashlib
 import hmac
 import logging
 import os
+import shutil
+import stat
+import subprocess
+import urllib.request
+from contextlib import asynccontextmanager
 from os import environ
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -10,7 +15,68 @@ from .enqueue import publish_webhook_message
 
 logger = logging.getLogger("webhook_receiver")
 
-app = FastAPI(title="github-webhook-agent-starter")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    cf_token = os.environ.get("CF_TUNNEL_TOKEN")
+    tunnel_process = None
+    if cf_token:
+        logger.info("CF_TUNNEL_TOKEN found. Preparing Cloudflare Tunnel...")
+
+        cf_bin = shutil.which("cloudflared")
+        if not cf_bin:
+            cf_bin = "/tmp/cloudflared"
+            if not os.path.exists(cf_bin):
+                logger.info(
+                    "cloudflared not found in PATH. Downloading standalone binary..."
+                )
+                url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+                try:
+                    urllib.request.urlretrieve(url, cf_bin)
+                    st = os.stat(cf_bin)
+                    os.chmod(cf_bin, st.st_mode | stat.S_IEXEC)
+                    logger.info("cloudflared binary downloaded and made executable.")
+                except Exception as e:
+                    logger.error(f"Failed to download cloudflared: {e}")
+                    cf_bin = None
+
+        if cf_bin:
+            logger.info("Starting Cloudflare Tunnel...")
+            log_file = "/tmp/cloudflared_tunnel.log"
+            try:
+                tunnel_process = subprocess.Popen(
+                    [cf_bin, "tunnel", "run", "--token", cf_token],
+                    stdout=open(log_file, "w"),
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                logger.info(
+                    f"Cloudflare Tunnel process started. Logs redirected to {log_file}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to start Cloudflare Tunnel: {e}")
+        else:
+            logger.error(
+                "Cloudflare Tunnel cannot be started because cloudflared binary is missing."
+            )
+
+    yield
+
+    # Shutdown
+    if tunnel_process:
+        logger.info("Terminating Cloudflare Tunnel process...")
+        tunnel_process.terminate()
+        try:
+            tunnel_process.wait(timeout=5)
+            logger.info("Cloudflare Tunnel process terminated.")
+        except subprocess.TimeoutExpired:
+            logger.warning("Cloudflare Tunnel process did not terminate. Killing...")
+            tunnel_process.kill()
+            logger.info("Cloudflare Tunnel process killed.")
+
+
+app = FastAPI(title="github-webhook-agent-starter", lifespan=lifespan)
 
 
 def verify_github_signature(secret: bytes, body: bytes, signature_header: str) -> bool:
