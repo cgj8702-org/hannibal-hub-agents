@@ -162,6 +162,24 @@ def validate_submit_review_args(args: dict[str, Any]) -> None:
         )
 
 
+def validate_get_pr_diff_args(args: dict[str, Any]) -> None:
+    if not isinstance(args.get("pr_number"), int):
+        raise ToolValidationError("get_pr_diff.pr_number must be an int")
+
+
+def validate_update_pr_description_args(args: dict[str, Any]) -> None:
+    if not isinstance(args.get("pr_number"), int):
+        raise ToolValidationError("update_pr_description.pr_number must be an int")
+    if "body" in args and not isinstance(args["body"], str):
+        raise ToolValidationError("update_pr_description.body must be a string")
+    if "title" in args and not isinstance(args["title"], str):
+        raise ToolValidationError("update_pr_description.title must be a string")
+    if "ready_for_review" in args and not isinstance(args["ready_for_review"], bool):
+        raise ToolValidationError(
+            "update_pr_description.ready_for_review must be a bool"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Writeback policy
 # ---------------------------------------------------------------------------
@@ -256,19 +274,35 @@ class AgentCore:
         if canonical == "pull_request.opened":
             pr = raw.get("pull_request", {})
             pr_number = pr.get("number")
+            pr_body = pr.get("body") or ""
             if pr_number:
-                actions.append(
-                    {
-                        "tool": "add_comment",
-                        "args": {
-                            "issue_number": pr_number,
-                            "body": (
-                                "Thanks for opening this pull request! "
-                                "The bot will review it shortly."
-                            ),
-                        },
-                    }
-                )
+                if "/create" in pr_body:
+                    actions.append(
+                        {
+                            "tool": "update_pr_description",
+                            "args": {
+                                "pr_number": pr_number,
+                                "body": (
+                                    "## 🍵 The Tea (Architectural Overview)\n"
+                                    "- Auto-generated placeholder description (LLM planner was not active).\n"
+                                ),
+                                "ready_for_review": True,
+                            },
+                        }
+                    )
+                else:
+                    actions.append(
+                        {
+                            "tool": "add_comment",
+                            "args": {
+                                "issue_number": pr_number,
+                                "body": (
+                                    "Thanks for opening this pull request! "
+                                    "The bot will review it shortly."
+                                ),
+                            },
+                        }
+                    )
 
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
@@ -396,6 +430,8 @@ class AgentCore:
             "assign_reviewers": validate_assign_reviewers_args,
             "reply_to_review_comment": validate_reply_to_review_comment_args,
             "submit_review": validate_submit_review_args,
+            "get_pr_diff": validate_get_pr_diff_args,
+            "update_pr_description": validate_update_pr_description_args,
         }
         validator = validators.get(tool)
         if validator is None:
@@ -417,7 +453,7 @@ class AgentCore:
             "true",
             "True",
         )
-        if not allow_auto and not self.dry_run:
+        if tool != "get_pr_diff" and not allow_auto and not self.dry_run:
             return ActionResult(
                 tool=tool, success=False, detail="mutations are disabled by policy"
             )
@@ -550,6 +586,44 @@ class AgentCore:
                     success=True,
                     detail=f"requested reviewers: {args['reviewers']}",
                 )
+            elif tool == "get_pr_diff":
+                pr = repo.get_pull(args["pr_number"])
+                files = pr.get_files()
+                diff_summary = []
+                for f in files:
+                    diff_summary.append(
+                        f"File: {f.filename}\n"
+                        f"Status: {f.status}\n"
+                        f"Additions: {f.additions}, Deletions: {f.deletions}\n"
+                        f"Patch:\n{f.patch}\n"
+                        f"{'-' * 40}"
+                    )
+                return ActionResult(
+                    tool=tool,
+                    success=True,
+                    detail="\n".join(diff_summary),
+                )
+            elif tool == "update_pr_description":
+                pr = repo.get_pull(args["pr_number"])
+                edit_kwargs = {}
+                if "body" in args:
+                    edit_kwargs["body"] = args["body"]
+                if "title" in args:
+                    edit_kwargs["title"] = args["title"]
+
+                if edit_kwargs:
+                    pr.edit(**edit_kwargs)
+
+                detail_msg = f"updated PR #{pr.number}"
+                if args.get("ready_for_review"):
+                    pr._requester.requestJsonAndHeaders("POST", f"{pr.url}/ready")
+                    detail_msg += " and marked ready for review"
+
+                return ActionResult(
+                    tool=tool,
+                    success=True,
+                    detail=detail_msg,
+                )
             else:
                 return ActionResult(
                     tool=tool, success=False, detail="unknown tool at execution"
@@ -578,6 +652,68 @@ class AgentCore:
 
         # Build canonical event from normalized data
         canonical = event_data.get("canonical", "") or self._infer_canonical(event_data)
+
+        # Pre-fetch PR diff and templates if /create trigger is present in PR body
+        raw_payload = event_data.get("raw_payload", {})
+        pr_data = raw_payload.get("pull_request", {})
+        pr_body = pr_data.get("body") or ""
+        if canonical.startswith("pull_request.") and "/create" in pr_body:
+            try:
+                repo = self.gh.get_repo(repo_full_name)
+                pr_number = pr_data.get("number")
+                if pr_number:
+                    pr = repo.get_pull(pr_number)
+                    files = pr.get_files()
+                    diff_summary = []
+                    is_dev_only = True
+                    for f in files:
+                        filename = f.filename or ""
+                        if not (
+                            filename.startswith("dev/")
+                            or filename.startswith("scripts/")
+                            or filename.startswith(".agents/")
+                            or filename == "AGENTS.md"
+                            or filename == "GEMINI.md"
+                        ):
+                            is_dev_only = False
+                        diff_summary.append(
+                            f"File: {filename} ({f.status})\n"
+                            f"Patch:\n{f.patch}\n"
+                            f"{'-' * 40}"
+                        )
+                    diff_text = "\n".join(diff_summary)
+
+                    template_content = ""
+                    template_path = (
+                        ".github/PULL_REQUEST_TEMPLATE/prod_pull_request_template.md"
+                    )
+                    if is_dev_only:
+                        template_path = (
+                            ".github/PULL_REQUEST_TEMPLATE/dev_pull_request_template.md"
+                        )
+
+                    try:
+                        content_file = repo.get_contents(template_path)
+                        template_content = content_file.decoded_content.decode("utf-8")
+                    except Exception:
+                        try:
+                            content_file = repo.get_contents(
+                                ".github/pull_request_template.md"
+                            )
+                            template_content = content_file.decoded_content.decode(
+                                "utf-8"
+                            )
+                        except Exception:
+                            template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
+
+                    raw_payload["pr_diff"] = diff_text
+                    raw_payload["pr_template"] = template_content
+                    logger.info(
+                        "Injected PR diff and template (%s) into payload", template_path
+                    )
+            except Exception as e:
+                logger.exception("Failed to pre-fetch PR diff/template: %s", e)
+
         event = CanonicalEvent(
             canonical=canonical,
             delivery_id=event_data.get("delivery_id", "unknown"),
@@ -586,7 +722,7 @@ class AgentCore:
             sender=event_data.get("sender"),
             installation=event_data.get("installation"),
             repository=event_data.get("repository"),
-            raw_payload=event_data.get("raw_payload", {}),
+            raw_payload=raw_payload,
         )
 
         logger.info(
