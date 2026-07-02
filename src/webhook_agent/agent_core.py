@@ -766,11 +766,11 @@ class AgentCore:
                         except Exception:
                             template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
 
-                    # Only inject diff/template context if /create is in PR body
-                    # This prevents unwanted template autofill when responding to /review comments
-                    pr_body_check = raw_payload.get("pull_request", {}).get("body") or ""
-                    if "/create" in pr_body_check:
-                        raw_payload["pr_diff"] = diff_text
+                    # Only inject template context on pull_request.opened events
+                    # Diff is always injected for review analysis, but template is ONLY
+                    # for the initial /create workflow when the PR is first opened
+                    raw_payload["pr_diff"] = diff_text
+                    if canonical == "pull_request.opened":
                         raw_payload["pr_template"] = template_content
 
                     # Re-construct event with injected payload
