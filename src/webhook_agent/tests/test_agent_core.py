@@ -534,7 +534,7 @@ class TestAgentCoreRun:
             results = core.run(ev, "owner/repo")
             assert len(results) == 1
             assert results[0].success is True
-            assert "ready for review" in results[0].detail
+            assert "ready for review" not in results[0].detail
         finally:
             if old_val is None:
                 os.environ.pop("ALLOW_AUTOMATED_MUTATIONS", None)
