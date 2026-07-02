@@ -616,7 +616,7 @@ class AgentCore:
 
                 detail_msg = f"updated PR #{pr.number}"
                 if args.get("ready_for_review"):
-                    pr._requester.requestJsonAndHeaders("POST", f"{pr.url}/ready")
+                    pr._requester.requestJsonAndCheck("POST", f"{pr.url}/ready")
                     detail_msg += " and marked ready for review"
 
                 return ActionResult(
