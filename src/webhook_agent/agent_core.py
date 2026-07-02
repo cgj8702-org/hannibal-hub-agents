@@ -349,26 +349,30 @@ class AgentCore:
         else:
             logger.info(
                 "trace=%s unknown canonical event=%s — no action", trace_id, canonical
+            )
+
         # If payload asks for writeback_create_issue, prepare a create_issue action
-        if event.get("writeback_create_issue"):
+        if event.raw_payload.get("writeback_create_issue"):
             actions.append(
                 {
                     "tool": "create_issue",
                     "args": {
-                        "title": event.get("writeback_title"),
-                        "body": event.get("writeback_body", ""),
+                        "title": event.raw_payload.get("writeback_title"),
+                        "body": event.raw_payload.get("writeback_body", ""),
                     },
                 }
             )
 
         # Example: add comment if requested
-        if event.get("writeback_add_comment"):
+        if event.raw_payload.get("writeback_add_comment"):
             actions.append(
                 {
                     "tool": "add_comment",
                     "args": {
-                        "issue_number": int(event.get("writeback_issue_number")),
-                        "body": event.get("writeback_comment_body"),
+                        "issue_number": int(
+                            event.raw_payload.get("writeback_issue_number")
+                        ),
+                        "body": event.raw_payload.get("writeback_comment_body"),
                     },
                 }
             )

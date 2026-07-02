@@ -45,14 +45,15 @@ _src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
 if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
 
-from webhook_agent.github_credential_helper import (
+from webhook_agent.github_credential_helper import (  # noqa: E402
     generate_jwt,
     get_installation_token,
     load_cached_token,
     load_private_key,
     save_cached_token,
 )
-from webhook_agent.agent_core import AgentCore
+from webhook_agent.agent_core import AgentCore  # noqa: E402
+
 
 logger = logging.getLogger("webhook_worker")
 logging.basicConfig(level=logging.INFO)
