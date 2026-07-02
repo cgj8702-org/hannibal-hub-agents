@@ -93,10 +93,11 @@ def load_cached_token(
         token = raw.get("token")
         if not token or not expires_at:
             return None
-        # expires_at is ISO8601; parse to epoch
-        exp_epoch = int(
-            time.mktime(time.strptime(expires_at.replace("Z", ""), "%Y-%m-%dT%H:%M:%S"))
-        )
+        # expires_at is ISO8601 (e.g. 2026-07-02T01:53:35Z); parse to timezone-aware timestamp
+        from datetime import datetime
+
+        clean_expires = expires_at.replace("Z", "+00:00")
+        exp_epoch = int(datetime.fromisoformat(clean_expires).timestamp())
         if exp_epoch - int(time.time()) < min_ttl_seconds:
             return None
         return InstallationToken(token=token, expires_at=expires_at)
