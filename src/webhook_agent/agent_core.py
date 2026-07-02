@@ -286,7 +286,6 @@ class AgentCore:
                                     "## 🍵 The Tea (Architectural Overview)\n"
                                     "- Auto-generated placeholder description (LLM planner was not active).\n"
                                 ),
-                                "ready_for_review": True,
                             },
                         }
                     )
@@ -332,22 +331,9 @@ class AgentCore:
 
         # --- pull_request_review_comment.created ---
         elif canonical == "pull_request_review_comment.created":
-            pr_number = raw.get("pull_request", {}).get("number")
-            comment_body = raw.get("comment", {}).get("body", "")
-            if pr_number and comment_body:
-                lower_body = comment_body.lower()
-                if "/review" in lower_body or "/analyze" in lower_body:
-                    actions.append(
-                        {
-                            "tool": "add_review_comment",
-                            "args": {
-                                "pr_number": pr_number,
-                                "body": (
-                                    "I'll review this PR and provide feedback shortly."
-                                ),
-                            },
-                        }
-                    )
+            # Review comments are handled by Gemma planner for actual diff analysis
+            # Rule-based fallback does nothing here
+            logger.debug("trace=%s review comment — no action taken", trace_id)
 
         # --- pull_request_review.submitted ---
         elif canonical == "pull_request_review.submitted":
@@ -606,22 +592,10 @@ class AgentCore:
                 if edit_kwargs:
                     pr.edit(**edit_kwargs)
 
-                detail_msg = f"updated PR #{pr.number}"
-                if args.get("ready_for_review"):
-                    try:
-                        pr.edit(draft=False)
-                        detail_msg += " and marked ready for review"
-                    except Exception as e:
-                        return ActionResult(
-                            tool=tool,
-                            success=False,
-                            detail=f"failed to mark ready for review: {e}",
-                        )
-
                 return ActionResult(
                     tool=tool,
                     success=True,
-                    detail=detail_msg,
+                    detail=f"updated PR #{pr.number}",
                 )
             else:
                 return ActionResult(
