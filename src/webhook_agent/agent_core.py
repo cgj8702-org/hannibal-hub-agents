@@ -728,6 +728,84 @@ class AgentCore:
         # Plan tool calls
         actions = self.decide(event, trace_id=trace_id)
 
+        # If gemma planned 'get_pr_diff', we execute it first, inject the result, and re-plan!
+        has_get_diff = any(act["tool"] == "get_pr_diff" for act in actions)
+        if has_get_diff:
+            logger.info("🔄 Agent planned get_pr_diff. Executing and re-planning...")
+            # Remove get_pr_diff from actions to execute later
+            actions = [act for act in actions if act["tool"] != "get_pr_diff"]
+
+            pr_number = pr_data.get("number")
+            if pr_number:
+                try:
+                    repo = self.gh.get_repo(repo_full_name)
+                    pr = repo.get_pull(pr_number)
+                    files = pr.get_files()
+                    diff_summary = []
+                    is_dev_only = True
+                    for f in files:
+                        filename = f.filename or ""
+                        if not (
+                            filename.startswith("dev/")
+                            or filename.startswith("scripts/")
+                            or filename.startswith(".agents/")
+                            or filename == "AGENTS.md"
+                            or filename == "GEMINI.md"
+                        ):
+                            is_dev_only = False
+                        diff_summary.append(
+                            f"File: {filename} ({f.status})\n"
+                            f"Patch:\n{f.patch}\n"
+                            f"{'-' * 40}"
+                        )
+                    diff_text = "\n".join(diff_summary)
+
+                    template_content = ""
+                    template_path = (
+                        ".github/PULL_REQUEST_TEMPLATE/prod_pull_request_template.md"
+                    )
+                    if is_dev_only:
+                        template_path = (
+                            ".github/PULL_REQUEST_TEMPLATE/dev_pull_request_template.md"
+                        )
+
+                    try:
+                        content_file = repo.get_contents(template_path)
+                        template_content = content_file.decoded_content.decode("utf-8")
+                    except Exception:
+                        try:
+                            content_file = repo.get_contents(
+                                ".github/pull_request_template.md"
+                            )
+                            template_content = content_file.decoded_content.decode(
+                                "utf-8"
+                            )
+                        except Exception:
+                            template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
+
+                    raw_payload["pr_diff"] = diff_text
+                    raw_payload["pr_template"] = template_content
+
+                    # Re-construct event with injected payload
+                    event = CanonicalEvent(
+                        canonical=canonical,
+                        delivery_id=event.delivery_id,
+                        event_name=event.event_name,
+                        action=event.action,
+                        sender=event.sender,
+                        installation=event.installation,
+                        repository=event.repository,
+                        raw_payload=raw_payload,
+                    )
+
+                    # Re-plan!
+                    new_actions = self.decide(event, trace_id=trace_id)
+                    actions.extend(new_actions)
+                except Exception as e:
+                    logger.exception(
+                        "💥 Failed to execute get_pr_diff and re-plan: %s", e
+                    )
+
         # Execute each action behind writeback policy
         results: list[ActionResult] = []
         for act in actions:
