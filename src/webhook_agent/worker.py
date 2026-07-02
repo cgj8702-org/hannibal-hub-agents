@@ -150,18 +150,41 @@ def route_event(normalized: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Ignored event types — skipped immediately to save API calls
+# ---------------------------------------------------------------------------
+IGNORED_EVENTS: set[str] = {
+    "pull_request.closed",
+    "check_suite.requested",
+    "check_suite.completed",
+    "label.created",
+    "label.deleted",
+}
+
+
+# ---------------------------------------------------------------------------
 # Loop-avoidance and dedupe check
 # ---------------------------------------------------------------------------
 def should_process_event(normalized: dict[str, Any]) -> bool:
     """Determine whether the event should be processed or suppressed.
 
     Suppression rules:
+    0. Ignored event types (configured list).
     1. Already processed delivery ID (dedupe).
     2. Sender is the bot itself (loop avoidance), unless the event is an
        explicit follow-up action we want to allow.
     3. For comment/review events, check if the comment author is the bot.
     """
     delivery_id = normalized.get("delivery_id", "")
+    canonical = route_event(normalized)
+
+    # Rule 0: ignored event types
+    if canonical in IGNORED_EVENTS:
+        logger.info(
+            "🤫 Ignoring event by configuration: delivery=%s canonical=%s",
+            delivery_id,
+            canonical,
+        )
+        return False
 
     # Rule 1: dedupe
     if delivery_id in _processed_deliveries:
