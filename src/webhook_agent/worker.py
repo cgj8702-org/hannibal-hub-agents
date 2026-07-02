@@ -55,8 +55,12 @@ from webhook_agent.github_credential_helper import (  # noqa: E402
 from webhook_agent.agent_core import AgentCore  # noqa: E402
 
 
-logger = logging.getLogger("webhook_worker")
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("worker")
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 # ---------------------------------------------------------------------------
 # Bot identity — used for loop-avoidance
@@ -161,7 +165,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
 
     # Rule 1: dedupe
     if delivery_id in _processed_deliveries:
-        logger.info("suppressing duplicate delivery=%s", delivery_id)
+        logger.info("🛡️  Suppressed duplicate delivery: %s", delivery_id)
         return False
 
     # Rule 2: bot actor suppression
@@ -175,7 +179,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
         canonical = f"{event_name}.{action}" if action else event_name
         if canonical not in allowed_followups:
             logger.info(
-                "suppressing bot-authored event delivery=%s canonical=%s sender=%s",
+                "🛡️  Suppressed bot-authored event: delivery=%s canonical=%s sender=%s",
                 delivery_id,
                 canonical,
                 sender.get("login"),
@@ -186,7 +190,9 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
     raw = normalized.get("raw_payload", {})
     comment = raw.get("comment") or raw.get("review")
     if _is_bot_comment_author(comment):
-        logger.info("suppressing bot-authored comment/review delivery=%s", delivery_id)
+        logger.info(
+            "🛡️  Suppressed bot-authored comment/review: delivery=%s", delivery_id
+        )
         return False
 
     return True
@@ -208,7 +214,7 @@ def process_message_data(
     canonical = route_event(data)
 
     logger.info(
-        "processing delivery=%s event=%s canonical=%s",
+        "⚙️  Processing event: delivery=%s event=%s canonical=%s",
         delivery_id,
         event_name,
         canonical,
@@ -216,7 +222,9 @@ def process_message_data(
 
     # Loop-avoidance and dedupe
     if not should_process_event(data):
-        logger.info("event suppressed delivery=%s canonical=%s", delivery_id, canonical)
+        logger.info(
+            "🛡️  Event suppressed: delivery=%s canonical=%s", delivery_id, canonical
+        )
         return
 
     # Mark as processed
@@ -232,9 +240,7 @@ def process_message_data(
 
     # Use PyGitHub to perform actions
     gh = Github(auth=Auth.Token(inst_token.token))
-    logger.info(
-        "authenticated as installation; token_expires=%s", inst_token.expires_at
-    )
+    logger.info("🔑 Authenticated as installation (expires: %s)", inst_token.expires_at)
 
     # Agent core: make decisions and execute tools behind policy gates
     agent = AgentCore(
@@ -246,15 +252,16 @@ def process_message_data(
         data.get("repository", {}).get("full_name") if data.get("repository") else None
     )
     if not repo_name:
-        logger.warning("no repository in event delivery=%s", delivery_id)
+        logger.warning("⚠️  No repository found in event delivery: %s", delivery_id)
         return
 
     try:
         results = agent.run(data, repo_name)
         for r in results:
-            logger.info("agent action completed: %s %s", r.tool, r.detail)
+            status_symbol = "✅" if r.success else "❌"
+            logger.info("%s Agent action: %s -> %s", status_symbol, r.tool, r.detail)
     except Exception as exc:
-        logger.exception("agent core failed for repo %s: %s", repo_name, exc)
+        logger.exception("💥 Agent core failed for repo %s: %s", repo_name, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -266,9 +273,9 @@ def publish_dead_letter(
     try:
         future = publisher.publish(topic, original_msg)
         _ = future.result(timeout=10.0)
-        logger.info("published dead-letter to %s", topic)
+        logger.info("💀 Published dead-letter to %s", topic)
     except Exception:
-        logger.exception("failed to publish dead-letter to %s", topic)
+        logger.exception("💥 Failed to publish dead-letter to %s", topic)
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +307,7 @@ def main() -> int:
     streaming_pull_future = None
 
     def callback(message: pubsub_v1.subscriber.message.Message) -> None:
-        logger.info("received message: %s", message.message_id)
+        logger.info("📥 Received message: %s", message.message_id)
         try:
             payload = json.loads(message.data.decode())
         except Exception:
@@ -315,24 +322,24 @@ def main() -> int:
         try:
             process_message_data(payload, app_id, installation_id, private_key_path)
             message.ack()
-            logger.info("acked message %s", message.message_id)
+            logger.info("💾 Acked message: %s", message.message_id)
         except Exception:
-            logger.exception("processing failed for message %s", message.message_id)
+            logger.exception("💥 Processing failed for message %s", message.message_id)
             if dead_letter_topic:
                 publish_dead_letter(publisher, dead_letter_topic, message.data)
                 message.ack()
             else:
                 # Let Pub/Sub redeliver by not acking
-                logger.info("not acking message to allow retry")
+                logger.info("🔄 Not acking message to allow retry")
 
     subscription_path = subscription
 
-    logger.info("starting subscriber for %s", subscription_path)
+    logger.info("🚀 Starting subscriber for %s", subscription_path)
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
 
     # Graceful shutdown handling
     def _signal_handler(signum, frame):
-        logger.info("signal %s received, cancelling subscriber", signum)
+        logger.info("🛑 Signal %s received, shutting down...", signum)
         streaming_pull_future.cancel()
 
     signal.signal(signal.SIGINT, _signal_handler)
@@ -341,7 +348,7 @@ def main() -> int:
     try:
         streaming_pull_future.result()
     except Exception:
-        logger.exception("subscriber terminated")
+        logger.exception("💥 Subscriber terminated unexpectedly")
 
     return 0
 
