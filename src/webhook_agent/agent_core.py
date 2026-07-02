@@ -766,8 +766,12 @@ class AgentCore:
                         except Exception:
                             template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
 
+                    # Only inject template context on pull_request.opened events
+                    # Diff is always injected for review analysis, but template is ONLY
+                    # for the initial /create workflow when the PR is first opened
                     raw_payload["pr_diff"] = diff_text
-                    raw_payload["pr_template"] = template_content
+                    if canonical == "pull_request.opened":
+                        raw_payload["pr_template"] = template_content
 
                     # Re-construct event with injected payload
                     event = CanonicalEvent(
