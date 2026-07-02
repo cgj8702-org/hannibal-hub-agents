@@ -579,7 +579,7 @@ class AgentCore:
                 return ActionResult(
                     tool=tool,
                     success=True,
-                    detail=f"Fetched diff for {len(files_list)} file(s): {files_list}",
+                    detail=f"Fetched diff for {len(files_list)} file(s)",
                 )
             elif tool == "update_pr_description":
                 pr = repo.get_pull(args["pr_number"])
@@ -712,7 +712,7 @@ class AgentCore:
         # If gemma planned 'get_pr_diff', we execute it first, inject the result, and re-plan!
         has_get_diff = any(act["tool"] == "get_pr_diff" for act in actions)
         if has_get_diff:
-            logger.info("🔄 Agent planned get_pr_diff. Executing and re-planning...")
+            logger.info("📌 Agent plan: Get PR diff")
             # Remove get_pr_diff from actions to execute later
             actions = [act for act in actions if act["tool"] != "get_pr_diff"]
 
@@ -795,6 +795,15 @@ class AgentCore:
 
         # Execute each action behind writeback policy
         results: list[ActionResult] = []
+        if has_get_diff and 'files' in locals():
+            results.append(
+                ActionResult(
+                    tool="get_pr_diff",
+                    success=True,
+                    detail=f"Fetched diff for {len(files)} file(s)"
+                )
+            )
+
         for act in actions:
             # Writeback policy check
             policy_reason = check_writeback_policy(event, act)

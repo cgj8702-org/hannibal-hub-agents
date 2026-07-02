@@ -428,9 +428,11 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
         )
 
     # Check for injected diff/template context
-    if "pr_diff" in raw and "pr_template" in raw:
+    if "pr_diff" in raw:
+        extra_context += f"\n=== PR CODE DIFF ===\n{raw['pr_diff']}\n"
+
+    if "pr_template" in raw:
         extra_context += (
-            f"\n=== PR CODE DIFF ===\n{raw['pr_diff']}\n"
             f"\n=== PR TEMPLATE TO FILL OUT ===\n{raw['pr_template']}\n"
             "\nINSTRUCTION:\n"
             "The user used `/create` in the pull request description.\n"

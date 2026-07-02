@@ -45,6 +45,7 @@ _src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
 if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
 
+from webhook_agent.agent_core import AgentCore  # noqa: E402
 from webhook_agent.github_credential_helper import (  # noqa: E402
     generate_jwt,
     get_installation_token,
@@ -52,8 +53,6 @@ from webhook_agent.github_credential_helper import (  # noqa: E402
     load_private_key,
     save_cached_token,
 )
-from webhook_agent.agent_core import AgentCore  # noqa: E402
-
 
 logger = logging.getLogger("worker")
 logging.basicConfig(
@@ -158,8 +157,10 @@ def route_event(normalized: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 IGNORED_EVENTS: set[str] = {
     "pull_request.closed",
+    "pull_request.synchronize",
     "check_suite.requested",
     "check_suite.completed",
+    "issue_comment.deleted",
     "label.created",
     "label.deleted",
 }
@@ -192,7 +193,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
 
     # Rule 1: dedupe
     if delivery_id in _processed_deliveries:
-        logger.info("🛡️  Suppressed duplicate delivery: %s", delivery_id)
+        logger.debug("🛡️  Suppressed duplicate delivery: %s", delivery_id)
         return False
 
     # Rule 2: bot actor suppression
@@ -205,7 +206,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
         allowed_followups: set[str] = set()
         canonical = f"{event_name}.{action}" if action else event_name
         if canonical not in allowed_followups:
-            logger.info(
+            logger.debug(
                 "🛡️  Suppressed bot-authored event: delivery=%s canonical=%s sender=%s",
                 delivery_id,
                 canonical,
@@ -217,7 +218,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
     raw = normalized.get("raw_payload", {})
     comment = raw.get("comment") or raw.get("review")
     if _is_bot_comment_author(comment):
-        logger.info(
+        logger.debug(
             "🛡️  Suppressed bot-authored comment/review: delivery=%s", delivery_id
         )
         return False
@@ -237,21 +238,15 @@ def process_message_data(
     data: dict[str, Any], app_id: int, installation_id: int, private_key_path: str
 ) -> None:
     delivery_id = data.get("delivery_id", "unknown")
-    event_name = data.get("event_name", "unknown")
     canonical = route_event(data)
 
     logger.info(
-        "⚙️  Processing event: delivery=%s event=%s canonical=%s",
-        delivery_id,
-        event_name,
-        canonical,
+        "⚙️  Processing event: %s",
+        canonical.replace("_", " ").replace(".", " ").capitalize(),
     )
 
     # Loop-avoidance and dedupe
     if not should_process_event(data):
-        logger.info(
-            "🛡️  Event suppressed: delivery=%s canonical=%s", delivery_id, canonical
-        )
         return
 
     # Mark as processed
@@ -267,7 +262,9 @@ def process_message_data(
 
     # Use PyGitHub to perform actions
     gh = Github(auth=Auth.Token(inst_token.token))
-    logger.info("🔑 Authenticated as installation (expires: %s)", inst_token.expires_at)
+    logger.debug(
+        "🔑 Authenticated as installation (expires: %s)", inst_token.expires_at
+    )
 
     # Agent core: make decisions and execute tools behind policy gates
     agent = AgentCore(
@@ -285,8 +282,8 @@ def process_message_data(
     try:
         results = agent.run(data, repo_name)
         for r in results:
-            status_symbol = "✅" if r.success else "❌"
-            logger.info("%s Agent action: %s -> %s", status_symbol, r.tool, r.detail)
+            status_symbol = "🤖" if r.success else "❌"
+            logger.info("%s Agent action: %s", status_symbol, r.detail)
     except Exception as exc:
         logger.exception("💥 Agent core failed for repo %s: %s", repo_name, exc)
 
@@ -334,7 +331,7 @@ def main() -> int:
     streaming_pull_future = None
 
     def callback(message: pubsub_v1.subscriber.message.Message) -> None:
-        logger.info("📥 Received message: %s", message.message_id)
+        logger.info("📥 Received message: %s", str(message.message_id)[-4:])
         try:
             payload = json.loads(message.data.decode())
         except Exception:
@@ -349,7 +346,7 @@ def main() -> int:
         try:
             process_message_data(payload, app_id, installation_id, private_key_path)
             message.ack()
-            logger.info("💾 Acked message: %s", message.message_id)
+            logger.info("✅ Acked message: %s", str(message.message_id)[-4:])
         except Exception:
             logger.exception("💥 Processing failed for message %s", message.message_id)
             if dead_letter_topic:
@@ -361,7 +358,7 @@ def main() -> int:
 
     subscription_path = subscription
 
-    logger.info("🚀 Starting subscriber for %s", subscription_path)
+    logger.info("🚀 Starting subscriber")
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
 
     # Graceful shutdown handling
