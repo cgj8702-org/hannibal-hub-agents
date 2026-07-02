@@ -34,7 +34,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 
 from .enqueue import publish_webhook_message
 
-logger = logging.getLogger("webhook_receiver")
+logger = logging.getLogger("app")
 
 
 @asynccontextmanager
@@ -43,27 +43,27 @@ async def lifespan(app: FastAPI):
     cf_token = os.environ.get("CF_TUNNEL_TOKEN")
     tunnel_process = None
     if cf_token:
-        logger.info("CF_TUNNEL_TOKEN found. Preparing Cloudflare Tunnel...")
+        logger.info("☁️  CF_TUNNEL_TOKEN found. Preparing Cloudflare Tunnel...")
 
         cf_bin = shutil.which("cloudflared")
         if not cf_bin:
             cf_bin = "/tmp/cloudflared"
             if not os.path.exists(cf_bin):
                 logger.info(
-                    "cloudflared not found in PATH. Downloading standalone binary..."
+                    "📥 cloudflared not found in PATH. Downloading standalone binary..."
                 )
                 url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
                 try:
                     urllib.request.urlretrieve(url, cf_bin)
                     st = os.stat(cf_bin)
                     os.chmod(cf_bin, st.st_mode | stat.S_IEXEC)
-                    logger.info("cloudflared binary downloaded and made executable.")
+                    logger.info("✅ cloudflared binary downloaded and made executable.")
                 except Exception as e:
-                    logger.error(f"Failed to download cloudflared: {e}")
+                    logger.error(f"💥 Failed to download cloudflared: {e}")
                     cf_bin = None
 
         if cf_bin:
-            logger.info("Starting Cloudflare Tunnel...")
+            logger.info("🚀 Starting Cloudflare Tunnel...")
             log_file = "/tmp/cloudflared_tunnel.log"
             try:
                 tunnel_process = subprocess.Popen(
@@ -73,28 +73,28 @@ async def lifespan(app: FastAPI):
                     text=True,
                 )
                 logger.info(
-                    f"Cloudflare Tunnel process started. Logs redirected to {log_file}"
+                    f"✅ Cloudflare Tunnel process started. Logs redirected to {log_file}"
                 )
             except Exception as e:
-                logger.error(f"Failed to start Cloudflare Tunnel: {e}")
+                logger.error(f"💥 Failed to start Cloudflare Tunnel: {e}")
         else:
             logger.error(
-                "Cloudflare Tunnel cannot be started because cloudflared binary is missing."
+                "💥 Cloudflare Tunnel cannot be started because cloudflared binary is missing."
             )
 
     yield
 
     # Shutdown
     if tunnel_process:
-        logger.info("Terminating Cloudflare Tunnel process...")
+        logger.info("🛑 Terminating Cloudflare Tunnel process...")
         tunnel_process.terminate()
         try:
             tunnel_process.wait(timeout=5)
-            logger.info("Cloudflare Tunnel process terminated.")
+            logger.info("✅ Cloudflare Tunnel process terminated.")
         except subprocess.TimeoutExpired:
-            logger.warning("Cloudflare Tunnel process did not terminate. Killing...")
+            logger.warning("⚠️  Cloudflare Tunnel process did not terminate. Killing...")
             tunnel_process.kill()
-            logger.info("Cloudflare Tunnel process killed.")
+            logger.info("💀 Cloudflare Tunnel process killed.")
 
 
 app = FastAPI(title="hannibal-hub-webhook-agent", lifespan=lifespan)
@@ -172,7 +172,7 @@ async def webhook(
     try:
         raw_payload: dict[str, Any] = json.loads(body.decode("utf-8", errors="replace"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.error("failed to parse webhook body: %s", exc)
+        logger.error("💥 Failed to parse webhook body: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     # Normalize the event for downstream consumers
@@ -183,7 +183,7 @@ async def webhook(
     )
 
     logger.info(
-        "received event=%s action=%s delivery=%s sender=%s repo=%s",
+        "📥 Received event: event=%s action=%s delivery=%s sender=%s repo=%s",
         normalized["event_name"],
         normalized["action"],
         delivery_id,
@@ -205,16 +205,17 @@ async def webhook(
                 },
             )
             logger.info(
-                "enqueued delivery=%s event=%s to topic=%s",
+                "📨 Enqueued delivery: delivery=%s event=%s topic=%s",
                 delivery_id,
                 event_name,
                 topic,
             )
         else:
             logger.warning(
-                "PUBSUB_TOPIC not set; skipping enqueue for delivery=%s", delivery_id
+                "⚠️  PUBSUB_TOPIC not set; skipping enqueue for delivery: %s",
+                delivery_id,
             )
     except Exception:
-        logger.exception("failed to enqueue delivery=%s", delivery_id)
+        logger.exception("💥 Failed to enqueue delivery: %s", delivery_id)
 
     return Response(status_code=202)
