@@ -1,21 +1,21 @@
 # 🤖 Hannibal Hub Agents: Standalone GitHub App Webhook Orchestrator
 
-A stateless, decoupled, and event-driven worker service that handles GitHub webhooks, verifies signatures, queues event processing asynchronously, and runs an agentic loop powered by **Gemma 4** to safely interact with GitHub repositories.
+A unified, event-driven service that handles GitHub webhooks, verifies signatures, queues event processing asynchronously in-memory, and runs an agentic loop powered by **Gemma 4** to safely interact with GitHub repositories.
 
 ---
 
 ## 🏗️ System Architecture
 
-The webhook orchestrator is designed for high reliability, security, and zero-trust event execution:
+The webhook orchestrator is designed for high reliability, security, and zero-trust event execution, now running as a unified process:
 
 ```mermaid
 flowchart TD
     GH[GitHub Webhook Event] -->|HTTPS POST| Ingress[FastAPI Webhook Ingress]
     Ingress -->|1. Verify HMAC Signature| Auth[Signature Validator]
     Ingress -->|2. Quick ACK 202 Accepted| GH
-    Ingress -->|3. Publish Event| PS[(Google Cloud Pub/Sub Topic)]
+    Ingress -->|3. Enqueue Event| Queue[(Internal Async Queue)]
     
-    PS -->|4. Trigger Pull| Worker[Worker Daemon]
+    Queue -->|4. Trigger Pull| Worker[Background Worker Task]
     Worker -->|5. App Authentication| Creds[GitHub App JWT / Installation Token]
     Worker -->|6. Load Context| GH_API[GitHub REST API]
     Worker -->|7. Decide Actions| Gemma[Gemma 4 Planner / Gemini API]
@@ -34,11 +34,11 @@ flowchart TD
 ├── .agents/                 # Shared agent scripts & protocols
 ├── src/
 │   └── webhook_agent/       # Core package
-│       ├── app.py           # FastAPI Webhook Ingress (receives & verifies)
-│       ├── enqueue.py       # Pub/Sub enqueue helper
-│       ├── worker.py        # Subscriber daemon consuming the event queue
+│       ├── app.py           # FastAPI Webhook Ingress & Background Worker
+│       ├── processor.py     # Event routing & agent orchestration logic
 │       ├── agent_core.py    # Tool schema validation & action execution
 │       └── gemma_planner.py # Gemma 4 model interaction via Gemini SDK
+├── main.py                  # Unified entry point to launch the server
 ├── github_app_credential_helper.py  # Utility for App JWT & cached access tokens
 ├── pyproject.toml           # Dependency specification (uv-compatible)
 ├── webhook_agent_TODO.md    # Local roadmap and first-PR tasks
@@ -60,14 +60,11 @@ uv sync
 ### 2. Configuration
 Ensure the following environment variables are set in your environment or `.envrc` file:
 
-#### Ingress Receiver Config:
+#### Server Config:
 - `WEBHOOK_SECRET`: The shared secret configured on the GitHub App to verify HMAC signatures.
-- `PUBSUB_TOPIC`: The Google Cloud Pub/Sub topic to publish raw webhooks into.
+- `CF_TUNNEL_TOKEN`: (Optional) Token to automatically start a Cloudflare Tunnel for local development.
 
-#### Worker & Agent Config:
-- `PUBSUB_PROJECT`: Your Google Cloud Project ID (e.g. `chatbot-project-hannibal`).
-- `PUBSUB_SUBSCRIPTION`: The Pub/Sub subscription name to pull jobs from.
-- `PUBSUB_DEAD_LETTER_TOPIC`: (Optional) Topic to route permanently failing events.
+#### Agent Config:
 - `GITHUB_APP_ID`: Numeric ID of your GitHub App.
 - `GITHUB_INSTALLATION_ID`: Target installation ID for token exchange.
 - `GITHUB_PRIVATE_KEY_PATH`: Path to the private key PEM file for your GitHub App.
@@ -80,16 +77,11 @@ Ensure the following environment variables are set in your environment or `.envr
 
 ## 🛠️ Operations & Execution
 
-### Running the Webhook Receiver Ingress
-Start the FastAPI server (typically run with Uvicorn):
-```bash
-uv run uvicorn src.webhook_agent.app:app --host 0.0.0.0 --port 8000
-```
+### Running the Unified Server
+Start the unified server which launches the FastAPI ingress, the background event processor, and the Cloudflare tunnel (if configured) in a single process:
 
-### Running the Worker Daemon
-Start the background worker to consume events and execute agent actions:
 ```bash
-uv run python src/webhook_agent/worker.py
+uv run python main.py
 ```
 
 ### Testing Credentials & App Tokens
@@ -107,4 +99,4 @@ uv run python github_app_credential_helper.py \
 
 1. **HMAC Signature Checks**: All incoming webhooks must match the configured `WEBHOOK_SECRET` signature. Unsigned or mismatching payloads are rejected immediately with `401 Unauthorized`.
 2. **Short-lived Tokens**: The helper automatically handles cache expiration and rotation of installation access tokens (valid for maximum 1 hour).
-3. **Purity Gates**: The worker checks `ALLOW_AUTOMATED_MUTATIONS`. If not explicitly enabled, all actions fallback to log-only operations, preventing unexpected automated commits, issues, or comments.
+3. **Purity Gates**: The processor checks `ALLOW_AUTOMATED_MUTATIONS`. If not explicitly enabled, all actions fallback to log-only operations, preventing unexpected automated commits, issues, or comments.
