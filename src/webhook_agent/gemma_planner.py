@@ -21,7 +21,15 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+
 from google import genai
+from google.genai._gaos.lib.compat_errors import InternalServerError
 
 logger = logging.getLogger("gemma_planner")
 
@@ -488,6 +496,20 @@ class GemmaPlanner:
             return None
         return cls(api_key=api_key)
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(InternalServerError),
+        reraise=True,
+    )
+    def _create_interaction(self, prompt: str, tools: list[dict[str, Any]]):
+        """Wrapper for API call to enable retries on InternalServerError."""
+        return self.client.interactions.create(
+            model=self.model,
+            input=prompt,
+            tools=tools,
+        )
+
     def plan(
         self,
         event: dict[str, Any] | PlannerEvent,
@@ -517,11 +539,7 @@ class GemmaPlanner:
             tools,
         )
 
-        interaction = self.client.interactions.create(
-            model=self.model,
-            input=prompt,
-            tools=tools,
-        )
+        interaction = self._create_interaction(prompt, tools)
 
         planned: list[PlannedAction] = []
         for step in interaction.steps:

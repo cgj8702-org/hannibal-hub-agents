@@ -264,10 +264,18 @@ class AgentCore:
         trace_id = trace_id or generate_trace_id()
 
         if self.planner:
-            planned = self.planner.plan(event, trace_id)
-            return [
-                {"tool": p.tool, "args": p.args, "call_id": p.call_id} for p in planned
-            ]
+            try:
+                planned = self.planner.plan(event, trace_id)
+                return [
+                    {"tool": p.tool, "args": p.args, "call_id": p.call_id}
+                    for p in planned
+                ]
+            except Exception:
+                logger.exception(
+                    "Gemma planner failed after retries, falling back to rule-based plan"
+                )
+
+        # Rule-based fallback planner
 
         # Rule-based fallback planner
         return self._rule_based_plan(event, trace_id)
@@ -573,7 +581,9 @@ class AgentCore:
                     issue = repo.get_issue(number=args["pr_number"])
                     comment = issue.get_comment(comment_id)
                     # Issue comments aren't threaded in the same way; create a new comment referencing it
-                    reply = issue.create_comment(body=f"Re: {comment.body[:100]}...\n\n{body}")
+                    reply = issue.create_comment(
+                        body=f"Re: {comment.body[:100]}...\n\n{body}"
+                    )
                     return ActionResult(
                         tool=tool,
                         success=True,
@@ -796,12 +806,12 @@ class AgentCore:
                     is_dev_only = True
                     for f in files:
                         filename = f.filename or ""
-                        
+
                         # If this is a review comment, target only the file being commented on
                         target_file = None
                         if "pull_request_review_comment" in canonical:
                             target_file = raw_payload.get("comment", {}).get("path")
-                        
+
                         if target_file and filename != target_file:
                             continue
 
