@@ -20,6 +20,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from typing import Any
+from github import GithubException
 
 from .gemma_planner import GemmaPlanner
 
@@ -483,7 +484,7 @@ class AgentCore:
                 created = False
                 try:
                     repo.get_branch(new_branch)
-                except Exception:
+                except GithubException:
                     sb = repo.get_branch(base)
                     repo.create_git_ref(ref=ref, sha=sb.commit.sha)
                     created = True
@@ -493,7 +494,7 @@ class AgentCore:
                     repo.create_file(
                         path, f"Add {path} via agent", content, branch=new_branch
                     )
-                except Exception:
+                except GithubException:
                     existing = repo.get_contents(path, ref=new_branch)
                     repo.update_file(
                         path,
@@ -524,7 +525,7 @@ class AgentCore:
                 try:
                     review = pr.create_review(body=args["body"])
                     detail = getattr(review, "html_url", str(review))
-                except Exception:
+                except GithubException:
                     comment = pr.create_issue_comment(body=args["body"])
                     detail = getattr(comment, "html_url", str(comment))
                 return ActionResult(
@@ -642,11 +643,8 @@ class AgentCore:
                     for f in files:
                         filename = f.filename or ""
                         if not (
-                            filename.startswith("dev/")
-                            or filename.startswith("scripts/")
-                            or filename.startswith(".agents/")
-                            or filename == "AGENTS.md"
-                            or filename == "GEMINI.md"
+                            filename.startswith(("dev/", "scripts/", ".agents/"))
+                            or filename in ("AGENTS.md", "GEMINI.md")
                         ):
                             is_dev_only = False
                         diff_summary.append(
@@ -668,7 +666,7 @@ class AgentCore:
                     try:
                         content_file = repo.get_contents(template_path)
                         template_content = content_file.decoded_content.decode("utf-8")
-                    except Exception:
+                    except GithubException:
                         try:
                             content_file = repo.get_contents(
                                 ".github/pull_request_template.md"
@@ -676,7 +674,7 @@ class AgentCore:
                             template_content = content_file.decoded_content.decode(
                                 "utf-8"
                             )
-                        except Exception:
+                        except GithubException:
                             template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
 
                     raw_payload["pr_diff"] = diff_text
@@ -684,8 +682,8 @@ class AgentCore:
                     logger.debug(
                         "Injected PR diff and template (%s) into payload", template_path
                     )
-            except Exception as e:
-                logger.exception("Failed to pre-fetch PR diff/template: %s", e)
+            except Exception:
+                logger.exception("Failed to pre-fetch PR diff/template")
 
         event = CanonicalEvent(
             canonical=canonical,
@@ -729,11 +727,8 @@ class AgentCore:
                     for f in files:
                         filename = f.filename or ""
                         if not (
-                            filename.startswith("dev/")
-                            or filename.startswith("scripts/")
-                            or filename.startswith(".agents/")
-                            or filename == "AGENTS.md"
-                            or filename == "GEMINI.md"
+                            filename.startswith(("dev/", "scripts/", ".agents/"))
+                            or filename in ("AGENTS.md", "GEMINI.md")
                         ):
                             is_dev_only = False
                         diff_summary.append(
@@ -755,7 +750,7 @@ class AgentCore:
                     try:
                         content_file = repo.get_contents(template_path)
                         template_content = content_file.decoded_content.decode("utf-8")
-                    except Exception:
+                    except GithubException:
                         try:
                             content_file = repo.get_contents(
                                 ".github/pull_request_template.md"
@@ -763,7 +758,7 @@ class AgentCore:
                             template_content = content_file.decoded_content.decode(
                                 "utf-8"
                             )
-                        except Exception:
+                        except GithubException:
                             template_content = "## 📋 What's Changing?\n\n## ✅ Engineering Checklist\n"
 
                     # Only inject template context on pull_request.opened events
@@ -788,10 +783,8 @@ class AgentCore:
                     # Re-plan!
                     new_actions = self.decide(event, trace_id=trace_id)
                     actions.extend(new_actions)
-                except Exception as e:
-                    logger.exception(
-                        "💥 Failed to execute get_pr_diff and re-plan: %s", e
-                    )
+                except Exception:
+                    logger.exception("💥 Failed to execute get_pr_diff and re-plan")
 
         # Execute each action behind writeback policy
         results: list[ActionResult] = []
