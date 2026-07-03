@@ -320,7 +320,7 @@ class AgentCore:
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
             # Read-only: log but don't mutate
-            logger.debug("trace=%s PR synchronize — no action taken", trace_id)
+            logger.debug("%s PR synchronize — no action taken", trace_id)
 
         # --- issue_comment.created ---
         elif canonical == "issue_comment.created":
@@ -347,11 +347,11 @@ class AgentCore:
         elif canonical == "pull_request_review_comment.created":
             # Review comments are handled by Gemma planner for actual diff analysis
             # Rule-based fallback does nothing here
-            logger.debug("trace=%s review comment — no action taken", trace_id)
+            logger.debug("%s review comment — no action taken", trace_id)
 
         # --- pull_request_review.submitted ---
         elif canonical == "pull_request_review.submitted":
-            logger.debug("trace=%s review submitted — no automatic follow-up", trace_id)
+            logger.debug("%s review submitted — no automatic follow-up", trace_id)
 
         # --- pull_request_review_requested ---
         elif canonical == "pull_request_review_requested":
@@ -369,21 +369,19 @@ class AgentCore:
 
         # --- label.* events ---
         elif canonical.startswith("label."):
-            logger.debug("trace=%s label event — no automatic action", trace_id)
+            logger.debug("%s label event — no automatic action", trace_id)
 
         # --- installation.* events ---
         elif canonical.startswith("installation."):
-            logger.debug("trace=%s installation event — no automatic action", trace_id)
+            logger.debug("%s installation event — no automatic action", trace_id)
 
         # --- ping ---
         elif canonical == "ping":
-            logger.debug("trace=%s ping received — no action needed", trace_id)
+            logger.debug("%s ping received — no action needed", trace_id)
 
         # --- unknown ---
         else:
-            logger.debug(
-                "trace=%s unknown canonical event=%s — no action", trace_id, canonical
-            )
+            logger.debug("%s %s — no action", trace_id, canonical)
 
         # If payload asks for writeback_create_issue, prepare a create_issue action
         if event.raw_payload.get("writeback_create_issue"):
@@ -710,7 +708,7 @@ class AgentCore:
         )
 
         logger.debug(
-            "agent run trace=%s canonical=%s repo=%s dry_run=%s",
+            "agent run: %s %s %s %s",
             trace_id,
             event.canonical,
             repo_full_name,
@@ -782,7 +780,9 @@ class AgentCore:
                         raw_payload["pr_template"] = template_content
 
                     # Load local review template for the review analysis
-                    review_template = self._load_local_template("code_review_template.md")
+                    review_template = self._load_local_template(
+                        "code_review_template.md"
+                    )
                     if review_template:
                         raw_payload["review_template"] = review_template
                         logger.debug("Injected local review template into payload")
@@ -828,7 +828,7 @@ class AgentCore:
                     )
                 )
                 logger.info(
-                    "writeback blocked trace=%s tool=%s reason=%s",
+                    "writeback blocked: %s %s %s",
                     trace_id,
                     act["tool"],
                     policy_reason,
@@ -838,7 +838,7 @@ class AgentCore:
             res = self.execute_action(repo_full_name, act, trace_id)
             results.append(res)
             logger.debug(
-                "action result trace=%s tool=%s success=%s detail=%s",
+                "action result: %s %s %s %s",
                 trace_id,
                 res.tool,
                 res.success,
