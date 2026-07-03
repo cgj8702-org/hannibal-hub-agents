@@ -412,19 +412,19 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
         comment = raw.get("comment", {})
         extra_context = (
             f"Issue/PR Number: {issue.get('number', 'unknown')}\n"
-            f"Comment Body Snippet: {comment.get('body', '')[:200]}\n"
+            f"Comment Body Snippet: {(comment.get('body') or '')[:200]}\n"
         )
     elif event.canonical.startswith("pull_request_review_comment."):
         comment = raw.get("comment", {})
         extra_context = (
             f"Review Comment ID: {comment.get('id', 'unknown')}\n"
-            f"Comment Body Snippet: {comment.get('body', '')[:200]}\n"
+            f"Comment Body Snippet: {(comment.get('body') or '')[:200]}\n"
         )
     elif event.canonical.startswith("pull_request_review."):
         review = raw.get("review", {})
         extra_context = (
             f"Review State: {review.get('state', 'N/A')}\n"
-            f"Review Body Snippet: {review.get('body', '')[:200]}\n"
+            f"Review Body Snippet: {(review.get('body') or '')[:200]}\n"
         )
 
     # Check for injected diff/template context
