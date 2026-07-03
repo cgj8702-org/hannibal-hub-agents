@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 from github import GithubException
@@ -236,6 +237,18 @@ class AgentCore:
         self.gh = gh_client
         self.dry_run = dry_run
         self.planner = planner or GemmaPlanner.from_env()
+        # Base directory for local templates
+        self.templates_dir = Path(__file__).parent / "templates"
+
+    def _load_local_template(self, template_name: str) -> str | None:
+        """Load a template file from the local templates directory."""
+        try:
+            template_path = self.templates_dir / template_name
+            if template_path.exists():
+                return template_path.read_text(encoding="utf-8")
+        except Exception:
+            logger.exception("Failed to load local template: %s", template_name)
+        return None
 
     # ------------------------------------------------------------------
     # Canonical event → tool calls (planning)
@@ -767,6 +780,12 @@ class AgentCore:
                     raw_payload["pr_diff"] = diff_text
                     if canonical == "pull_request.opened":
                         raw_payload["pr_template"] = template_content
+
+                    # Load local review template for the review analysis
+                    review_template = self._load_local_template("code_review_template.md")
+                    if review_template:
+                        raw_payload["review_template"] = review_template
+                        logger.debug("Injected local review template into payload")
 
                     # Re-construct event with injected payload
                     event = CanonicalEvent(
