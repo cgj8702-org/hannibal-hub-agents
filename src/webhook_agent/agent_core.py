@@ -544,13 +544,47 @@ class AgentCore:
                 )
             elif tool == "reply_to_review_comment":
                 pr = repo.get_pull(args["pr_number"])
-                # PyGitHub doesn't have a direct reply method; use issue comment as fallback
-                comment = pr.create_issue_comment(body=args["body"])
-                return ActionResult(
-                    tool=tool,
-                    success=True,
-                    detail=f"replied to review comment: {comment.html_url}",
-                )
+                comment_id = args["comment_id"]
+                body = args["body"]
+
+                # Try to find the comment in PR reviews to perform a threaded reply
+                target_comment = None
+                try:
+                    for review in pr.get_reviews():
+                        for comment in review.comments:
+                            if comment.id == comment_id:
+                                target_comment = comment
+                                break
+                        if target_comment:
+                            break
+                except Exception:
+                    logger.debug("Failed to iterate reviews for comment %s", comment_id)
+
+                if target_comment:
+                    reply = target_comment.create_comment(body)
+                    return ActionResult(
+                        tool=tool,
+                        success=True,
+                        detail=f"replied to review comment: {reply.html_url}",
+                    )
+
+                # Fallback: check if it's a general PR comment (IssueComment)
+                try:
+                    issue = repo.get_issue(number=args["pr_number"])
+                    comment = issue.get_comment(comment_id)
+                    # Issue comments aren't threaded in the same way; create a new comment referencing it
+                    reply = issue.create_comment(body=f"Re: {comment.body[:100]}...\n\n{body}")
+                    return ActionResult(
+                        tool=tool,
+                        success=True,
+                        detail=f"replied to issue comment: {reply.html_url}",
+                    )
+                except Exception:
+                    return ActionResult(
+                        tool=tool,
+                        success=False,
+                        detail=f"could not find comment {comment_id} to reply to",
+                    )
             elif tool == "submit_review":
                 pr = repo.get_pull(args["pr_number"])
                 review = pr.create_review(
@@ -667,8 +701,17 @@ class AgentCore:
                     files = pr.get_files()
                     diff_summary = []
                     is_dev_only = True
+
+                    # If this is a review comment, target only the file being commented on
+                    target_file = None
+                    if "pull_request_review_comment" in canonical:
+                        target_file = raw_payload.get("comment", {}).get("path")
+
                     for f in files:
                         filename = f.filename or ""
+                        if target_file and filename != target_file:
+                            continue
+
                         if not (
                             filename.startswith(("dev/", "scripts/", ".agents/"))
                             or filename in ("AGENTS.md", "GEMINI.md")
@@ -753,6 +796,15 @@ class AgentCore:
                     is_dev_only = True
                     for f in files:
                         filename = f.filename or ""
+                        
+                        # If this is a review comment, target only the file being commented on
+                        target_file = None
+                        if "pull_request_review_comment" in canonical:
+                            target_file = raw_payload.get("comment", {}).get("path")
+                        
+                        if target_file and filename != target_file:
+                            continue
+
                         if not (
                             filename.startswith(("dev/", "scripts/", ".agents/"))
                             or filename in ("AGENTS.md", "GEMINI.md")
