@@ -467,6 +467,7 @@ dependencies = [
     { name = "pytest" },
     { name = "pytz" },
     { name = "ruff" },
+    { name = "tenacity" },
     { name = "uvicorn" },
 ]
 
@@ -483,6 +484,7 @@ requires-dist = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytz", specifier = ">=2026.2" },
     { name = "ruff", specifier = ">=0.15.20" },
+    { name = "tenacity", specifier = ">=9.0.0" },
     { name = "uvicorn", specifier = ">=0.30.0" },
 ]
 
