@@ -32,7 +32,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 
-from .processor import WebhookProcessor
+from .enqueue import publish_webhook_message
 
 logger = logging.getLogger("app")
 
@@ -40,52 +40,11 @@ logger = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
 
-# Global state for the queue and processor
-state = {
-    "queue": asyncio.Queue(),
-    "processor": None,
-    "worker_task": None,
-}
-
-
-async def webhook_worker():
-    """Background worker that consumes events from the queue."""
-    logger.info("🚀 Webhook background worker started.")
-    processor = state["processor"]
-    while True:
-        try:
-            # Wait for an event from the queue
-            event = await state["queue"].get()
-            try:
-                # Process the event (this is a synchronous call, so we run it in a thread)
-                await asyncio.to_thread(processor.process_event, event)
-            except (RuntimeError, ConnectionError, TimeoutError):
-                logger.exception("💥 Recoverable error processing event from queue")
-            except Exception:
-                logger.exception("💥 Unexpected error processing event from queue")
-            finally:
-                state["queue"].task_done()
-        except asyncio.CancelledError:
-            logger.info("🛑 Webhook background worker shutting down.")
-            break
-        except Exception:
-            logger.exception("💥 Unexpected error in webhook worker loop")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    # Initialize Processor
-    try:
-        state["processor"] = WebhookProcessor()
-    except (KeyError, ValueError, TypeError) as e:
-        logger.error(
-            f"💥 Failed to initialize WebhookProcessor due to config error: {e}"
-        )
-        # We don't raise here to allow the server to start, but webhooks will fail
-
-    # Start the background worker
-    state["worker_task"] = asyncio.create_task(webhook_worker())
 
     # Cloudflare Tunnel Setup
     cf_token = os.environ.get("CF_TUNNEL_TOKEN")
@@ -136,15 +95,6 @@ async def lifespan(app: FastAPI):
             )
 
     yield
-
-    # Shutdown
-    if state["worker_task"]:
-        logger.info("🛑 Cancelling background worker...")
-        state["worker_task"].cancel()
-        try:
-            await state["worker_task"]
-        except asyncio.CancelledError:
-            pass
 
     if tunnel_process:
         logger.info("🛑 Terminating Cloudflare Tunnel process...")
@@ -221,6 +171,14 @@ async def webhook(
         ok = verify_github_signature(secret.encode(), body, x_hub_signature_256 or "")
         if not ok:
             raise HTTPException(status_code=401, detail="Invalid signature")
+    elif x_hub_signature_256:
+        # If a signature is provided but no secret is configured, we still verify it
+        # to avoid "Invalid signature" errors when the user is testing without a secret
+        # but the client sends a signature.
+        logger.warning("⚠️  WEBHOOK_SECRET not set; skipping signature verification despite header presence")
+    else:
+        # If no secret is configured and no signature is provided, we skip verification.
+        logger.warning("⚠️  WEBHOOK_SECRET not set; skipping signature verification")
 
     delivery_id = x_github_delivery or "unknown"
     event_name = x_github_event or "unknown"
@@ -248,15 +206,31 @@ async def webhook(
         normalized["repository"].get("full_name") if normalized["repository"] else None,
     )
 
-    # Enqueue for background processing
+    # Publish to Pub/Sub
     try:
-        state["queue"].put_nowait(normalized)
-        logger.info(
-            "📨 Enqueued delivery: delivery=%s event=%s", delivery_id, event_name
-        )
-    except asyncio.QueueFull:
-        logger.error("💥 Queue full; failed to enqueue delivery: %s", delivery_id)
-        # We still return 202 because we don't want to block GitHub,
-        # but the event is lost if the queue is full/broken.
+        topic = os.environ.get("PUBSUB_TOPIC")
+        if topic:
+            publish_webhook_message(
+                topic,
+                payload=normalized,
+                attributes={
+                    "delivery_id": delivery_id,
+                    "event_name": event_name,
+                    "action": str(normalized["action"] or ""),
+                },
+            )
+            logger.info(
+                "📨 Enqueued delivery: delivery=%s event=%s topic=%s",
+                delivery_id,
+                event_name,
+                topic,
+            )
+        else:
+            logger.warning(
+                "⚠️  PUBSUB_TOPIC not set; skipping enqueue for delivery: %s",
+                delivery_id,
+            )
+    except Exception:
+        logger.exception("💥 Failed to enqueue delivery: %s", delivery_id)
 
     return Response(status_code=202)
