@@ -215,7 +215,7 @@ async def webhook(
                     "action": str(normalized["action"] or ""),
                 },
             )
-            logger.info(
+            logger.debug(
                 "📨 Enqueued delivery: %s",
                 event_name,
             )

@@ -295,7 +295,7 @@ def publish_dead_letter(
     try:
         future = publisher.publish(topic, original_msg)
         _ = future.result(timeout=10.0)
-        logger.info("💀 Published dead-letter to %s", topic)
+        logger.debug("💀 Published dead-letter to %s", topic)
     except Exception:
         logger.exception("💥 Failed to publish dead-letter to %s", topic)
 
@@ -329,7 +329,7 @@ def main() -> int:
     streaming_pull_future = None
 
     def callback(message: pubsub_v1.subscriber.message.Message) -> None:
-        logger.info("📥 Received message: %s", str(message.message_id)[-4:])
+        logger.debug("📥 Received message: %s", str(message.message_id)[-4:])
         try:
             payload = json.loads(message.data.decode())
         except Exception:
@@ -344,7 +344,7 @@ def main() -> int:
         try:
             process_message_data(payload, app_id, installation_id, private_key_path)
             message.ack()
-            logger.info("✅ Acked message: %s", str(message.message_id)[-4:])
+            logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
         except Exception:
             logger.exception("💥 Processing failed for message %s", message.message_id)
             if dead_letter_topic:
@@ -352,11 +352,11 @@ def main() -> int:
                 message.ack()
             else:
                 # Let Pub/Sub redeliver by not acking
-                logger.info("🔄 Not acking message to allow retry")
+                logger.debug("🔄 Not acking message to allow retry")
 
     subscription_path = subscription
 
-    logger.info("🚀 Starting subscriber")
+    logger.debug("🚀 Starting subscriber")
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
 
     # Graceful shutdown handling
