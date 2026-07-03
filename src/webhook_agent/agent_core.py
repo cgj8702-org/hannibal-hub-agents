@@ -638,14 +638,30 @@ class AgentCore:
         # Build canonical event from normalized data
         canonical = event_data.get("canonical", "") or self._infer_canonical(event_data)
 
-        # Pre-fetch PR diff and templates only on pull_request.opened when /create trigger is present
+        # Pre-fetch PR diff and templates if /create trigger is present in any relevant body
         raw_payload = event_data.get("raw_payload", {})
-        pr_data = raw_payload.get("pull_request", {})
-        pr_body = pr_data.get("body") or ""
-        if canonical == "pull_request.opened" and "/create" in pr_body:
+
+        # Check all possible places for /create
+        pr_body = raw_payload.get("pull_request", {}).get("body") or ""
+        comment_body = raw_payload.get("comment", {}).get("body") or ""
+        review_body = raw_payload.get("review", {}).get("body") or ""
+
+        if (
+            "/create" in pr_body
+            or "/create" in comment_body
+            or "/create" in review_body
+        ):
             try:
                 repo = self.gh.get_repo(repo_full_name)
-                pr_number = pr_data.get("number")
+                # Get PR number from whichever part of the payload has it
+                pr_number = raw_payload.get("pull_request", {}).get(
+                    "number"
+                ) or raw_payload.get("issue", {}).get("number")
+                # If it's an issue_comment, verify it's actually a pull request
+                if "issue" in raw_payload and "pull_request" not in raw_payload:
+                    if not raw_payload.get("issue", {}).get("pull_request"):
+                        pr_number = None
+
                 if pr_number:
                     pr = repo.get_pull(pr_number)
                     files = pr.get_files()
