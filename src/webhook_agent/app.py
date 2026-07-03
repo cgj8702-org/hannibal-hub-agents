@@ -41,7 +41,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
 
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -175,7 +174,9 @@ async def webhook(
         # If a signature is provided but no secret is configured, we still verify it
         # to avoid "Invalid signature" errors when the user is testing without a secret
         # but the client sends a signature.
-        logger.warning("⚠️  WEBHOOK_SECRET not set; skipping signature verification despite header presence")
+        logger.warning(
+            "⚠️  WEBHOOK_SECRET not set; skipping signature verification despite header presence"
+        )
     else:
         # If no secret is configured and no signature is provided, we skip verification.
         logger.warning("⚠️  WEBHOOK_SECRET not set; skipping signature verification")

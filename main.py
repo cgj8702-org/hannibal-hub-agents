@@ -23,7 +23,7 @@ def run_receiver():
         host="0.0.0.0",
         port=8000,
         log_level="info",
-        reload=True,  # Set to False in production
+        reload=False,  # Set to False in production
     )
 
 
