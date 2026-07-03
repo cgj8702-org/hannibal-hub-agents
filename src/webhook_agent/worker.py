@@ -177,8 +177,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
     # Rule 0: ignored event types
     if canonical in IGNORED_EVENTS:
         logger.info(
-            "🤫 Ignoring event by configuration: %s %s",
-            delivery_id,
+            "🤫 Ignoring event by configuration: %s",
             canonical.replace("_", " ").replace(".", " ").capitalize(),
         )
         return False

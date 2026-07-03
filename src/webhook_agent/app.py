@@ -216,10 +216,8 @@ async def webhook(
                 },
             )
             logger.info(
-                "📨 Enqueued delivery: %s %s %s",
-                delivery_id,
+                "📨 Enqueued delivery: %s",
                 event_name,
-                topic,
             )
         else:
             logger.warning(
