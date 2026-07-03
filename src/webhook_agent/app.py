@@ -49,13 +49,13 @@ async def lifespan(app: FastAPI):
     cf_token = os.environ.get("CF_TUNNEL_TOKEN")
     tunnel_process = None
     if cf_token:
-        logger.info("☁️  CF_TUNNEL_TOKEN found. Preparing Cloudflare Tunnel...")
+        logger.debug("☁️  CF_TUNNEL_TOKEN found. Preparing Cloudflare Tunnel...")
 
         cf_bin = shutil.which("cloudflared")
         if not cf_bin:
             cf_bin = "/tmp/cloudflared"
             if not os.path.exists(cf_bin):
-                logger.info(
+                logger.debug(
                     "📥 cloudflared not found in PATH. Downloading standalone binary..."
                 )
                 url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
@@ -63,7 +63,9 @@ async def lifespan(app: FastAPI):
                     urllib.request.urlretrieve(url, cf_bin)
                     st = os.stat(cf_bin)
                     os.chmod(cf_bin, st.st_mode | stat.S_IEXEC)
-                    logger.info("✅ cloudflared binary downloaded and made executable.")
+                    logger.debug(
+                        "✅ cloudflared binary downloaded and made executable."
+                    )
                 except (urllib.error.URLError, OSError) as e:
                     logger.error(f"💥 Failed to download cloudflared: {e}")
                     cf_bin = None
@@ -198,14 +200,7 @@ async def webhook(
         delivery_id=delivery_id,
     )
 
-    logger.info(
-        "📥 Received event: event=%s action=%s delivery=%s sender=%s repo=%s",
-        normalized["event_name"],
-        normalized["action"],
-        delivery_id,
-        normalized["sender"].get("login") if normalized["sender"] else None,
-        normalized["repository"].get("full_name") if normalized["repository"] else None,
-    )
+    logger.info("📥 Received event: %s", delivery_id)
 
     # Publish to Pub/Sub
     try:
@@ -221,7 +216,7 @@ async def webhook(
                 },
             )
             logger.info(
-                "📨 Enqueued delivery: delivery=%s event=%s topic=%s",
+                "📨 Enqueued delivery: %s %s %s",
                 delivery_id,
                 event_name,
                 topic,

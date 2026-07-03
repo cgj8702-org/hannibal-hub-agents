@@ -102,7 +102,7 @@ class WebhookProcessor:
 
         if canonical in ignored_events:
             logger.info(
-                "🤫 Ignoring event by configuration: delivery=%s canonical=%s",
+                "🤫 Ignoring event by configuration: %s %s",
                 delivery_id,
                 canonical,
             )
@@ -114,7 +114,7 @@ class WebhookProcessor:
 
         sender = normalized.get("sender")
         if sender and sender.get("login") == BOT_LOGIN:
-            logger.debug("🛡️  Suppressed bot-authored event: delivery=%s", delivery_id)
+            logger.debug("🛡️  Suppressed bot-authored event: %s", delivery_id)
             return False
 
         raw = normalized.get("raw_payload", {})
@@ -123,7 +123,7 @@ class WebhookProcessor:
             user = comment.get("user") or {}
             if user.get("login") == BOT_LOGIN:
                 logger.debug(
-                    "🛡️  Suppressed bot-authored comment/review: delivery=%s",
+                    "🛡️  Suppressed bot-authored comment/review: %s",
                     delivery_id,
                 )
                 return False

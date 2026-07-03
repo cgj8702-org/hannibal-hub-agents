@@ -45,14 +45,6 @@ _src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
 if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
 
-from webhook_agent.agent_core import AgentCore  # noqa: E402
-from webhook_agent.github_credential_helper import (  # noqa: E402
-    generate_jwt,
-    get_installation_token,
-    load_cached_token,
-    load_private_key,
-    save_cached_token,
-)
 
 logger = logging.getLogger("worker")
 logging.basicConfig(
@@ -185,9 +177,9 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
     # Rule 0: ignored event types
     if canonical in IGNORED_EVENTS:
         logger.info(
-            "🤫 Ignoring event by configuration: delivery=%s canonical=%s",
+            "🤫 Ignoring event by configuration: %s %s",
             delivery_id,
-            canonical,
+            canonical.replace("_", " ").replace(".", " ").capitalize(),
         )
         return False
 
@@ -207,9 +199,9 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
         canonical = f"{event_name}.{action}" if action else event_name
         if canonical not in allowed_followups:
             logger.debug(
-                "🛡️  Suppressed bot-authored event: delivery=%s canonical=%s sender=%s",
+                "🛡️  Suppressed bot-authored event: %s %s %s",
                 delivery_id,
-                canonical,
+                canonical.replace("_", " ").replace(".", " ").capitalize(),
                 sender.get("login"),
             )
             return False
@@ -218,9 +210,7 @@ def should_process_event(normalized: dict[str, Any]) -> bool:
     raw = normalized.get("raw_payload", {})
     comment = raw.get("comment") or raw.get("review")
     if _is_bot_comment_author(comment):
-        logger.debug(
-            "🛡️  Suppressed bot-authored comment/review: delivery=%s", delivery_id
-        )
+        logger.debug("🛡️  Suppressed bot-authored comment/review: %s", delivery_id)
         return False
 
     return True
@@ -237,6 +227,15 @@ def mark_processed(delivery_id: str) -> None:
 def process_message_data(
     data: dict[str, Any], app_id: int, installation_id: int, private_key_path: str
 ) -> None:
+    from webhook_agent.agent_core import AgentCore
+    from webhook_agent.github_credential_helper import (
+        generate_jwt,
+        get_installation_token,
+        load_cached_token,
+        load_private_key,
+        save_cached_token,
+    )
+
     delivery_id = data.get("delivery_id", "unknown")
     canonical = route_event(data)
 
@@ -284,8 +283,8 @@ def process_message_data(
         for r in results:
             status_symbol = "🤖" if r.success else "❌"
             logger.info("%s Agent action: %s", status_symbol, r.detail)
-    except Exception as exc:
-        logger.exception("💥 Agent core failed for repo %s: %s", repo_name, exc)
+    except Exception:
+        logger.exception("💥 Agent core failed for repo %s", repo_name)
 
 
 # ---------------------------------------------------------------------------

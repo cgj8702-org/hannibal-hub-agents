@@ -511,10 +511,10 @@ class GemmaPlanner:
         prompt = _build_event_prompt(planner_event, trace_id)
 
         logger.debug(
-            "gemma planner request trace=%s canonical=%s tools=%s",
+            "gemma planner request: %s %s %s",
             trace_id,
             planner_event.canonical,
-            [t.get("name") for t in tools],
+            tools,
         )
 
         interaction = self.client.interactions.create(
@@ -538,16 +538,16 @@ class GemmaPlanner:
 
         if interaction.output_text:
             logger.debug(
-                "gemma planner text trace=%s model=%s text=%s",
+                "gemma planner text: %s %s %s",
                 trace_id,
                 self.model,
                 interaction.output_text,
             )
 
         logger.debug(
-            "gemma planner trace=%s model=%s planned_actions=%s",
+            "gemma planner: %s %s %s",
             trace_id,
             self.model,
-            [p.tool for p in planned],
+            planned,
         )
         return planned

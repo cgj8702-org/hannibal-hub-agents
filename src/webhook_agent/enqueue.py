@@ -32,7 +32,7 @@ def publish_webhook_message(
         def _cb(fut):
             try:
                 message_id = fut.result()
-                logger.info("published message id=%s to %s", message_id, topic_path)
+                logger.info("📨 Enqueued delivery: %s", message_id)
             except Exception:
                 logger.exception("publish failed to %s", topic_path)
 
