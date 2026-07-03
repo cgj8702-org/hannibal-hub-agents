@@ -435,7 +435,7 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
         extra_context += (
             f"\n=== PR TEMPLATE TO FILL OUT ===\n{raw['pr_template']}\n"
             "\nINSTRUCTION:\n"
-            "The user used `/create` in the pull request description.\n"
+            "The user used `/create` in a comment or the pull request description.\n"
             "You MUST parse the PR Code Diff above, fill out the provided PR Template completely with a detailed explanation of the changes, "
             "and output a call to the `update_pr_description` tool containing the filled-out template in the `body` argument, "
             "setting `ready_for_review` to true.\n"
