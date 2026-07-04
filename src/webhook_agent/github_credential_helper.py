@@ -101,7 +101,7 @@ def load_cached_token(
         if exp_epoch - int(time.time()) < min_ttl_seconds:
             return None
         return InstallationToken(token=token, expires_at=expires_at)
-    except Exception:
+    except (json.JSONDecodeError, ValueError, OSError):
         return None
 
 
@@ -164,7 +164,7 @@ def main() -> int:
     except httpx.HTTPStatusError as exc:
         print(f"Error from GitHub API: {exc.response.status_code} {exc.response.text}")
         return 2
-    except Exception as exc:  # network or other errors
+    except httpx.HTTPError as exc:  # network or other errors
         print(f"Network/error: {exc}")
         return 3
 

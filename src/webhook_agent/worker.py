@@ -23,6 +23,7 @@ import signal
 import sys
 
 from google.cloud import pubsub_v1
+
 from .processor import WebhookProcessor
 
 # Ensure src/ is on sys.path so the package is importable when run as a script
