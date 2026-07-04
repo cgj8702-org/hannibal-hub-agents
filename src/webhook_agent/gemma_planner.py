@@ -370,7 +370,6 @@ def _tool_declarations_for_event(
         tools.extend(_pr_review_schemas())
     elif canonical.startswith("pull_request_review."):
         tools.extend(_pr_review_schemas())
-        tools.extend(_pr_lifecycle_schemas())
     elif canonical == "pull_request_review_requested":
         tools.extend(_pr_review_schemas())
     elif canonical.startswith("label."):
@@ -417,20 +416,35 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
     elif event.canonical.startswith("issue_comment."):
         issue = raw.get("issue", {})
         comment = raw.get("comment", {})
+        user = comment.get("user", {})
         extra_context = (
             f"Issue/PR Number: {issue.get('number', 'unknown')}\n"
+            f"Comment Author: {user.get('login', 'unknown')}\n"
+            f"Comment Created At: {comment.get('created_at', 'unknown')}\n"
             f"Comment Body Snippet: {(comment.get('body') or '')[:200]}\n"
         )
     elif event.canonical.startswith("pull_request_review_comment."):
+        pr = raw.get("pull_request", {}) or raw.get("issue", {})
         comment = raw.get("comment", {})
+        user = comment.get("user", {})
         extra_context = (
+            f"PR Number: {pr.get('number', 'unknown')}\n"
             f"Review Comment ID: {comment.get('id', 'unknown')}\n"
+            f"Comment Author: {user.get('login', 'unknown')}\n"
+            f"Comment Created At: {comment.get('created_at', 'unknown')}\n"
+            f"File Path: {comment.get('path', 'unknown')}\n"
+            f"Line Number: {comment.get('line', 'unknown')}\n"
             f"Comment Body Snippet: {(comment.get('body') or '')[:200]}\n"
         )
     elif event.canonical.startswith("pull_request_review."):
+        pr = raw.get("pull_request", {})
         review = raw.get("review", {})
+        user = review.get("user", {})
         extra_context = (
+            f"PR Number: {pr.get('number', 'unknown')}\n"
             f"Review State: {review.get('state', 'N/A')}\n"
+            f"Review Author: {user.get('login', 'unknown')}\n"
+            f"Review Submitted At: {review.get('submitted_at', 'unknown')}\n"
             f"Review Body Snippet: {(review.get('body') or '')[:200]}\n"
         )
 
