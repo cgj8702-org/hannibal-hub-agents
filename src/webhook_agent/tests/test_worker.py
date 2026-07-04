@@ -7,12 +7,11 @@ from typing import Any
 from webhook_agent.worker import (
     _is_bot_actor,
     _is_bot_comment_author,
+    _processed_deliveries,
+    mark_processed,
     route_event,
     should_process_event,
-    mark_processed,
-    _processed_deliveries,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures: normalized webhook payloads
