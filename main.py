@@ -3,8 +3,6 @@ import multiprocessing
 import signal
 import sys
 
-import uvicorn
-
 # Configure logging for the entry point
 logging.basicConfig(
     level=logging.INFO,
@@ -13,18 +11,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("main")
-
-
-def run_receiver():
-    """Launch the FastAPI webhook receiver."""
-    logger.info("🚀 Starting Webhook Receiver...")
-    uvicorn.run(
-        "src.webhook_agent.app:app",
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        reload=False,  # Set to False in production
-    )
 
 
 def run_worker():
@@ -43,23 +29,19 @@ def run_worker():
 def main():
     """
     Orchestrate the hannibal-hub-agents services.
-    Starts both the receiver and the worker as separate processes.
+    Starts the worker as a separate process.
     """
     logger.info("🚀 Starting hannibal-hub-agents distributed architecture...")
 
-    # Create processes for the receiver and worker
-    receiver_proc = multiprocessing.Process(target=run_receiver, name="Receiver")
+    # Create process for the worker
     worker_proc = multiprocessing.Process(target=run_worker, name="Worker")
 
-    # Start processes
-    receiver_proc.start()
+    # Start process
     worker_proc.start()
 
     def signal_handler(sig, frame):
         logger.info(f"🛑 Received signal {sig}, shutting down services...")
-        receiver_proc.terminate()
         worker_proc.terminate()
-        receiver_proc.join()
         worker_proc.join()
         logger.info("✅ All services shut down.")
         sys.exit(0)
@@ -69,7 +51,6 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Keep the main process alive while children are running
-    receiver_proc.join()
     worker_proc.join()
 
 

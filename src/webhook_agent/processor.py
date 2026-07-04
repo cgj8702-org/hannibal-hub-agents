@@ -102,14 +102,16 @@ class WebhookProcessor:
 
         if canonical in ignored_events:
             logger.info(
-                "🤫 Ignoring event by configuration: %s %s",
-                delivery_id,
-                canonical,
+                "🤫 Ignoring event: %s",
+                canonical.replace("_", " ").replace(".", " ").capitalize(),
             )
             return False
 
         if delivery_id in self._processed_deliveries:
-            logger.debug("🛡️  Suppressed duplicate delivery: %s", delivery_id)
+            logger.debug(
+                "🛡️  Suppressed duplicate delivery: %s",
+                delivery_id,
+            )
             return False
 
         sender = normalized.get("sender")
@@ -123,8 +125,7 @@ class WebhookProcessor:
             user = comment.get("user") or {}
             if user.get("login") == BOT_LOGIN:
                 logger.debug(
-                    "🛡️  Suppressed bot-authored comment/review: %s",
-                    delivery_id,
+                    "🛡️  Suppressed bot-authored comment/review: %s", delivery_id
                 )
                 return False
 
@@ -173,6 +174,10 @@ class WebhookProcessor:
             results = agent.run(data, repo_name)
             for r in results:
                 status_symbol = "🤖" if r.success else "❌"
-                logger.info("%s Agent action: %s", status_symbol, r.detail)
+                logger.info(
+                    "%s Agent action: %s",
+                    status_symbol,
+                    r.detail.replace("_", " ").replace(".", " ").capitalize(),
+                )
         except Exception:
             logger.exception("💥 Agent core failed for repo %s", repo_name)
