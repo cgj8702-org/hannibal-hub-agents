@@ -274,7 +274,7 @@ Use this as the practical implementation order for the standalone service.
 - [x] Implement worker consumption logic
 - [x] Add retry policy and backoff
 - [x] Add dead-letter handling or a failure sink
-- [ ] Confirm a restarted process does not lose work
+- [x] Confirm a restarted process does not lose work
 
 ### 6. Implement GitHub App authentication
 
@@ -285,11 +285,11 @@ Use this as the practical implementation order for the standalone service.
 
 ### 7. Gather event context
 
-- [ ] Fetch issue or pull request metadata
-- [ ] Fetch comments and review threads
-- [ ] Fetch changed files and patch hunks
+- [x] Fetch issue or pull request metadata
+- [x] Fetch comments and review threads
+- [x] Fetch changed files and patch hunks
 - [ ] Fetch checks or status context when useful
-- [ ] Limit each event to only the context it needs
+- [x] Limit each event to only the context it needs
 
 ### 8. Build the agent core
 
@@ -319,11 +319,11 @@ Use this as the practical implementation order for the standalone service.
 
 ### 11. Validate the first release
 
-- [ ] Confirm every webhook returns within 10 seconds
-- [ ] Confirm duplicate deliveries do not produce duplicate side effects
-- [ ] Confirm the worker can authenticate as the GitHub App installation
-- [ ] Confirm the agent can gather context and call the model
-- [ ] Confirm the agent can write back to GitHub safely
+- [x] Confirm every webhook returns within 10 seconds
+- [x] Confirm duplicate deliveries do not produce duplicate side effects
+- [x] Confirm the worker can authenticate as the GitHub App installation
+- [x] Confirm the agent can gather context and call the model
+- [x] Confirm the agent can write back to GitHub safely
 - [x] Confirm the project remains fully separate from Hannibal Hub
 
 ## Open Questions
