@@ -312,19 +312,6 @@ class AgentCore:
                             },
                         }
                     )
-                else:
-                    actions.append(
-                        {
-                            "tool": "add_comment",
-                            "args": {
-                                "issue_number": pr_number,
-                                "body": (
-                                    "Thanks for opening this pull request! "
-                                    "The bot will review it shortly."
-                                ),
-                            },
-                        }
-                    )
 
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
@@ -364,17 +351,7 @@ class AgentCore:
 
         # --- pull_request_review_requested ---
         elif canonical == "pull_request_review_requested":
-            pr_number = raw.get("pull_request", {}).get("number")
-            if pr_number:
-                actions.append(
-                    {
-                        "tool": "add_comment",
-                        "args": {
-                            "issue_number": pr_number,
-                            "body": ("Review requested! I'll take a look at this PR."),
-                        },
-                    }
-                )
+            logger.debug("%s review requested — no automatic follow-up", trace_id)
 
         # --- label.* events ---
         elif canonical.startswith("label."):
