@@ -246,8 +246,8 @@ class AgentCore:
             template_path = self.templates_dir / template_name
             if template_path.exists():
                 return template_path.read_text(encoding="utf-8")
-        except Exception:
-            logger.exception("Failed to load local template: %s", template_name)
+        except Exception as e:
+            logger.exception("Failed to load local template %s: %s", template_name, e)
         return None
 
     # ------------------------------------------------------------------
