@@ -174,5 +174,5 @@ class WebhookProcessor:
             for r in results:
                 status_symbol = "🤖" if r.success else "❌"
                 logger.info("%s Agent action: %s", status_symbol, r.detail)
-        except Exception as exc:
-            logger.exception("💥 Agent core failed for repo %s: %s", repo_name, exc)
+        except Exception:
+            logger.exception("💥 Agent core failed for repo %s", repo_name)

@@ -18,9 +18,10 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
 from github import GithubException
 
 from .gemma_planner import GemmaPlanner
@@ -246,8 +247,8 @@ class AgentCore:
             template_path = self.templates_dir / template_name
             if template_path.exists():
                 return template_path.read_text(encoding="utf-8")
-        except Exception as e:
-            logger.exception("Failed to load local template %s: %s", template_name, e)
+        except Exception:
+            logger.exception("Failed to load local template %s", template_name)
         return None
 
     # ------------------------------------------------------------------
@@ -565,7 +566,7 @@ class AgentCore:
                                 break
                         if target_comment:
                             break
-                except Exception:
+                except GithubException:
                     logger.debug("Failed to iterate reviews for comment %s", comment_id)
 
                 if target_comment:
@@ -589,7 +590,7 @@ class AgentCore:
                         success=True,
                         detail=f"replied to issue comment: {reply.html_url}",
                     )
-                except Exception:
+                except GithubException:
                     return ActionResult(
                         tool=tool,
                         success=False,
@@ -702,9 +703,12 @@ class AgentCore:
                     "number"
                 ) or raw_payload.get("issue", {}).get("number")
                 # If it's an issue_comment, verify it's actually a pull request
-                if "issue" in raw_payload and "pull_request" not in raw_payload:
-                    if not raw_payload.get("issue", {}).get("pull_request"):
-                        pr_number = None
+                if (
+                    "issue" in raw_payload
+                    and "pull_request" not in raw_payload
+                    and not raw_payload.get("issue", {}).get("pull_request")
+                ):
+                    pr_number = None
 
                 if pr_number:
                     pr = repo.get_pull(pr_number)
