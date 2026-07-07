@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from google import genai
-from google.genai._gaos.lib.compat_errors import InternalServerError
+from google.genai._gaos.lib.compat_errors import InternalServerError, RateLimitError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -512,7 +512,7 @@ class GemmaPlanner:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(InternalServerError),
+        retry=retry_if_exception_type((InternalServerError, RateLimitError)),
         reraise=True,
     )
     def _create_interaction(self, prompt: str, tools: list[dict[str, Any]]):

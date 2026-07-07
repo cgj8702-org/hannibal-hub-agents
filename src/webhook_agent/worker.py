@@ -83,52 +83,58 @@ def main() -> int:
     subscriber = pubsub_v1.SubscriberClient()
     publisher = pubsub_v1.PublisherClient()
 
-    streaming_pull_future = None
-
-    def callback(message: pubsub_v1.subscriber.message.Message) -> None:
-        logger.debug("📥 Received message: %s", str(message.message_id)[-4:])
-        try:
-            payload = json.loads(message.data.decode())
-        except Exception:
-            logger.exception(
-                "invalid JSON payload; sending to dead-letter if configured"
-            )
-            if dead_letter_topic:
-                publish_dead_letter(publisher, dead_letter_topic, message.data)
-            message.ack()
-            return
-
-        try:
-            # Delegate all routing, filtering, and execution to the processor
-            processor.process_event(payload)
-            message.ack()
-            logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
-        except Exception:
-            logger.exception("💥 Processing failed for message %s", message.message_id)
-            if dead_letter_topic:
-                publish_dead_letter(publisher, dead_letter_topic, message.data)
-                message.ack()
-            else:
-                # Let Pub/Sub redeliver by not acking
-                logger.debug("🔄 Not acking message to allow retry")
-
     subscription_path = subscription
+    keep_running = True
 
-    logger.debug("🚀 Starting subscriber")
-    streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
-
-    # Graceful shutdown handling
     def _signal_handler(signum, frame):
+        nonlocal keep_running
         logger.info("🛑 Signal %s received, shutting down...", signum)
-        streaming_pull_future.cancel()
+        keep_running = False
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    logger.debug("🚀 Starting sequential subscriber loop")
     try:
-        streaming_pull_future.result()
+        while keep_running:
+            # Pull exactly one message synchronously
+            response = subscriber.pull(
+                request={"subscription": subscription_path, "max_messages": 1},
+                timeout=30.0,
+            )
+
+            if not response.received_messages:
+                continue
+
+            message = response.received_messages[0].message
+            ack_id = response.received_messages[0].ack_id
+
+            logger.debug("📥 Received message: %s", str(message.message_id)[-4:])
+
+            try:
+                payload = json.loads(message.data.decode())
+                # Delegate all routing, filtering, and execution to the processor
+                # This is a blocking call; the loop waits until it's done
+                processor.process_event(payload)
+
+                subscriber.acknowledge(
+                    request={"subscription": subscription_path, "ack_ids": [ack_id]}
+                )
+                logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
+            except Exception:
+                logger.exception(
+                    "💥 Processing failed for message %s", message.message_id
+                )
+                if dead_letter_topic:
+                    publish_dead_letter(publisher, dead_letter_topic, message.data)
+                    subscriber.acknowledge(
+                        request={"subscription": subscription_path, "ack_ids": [ack_id]}
+                    )
+                else:
+                    # Let Pub/Sub redeliver by not acking
+                    logger.debug("🔄 Not acking message to allow retry")
     except Exception:
-        logger.exception("💥 Subscriber terminated unexpectedly")
+        logger.exception("💥 Subscriber loop terminated unexpectedly")
 
     return 0
 
