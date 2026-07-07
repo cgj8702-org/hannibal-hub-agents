@@ -263,7 +263,9 @@ class AgentCore:
         fall back to the rule-based planner with event-specific branches.
         """
         trace_id = trace_id or generate_trace_id()
-        logger.info("🧠 Planning actions for event %s (trace: %s)", event.canonical, trace_id)
+        logger.info(
+            "🧠 Planning actions for event %s (trace: %s)", event.canonical, trace_id
+        )
 
         if self.planner:
             try:
@@ -299,20 +301,17 @@ class AgentCore:
             pr = raw.get("pull_request", {})
             pr_number = pr.get("number")
             pr_body = pr.get("body") or ""
-            if pr_number:
-                if "/create" in pr_body:
-                    actions.append(
-                        {
-                            "tool": "update_pr_description",
-                            "args": {
-                                "pr_number": pr_number,
-                                "body": (
-                                    "## 🍵 The Tea (Architectural Overview)\n"
-                                    "- Auto-generated placeholder description (LLM planner was not active).\n"
-                                ),
-                            },
-                        }
-                    )
+            if "/create" in pr_body:
+                actions.append({
+                    "tool": "update_pr_description",
+                    "args": {
+                        "pr_number": pr_number,
+                        "body": (
+                            "## 🍵 The Tea (Architectural Overview)\n"
+                            "- Auto-generated placeholder description (LLM planner was not active).\n"
+                        ),
+                    },
+                })
 
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
@@ -325,19 +324,30 @@ class AgentCore:
             issue_number = issue.get("number")
             comment_body = raw.get("comment", {}).get("body", "")
             if issue_number and comment_body:
-                # Check for trigger keywords
+                # Check for trigger keywords or bot mentions
                 lower_body = comment_body.lower()
-                if "/review" in lower_body or "/analyze" in lower_body:
-                    actions.append(
-                        {
-                            "tool": "add_comment",
-                            "args": {
-                                "issue_number": issue_number,
-                                "body": (
-                                    "I'll analyze this issue and provide feedback shortly."
-                                ),
-                            },
-                        }
+                if any(
+                    k in lower_body
+                    for k in (
+                        "/review",
+                        "/analyze",
+                        "@hannibal-hub-agents",
+                        "@hannibal",
+                    )
+                ):
+                    actions.append({
+                        "tool": "add_comment",
+                        "args": {
+                            "issue_number": issue_number,
+                            "body": (
+                                "I'll analyze this issue and provide feedback shortly."
+                            ),
+                        },
+                    })
+                else:
+                    logger.info(
+                        "%s issue comment — no trigger keywords found, no action",
+                        trace_id,
                     )
 
         # --- pull_request_review_comment.created ---
@@ -348,53 +358,49 @@ class AgentCore:
 
         # --- pull_request_review.submitted ---
         elif canonical == "pull_request_review.submitted":
-            logger.debug("%s review submitted — no automatic follow-up", trace_id)
+            logger.info("%s review submitted — no automatic follow-up", trace_id)
 
         # --- pull_request_review_requested ---
         elif canonical == "pull_request_review_requested":
-            logger.debug("%s review requested — no automatic follow-up", trace_id)
+            logger.info("%s review requested — no automatic follow-up", trace_id)
 
         # --- label.* events ---
         elif canonical.startswith("label."):
-            logger.debug("%s label event — no automatic action", trace_id)
+            logger.info("%s label event — no automatic action", trace_id)
 
         # --- installation.* events ---
         elif canonical.startswith("installation."):
-            logger.debug("%s installation event — no automatic action", trace_id)
+            logger.info("%s installation event — no automatic action", trace_id)
 
         # --- ping ---
         elif canonical == "ping":
-            logger.debug("%s ping received — no action needed", trace_id)
+            logger.info("%s ping received — no action needed", trace_id)
 
         # --- unknown ---
         else:
-            logger.debug("%s %s — no action", trace_id, canonical)
+            logger.info("%s %s — no action", trace_id, canonical)
 
         # If payload asks for writeback_create_issue, prepare a create_issue action
         if event.raw_payload.get("writeback_create_issue"):
-            actions.append(
-                {
-                    "tool": "create_issue",
-                    "args": {
-                        "title": event.raw_payload.get("writeback_title"),
-                        "body": event.raw_payload.get("writeback_body", ""),
-                    },
-                }
-            )
+            actions.append({
+                "tool": "create_issue",
+                "args": {
+                    "title": event.raw_payload.get("writeback_title"),
+                    "body": event.raw_payload.get("writeback_body", ""),
+                },
+            })
 
         # Example: add comment if requested
         if event.raw_payload.get("writeback_add_comment"):
-            actions.append(
-                {
-                    "tool": "add_comment",
-                    "args": {
-                        "issue_number": int(
-                            event.raw_payload.get("writeback_issue_number")
-                        ),
-                        "body": event.raw_payload.get("writeback_comment_body"),
-                    },
-                }
-            )
+            actions.append({
+                "tool": "add_comment",
+                "args": {
+                    "issue_number": int(
+                        event.raw_payload.get("writeback_issue_number")
+                    ),
+                    "body": event.raw_payload.get("writeback_comment_body"),
+                },
+            })
 
         return actions
 
@@ -430,7 +436,12 @@ class AgentCore:
         self, repo_full_name: str, action: dict[str, Any], trace_id: str
     ) -> ActionResult:
         tool = action["tool"]
-        logger.info("🛠️  Executing tool %s for repo %s (trace: %s)", tool, repo_full_name, trace_id)
+        logger.info(
+            "🛠️  Executing tool %s for repo %s (trace: %s)",
+            tool,
+            repo_full_name,
+            trace_id,
+        )
         args = action.get("args") or {}
 
         # Policy gate

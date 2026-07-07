@@ -545,6 +545,11 @@ class GemmaPlanner:
         )
         prompt = _build_event_prompt(planner_event, trace_id)
 
+        logger.info(
+            "📡 Requesting plan from Gemma 4 (trace: %s, event: %s)...",
+            trace_id,
+            planner_event.canonical,
+        )
         logger.debug(
             "gemma planner request: %s %s %s",
             trace_id,
@@ -553,6 +558,7 @@ class GemmaPlanner:
         )
 
         interaction = self._create_interaction(prompt, tools)
+        logger.info("✅ Gemma 4 returned a plan (trace: %s)", trace_id)
 
         planned: list[PlannedAction] = []
         for step in interaction.steps:
@@ -568,8 +574,8 @@ class GemmaPlanner:
             )
 
         if interaction.output_text:
-            logger.debug(
-                "gemma planner text: %s %s %s",
+            logger.info(
+                "🧠 Gemma planner reasoning: %s %s %s",
                 trace_id,
                 self.model,
                 interaction.output_text,
