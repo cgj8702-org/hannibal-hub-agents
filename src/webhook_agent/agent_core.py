@@ -302,16 +302,18 @@ class AgentCore:
             pr_number = pr.get("number")
             pr_body = pr.get("body") or ""
             if "/create" in pr_body:
-                actions.append({
-                    "tool": "update_pr_description",
-                    "args": {
-                        "pr_number": pr_number,
-                        "body": (
-                            "## 🍵 The Tea (Architectural Overview)\n"
-                            "- Auto-generated placeholder description (LLM planner was not active).\n"
-                        ),
-                    },
-                })
+                actions.append(
+                    {
+                        "tool": "update_pr_description",
+                        "args": {
+                            "pr_number": pr_number,
+                            "body": (
+                                "## 🍵 The Tea (Architectural Overview)\n"
+                                "- Auto-generated placeholder description (LLM planner was not active).\n"
+                            ),
+                        },
+                    }
+                )
 
         # --- pull_request.synchronize ---
         elif canonical == "pull_request.synchronize":
@@ -335,15 +337,17 @@ class AgentCore:
                         "@hannibal",
                     )
                 ):
-                    actions.append({
-                        "tool": "add_comment",
-                        "args": {
-                            "issue_number": issue_number,
-                            "body": (
-                                "I'll analyze this issue and provide feedback shortly."
-                            ),
-                        },
-                    })
+                    actions.append(
+                        {
+                            "tool": "add_comment",
+                            "args": {
+                                "issue_number": issue_number,
+                                "body": (
+                                    "I'll analyze this issue and provide feedback shortly."
+                                ),
+                            },
+                        }
+                    )
                 else:
                     logger.info(
                         "%s issue comment — no trigger keywords found, no action",
@@ -382,25 +386,29 @@ class AgentCore:
 
         # If payload asks for writeback_create_issue, prepare a create_issue action
         if event.raw_payload.get("writeback_create_issue"):
-            actions.append({
-                "tool": "create_issue",
-                "args": {
-                    "title": event.raw_payload.get("writeback_title"),
-                    "body": event.raw_payload.get("writeback_body", ""),
-                },
-            })
+            actions.append(
+                {
+                    "tool": "create_issue",
+                    "args": {
+                        "title": event.raw_payload.get("writeback_title"),
+                        "body": event.raw_payload.get("writeback_body", ""),
+                    },
+                }
+            )
 
         # Example: add comment if requested
         if event.raw_payload.get("writeback_add_comment"):
-            actions.append({
-                "tool": "add_comment",
-                "args": {
-                    "issue_number": int(
-                        event.raw_payload.get("writeback_issue_number")
-                    ),
-                    "body": event.raw_payload.get("writeback_comment_body"),
-                },
-            })
+            actions.append(
+                {
+                    "tool": "add_comment",
+                    "args": {
+                        "issue_number": int(
+                            event.raw_payload.get("writeback_issue_number")
+                        ),
+                        "body": event.raw_payload.get("writeback_comment_body"),
+                    },
+                }
+            )
 
         return actions
 

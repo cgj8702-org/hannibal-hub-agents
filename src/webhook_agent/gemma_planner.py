@@ -490,6 +490,9 @@ def _build_event_prompt(event: PlannerEvent, trace_id: str) -> str:
         "4. Keep arguments concise and correct.\n"
         "5. For PR review events, prefer submit_review over add_review_comment "
         "when a formal review is appropriate.\n"
+        "6. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this "
+        "account is the agent itself. All other senders (including "
+        "'cgj8702-agents') are real users and should be responded to normally.\n"
     )
 
 
