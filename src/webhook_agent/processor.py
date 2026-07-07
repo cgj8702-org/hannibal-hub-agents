@@ -98,6 +98,7 @@ class WebhookProcessor:
             "issue_comment.deleted",
             "label.created",
             "label.deleted",
+            "dependabot_alert.fixed",
         }
 
         if canonical in ignored_events:
