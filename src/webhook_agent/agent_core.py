@@ -263,6 +263,7 @@ class AgentCore:
         fall back to the rule-based planner with event-specific branches.
         """
         trace_id = trace_id or generate_trace_id()
+        logger.info("🧠 Planning actions for event %s (trace: %s)", event.canonical, trace_id)
 
         if self.planner:
             try:
@@ -429,6 +430,7 @@ class AgentCore:
         self, repo_full_name: str, action: dict[str, Any], trace_id: str
     ) -> ActionResult:
         tool = action["tool"]
+        logger.info("🛠️  Executing tool %s for repo %s (trace: %s)", tool, repo_full_name, trace_id)
         args = action.get("args") or {}
 
         # Policy gate

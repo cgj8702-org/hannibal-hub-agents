@@ -172,6 +172,7 @@ class WebhookProcessor:
             return
 
         try:
+            logger.info("🚀 Agent starting execution for repo %s", repo_name)
             results = agent.run(data, repo_name)
             for r in results:
                 status_symbol = "🤖" if r.success else "❌"
@@ -182,3 +183,9 @@ class WebhookProcessor:
                 )
         except Exception:
             logger.exception("💥 Agent core failed for repo %s", repo_name)
+
+        if not results:
+            logger.info(
+                "🏁 Agent completed execution with no actions taken for repo %s",
+                repo_name,
+            )
