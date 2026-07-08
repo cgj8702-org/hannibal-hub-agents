@@ -52,7 +52,7 @@ class AgentCore:
 
         logger.info(
             "🧠 Processing event via ADK agent (trace: %s, repo: %s)",
-            trace_id,
+            trace_id[-4:],
             repo_full_name,
         )
 

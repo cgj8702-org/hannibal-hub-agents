@@ -124,7 +124,8 @@ def main() -> int:
                 logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
             except Exception:
                 logger.exception(
-                    "💥 Processing failed for message %s", message.message_id
+                    "💥 Processing failed for message %s",
+                    str(message.message_id)[-4:],
                 )
                 if dead_letter_topic:
                     publish_dead_letter(publisher, dead_letter_topic, message.data)
