@@ -71,8 +71,9 @@ Ensure the following environment variables are set:
 - `GITHUB_PRIVATE_KEY_PATH`: Path to the private key PEM file for your GitHub App.
 - `GEMINI_API_KEY`: API key for model planning calls.
 - `GEMMA_MODEL`: The Gemma model to use (defaults to `gemma-4-31b-it`).
+- `GEMMA_MODEL_FALLBACK`: Fallback model when primary is unavailable (defaults to `gemma-4-26b-a4b-it`).
+- `GEMMA_MODEL_MAX_RETRIES`: Maximum retry attempts on transient errors (defaults to `5`).
 - `ALLOW_AUTOMATED_MUTATIONS`: Set to `1` or `true` to allow active writebacks to GitHub.
-- `DRY_RUN`: Set to `1` to preview actions without executing mutations.
 
 ---
 
