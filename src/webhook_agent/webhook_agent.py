@@ -667,6 +667,26 @@ class WebhookAgent:
         async def _run():
             nonlocal results
             try:
+                # Ensure session exists before invoking the runner.
+                # In the installed ADK version, InMemorySessionService only
+                # exposes async helpers, so we must await them here.
+                session = await self._session_service.get_session(
+                    app_name=self._app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                if session is None:
+                    await self._session_service.create_session(
+                        app_name=self._app_name,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
+                    logger.info(
+                        "Created new ADK session %s for user %s",
+                        session_id,
+                        user_id,
+                    )
+
                 async for event in self._runner.run_async(
                     user_id=user_id,
                     session_id=session_id,
