@@ -28,6 +28,26 @@ from google.genai import types as genai_types
 
 from .chroma_memory_service import ChromaDBMemoryService
 
+logger = logging.getLogger("webhook_agent")
+
+
+# ---------------------------------------------------------------------------
+# Template Loading Utility
+# ---------------------------------------------------------------------------
+
+
+def _load_pr_template() -> str:
+    """Load the PR description template from the templates directory."""
+    template_path = os.path.join(
+        os.path.dirname(__file__), "templates", "pr_template.md"
+    )
+    try:
+        with open(template_path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning("PR template not found at %s", template_path)
+        return ""
+
 
 @dataclass
 class ActionResult:
@@ -37,8 +57,6 @@ class ActionResult:
     success: bool
     detail: str
 
-
-logger = logging.getLogger("webhook_agent")
 
 # Bot identity — used for writeback policy
 BOT_LOGIN = "hannibal-hub-agents[bot]"
@@ -429,7 +447,10 @@ def create_issue(ctx: Context, title: str, body: str = "") -> str:
 # System instruction for the agent
 # ---------------------------------------------------------------------------
 
-SYSTEM_INSTRUCTION = """You are the planner for a GitHub App agent. Your role is to decide which tool(s) to call based on the incoming webhook event.
+# Load the PR template once at module load time
+_PR_TEMPLATE = _load_pr_template()
+
+SYSTEM_INSTRUCTION = f"""You are the planner for a GitHub App agent. Your role is to decide which tool(s) to call based on the incoming webhook event.
 
 Rules:
 1. Only call tools from the provided set. Do NOT invent tools or parameters.
@@ -440,9 +461,12 @@ Rules:
 6. If no action is needed, respond in text explaining why.
 
 Trigger words:
-- `/create` in a PR body (pull_request.opened): Call update_pr_description to add a descriptive template with sections for architectural overview, changes, and checklist.
+- `/create` in a PR body (pull_request.opened): Use the PR_TEMPLATE to structure a descriptive PR body using the template format. Call update_pr_description with the filled template.
 - `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
 - `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
+
+When generating PR descriptions, use this template as a guide:
+{_PR_TEMPLATE}
 """
 
 # ---------------------------------------------------------------------------
