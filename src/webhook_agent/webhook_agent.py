@@ -52,7 +52,8 @@ BOT_LOGIN = "hannibal-hub-agents[bot]"
 
 def _get_gh_from_ctx(ctx: Context) -> Github:
     """Retrieve the Github client from the agent context."""
-    gh = ctx.state.get("gh_client")
+    # Check both raw key and prefixed user: key (from InMemorySessionService.user_state)
+    gh = ctx.state.get("gh_client") or ctx.state.get("user:gh_client")
     if gh is None:
         raise RuntimeError("GitHub client not found in agent context")
     return gh
@@ -60,7 +61,8 @@ def _get_gh_from_ctx(ctx: Context) -> Github:
 
 def _get_repo_full_name(ctx: Context) -> str:
     """Retrieve the repo full name from the agent context."""
-    name = ctx.state.get("repo_full_name")
+    # Check both raw key and prefixed user: key (from InMemorySessionService.user_state)
+    name = ctx.state.get("repo_full_name") or ctx.state.get("user:repo_full_name")
     if name is None:
         raise RuntimeError("repo_full_name not found in agent context")
     return name
@@ -693,9 +695,14 @@ class WebhookAgent:
                         user_id,
                     )
 
-                # Set state values for tool access (ADK Context.state instead of deprecated user_context)
-                session.state["gh_client"] = gh_client
-                session.state["repo_full_name"] = repo_full_name
+                # Set user_state values - they get merged into session.state by InMemorySessionService
+                # This is needed because session copies are returned and our direct mutations wouldn't persist
+                self._session_service.user_state.setdefault(
+                    self._app_name, {}
+                ).setdefault(user_id, {})["gh_client"] = gh_client
+                self._session_service.user_state.setdefault(
+                    self._app_name, {}
+                ).setdefault(user_id, {})["repo_full_name"] = repo_full_name
 
                 async for event in self._runner.run_async(
                     user_id=user_id,
