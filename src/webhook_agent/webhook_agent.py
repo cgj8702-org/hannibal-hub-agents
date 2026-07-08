@@ -52,7 +52,7 @@ BOT_LOGIN = "hannibal-hub-agents[bot]"
 
 def _get_gh_from_ctx(ctx: Context) -> Github:
     """Retrieve the Github client from the agent context."""
-    gh = ctx.user_context.get("gh_client")
+    gh = ctx.state.get("gh_client")
     if gh is None:
         raise RuntimeError("GitHub client not found in agent context")
     return gh
@@ -60,7 +60,7 @@ def _get_gh_from_ctx(ctx: Context) -> Github:
 
 def _get_repo_full_name(ctx: Context) -> str:
     """Retrieve the repo full name from the agent context."""
-    name = ctx.user_context.get("repo_full_name")
+    name = ctx.state.get("repo_full_name")
     if name is None:
         raise RuntimeError("repo_full_name not found in agent context")
     return name
@@ -686,6 +686,10 @@ class WebhookAgent:
                         session_id,
                         user_id,
                     )
+
+                # Set state values for tool access (ADK Context.state instead of deprecated user_context)
+                session.state["gh_client"] = gh_client
+                session.state["repo_full_name"] = repo_full_name
 
                 async for event in self._runner.run_async(
                     user_id=user_id,
