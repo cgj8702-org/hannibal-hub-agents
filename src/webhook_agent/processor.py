@@ -111,13 +111,13 @@ class WebhookProcessor:
         if delivery_id in self._processed_deliveries:
             logger.debug(
                 "🛡️  Suppressed duplicate delivery: %s",
-                delivery_id,
+                delivery_id[-4:],
             )
             return False
 
         sender = normalized.get("sender")
         if sender and sender.get("login") == BOT_LOGIN:
-            logger.debug("🛡️  Suppressed bot-authored event: %s", delivery_id)
+            logger.debug("🛡️  Suppressed bot-authored event: %s", delivery_id[-4:])
             return False
 
         raw = normalized.get("raw_payload", {})
@@ -126,7 +126,8 @@ class WebhookProcessor:
             user = comment.get("user") or {}
             if user.get("login") == BOT_LOGIN:
                 logger.debug(
-                    "🛡️  Suppressed bot-authored comment/review: %s", delivery_id
+                    "🛡️  Suppressed bot-authored comment/review: %s",
+                    delivery_id[-4:],
                 )
                 return False
 
@@ -169,7 +170,9 @@ class WebhookProcessor:
             else None
         )
         if not repo_name:
-            logger.warning("⚠️  No repository found in event delivery: %s", delivery_id)
+            logger.warning(
+                "⚠️  No repository found in event delivery: %s", delivery_id[-4:]
+            )
             return
 
         try:
