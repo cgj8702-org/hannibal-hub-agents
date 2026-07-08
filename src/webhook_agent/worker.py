@@ -22,6 +22,7 @@ import os
 import signal
 import sys
 
+from google.api_core import exceptions as gcp_exceptions
 from google.cloud import pubsub_v1
 
 from .processor import WebhookProcessor
@@ -96,47 +97,57 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _signal_handler)
 
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
-    try:
-        while keep_running:
+    while keep_running:
+        try:
             # Pull exactly one message synchronously
             response = subscriber.pull(
                 request={"subscription": subscription_path, "max_messages": 1},
                 timeout=30.0,
             )
+        except gcp_exceptions.DeadlineExceeded:
+            # Transient deadline error - just continue polling
+            logger.debug("⏱️ Pull deadline exceeded, continuing...")
+            continue
+        except gcp_exceptions.GoogleAPICallError as e:
+            # Retryable API error - log and continue
+            logger.warning("📡 API call error during pull: %s", e)
+            continue
+        except Exception:
+            # Unexpected error during pull - log and continue
+            logger.exception("💥 Unexpected error during pull, continuing...")
+            continue
 
-            if not response.received_messages:
-                continue
+        if not response.received_messages:
+            continue
 
-            message = response.received_messages[0].message
-            ack_id = response.received_messages[0].ack_id
+        message = response.received_messages[0].message
+        ack_id = response.received_messages[0].ack_id
 
-            logger.debug("📥 Received message: %s", str(message.message_id)[-4:])
+        logger.debug("📥 Received message: %s", str(message.message_id)[-4:])
 
-            try:
-                payload = json.loads(message.data.decode())
-                # Delegate all routing, filtering, and execution to the processor
-                # This is a blocking call; the loop waits until it's done
-                processor.process_event(payload)
+        try:
+            payload = json.loads(message.data.decode())
+            # Delegate all routing, filtering, and execution to the processor
+            # This is a blocking call; the loop waits until it's done
+            processor.process_event(payload)
 
+            subscriber.acknowledge(
+                request={"subscription": subscription_path, "ack_ids": [ack_id]}
+            )
+            logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
+        except Exception:
+            logger.exception(
+                "💥 Processing failed for message %s",
+                str(message.message_id)[-4:],
+            )
+            if dead_letter_topic:
+                publish_dead_letter(publisher, dead_letter_topic, message.data)
                 subscriber.acknowledge(
                     request={"subscription": subscription_path, "ack_ids": [ack_id]}
                 )
-                logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
-            except Exception:
-                logger.exception(
-                    "💥 Processing failed for message %s",
-                    str(message.message_id)[-4:],
-                )
-                if dead_letter_topic:
-                    publish_dead_letter(publisher, dead_letter_topic, message.data)
-                    subscriber.acknowledge(
-                        request={"subscription": subscription_path, "ack_ids": [ack_id]}
-                    )
-                else:
-                    # Let Pub/Sub redeliver by not acking
-                    logger.debug("🔄 Not acking message to allow retry")
-    except Exception:
-        logger.exception("💥 Subscriber loop terminated unexpectedly")
+            else:
+                # Let Pub/Sub redeliver by not acking
+                logger.debug("🔄 Not acking message to allow retry")
 
     return 0
 

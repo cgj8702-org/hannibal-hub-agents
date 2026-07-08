@@ -129,3 +129,72 @@ class TestActionResult:
         assert r.tool == "add_comment"
         assert r.success is True
         assert r.detail == "commented"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _is_transient_error
+# ---------------------------------------------------------------------------
+
+
+class TestIsTransientError:
+    def test_returns_true_for_503_error(self):
+        """503 UNAVAILABLE should be recognized as transient."""
+        from google.genai.errors import ServerError
+        from webhook_agent.webhook_agent import _is_transient_error
+
+        error = ServerError(503, {}, None)
+        assert _is_transient_error(error) is True
+
+    def test_returns_true_for_500_error(self):
+        """500 INTERNAL_ERROR should be recognized as transient."""
+        from google.genai.errors import ServerError
+        from webhook_agent.webhook_agent import _is_transient_error
+
+        error = ServerError(500, {}, None)
+        assert _is_transient_error(error) is True
+
+    def test_returns_true_for_429_error(self):
+        """429 RESOURCE_EXHAUSTED should be recognized as transient."""
+        from google.genai.errors import ServerError
+        from webhook_agent.webhook_agent import _is_transient_error
+
+        error = ServerError(429, {}, None)
+        assert _is_transient_error(error) is True
+
+    def test_returns_false_for_400_error(self):
+        """400 BAD_REQUEST should NOT be recognized as transient."""
+        from google.genai.errors import ServerError
+        from webhook_agent.webhook_agent import _is_transient_error
+
+        error = ServerError(400, {}, None)
+        assert _is_transient_error(error) is False
+
+    def test_returns_false_for_non_server_error(self):
+        """Non-ServerError exceptions should NOT be recognized as transient."""
+        from webhook_agent.webhook_agent import _is_transient_error
+
+        assert _is_transient_error(ValueError("test")) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: WebhookAgent fallback model
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookAgentFallback:
+    def test_fallback_model_environment_variable(self):
+        """WebhookAgent should use GEMMA_MODEL_FALLBACK env var for fallback."""
+        from webhook_agent.webhook_agent import _FALLBACK_MODEL
+
+        assert _FALLBACK_MODEL == "gemma-4-26b-a4b-it"
+
+    def test_fallback_triggered_only_once(self):
+        """Fallback model should only be triggered once per agent instance."""
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        agent._create_fallback_agent()
+        # Second call should be a no-op
+        agent._create_fallback_agent()  # Should not raise or create duplicate
+
+        assert agent._fallback_triggered is True
