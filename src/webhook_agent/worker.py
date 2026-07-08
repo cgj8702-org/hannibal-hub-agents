@@ -37,6 +37,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
+    force=True,
 )
 
 # Silence verbose third-party loggers
@@ -94,7 +95,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    logger.debug("🚀 Starting sequential subscriber loop")
+    logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     try:
         while keep_running:
             # Pull exactly one message synchronously
