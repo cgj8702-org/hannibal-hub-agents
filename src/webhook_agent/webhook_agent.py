@@ -681,6 +681,12 @@ class WebhookAgent:
                         user_id=user_id,
                         session_id=session_id,
                     )
+                    # Re-fetch the session after creation
+                    session = await self._session_service.get_session(
+                        app_name=self._app_name,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
                     logger.info(
                         "Created new ADK session %s for user %s",
                         session_id,
