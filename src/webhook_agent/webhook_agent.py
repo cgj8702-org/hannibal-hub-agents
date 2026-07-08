@@ -658,20 +658,6 @@ class WebhookAgent:
         session_id = self._derive_session_id(event_data)
         user_id = sender_login or "anonymous"
 
-        # Ensure session exists
-        try:
-            self._session_service.get_session(
-                app_name=self._app_name,
-                user_id=user_id,
-                session_id=session_id,
-            )
-        except ValueError:
-            self._session_service.create_session(
-                app_name=self._app_name,
-                user_id=user_id,
-                session_id=session_id,
-            )
-
         # Build the user message
         user_message = self._build_user_message(event_data)
 
