@@ -136,6 +136,7 @@ class WebhookProcessor:
         """The main entry point for processing a single normalized event."""
         delivery_id = data.get("delivery_id", "unknown")
         canonical = self.route_event(data)
+        data["canonical"] = canonical
 
         logger.info(
             "⚙️  Processing event: %s",
