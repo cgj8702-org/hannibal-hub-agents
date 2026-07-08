@@ -433,11 +433,16 @@ SYSTEM_INSTRUCTION = """You are the planner for a GitHub App agent. Your role is
 
 Rules:
 1. Only call tools from the provided set. Do NOT invent tools or parameters.
-2. When a real user comments on an issue or pull request, you MUST respond. The user is engaging with the agent — treat this as a conversation and reply appropriately. Do NOT treat user comments as 'no action needed' simply because they lack explicit commands like /review.
+2. When a real user comments on an issue or pull request, you MUST respond. The user is engaging with the agent — treat this as a conversation and reply appropriately.
 3. Keep arguments concise and correct.
 4. For PR review events, prefer submit_review over add_review_comment when a formal review is appropriate.
 5. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally.
 6. If no action is needed, respond in text explaining why.
+
+Trigger words:
+- `/create` in a PR body (pull_request.opened): Call update_pr_description to add a descriptive template with sections for architectural overview, changes, and checklist.
+- `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
+- `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
 """
 
 # ---------------------------------------------------------------------------
@@ -591,7 +596,7 @@ class WebhookAgent:
             logger.info(
                 "writeback blocked: bot-authored event '%s' (trace: %s)",
                 canonical,
-                trace_id,
+                trace_id[-4:],
             )
             return [
                 ActionResult(
@@ -617,7 +622,7 @@ class WebhookAgent:
             logger.info(
                 "writeback policy: event '%s' is read-only (trace: %s)",
                 canonical,
-                trace_id,
+                trace_id[-4:],
             )
             return [
                 ActionResult(
@@ -636,7 +641,7 @@ class WebhookAgent:
         if not allow_auto and not self.dry_run:
             logger.info(
                 "mutations disabled by policy (trace: %s)",
-                trace_id,
+                trace_id[-4:],
             )
             return [
                 ActionResult(
@@ -647,7 +652,7 @@ class WebhookAgent:
             ]
 
         if self.dry_run:
-            logger.info("dry-run mode (trace: %s)", trace_id)
+            logger.info("dry-run mode (trace: %s)", trace_id[-4:])
             return [
                 ActionResult(
                     tool="plan",
@@ -747,13 +752,13 @@ class WebhookAgent:
                                 logger.info(
                                     "🧠 Agent response: %s (trace: %s)",
                                     part.text[:200],
-                                    trace_id,
+                                    trace_id[-4:],
                                 )
 
             except Exception as e:
                 logger.exception(
                     "ADK agent run failed (trace: %s): %s",
-                    trace_id,
+                    trace_id[-4:],
                     e,
                 )
                 results.append(
@@ -769,7 +774,7 @@ class WebhookAgent:
         if not results:
             logger.info(
                 "🏁 Agent completed with no actions (trace: %s)",
-                trace_id,
+                trace_id[-4:],
             )
 
         return results
@@ -790,7 +795,7 @@ class WebhookAgent:
             "🛠️  Executing tool %s for repo %s (trace: %s)",
             tool_name,
             repo_full_name,
-            trace_id,
+            trace_id[-4:],
         )
 
         try:
