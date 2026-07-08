@@ -25,6 +25,7 @@ from google.adk.models import Gemini
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
+from google.genai.errors import ServerError as GenAIServerError
 
 from .chroma_memory_service import ChromaDBMemoryService
 
@@ -480,11 +481,31 @@ IMPORTANT: When `/create` is detected in a PR body, you MUST:
 # ---------------------------------------------------------------------------
 
 
+# Retry configuration for transient server errors
+_MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
+_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemma-4-26b-a4b-it")
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """Check if an error is transient and should be retried.
+
+    Transient errors include server unavailability (503), rate limiting (429),
+    and other temporary issues.
+    """
+    if isinstance(error, GenAIServerError):
+        error_code = getattr(error, "code", None)
+        # Retry on 503 (UNAVAILABLE), 500 (INTERNAL_ERROR), 429 (RESOURCE_EXHAUSTED)
+        return error_code in (503, 500, 429, 502, 504)
+    return False
+
+
 class WebhookAgent:
     """ADK-powered agent for processing GitHub webhook events.
 
     Wraps the ADK Agent and Runner to provide a synchronous interface
     compatible with the existing webhook pipeline.
+
+    Supports automatic model fallback when the primary model is unavailable.
     """
 
     def __init__(
@@ -500,11 +521,15 @@ class WebhookAgent:
         # Memory service — persistent ChromaDB-backed long-term memory
         self._memory_service = ChromaDBMemoryService()
 
+        # Track current model and fallback state
+        self._current_model_name = os.environ.get("GEMMA_MODEL", "gemma-4-31b-it")
+        self._fallback_triggered = False
+
         # Create the ADK agent with all tools
         self._agent = Agent(
             name="webhook_agent",
             model=Gemini(
-                model=os.environ.get("GEMMA_MODEL", "gemma-4-31b-it"),
+                model=self._current_model_name,
             ),
             instruction=SYSTEM_INSTRUCTION,
             tools=[
@@ -524,6 +549,49 @@ class WebhookAgent:
         )
 
         # Create the runner
+        self._runner = Runner(
+            agent=self._agent,
+            app_name=self._app_name,
+            session_service=self._session_service,
+            memory_service=self._memory_service,
+        )
+
+    def _create_fallback_agent(self) -> None:
+        """Switch to fallback model when primary model is unavailable."""
+        if self._fallback_triggered:
+            return
+
+        logger.info(
+            " Switching to fallback model: %s (primary was: %s)",
+            _FALLBACK_MODEL,
+            self._current_model_name,
+        )
+        self._fallback_triggered = True
+
+        # Create new agent with fallback model
+        self._agent = Agent(
+            name="webhook_agent",
+            model=Gemini(
+                model=_FALLBACK_MODEL,
+            ),
+            instruction=SYSTEM_INSTRUCTION,
+            tools=[
+                add_comment,
+                add_label,
+                add_review_comment,
+                reply_to_review_comment,
+                submit_review,
+                assign_reviewers,
+                open_pr,
+                merge_pr,
+                create_branch_commit,
+                get_pr_diff,
+                update_pr_description,
+                create_issue,
+            ],
+        )
+
+        # Recreate runner with new agent
         self._runner = Runner(
             agent=self._agent,
             app_name=self._app_name,
@@ -698,92 +766,132 @@ class WebhookAgent:
         # Build the user message
         user_message = self._build_user_message(event_data)
 
-        # Run the agent asynchronously
+        # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
+
+        async def _execute_agent():
+            """Execute the agent run. Returns True on success, raises on transient error."""
+            async for event in self._runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=user_message,
+            ):
+                # Handle function response events — these are tool results from ADK
+                if hasattr(event, "get_function_responses"):
+                    responses = event.get_function_responses()
+                    if responses:
+                        for response in responses:
+                            results.append(
+                                ActionResult(
+                                    tool=response.name,
+                                    success=True,
+                                    detail=f"tool executed: {response.response}",
+                                )
+                            )
+
+                # Handle text responses — log the agent's reasoning
+                if (
+                    event.content
+                    and event.content.parts
+                    and any(hasattr(p, "text") and p.text for p in event.content.parts)
+                ):
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            logger.info(
+                                "🧠 Agent response: %s (trace: %s)",
+                                part.text[:200],
+                                trace_id[-4:],
+                            )
 
         async def _run():
             nonlocal results
-            try:
-                # Ensure session exists before invoking the runner.
-                # In the installed ADK version, InMemorySessionService only
-                # exposes async helpers, so we must await them here.
-                session = await self._session_service.get_session(
-                    app_name=self._app_name,
-                    user_id=user_id,
-                    session_id=session_id,
-                )
-                if session is None:
-                    await self._session_service.create_session(
-                        app_name=self._app_name,
-                        user_id=user_id,
-                        session_id=session_id,
-                    )
-                    # Re-fetch the session after creation
+            last_error = None
+
+            # Try with retry and optional fallback model
+            for attempt in range(_MAX_RETRIES):
+                try:
+                    # Ensure session exists before invoking the runner.
+                    # In the installed ADK version, InMemorySessionService only
+                    # exposes async helpers, so we must await them here.
                     session = await self._session_service.get_session(
                         app_name=self._app_name,
                         user_id=user_id,
                         session_id=session_id,
                     )
-                    logger.info(
-                        "Created new ADK session %s for user %s",
-                        session_id,
-                        user_id,
-                    )
-
-                # Set user_state values - they get merged into session.state by InMemorySessionService
-                # This is needed because session copies are returned and our direct mutations wouldn't persist
-                self._session_service.user_state.setdefault(
-                    self._app_name, {}
-                ).setdefault(user_id, {})["gh_client"] = gh_client
-                self._session_service.user_state.setdefault(
-                    self._app_name, {}
-                ).setdefault(user_id, {})["repo_full_name"] = repo_full_name
-
-                async for event in self._runner.run_async(
-                    user_id=user_id,
-                    session_id=session_id,
-                    new_message=user_message,
-                ):
-                    # Handle function response events — these are tool results from ADK
-                    if hasattr(event, "get_function_responses"):
-                        responses = event.get_function_responses()
-                        if responses:
-                            for response in responses:
-                                results.append(
-                                    ActionResult(
-                                        tool=response.name,
-                                        success=True,
-                                        detail=f"tool executed: {response.response}",
-                                    )
-                                )
-
-                    # Handle text responses — log the agent's reasoning
-                    if (
-                        event.content
-                        and event.content.parts
-                        and any(
-                            hasattr(p, "text") and p.text for p in event.content.parts
+                    if session is None:
+                        await self._session_service.create_session(
+                            app_name=self._app_name,
+                            user_id=user_id,
+                            session_id=session_id,
                         )
-                    ):
-                        for part in event.content.parts:
-                            if hasattr(part, "text") and part.text:
-                                logger.info(
-                                    "🧠 Agent response: %s (trace: %s)",
-                                    part.text[:200],
-                                    trace_id[-4:],
-                                )
+                        # Re-fetch the session after creation
+                        session = await self._session_service.get_session(
+                            app_name=self._app_name,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                        logger.info(
+                            "Created new ADK session %s for user %s",
+                            session_id,
+                            user_id,
+                        )
 
-            except Exception as e:
-                logger.exception(
-                    "ADK agent run failed (trace: %s): %s",
+                    # Set user_state values - they get merged into session.state by InMemorySessionService
+                    # This is needed because session copies are returned and our direct mutations wouldn't persist
+                    self._session_service.user_state.setdefault(
+                        self._app_name, {}
+                    ).setdefault(user_id, {})["gh_client"] = gh_client
+                    self._session_service.user_state.setdefault(
+                        self._app_name, {}
+                    ).setdefault(user_id, {})["repo_full_name"] = repo_full_name
+
+                    await _execute_agent()
+                    return  # Success - exit the retry loop
+
+                except GenAIServerError as e:
+                    last_error = e
+                    if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
+                        logger.warning(
+                            "Transient error on attempt %d/%d (trace: %s): %s",
+                            attempt + 1,
+                            _MAX_RETRIES,
+                            trace_id[-4:],
+                            e,
+                        )
+                        # Try fallback model after first transient error
+                        if attempt == 0 and not self._fallback_triggered:
+                            self._create_fallback_agent()
+                        continue
+                    raise  # Non-transient error or exhausted retries
+
+                except Exception as e:
+                    # Non-server errors are not retried
+                    logger.exception(
+                        "ADK agent run failed (trace: %s): %s",
+                        trace_id[-4:],
+                        e,
+                    )
+                    results.append(
+                        ActionResult(
+                            tool="plan",
+                            success=False,
+                            detail=f"ADK agent error: {e}",
+                        )
+                    )
+                    return
+
+            # If we exhausted retries, add error result
+            if last_error and _is_transient_error(last_error):
+                logger.error(
+                    "Model unavailable after %d retries (trace: %s)",
+                    _MAX_RETRIES,
                     trace_id[-4:],
-                    e,
                 )
                 results.append(
                     ActionResult(
                         tool="plan",
                         success=False,
-                        detail=f"ADK agent error: {e}",
+                        detail=f"Model unavailable after {_MAX_RETRIES} retries: {last_error}",
                     )
                 )
 
