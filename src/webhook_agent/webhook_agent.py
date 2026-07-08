@@ -461,12 +461,18 @@ Rules:
 6. If no action is needed, respond in text explaining why.
 
 Trigger words:
-- `/create` in a PR body (pull_request.opened): Use the PR_TEMPLATE to structure a descriptive PR body using the template format. Call update_pr_description with the filled template.
+- `/create` in a PR body (pull_request.opened OR pull_request.edited): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template.
 - `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
 - `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
+
+IMPORTANT: When `/create` is detected in a PR body, you MUST:
+1. Call get_pr_diff to understand what files were changed and their content
+2. Analyze the actual code changes to write accurate What/Why/How sections
+3. Fill in the Test Results section with actual data (run tests yourself or note the results)
+4. Only then call update_pr_description with the complete, accurate description
 """
 
 # ---------------------------------------------------------------------------

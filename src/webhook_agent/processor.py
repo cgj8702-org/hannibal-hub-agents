@@ -133,6 +133,28 @@ class WebhookProcessor:
 
         return True
 
+    def _fetch_pr_diff(
+        self, gh: Github, repo_full_name: str, pr_number: int, raw_payload: dict
+    ) -> None:
+        """Fetch PR diff and add it to raw_payload for agent context.
+
+        This mutates raw_payload in place with the diff content.
+        """
+        try:
+            repo = gh.get_repo(repo_full_name)
+            pr = repo.get_pull(pr_number)
+            files = pr.get_files()
+            diff_summary = []
+            for f in files:
+                diff_summary.append(
+                    f"File: {f.filename} ({f.status})\nPatch:\n{f.patch}\n{'-' * 40}"
+                )
+            raw_payload["pr_diff"] = (
+                "\n".join(diff_summary) if diff_summary else "No files changed."
+            )
+        except Exception:
+            raw_payload["pr_diff"] = "Could not fetch PR diff"
+
     def process_event(self, data: dict[str, Any]) -> None:
         """The main entry point for processing a single normalized event."""
         delivery_id = data.get("delivery_id", "unknown")
@@ -174,6 +196,15 @@ class WebhookProcessor:
                 "⚠️  No repository found in event delivery: %s", delivery_id[-4:]
             )
             return
+
+        # Pre-fetch PR diff for /create triggers to provide context to the agent
+        raw = data.get("raw_payload", {})
+        pr = raw.get("pull_request", {})
+        pr_body = pr.get("body") or ""
+        if "/create" in pr_body and canonical.startswith("pull_request."):
+            pr_number = pr.get("number")
+            if pr_number:
+                self._fetch_pr_diff(gh, repo_name, pr_number, raw)
 
         try:
             logger.info("🚀 Agent starting execution for repo %s", repo_name)
