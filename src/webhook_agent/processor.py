@@ -13,6 +13,7 @@ from typing import Any
 from github import Auth, Github
 
 from .agent_core import AgentCore
+from .bot_identity import _is_bot_event
 from .github_credential_helper import (
     generate_jwt,
     get_installation_token,
@@ -22,9 +23,6 @@ from .github_credential_helper import (
 )
 
 logger = logging.getLogger("processor")
-
-# Bot identity — used for loop-avoidance
-BOT_LOGIN = "hannibal-hub-agents[bot]"
 
 
 class WebhookProcessor:
@@ -93,6 +91,7 @@ class WebhookProcessor:
         ignored_events = {
             "pull_request.closed",
             "pull_request.synchronize",
+            "pull_request.edited",
             "check_suite.requested",
             "check_suite.completed",
             "issue_comment.deleted",
@@ -115,21 +114,13 @@ class WebhookProcessor:
             )
             return False
 
-        sender = normalized.get("sender")
-        if sender and sender.get("login") == BOT_LOGIN:
-            logger.debug("🛡️  Suppressed bot-authored event: %s", delivery_id[-4:])
+        if _is_bot_event(normalized):
+            logger.debug(
+                "🛡️  Suppressed bot-originated event: %s (delivery: %s)",
+                canonical,
+                delivery_id[-4:],
+            )
             return False
-
-        raw = normalized.get("raw_payload", {})
-        comment = raw.get("comment") or raw.get("review")
-        if comment:
-            user = comment.get("user") or {}
-            if user.get("login") == BOT_LOGIN:
-                logger.debug(
-                    "🛡️  Suppressed bot-authored comment/review: %s",
-                    delivery_id[-4:],
-                )
-                return False
 
         return True
 

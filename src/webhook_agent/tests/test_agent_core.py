@@ -68,6 +68,23 @@ class TestAgentCoreRun:
         assert results[0].success is False
         assert "writeback policy" in results[0].detail
 
+    def test_bot_sender_without_suffix_blocked(self):
+        """Bot sender without [bot] suffix is also blocked by writeback policy."""
+        core = AgentCore(gh_client=MagicMock(), dry_run=True)
+        ev = {
+            "delivery_id": "test-002b",
+            "event_name": "pull_request",
+            "action": "opened",
+            "canonical": "pull_request.opened",
+            "sender": {"login": "hannibal-hub-agents"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {"pull_request": {"number": 1}, "action": "opened"},
+        }
+        results = core.run(ev, "owner/repo")
+        assert len(results) == 1
+        assert results[0].success is False
+        assert "writeback policy" in results[0].detail
+
     def test_read_only_event_blocked(self):
         core = AgentCore(gh_client=MagicMock(), dry_run=True)
         ev = {

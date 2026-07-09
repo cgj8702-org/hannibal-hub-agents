@@ -169,12 +169,49 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is False
 
+    def test_suppress_bot_actor_without_suffix(self):
+        """Bot events where sender.login lacks the [bot] suffix should be suppressed."""
+        ev = _make_normalized(
+            "pull_request", action="opened", sender_login="hannibal-hub-agents"
+        )
+        assert self.processor.should_process_event(ev) is False
+
+    def test_suppress_bot_actor_by_type(self):
+        """Bot events detected via sender.type == 'Bot' should be suppressed."""
+        ev = _make_normalized(
+            "issue_comment",
+            action="created",
+            sender_login="some-other-bot",
+        )
+        # A different bot should NOT be suppressed
+        ev["sender"] = {
+            "login": "some-other-bot",
+            "type": "Bot",
+        }
+        assert self.processor.should_process_event(ev) is True
+        # But if login starts with the app slug and type is Bot, it IS matched
+        ev["sender"] = {
+            "login": "hannibal-hub-agents",
+            "type": "Bot",
+        }
+        assert self.processor.should_process_event(ev) is False
+
     def test_suppress_bot_comment_author(self):
         ev = _make_normalized(
             "issue_comment",
             action="created",
             include_comment=True,
             comment_author="hannibal-hub-agents[bot]",
+        )
+        assert self.processor.should_process_event(ev) is False
+
+    def test_suppress_bot_comment_author_without_suffix(self):
+        """Comment author without [bot] suffix should be suppressed."""
+        ev = _make_normalized(
+            "issue_comment",
+            action="created",
+            include_comment=True,
+            comment_author="hannibal-hub-agents",
         )
         assert self.processor.should_process_event(ev) is False
 
@@ -185,6 +222,21 @@ class TestShouldProcessEvent:
             include_review=True,
             comment_author="hannibal-hub-agents[bot]",
         )
+        assert self.processor.should_process_event(ev) is False
+
+    def test_suppress_performed_via_github_app(self):
+        """Events with performed_via_github_app matching our app should be suppressed."""
+        ev = _make_normalized(
+            "issue_comment",
+            action="created",
+            sender_login="some-other-user",
+            include_comment=True,
+            comment_author="some-other-user",
+        )
+        ev["raw_payload"]["performed_via_github_app"] = {
+            "id": int(os.environ.get("GITHUB_APP_ID", "12345")),
+            "slug": "hannibal-hub-agents",
+        }
         assert self.processor.should_process_event(ev) is False
 
     def test_human_comment_allowed(self):
@@ -204,3 +256,8 @@ class TestShouldProcessEvent:
             comment_author="human-user",
         )
         assert self.processor.should_process_event(ev) is True
+
+    def test_pull_request_edited_ignored(self):
+        """pull_request.edited should be in the ignored events set."""
+        ev = _make_normalized("pull_request", action="edited")
+        assert self.processor.should_process_event(ev) is False

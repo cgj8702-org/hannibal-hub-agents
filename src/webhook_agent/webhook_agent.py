@@ -28,6 +28,7 @@ from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
 from .chroma_memory_service import ChromaDBMemoryService
+from .bot_identity import _is_bot_event
 
 logger = logging.getLogger("webhook_agent")
 
@@ -462,7 +463,7 @@ Rules:
 6. If no action is needed, respond in text explaining why.
 
 Trigger words:
-- `/create` in a PR body (pull_request.opened OR pull_request.edited): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template.
+- `/create` in a PR body (pull_request.opened): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template.
 - `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
 - `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
 
@@ -686,13 +687,10 @@ class WebhookAgent:
         )
 
         # Check writeback policy for bot-authored events
-        sender = event_data.get("sender") or {}
-        sender_login = sender.get("login", "")
         canonical = event_data.get("canonical", "")
-
-        if sender_login == BOT_LOGIN:
+        if _is_bot_event(event_data):
             logger.info(
-                "writeback blocked: bot-authored event '%s' (trace: %s)",
+                "writeback blocked: bot-originated event '%s' (trace: %s)",
                 canonical,
                 trace_id[-4:],
             )
@@ -700,7 +698,7 @@ class WebhookAgent:
                 ActionResult(
                     tool="plan",
                     success=False,
-                    detail=f"writeback policy: bot-authored event '{canonical}' blocked",
+                    detail=f"writeback policy: bot-originated event '{canonical}' blocked",
                 )
             ]
 
@@ -761,6 +759,8 @@ class WebhookAgent:
 
         # Derive session and user IDs
         session_id = self._derive_session_id(event_data)
+        sender = event_data.get("sender") or {}
+        sender_login = sender.get("login", "")
         user_id = sender_login or "anonymous"
 
         # Build the user message
