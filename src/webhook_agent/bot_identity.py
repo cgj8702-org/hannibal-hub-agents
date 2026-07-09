@@ -49,6 +49,10 @@ def _is_bot_event(normalized: dict[str, Any]) -> bool:
 
     # Check performed_via_github_app (most reliable signal)
     app_info = raw.get("performed_via_github_app")
+    # Also check within comment/review, where GitHub sometimes nests it
+    if not app_info and comment:
+        app_info = comment.get("performed_via_github_app")
+
     if app_info:
         if app_info.get("slug") == BOT_APP_SLUG:
             return True

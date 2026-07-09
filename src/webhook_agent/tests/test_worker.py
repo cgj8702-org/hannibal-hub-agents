@@ -239,6 +239,25 @@ class TestShouldProcessEvent:
         }
         assert self.processor.should_process_event(ev) is False
 
+    def test_suppress_performed_via_github_app_in_comment(self):
+        """Events with performed_via_github_app inside comment should be suppressed.
+
+        This matches the actual GitHub webhook structure when a bot creates a comment.
+        """
+        ev = _make_normalized(
+            "issue_comment",
+            action="created",
+            sender_login="human-user",
+            include_comment=True,
+            comment_author="human-user",
+        )
+        # In real webhooks, performed_via_github_app is nested inside comment
+        ev["raw_payload"]["comment"]["performed_via_github_app"] = {
+            "id": int(os.environ.get("GITHUB_APP_ID", "12345")),
+            "slug": "hannibal-hub-agents",
+        }
+        assert self.processor.should_process_event(ev) is False
+
     def test_human_comment_allowed(self):
         ev = _make_normalized(
             "issue_comment",
