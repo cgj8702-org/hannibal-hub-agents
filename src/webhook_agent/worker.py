@@ -35,7 +35,7 @@ if _src_path not in sys.path:
 
 logger = logging.getLogger("worker")
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="[%(asctime)s] [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
     force=True,

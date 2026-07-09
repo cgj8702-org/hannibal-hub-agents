@@ -5,7 +5,7 @@ import sys
 
 # Configure logging for the entry point
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="[%(asctime)s] [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
 )

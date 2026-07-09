@@ -688,7 +688,21 @@ class WebhookAgent:
 
         # Check writeback policy for bot-authored events
         canonical = event_data.get("canonical", "")
+
+        logger.debug(
+            "🔍 Checking writeback policy: canonical=%s, dry_run=%s, trace=%s",
+            canonical,
+            self.dry_run,
+            trace_id[-4:],
+        )
+
         if _is_bot_event(event_data):
+            sender = event_data.get("sender", {})
+            logger.debug(
+                "🤖 Bot event detected: sender=%s, canonical=%s",
+                sender.get("login", "unknown"),
+                canonical,
+            )
             logger.info(
                 "writeback blocked: bot-originated event '%s' (trace: %s)",
                 canonical,
@@ -715,6 +729,10 @@ class WebhookAgent:
             "unknown",
         }
         if canonical in read_only_events:
+            logger.debug(
+                "📖 Read-only event detected: canonical=%s",
+                canonical,
+            )
             logger.info(
                 "writeback policy: event '%s' is read-only (trace: %s)",
                 canonical,
@@ -735,6 +753,10 @@ class WebhookAgent:
             "True",
         )
         if not allow_auto and not self.dry_run:
+            logger.debug(
+                "⛔ Mutations disabled (ALLOW_AUTOMATED_MUTATIONS=%s)",
+                os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "0"),
+            )
             logger.info(
                 "mutations disabled by policy (trace: %s)",
                 trace_id[-4:],
@@ -748,6 +770,7 @@ class WebhookAgent:
             ]
 
         if self.dry_run:
+            logger.debug("🧪 Dry-run mode enabled")
             logger.info("dry-run mode (trace: %s)", trace_id[-4:])
             return [
                 ActionResult(
@@ -757,20 +780,40 @@ class WebhookAgent:
                 )
             ]
 
+        logger.debug(
+            "✅ All policy checks passed, building session context (trace: %s)",
+            trace_id[-4:],
+        )
+
         # Derive session and user IDs
         session_id = self._derive_session_id(event_data)
         sender = event_data.get("sender") or {}
         sender_login = sender.get("login", "")
         user_id = sender_login or "anonymous"
 
+        logger.debug(
+            "👤 Session context: session_id=%s, user_id=%s",
+            session_id,
+            user_id,
+        )
+
         # Build the user message
         user_message = self._build_user_message(event_data)
+        logger.debug(
+            "📝 Built user message for agent (length: %d chars)",
+            len(user_message.parts[0].text) if user_message.parts else 0,
+        )
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
 
         async def _execute_agent():
             """Execute the agent run. Returns True on success, raises on transient error."""
+            logger.debug(
+                "⚡ Executing ADK agent run (trace: %s, attempt=%d)",
+                trace_id[-4:],
+                1,  # First attempt, will be updated in retry loop
+            )
             async for event in self._runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
@@ -780,6 +823,10 @@ class WebhookAgent:
                 if hasattr(event, "get_function_responses"):
                     responses = event.get_function_responses()
                     if responses:
+                        logger.debug(
+                            "🔧 Received %d tool responses from ADK",
+                            len(responses),
+                        )
                         for response in responses:
                             results.append(
                                 ActionResult(
@@ -797,6 +844,11 @@ class WebhookAgent:
                 ):
                     for part in event.content.parts:
                         if hasattr(part, "text") and part.text:
+                            logger.debug(
+                                "💭 Agent response received (trace: %s): %s",
+                                trace_id[-4:],
+                                part.text[:200],
+                            )
                             logger.info(
                                 "🧠 Agent response: %s (trace: %s)",
                                 part.text[:200],
@@ -851,6 +903,14 @@ class WebhookAgent:
                 except GenAIServerError as e:
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
+                        logger.debug(
+                            "Transient API error on attempt %d/%d (trace: %s): code=%s, error=%s",
+                            attempt + 1,
+                            _MAX_RETRIES,
+                            trace_id[-4:],
+                            getattr(e, "code", "unknown"),
+                            e,
+                        )
                         logger.warning(
                             "Transient error on attempt %d/%d (trace: %s): %s",
                             attempt + 1,
@@ -860,12 +920,22 @@ class WebhookAgent:
                         )
                         # Try fallback model after first transient error
                         if attempt == 0 and not self._fallback_triggered:
+                            logger.debug("Triggering fallback model switch (attempt 1)")
                             self._create_fallback_agent()
                         continue
+                    logger.debug(
+                        "Non-transient error or exhausted retries: raising exception (trace: %s)",
+                        trace_id[-4:],
+                    )
                     raise  # Non-transient error or exhausted retries
 
                 except Exception as e:
                     # Non-server errors are not retried
+                    logger.debug(
+                        "Non-server error during agent run (trace: %s): type=%s",
+                        trace_id[-4:],
+                        type(e).__name__,
+                    )
                     logger.exception(
                         "ADK agent run failed (trace: %s): %s",
                         trace_id[-4:],
@@ -882,6 +952,10 @@ class WebhookAgent:
 
             # If we exhausted retries, add error result
             if last_error and _is_transient_error(last_error):
+                logger.debug(
+                    "All retry attempts exhausted (trace: %s): retrying model was unavailable",
+                    trace_id[-4:],
+                )
                 logger.error(
                     "Model unavailable after %d retries (trace: %s)",
                     _MAX_RETRIES,

@@ -50,6 +50,12 @@ class AgentCore:
         """
         trace_id = trace_id or generate_trace_id()
 
+        logger.debug(
+            "🧠 Starting ADK agent processing (trace: %s, repo: %s)",
+            trace_id[-4:],
+            repo_full_name,
+        )
+
         logger.info(
             "🧠 Processing event via ADK agent (trace: %s, repo: %s)",
             trace_id[-4:],
@@ -57,8 +63,16 @@ class AgentCore:
         )
 
         # Delegate to the ADK-powered webhook agent
-        return self._webhook_agent.plan_and_execute(
+        results = self._webhook_agent.plan_and_execute(
             event_data=event_data,
             gh_client=self.gh,
             trace_id=trace_id,
         )
+
+        logger.debug(
+            "🧠 ADK agent processing completed (trace: %s, result_count: %d)",
+            trace_id[-4:],
+            len(results) if results else 0,
+        )
+
+        return results
