@@ -5,7 +5,7 @@ and provides a synchronous interface for the existing webhook pipeline.
 
 The agent uses:
 - Gemma-4-31b-it via ADK's Gemini model wrapper
-- ChromaDBMemoryService for persistent, searchable conversation memory
+- InMemoryMemoryService for in-memory conversation memory
 - InMemorySessionService for per-PR conversation context
 - Plain Python functions as tools (ADK auto-generates JSON schemas)
 """
@@ -27,7 +27,7 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
-from .chroma_memory_service import ChromaDBMemoryService
+from .memory_service import InMemoryMemoryService
 from .bot_identity import _is_bot_event
 
 logger = logging.getLogger("webhook_agent")
@@ -519,8 +519,8 @@ class WebhookAgent:
         # Session service — keeps per-PR conversation history
         self._session_service = InMemorySessionService()
 
-        # Memory service — persistent ChromaDB-backed long-term memory
-        self._memory_service = ChromaDBMemoryService()
+        # Memory service — in-memory conversation memory
+        self._memory_service = InMemoryMemoryService()
 
         # Track current model and fallback state
         self._current_model_name = os.environ.get("GEMMA_MODEL", "gemma-4-31b-it")
