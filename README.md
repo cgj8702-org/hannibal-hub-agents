@@ -31,6 +31,15 @@ flowchart TD
 ## 📁 Repository Structure
 
 ```
+├── .github/workflows/
+│   └── deploy.yml           # Automated CI/CD deployment to VM via IAP SSH
+├── scripts/
+│   ├── load_secrets.sh      # Load environment variables from GCP Secret Manager
+│   ├── migrate_pubsub_messages.py # Pub/Sub backlog migration helper
+│   ├── setup_vm_user_service.sh   # VM systemd user service setup
+│   ├── hannibal-webhook-agent.service # Systemd unit template
+│   ├── publish_test_message.py    # Test event publisher
+│   └── ruff-all.sh          # Clinical linting & formatting script
 ├── src/
 │   └── webhook_agent/       # Core package
 │       ├── worker.py        # Pub/Sub subscriber and entry point
@@ -39,7 +48,8 @@ flowchart TD
 │       ├── gemma_planner.py # Gemma 4 model interaction via Gemini SDK
 │       ├── enqueue.py       # Pub/Sub publishing helpers
 │       ├── github_credential_helper.py # App JWT & cached access tokens
-│       └── templates/       # Local prompt/review templates
+│       ├── templates/       # Local prompt/review templates
+│       └── tests/           # Pytest test suite & fixtures
 ├── main.py                  # Entry point to launch the background worker
 ├── pyproject.toml           # Dependency specification (uv-compatible)
 ├── README.md                # Documentation
@@ -58,12 +68,19 @@ This project uses `uv` for lightning-fast dependency management:
 uv sync
 ```
 
-### 2. Configuration
-Ensure the following environment variables are set:
+### 2. Configuration & Secret Management
+Ensure the required environment variables are configured. You can load secrets directly from **GCP Secret Manager** without keeping plain-text secrets or key files on disk:
+
+```bash
+# Load secrets directly from GCP Secret Manager into memory
+source scripts/load_secrets.sh
+```
 
 #### Infrastructure Config:
-- `PUBSUB_PROJECT`: Your Google Cloud Project ID.
-- `PUBSUB_SUBSCRIPTION`: The full path to the Pub/Sub subscription (e.g., `projects/.../subscriptions/...`).
+- `PUBSUB_PROJECT`: Dedicated Google Cloud Project ID (e.g. `cgj8702-webhook-agent`).
+- `PUBSUB_TOPIC`: Full path to the topic (`projects/.../topics/webhooks`).
+- `PUBSUB_SUBSCRIPTION`: Full path to the subscription (`projects/.../subscriptions/webhooks-sub`).
+- `PUBSUB_DEAD_LETTER_TOPIC`: Optional dead-letter topic path for failed payloads.
 
 #### Agent Config:
 - `GITHUB_APP_ID`: Numeric ID of your GitHub App.
@@ -77,23 +94,32 @@ Ensure the following environment variables are set:
 
 ---
 
-## 🛠️ Operations & Execution
+## 🛠️ Operations & Deployment
 
 ### Running the Background Worker
-Start the worker process which subscribes to the Pub/Sub topic and processes queued events:
+Start the worker process locally or on a VM:
 
 ```bash
 uv run python main.py
 ```
 
-### Testing Credentials & App Tokens
-Use the credential helper CLI directly to fetch or verify installation access tokens:
+### Migrating Backlogged Pub/Sub Messages
+To migrate backlogged messages between Pub/Sub projects or subscriptions:
+
 ```bash
-uv run python src/webhook_agent/github_credential_helper.py \
-    --app-id <YOUR_APP_ID> \
-    --installation-id <YOUR_INSTALLATION_ID> \
-    --private-key <PATH_TO_PEM>
+uv run python scripts/migrate_pubsub_messages.py \
+    --source-subscription projects/OLD_PROJECT/subscriptions/webhook-sub \
+    --target-topic projects/NEW_PROJECT/topics/webhooks
 ```
+
+### VM Deployment (Compute Engine)
+Run the user-space service setup script on your VM (`hannibal-hub-free`):
+
+```bash
+bash scripts/setup_vm_user_service.sh
+```
+
+All pushes to `main` will automatically trigger [`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml) to deploy code updates and restart the service!
 
 ---
 
