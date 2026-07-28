@@ -60,10 +60,28 @@ def publish_dead_letter(
         logger.exception("💥 Failed to publish dead-letter to %s", topic)
 
 
+def setup_cloud_logging() -> None:
+    """Initialize Google Cloud Logging handler if available."""
+    try:
+        import google.cloud.logging
+
+        project_id = os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
+        client = google.cloud.logging.Client(project=project_id)
+        client.setup_logging()
+        logger.info(
+            "☁️ Google Cloud Logging initialized for project [%s]", project_id
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not initialize Google Cloud Logging handler: %s", exc
+        )
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
+    setup_cloud_logging()
     os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
     subscription = os.environ.get("PUBSUB_SUBSCRIPTION")
     dead_letter_topic = os.environ.get("PUBSUB_DEAD_LETTER_TOPIC")
