@@ -29,15 +29,15 @@
 ## 🤖 Agentic Logic & Accountability
 *[For AI contributors: Please provide a clinical audit of your process.]*
 - **Reasoning Path:** *[Briefly summarize your sequential-thinking or architectural logic]*
-- **Mandate Adherence:** *[Which section of GEMINI.md guided this change?]*
+- **Mandate Adherence:** *[Which section of AGENTS.md or GEMINI.md guided this change?]*
 - **Edge Cases Handled:** *[What did you test for that wasn't explicitly requested?]*
 
 ## ✅ Engineering Checklist
 *[Clinical-grade validation time! Please ensure all of these are checked before requesting a review.]*
 - [ ] 📦 **Dependencies:** I have run `uv sync` (and used `--no-dev` if applicable).
-- [ ] 🧹 **Hygiene:** I have run `ruff-all` (or equivalent) and there are zero linting errors.
-- [ ] 🐍 **Syntax:** I have verified Python syntax integrity (no broken SOT files).
-- [ ] 🧪 **Testing:** I have run `pytest` and provided the results below.
+- [ ] 🧹 **Hygiene:** I have run `scripts/ruff-all.sh` and there are zero linting errors.
+- [ ] 🐍 **Syntax:** I have verified Python syntax integrity in `src/webhook_agent/`.
+- [ ] 🧪 **Testing:** I have run `uv run pytest` and provided the results below.
 
 ## 📊 Test Results
 <!-- Paste the CI test run summary here -->
