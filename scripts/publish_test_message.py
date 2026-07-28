@@ -4,8 +4,8 @@ Publishes a properly normalized event that exercises the event router,
 loop-avoidance, and agent core in a single end-to-end flow.
 
 Usage:
-  export PUBSUB_TOPIC=projects/chatbot-project-hannibal/topics/hannibal-webhook
-  python3 scripts/publish_test_message.py
+  export PUBSUB_TOPIC=projects/cgj8702-webhook-agent/topics/webhooks
+  uv run python scripts/publish_test_message.py
 
 Requires: PUBSUB_TOPIC and GOOGLE_APPLICATION_CREDENTIALS in env
 """

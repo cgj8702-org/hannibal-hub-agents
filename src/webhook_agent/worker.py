@@ -5,8 +5,8 @@ webhook event, and leverages the WebhookProcessor to handle routing, loop protec
 and agent execution.
 
 Usage:
-  export PUBSUB_PROJECT=chatbot-project-hannibal
-  export PUBSUB_SUBSCRIPTION=projects/$PUBSUB_PROJECT/subscriptions/hannibal-webhook-sub
+  export PUBSUB_PROJECT=cgj8702-webhook-agent
+  export PUBSUB_SUBSCRIPTION=projects/$PUBSUB_PROJECT/subscriptions/webhooks-sub
   export GITHUB_APP_ID=12345
   export GITHUB_INSTALLATION_ID=67890
   export GITHUB_PRIVATE_KEY_PATH=/path/to/private-key.pem
@@ -64,7 +64,7 @@ def publish_dead_letter(
 # Main entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
-    os.environ.get("PUBSUB_PROJECT", "chatbot-project-hannibal")
+    os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
     subscription = os.environ.get("PUBSUB_SUBSCRIPTION")
     dead_letter_topic = os.environ.get("PUBSUB_DEAD_LETTER_TOPIC")
 

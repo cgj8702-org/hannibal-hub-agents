@@ -1,0 +1,14 @@
+[Unit]
+Description=Hannibal Webhook Agent Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/carly/hannibal-hub-agents
+ExecStartPre=/bin/bash -c 'source /home/carly/hannibal-hub-agents/scripts/load_secrets.sh'
+ExecStart=/home/carly/.local/bin/uv run python main.py
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
