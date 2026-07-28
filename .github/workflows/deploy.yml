@@ -62,6 +62,7 @@ jobs:
 
               mkdir -p ~/.config/systemd/user
               cp scripts/hannibal-webhook-agent.service ~/.config/systemd/user/
+              loginctl enable-linger \$(id -u -n) || true
               XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload
               XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable hannibal-webhook-agent
               XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart hannibal-webhook-agent
