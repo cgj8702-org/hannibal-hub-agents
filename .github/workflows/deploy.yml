@@ -28,7 +28,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: 'projects/1023782330414/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider'
-          service_account: 'hannibal-hub-sa@chatbot-project-hannibal.iam.gserviceaccount.com'
+          service_account: 'webhook-agent-sa@cgj8702-webhook-agent.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
