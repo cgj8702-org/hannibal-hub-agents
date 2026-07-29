@@ -68,13 +68,9 @@ def setup_cloud_logging() -> None:
         project_id = os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
         client = google.cloud.logging.Client(project=project_id)
         client.setup_logging()
-        logger.info(
-            "☁️ Google Cloud Logging initialized for project [%s]", project_id
-        )
+        logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
-        logger.warning(
-            "Could not initialize Google Cloud Logging handler: %s", exc
-        )
+        logger.warning("Could not initialize Google Cloud Logging handler: %s", exc)
 
 
 # ---------------------------------------------------------------------------
