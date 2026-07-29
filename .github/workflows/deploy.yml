@@ -1,0 +1,70 @@
+name: Hannibal Webhook Agent Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 10
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/1023782330414/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider'
+          service_account: 'webhook-agent-sa@cgj8702-webhook-agent.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Persistent SSH Key
+        env:
+          GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$GCP_SSH_PRIVATE_KEY" > ~/.ssh/google_compute_engine
+          chmod 600 ~/.ssh/google_compute_engine
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
+      - name: VM Deploy via IAP
+        run: |
+          gcloud compute ssh carly@hannibal-hub-free \
+            --project=chatbot-project-hannibal \
+            --zone=us-east1-d \
+            --tunnel-through-iap \
+            --quiet \
+            --command="
+              set -e
+              cd /home/carly/hannibal-hub-agents
+              git fetch --quiet origin
+              git checkout --quiet main
+              git reset --quiet --hard origin/main
+              git clean -fd --quiet
+
+              uv sync --no-dev
+
+              mkdir -p ~/.config/systemd/user
+              cp scripts/hannibal-webhook-agent.service ~/.config/systemd/user/
+              loginctl enable-linger \$(id -u -n) || true
+              XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload
+              XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable hannibal-webhook-agent
+              XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart hannibal-webhook-agent
+              echo 'Deployment Complete.'
+            "

@@ -102,8 +102,9 @@ class TestAgentCoreRun:
         assert results[0].success is False
         assert "read-only" in results[0].detail
 
-    def test_mutations_disabled_by_policy(self):
+    def test_mutations_disabled_by_policy(self, monkeypatch):
         """When ALLOW_AUTOMATED_MUTATIONS is 0 and not dry-run, mutations are blocked."""
+        monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "0")
         core = AgentCore(gh_client=MagicMock(), dry_run=False)
         ev = {
             "delivery_id": "test-004",

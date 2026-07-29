@@ -5,8 +5,8 @@ webhook event, and leverages the WebhookProcessor to handle routing, loop protec
 and agent execution.
 
 Usage:
-  export PUBSUB_PROJECT=chatbot-project-hannibal
-  export PUBSUB_SUBSCRIPTION=projects/$PUBSUB_PROJECT/subscriptions/hannibal-webhook-sub
+  export PUBSUB_PROJECT=cgj8702-webhook-agent
+  export PUBSUB_SUBSCRIPTION=projects/$PUBSUB_PROJECT/subscriptions/webhooks-sub
   export GITHUB_APP_ID=12345
   export GITHUB_INSTALLATION_ID=67890
   export GITHUB_PRIVATE_KEY_PATH=/path/to/private-key.pem
@@ -60,11 +60,29 @@ def publish_dead_letter(
         logger.exception("💥 Failed to publish dead-letter to %s", topic)
 
 
+def setup_cloud_logging() -> None:
+    """Initialize Google Cloud Logging handler if available."""
+    try:
+        import google.cloud.logging
+
+        project_id = os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
+        client = google.cloud.logging.Client(project=project_id)
+        client.setup_logging()
+        logger.info(
+            "☁️ Google Cloud Logging initialized for project [%s]", project_id
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not initialize Google Cloud Logging handler: %s", exc
+        )
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
-    os.environ.get("PUBSUB_PROJECT", "chatbot-project-hannibal")
+    setup_cloud_logging()
+    os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
     subscription = os.environ.get("PUBSUB_SUBSCRIPTION")
     dead_letter_topic = os.environ.get("PUBSUB_DEAD_LETTER_TOPIC")
 
