@@ -141,6 +141,7 @@ The Cloud Run function needs a service account with the **Pub/Sub Publisher (`ro
 Because the Cloud Run function now handles normalization, you do **not** need to rewrite your worker logic. Your existing `src/webhook_agent/worker.py` and `src/webhook_agent/processor.py` will work as-is because they already expect the normalized JSON envelope.
 
 #### How the Worker Consumes the Event:
+
 1. The worker pulls a message from the Pub/Sub subscription.
 2. It decodes the `data` field, which is now the **normalized JSON object**.
 3. It passes this object directly to `processor.process_event(payload)`.
