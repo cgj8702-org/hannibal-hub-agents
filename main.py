@@ -1,6 +1,5 @@
 import logging
 import multiprocessing
-import os
 import signal
 import sys
 
@@ -12,22 +11,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("main")
-
-
-def setup_cloud_logging():
-    """Initialize Google Cloud Logging handler if available."""
-    try:
-        import google.cloud.logging
-
-        project_id = os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
-        client = google.cloud.logging.Client(project=project_id)
-        client.setup_logging()
-        logger.info(
-            f"☁️ Google Cloud Logging initialized for project [{project_id}]"
-        )
-    except Exception as e:
-        logger.warning(f"Could not setup Google Cloud Logging handler: {e}")
-
 
 
 def run_worker():
@@ -48,7 +31,6 @@ def main():
     Orchestrate the hannibal-hub-agents services.
     Starts the worker as a separate process.
     """
-    setup_cloud_logging()
     logger.info("🚀 Starting hannibal-hub-agents distributed architecture...")
 
     # Create process for the worker
