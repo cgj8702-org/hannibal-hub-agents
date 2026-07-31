@@ -53,6 +53,7 @@ jobs:
             --command="
               set -e
               cd /home/carly/hannibal-hub-agents
+              git remote set-url origin https://github.com/cgj8702-org/hannibal-hub-agents.git
               git fetch --quiet origin
               git checkout --quiet main
               git reset --quiet --hard origin/main
