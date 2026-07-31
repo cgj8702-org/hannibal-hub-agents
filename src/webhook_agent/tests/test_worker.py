@@ -280,3 +280,34 @@ class TestShouldProcessEvent:
         """pull_request.edited should be in the ignored events set."""
         ev = _make_normalized("pull_request", action="edited")
         assert self.processor.should_process_event(ev) is False
+
+    def test_process_event_detail_preserves_code_formatting(self, caplog):
+        """r.detail in process_event must preserve underscores, dots, and exact patch text."""
+        import logging
+        from unittest.mock import MagicMock, patch
+        from webhook_agent.types import ActionResult
+
+        ev = _make_normalized("pull_request", action="opened")
+        mock_result = ActionResult(
+            tool="execute_command",
+            success=True,
+            detail="Tool executed: {'result': 'file: githooks/pre-commit (modified)\npatch: readarray -t modified_files *.ipynb'}",
+        )
+
+        with (
+            patch(
+                "webhook_agent.processor.load_cached_token",
+                return_value=MagicMock(token="fake"),
+            ),
+            patch("webhook_agent.processor.Github"),
+            patch("webhook_agent.processor.AgentCore") as mock_core_cls,
+            caplog.at_level(logging.INFO),
+        ):
+            mock_agent = MagicMock()
+            mock_agent.run.return_value = [mock_result]
+            mock_core_cls.return_value = mock_agent
+
+            self.processor.process_event(ev)
+
+            assert "readarray -t modified_files *.ipynb" in caplog.text
+            assert "modified files" not in caplog.text

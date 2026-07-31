@@ -40,9 +40,17 @@ class WebhookProcessor:
 
     def route_event(self, normalized: dict[str, Any]) -> str:
         """Map a normalized webhook event to a canonical internal event category."""
-        event_name = normalized.get("event_name", "")
-        action = normalized.get("action") or ""
         raw = normalized.get("raw_payload", {})
+        event_name = (
+            normalized.get("event_name")
+            or (raw.get("event_name") if isinstance(raw, dict) else "")
+            or ""
+        )
+        action = (
+            normalized.get("action")
+            or (raw.get("action") if isinstance(raw, dict) else "")
+            or ""
+        )
 
         if event_name == "pull_request" and action == "review_requested":
             return "pull_request_review_requested"
@@ -224,8 +232,13 @@ class WebhookProcessor:
 
         repo_name = (
             data.get("repository", {}).get("full_name")
-            if data.get("repository")
-            else None
+            if isinstance(data.get("repository"), dict)
+            else (
+                data.get("raw_payload", {}).get("repository", {}).get("full_name")
+                if isinstance(data.get("raw_payload"), dict)
+                and isinstance(data.get("raw_payload", {}).get("repository"), dict)
+                else None
+            )
         )
         if not repo_name:
             logger.warning(
@@ -260,7 +273,7 @@ class WebhookProcessor:
                 logger.info(
                     "%s Agent action: %s",
                     status_symbol,
-                    r.detail.replace("_", " ").replace(".", " ").capitalize(),
+                    r.detail,
                 )
         except Exception:
             logger.exception("💥 Agent core failed for repo %s", repo_name)
