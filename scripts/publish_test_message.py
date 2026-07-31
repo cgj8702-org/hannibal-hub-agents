@@ -33,8 +33,8 @@ def main() -> None:
         "sender": {"login": "test-human-user", "type": "User", "id": 12345},
         "installation": {"id": 67890},
         "repository": {
-            "full_name": "cgj8702/chatbot-repo",
-            "owner": {"login": "cgj8702"},
+            "full_name": "cgj8702-org/hannibal-hub",
+            "owner": {"login": "cgj8702-org"},
         },
         "raw_payload": {
             "action": "opened",
