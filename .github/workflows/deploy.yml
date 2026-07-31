@@ -44,6 +44,8 @@ jobs:
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       - name: VM Deploy via IAP
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gcloud compute ssh carly@hannibal-hub-free \
             --project=chatbot-project-hannibal \
@@ -53,7 +55,7 @@ jobs:
             --command="
               set -e
               cd /home/carly/hannibal-hub-agents
-              git remote set-url origin https://github.com/cgj8702-org/hannibal-hub-agents.git
+              git remote set-url origin https://x-access-token:$GH_TOKEN@github.com/cgj8702-org/hannibal-hub-agents.git
               git fetch --quiet origin
               git checkout --quiet main
               git reset --quiet --hard origin/main
