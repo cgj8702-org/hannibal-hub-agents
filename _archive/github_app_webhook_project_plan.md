@@ -2,7 +2,7 @@
 
 ## Project Boundary
 
-This is a **separate project** from Hannibal Hub / `chatbot-repo`.
+This is a **separate project** from Hannibal Hub / `hannibal-hub`.
 
 It should have its own:
 
