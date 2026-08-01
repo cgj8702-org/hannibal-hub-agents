@@ -22,7 +22,17 @@ import logging
 import os
 from typing import Any
 
+from github import Auth, Github
+
+from .agent_core import AgentCore
 from .bot_identity import _is_bot_event
+from .github_credential_helper import (
+    generate_jwt,
+    get_installation_token,
+    load_cached_token,
+    load_private_key,
+    save_cached_token,
+)
 
 logger = logging.getLogger("webhook_processor")
 
@@ -98,7 +108,6 @@ class WebhookProcessor:
         delivery_id = ev.get("delivery_id")
         if delivery_id in self._processed_deliveries:
             return False
-        self._processed_deliveries.add(delivery_id)
         if _is_bot_event(ev):
             return False
         if ev.get("action") == "edited":
@@ -108,8 +117,8 @@ class WebhookProcessor:
     def process_event(self, payload: dict[str, Any]) -> None:
         """Process a Pub/Sub payload.
 
-        Logs the canonical event and filters duplication and bot events.
-        Unknown events log their raw payload for debugging.
+        Logs the canonical event, filters duplication and bot events,
+        and delegates execution to AgentCore.
         """
         event_key = self.route_event(payload)
         if event_key == "unknown":
@@ -117,4 +126,43 @@ class WebhookProcessor:
         logger.debug("Processing event: %s", event_key)
         if not self.should_process_event(payload):
             return
+
+        delivery_id = payload.get("delivery_id", "unknown")
+        if delivery_id != "unknown":
+            self._processed_deliveries.add(delivery_id)
+
         logger.info("Event processed: %s", event_key)
+
+        inst_token = load_cached_token(self.installation_id)
+        if inst_token is None:
+            pem = load_private_key(self.private_key_path)
+            jwt_token = generate_jwt(self.app_id, pem)
+            inst_token = get_installation_token(jwt_token, self.installation_id)
+            save_cached_token(self.installation_id, inst_token)
+
+        gh = Github(auth=Auth.Token(inst_token.token))
+
+        agent = AgentCore(
+            gh_client=gh,
+            dry_run=os.environ.get("DRY_RUN", "0") in ("1", "true", "True"),
+        )
+
+        repo_name = payload.get("repository", {}).get("full_name") or payload.get(
+            "raw_payload", {}
+        ).get("repository", {}).get("full_name")
+        if not repo_name:
+            logger.warning("No repository found in event payload")
+            return
+
+        logger.info("Agent starting execution for repo %s", repo_name)
+        results = agent.run(payload, repo_name)
+        if results:
+            for r in results:
+                msg = getattr(r, "detail", None) or getattr(r, "message", str(r))
+                status_symbol = "OK" if r.success else "FAIL"
+                logger.info("Agent action [%s]: %s", status_symbol, msg)
+        else:
+            logger.info(
+                "Agent completed execution with no actions taken for repo %s",
+                repo_name,
+            )
