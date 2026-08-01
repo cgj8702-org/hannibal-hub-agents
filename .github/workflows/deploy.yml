@@ -45,7 +45,7 @@ jobs:
 
       - name: VM Deploy via IAP
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           gcloud compute ssh carly@hannibal-hub-free \
             --project=chatbot-project-hannibal \
