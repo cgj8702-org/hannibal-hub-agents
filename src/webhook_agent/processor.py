@@ -99,19 +99,33 @@ class WebhookProcessor:
         return "unknown"
 
     def should_process_event(self, ev: dict[str, Any]) -> bool:
-        """Apply loop‑avoidance and duplication checks.
+        """Apply loop‑avoidance, noise filtering, and duplication checks.
 
         * Duplicate deliveries are suppressed.
         * Bot events originating from the app are suppressed.
         * The ``edited`` action is filtered out.
+        * Automated CI noise events (check_suite, check_run, status) are suppressed.
+        * Read-only PR lifecycle events (pull_request.closed, pull_request.synchronize) are suppressed.
         """
         delivery_id = ev.get("delivery_id")
         if delivery_id in self._processed_deliveries:
             return False
         if _is_bot_event(ev):
             return False
-        if ev.get("action") == "edited":
+
+        action = ev.get("action")
+        if action == "edited":
             return False
+
+        event_name = ev.get("event_name")
+        # Ignore automated CI status and check suite noise
+        if event_name in ("check_suite", "check_run", "status"):
+            return False
+
+        # Ignore read-only PR lifecycle events that do not trigger actions
+        if event_name == "pull_request" and action in ("closed", "synchronize"):
+            return False
+
         return True
 
     def process_event(self, payload: dict[str, Any]) -> None:
