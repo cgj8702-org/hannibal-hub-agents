@@ -133,6 +133,9 @@ class WebhookProcessor:
 
         logger.info("Event processed: %s", event_key)
 
+        # Set canonical event name in payload for AgentCore and WebhookAgent
+        payload["canonical"] = event_key
+
         inst_token = load_cached_token(self.installation_id)
         if inst_token is None:
             pem = load_private_key(self.private_key_path)
