@@ -280,6 +280,37 @@ class TestShouldProcessEvent:
         ev = _make_normalized("pull_request", action="edited")
         assert self.processor.should_process_event(ev) is False
 
+    def test_check_suite_and_ci_noise_ignored(self):
+        """Automated CI noise events (check_suite, check_run, status) should be ignored."""
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("check_suite", action="requested")
+            )
+            is False
+        )
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("check_run", action="completed")
+            )
+            is False
+        )
+        assert self.processor.should_process_event(_make_normalized("status")) is False
+
+    def test_read_only_pr_lifecycle_events_ignored(self):
+        """pull_request.closed and pull_request.synchronize should be ignored early."""
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("pull_request", action="closed")
+            )
+            is False
+        )
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("pull_request", action="synchronize")
+            )
+            is False
+        )
+
     def test_process_event_detail_preserves_code_formatting(self, caplog):
         """r.detail in process_event must preserve underscores, dots, and exact patch text."""
         import logging
