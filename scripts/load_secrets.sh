@@ -2,6 +2,8 @@
 # Load environment variables dynamically from Google Cloud Secret Manager.
 # Usage: source scripts/load_secrets.sh
 
+set -euo pipefail
+
 PROJECT_ID="${PUBSUB_PROJECT:-cgj8702-webhook-agent}"
 
 echo "Loading secrets from Secret Manager project [${PROJECT_ID}]..."

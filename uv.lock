@@ -605,13 +605,17 @@ dependencies = [
     { name = "google-genai" },
     { name = "httpx" },
     { name = "jwt" },
-    { name = "mypy" },
     { name = "pygithub" },
-    { name = "pytest" },
     { name = "pytz" },
-    { name = "ruff" },
     { name = "tenacity" },
     { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -624,13 +628,17 @@ requires-dist = [
     { name = "google-genai", specifier = ">=2.3.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jwt", specifier = ">=1.4.0" },
-    { name = "mypy", specifier = ">=2.1.0" },
     { name = "pygithub", specifier = ">=2.9.1" },
-    { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytz", specifier = ">=2026.2" },
-    { name = "ruff", specifier = ">=0.15.20" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "uvicorn", specifier = ">=0.30.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=2.1.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.15.20" },
 ]
 
 [[package]]

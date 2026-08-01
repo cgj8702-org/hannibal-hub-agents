@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/**'
       - 'scripts/**'
+      - 'main.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/deploy.yml'
@@ -22,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 10
+          fetch-depth: 1
 
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
@@ -55,8 +56,12 @@ jobs:
             --command="
               set -e
               cd /home/carly/hannibal-hub-agents
-              git remote set-url origin https://x-access-token:$GH_TOKEN@github.com/cgj8702-org/hannibal-hub-agents.git
+
+              # Authenticate, fetch, then immediately scrub token from git config
+              git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/cgj8702-org/hannibal-hub-agents.git
               git fetch --quiet origin
+              git remote set-url origin https://github.com/cgj8702-org/hannibal-hub-agents.git
+
               git checkout --quiet main
               git reset --quiet --hard origin/main
               git clean -fd --quiet
@@ -66,8 +71,19 @@ jobs:
               mkdir -p ~/.config/systemd/user
               cp scripts/hannibal-webhook-agent.service ~/.config/systemd/user/
               loginctl enable-linger \$(id -u -n) || true
-              XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload
-              XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable hannibal-webhook-agent
-              XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart hannibal-webhook-agent
-              echo 'Deployment Complete.'
+              export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+              systemctl --user daemon-reload
+              systemctl --user enable hannibal-webhook-agent
+              systemctl --user restart hannibal-webhook-agent
+
+              # Verify service actually started and is healthy
+              sleep 3
+              if systemctl --user is-active --quiet hannibal-webhook-agent; then
+                echo 'Deployment Complete. Service is active.'
+              else
+                echo 'ERROR: Service failed to start after restart!'
+                systemctl --user status hannibal-webhook-agent --no-pager || true
+                journalctl --user -u hannibal-webhook-agent --no-pager -n 20 || true
+                exit 1
+              fi
             "
