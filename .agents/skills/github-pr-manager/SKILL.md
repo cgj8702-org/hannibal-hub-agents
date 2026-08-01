@@ -66,19 +66,21 @@ Follow these sequential phases. **Do not skip validation steps.**
 
 ### Phase 1: Branch & Stage Management (MANDATORY)
 
-**Description**: Ensure you are on a feature branch and only intended changes are staged.
+**Description**: Ensure you are on a fresh feature branch and only intended changes are staged.
 
 ```bash
-# Example: Verify branch and status
+# Example: Verify branch, remote PR state, and status
+git fetch origin
 git branch --show-current
 git status
-git add <files>
 ```
 
-**Validation**:
-1. **Safety**: Confirm current branch is NOT `main`. If it is, immediately create and switch to an `agent/` prefixed branch.
-2. **Surgicality**: Ensure only a **single improvement or fix per PR**.
-3. **Internal Protection**: Verify no internal bot management files are staged. Use `git reset <file>` immediately if they are.
+**Validation & Safety Rules**:
+1. **Stale/Merged Branch Verification (CRITICAL)**: Before adding commits to an existing feature branch or PR, check if the PR has already been merged into `main` (`gh pr view <branch_or_pr> --json state`).
+   * **If Merged**: DO NOT commit or push to the stale/deleted branch! Immediately switch to `main` (`git checkout main`), pull latest changes (`git pull origin main`), and create a fresh feature branch (`git checkout -b agent/<new-topic>`).
+2. **Safety**: Confirm current branch is NOT `main`. If it is, create and switch to an `agent/` prefixed branch off updated `main`.
+3. **Surgicality**: Ensure only a **single improvement or fix per PR**.
+4. **Internal Protection**: Verify no internal bot management files are staged. Use `git reset <file>` immediately if they are.
 
 ### Phase 2: Submission & Drafting
 
