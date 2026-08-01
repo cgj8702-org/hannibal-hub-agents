@@ -10,20 +10,20 @@ The orchestrator is designed for high reliability, security, and zero-trust even
 
 ```mermaid
 flowchart TD
-    GH[GitHub Webhook Event] -->|HTTPS POST| Router[Cloud Run Function Router]
-    Router -->|1. Verify HMAC Signature| Auth[Signature Validator]
-    Router -->|2. Quick ACK 202 Accepted| GH
-    Router -->|3. Normalize & Enqueue| Queue[(Google Cloud Pub/Sub)]
+    GH["GitHub Webhook Event"] -->|"1. HTTPS POST"| Router["Cloud Run Function Router"]
+    Router -->|"Verify HMAC Signature"| Auth["Signature Validator"]
+    Router -->|"Quick ACK 202 Accepted"| GH
+    Router -->|"Normalize & Enqueue"| Queue[("Google Cloud Pub/Sub")]
     
-    Queue -->|4. Trigger Pull| Worker[Background Worker Task]
-    Worker -->|5. App Authentication| Creds[GitHub App JWT / Installation Token]
-    Worker -->|6. Load Context| GH_API[GitHub REST API]
-    Worker -->|7. Decide Actions| Gemma[Gemma 4 Planner / Gemini API]
-    Worker -->|8. Policy Verification| Policy{Mutations Allowed?}
-    Policy -->|Yes| Exec[Execute Tool Actions]
-    Policy -->|No / Dry Run| Log[Log Planned Actions]
+    Queue -->|"Trigger Pull"| Worker["Background Worker Task"]
+    Worker -->|"App Authentication"| Creds["GitHub App JWT / Installation Token"]
+    Worker -->|"Load Context"| GH_API["GitHub REST API"]
+    Worker -->|"Decide Actions"| Gemma["Gemma 4 Planner / Gemini API"]
+    Worker -->|"Policy Verification"| Policy{"Mutations Allowed?"}
+    Policy -->|"Yes"| Exec["Execute Tool Actions"]
+    Policy -->|"No / Dry Run"| Log["Log Planned Actions"]
     
-    Exec -->|9. Writeback| GH_Write[GitHub Comments, Reviews, PRs]
+    Exec -->|"Writeback"| GH_Write["GitHub Comments, Reviews, PRs"]
 ```
 
 ---
