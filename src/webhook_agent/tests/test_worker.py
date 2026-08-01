@@ -14,7 +14,6 @@ os.environ.setdefault("GITHUB_PRIVATE_KEY_PATH", "/dev/null")
 
 from webhook_agent.processor import WebhookProcessor
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -285,6 +284,7 @@ class TestShouldProcessEvent:
         """r.detail in process_event must preserve underscores, dots, and exact patch text."""
         import logging
         from unittest.mock import MagicMock, patch
+
         from webhook_agent.types import ActionResult
 
         ev = _make_normalized("pull_request", action="opened")
