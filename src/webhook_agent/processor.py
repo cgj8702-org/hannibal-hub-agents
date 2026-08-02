@@ -165,7 +165,9 @@ class WebhookProcessor:
         )
 
         raw_repo = payload.get("repository")
-        if not isinstance(raw_repo, dict) and isinstance(payload.get("raw_payload"), dict):
+        if not isinstance(raw_repo, dict) and isinstance(
+            payload.get("raw_payload"), dict
+        ):
             raw_repo = payload["raw_payload"].get("repository")
         repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
         if not repo_name:
