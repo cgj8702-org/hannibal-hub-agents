@@ -115,7 +115,16 @@ class WebhookProcessor:
 
         action = ev.get("action")
         if action == "edited":
-            return False
+            sender_login = (ev.get("sender") or {}).get("login", "")
+            raw = ev.get("raw_payload") or {}
+            comment_user = (raw.get("comment") or {}).get("user") or {}
+            comment_author = comment_user.get("login", "")
+            allowed_users = {"cgj8702", "cgj8702-agents"}
+            if (
+                sender_login not in allowed_users
+                and comment_author not in allowed_users
+            ):
+                return False
 
         event_name = ev.get("event_name")
         # Ignore automated CI status, check suite noise, and installation lifecycle events

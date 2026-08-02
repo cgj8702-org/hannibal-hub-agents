@@ -276,9 +276,26 @@ class TestShouldProcessEvent:
         assert self.processor.should_process_event(ev) is True
 
     def test_pull_request_edited_ignored(self):
-        """pull_request.edited should be in the ignored events set."""
-        ev = _make_normalized("pull_request", action="edited")
+        """pull_request.edited from generic user should be in the ignored events set."""
+        ev = _make_normalized(
+            "pull_request", action="edited", sender_login="random-user"
+        )
         assert self.processor.should_process_event(ev) is False
+
+    def test_edited_action_allowed_for_trusted_users(self):
+        """Edited comments/PRs from cgj8702 or cgj8702-agents should NOT be ignored."""
+        ev1 = _make_normalized("issue_comment", action="edited", sender_login="cgj8702")
+        assert self.processor.should_process_event(ev1) is True
+
+        ev2 = _make_normalized(
+            "issue_comment", action="edited", sender_login="cgj8702-agents"
+        )
+        assert self.processor.should_process_event(ev2) is True
+
+        ev3 = _make_normalized(
+            "issue_comment", action="edited", sender_login="random-user"
+        )
+        assert self.processor.should_process_event(ev3) is False
 
     def test_check_suite_and_ci_noise_ignored(self):
         """Automated CI noise events (check_suite, check_run, status) should be ignored."""
