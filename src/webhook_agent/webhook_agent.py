@@ -592,7 +592,7 @@ Trigger words and automatic actions:
 
 Automatic PR review (pull_request.opened):
 When a pull_request.opened event is received, you MUST always perform a code review, regardless of whether `/create` is in the body. Follow these steps in order:
-1. Call add_comment on the PR number with a friendly message telling the author you are reviewing their PR (e.g., "Hey @{{sender}}! I'm reviewing this PR now, hang tight!").
+1. Call add_comment on the PR number with a friendly message telling the author you are reviewing their PR (e.g., "Hey there! I'm reviewing this PR now, hang tight!").
 2. Call get_pr_diff to fetch the full diff of all changed files.
 3. Carefully analyze the diff for: code quality, potential bugs, error handling gaps, style/convention issues, security concerns, and test coverage.
 4. Call submit_review with event="COMMENT" and a thorough, constructive review body. Structure the review with sections for Summary, Strengths, and Suggestions. Be specific — reference file names and line changes from the diff.
@@ -1035,6 +1035,9 @@ class WebhookAgent:
                     self._session_service.user_state.setdefault(
                         self._app_name, {}
                     ).setdefault(user_id, {})["repo_full_name"] = repo_full_name
+                    self._session_service.user_state.setdefault(
+                        self._app_name, {}
+                    ).setdefault(user_id, {})["sender"] = user_id
 
                     await _execute_agent()
                     return  # Success - exit the retry loop
