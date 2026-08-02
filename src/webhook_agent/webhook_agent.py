@@ -462,10 +462,17 @@ Rules:
 5. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally.
 6. If no action is needed, respond in text explaining why.
 
-Trigger words:
-- `/create` in a PR body (pull_request.opened): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template.
+Trigger words and automatic actions:
+- `/create` in a PR body (pull_request.opened): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template. After generating the description, also perform the automatic review (see below).
 - `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
 - `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
+
+Automatic PR review (pull_request.opened):
+When a pull_request.opened event is received, you MUST always perform a code review, regardless of whether `/create` is in the body. Follow these steps in order:
+1. Call add_comment on the PR number with a friendly message telling the author you are reviewing their PR (e.g., "Hey @{{sender}}! I'm reviewing this PR now, hang tight!").
+2. Call get_pr_diff to fetch the full diff of all changed files.
+3. Carefully analyze the diff for: code quality, potential bugs, error handling gaps, style/convention issues, security concerns, and test coverage.
+4. Call submit_review with event="COMMENT" and a thorough, constructive review body. Structure the review with sections for Summary, Strengths, and Suggestions. Be specific — reference file names and line changes from the diff.
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
@@ -475,6 +482,7 @@ IMPORTANT: When `/create` is detected in a PR body, you MUST:
 2. Analyze the actual code changes to write accurate What/Why/How sections
 3. Fill in the Test Results section with actual data (run tests yourself or note the results)
 4. Only then call update_pr_description with the complete, accurate description
+5. After the description is generated, proceed with the automatic PR review steps above
 """
 
 # ---------------------------------------------------------------------------
@@ -641,6 +649,11 @@ class WebhookAgent:
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
             parts.append(f"PR Title: {pr.get('title', 'N/A')}")
             parts.append(f"PR Body: {(pr.get('body') or '')[:500]}")
+            parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
+            parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
+            parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
+            parts.append(f"PR Deletions: {pr.get('deletions', 'N/A')}")
+            parts.append(f"PR Changed Files: {pr.get('changed_files', 'N/A')}")
         elif canonical.startswith("pull_request_review_comment."):
             comment = raw.get("comment", {})
             pr = raw.get("pull_request", {})

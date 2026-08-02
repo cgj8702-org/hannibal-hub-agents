@@ -311,6 +311,55 @@ class TestShouldProcessEvent:
             is False
         )
 
+    def test_installation_events_ignored(self):
+        """Installation lifecycle events should be filtered early."""
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("installation", action="new_permissions_accepted")
+            )
+            is False
+        )
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("installation", action="created")
+            )
+            is False
+        )
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("installation", action="deleted")
+            )
+            is False
+        )
+
+    def test_process_event_null_repository_does_not_crash(self, caplog):
+        """Payloads with 'repository': null must not crash with AttributeError."""
+        import logging
+        from unittest.mock import patch
+
+        ev = _make_normalized("issue_comment", action="created")
+        ev["repository"] = None
+        ev["raw_payload"]["repository"] = None
+
+        with (
+            patch(
+                "webhook_agent.processor.load_cached_token",
+                return_value=None,
+            ),
+            patch("webhook_agent.processor.load_private_key", return_value=b"key"),
+            patch("webhook_agent.processor.generate_jwt", return_value="jwt"),
+            patch(
+                "webhook_agent.processor.get_installation_token",
+                return_value=type("T", (), {"token": "tok"})(),
+            ),
+            patch("webhook_agent.processor.save_cached_token"),
+            patch("webhook_agent.processor.Github"),
+            patch("webhook_agent.processor.AgentCore"),
+            caplog.at_level(logging.WARNING),
+        ):
+            self.processor.process_event(ev)
+            assert "No repository found" in caplog.text
+
     def test_process_event_detail_preserves_code_formatting(self, caplog):
         """r.detail in process_event must preserve underscores, dots, and exact patch text."""
         import logging
