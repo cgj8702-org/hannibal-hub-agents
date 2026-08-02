@@ -64,11 +64,11 @@ class ActionResult:
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
 # ---------------------------------------------------------------------------
-# Input Token Safety Limits (Capped to 15,000 tokens max)
+# Input Token Safety Limits (Capped to stay under 16k/min cumulative limit)
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 15000
-MAX_DIFF_TOKENS = 12000  # Cap PR diff tool response to 12k tokens
-MAX_FILE_PATCH_CHARS = 4000  # Cap per-file diff patch in get_pr_diff
+MAX_INPUT_TOKENS = 6000  # Cap user prompt payload per turn to 6k tokens
+MAX_DIFF_TOKENS = 4000  # Cap PR diff tool response to 4k tokens (~14k chars)
+MAX_FILE_PATCH_CHARS = 2000  # Cap per-file diff patch in get_pr_diff
 
 
 def count_tokens_exact(
@@ -97,7 +97,7 @@ def _truncate_text_to_token_limit(
     model_name: str = "gemma-4-31b-it",
     label: str = "Input",
 ) -> str:
-    """Truncate input text to guarantee it stays strictly under max_tokens (15k).
+    """Truncate input text to guarantee it stays strictly under max_tokens limit.
 
     Uses google.genai client.models.count_tokens() for exact measurement when available,
     falling back to character estimation (~3.5 chars/token).
@@ -116,7 +116,7 @@ def _truncate_text_to_token_limit(
         current_text = text
         current_tokens = exact_count
         while current_tokens > max_tokens and len(current_text) > 100:
-            target_ratio = (max_tokens - 500) / current_tokens
+            target_ratio = (max_tokens - 300) / current_tokens
             new_length = max(100, int(len(current_text) * target_ratio))
             current_text = current_text[:new_length]
             new_count = count_tokens_exact(current_text, model_name=model_name)
@@ -134,7 +134,7 @@ def _truncate_text_to_token_limit(
         )
 
     # Step 2: Fallback character estimation if API is offline/unauthenticated
-    max_chars = max_tokens * 3  # Conservative limit (~13.5k tokens)
+    max_chars = max_tokens * 3  # Conservative limit
     if len(text) <= max_chars:
         return text
 
@@ -145,6 +145,35 @@ def _truncate_text_to_token_limit(
         f"[⚠️ {label} truncated: omitted {omitted} characters (~{omitted // 4} tokens) "
         f"to stay within {max_tokens} token limit]"
     )
+
+
+# ---------------------------------------------------------------------------
+# WebhookAgent class
+# ---------------------------------------------------------------------------
+
+
+# Retry configuration for transient server errors
+_MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
+_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemma-4-26b-a4b-it")
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """Check if an error is transient and should be retried.
+
+    Transient errors include server unavailability (503), rate limiting (429),
+    RESOURCE_EXHAUSTED errors, and other temporary issues.
+    """
+    if isinstance(error, GenAIServerError):
+        error_code = getattr(error, "code", None)
+        return error_code in (503, 500, 429, 502, 504)
+    err_str = str(error)
+    if (
+        "429" in err_str
+        or "RESOURCE_EXHAUSTED" in err_str
+        or "ResourceExhausted" in type(error).__name__
+    ):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
