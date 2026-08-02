@@ -64,6 +64,119 @@ class ActionResult:
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
 # ---------------------------------------------------------------------------
+# Input Token Safety Limits (Capped to stay under 16k/min cumulative limit)
+# ---------------------------------------------------------------------------
+MAX_INPUT_TOKENS = 6000  # Cap user prompt payload per turn to 6k tokens
+MAX_DIFF_TOKENS = 4000  # Cap PR diff tool response to 4k tokens (~14k chars)
+MAX_FILE_PATCH_CHARS = 2000  # Cap per-file diff patch in get_pr_diff
+
+
+def count_tokens_exact(
+    contents: str | list[Any], model_name: str = "gemma-4-31b-it"
+) -> int | None:
+    """Count input tokens using Google GenAI SDK's client.models.count_tokens().
+
+    Returns exact token count from the API if credentials are configured,
+    or None if unavailable/offline.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        response = client.models.count_tokens(model=model_name, contents=contents)
+        return response.total_tokens
+    except Exception as exc:
+        logger.debug("count_tokens API call skipped/unavailable: %s", exc)
+        return None
+
+
+def _truncate_text_to_token_limit(
+    text: str,
+    max_tokens: int = MAX_INPUT_TOKENS,
+    model_name: str = "gemma-4-31b-it",
+    label: str = "Input",
+) -> str:
+    """Truncate input text to guarantee it stays strictly under max_tokens limit.
+
+    Uses google.genai client.models.count_tokens() for exact measurement when available,
+    falling back to character estimation (~3.5 chars/token).
+    """
+    if not text:
+        return text
+
+    # Step 1: Try exact token count via google.genai API
+    exact_count = count_tokens_exact(text, model_name=model_name)
+
+    if exact_count is not None:
+        if exact_count <= max_tokens:
+            return text
+
+        # Oversized payload: iteratively truncate to fit exact token limit
+        current_text = text
+        current_tokens = exact_count
+        while current_tokens > max_tokens and len(current_text) > 100:
+            target_ratio = (max_tokens - 300) / current_tokens
+            new_length = max(100, int(len(current_text) * target_ratio))
+            current_text = current_text[:new_length]
+            new_count = count_tokens_exact(current_text, model_name=model_name)
+            if new_count is None or new_count >= current_tokens:
+                current_text = current_text[: int(len(current_text) * 0.8)]
+                current_tokens = int(current_tokens * 0.8)
+            else:
+                current_tokens = new_count
+
+        omitted_chars = len(text) - len(current_text)
+        return (
+            f"{current_text}\n\n"
+            f"[⚠️ {label} truncated: reduced to {current_tokens} tokens "
+            f"(omitted {omitted_chars} characters) to stay under {max_tokens} token limit]"
+        )
+
+    # Step 2: Fallback character estimation if API is offline/unauthenticated
+    max_chars = max_tokens * 3  # Conservative limit
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[:max_chars]
+    omitted = len(text) - max_chars
+    return (
+        f"{truncated}\n\n"
+        f"[⚠️ {label} truncated: omitted {omitted} characters (~{omitted // 4} tokens) "
+        f"to stay within {max_tokens} token limit]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# WebhookAgent class
+# ---------------------------------------------------------------------------
+
+
+# Retry configuration for transient server errors
+_MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
+_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemma-4-26b-a4b-it")
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """Check if an error is transient and should be retried.
+
+    Transient errors include server unavailability (503), rate limiting (429),
+    RESOURCE_EXHAUSTED errors, and other temporary issues.
+    """
+    if isinstance(error, GenAIServerError):
+        error_code = getattr(error, "code", None)
+        return error_code in (503, 500, 429, 502, 504)
+    err_str = str(error)
+    if (
+        "429" in err_str
+        or "RESOURCE_EXHAUSTED" in err_str
+        or "ResourceExhausted" in type(error).__name__
+    ):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # ADK Tool Functions
 # Each function becomes an ADK tool automatically. The docstring and type
 # hints define the JSON schema that Gemma sees.
@@ -370,7 +483,7 @@ def get_pr_diff(ctx: Context, pr_number: int) -> str:
         pr_number: Pull request number.
 
     Returns:
-        A string containing the diff summary.
+        A string containing the diff summary, capped to stay within 15k tokens.
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
@@ -380,10 +493,20 @@ def get_pr_diff(ctx: Context, pr_number: int) -> str:
         files = pr.get_files()
         diff_summary = []
         for f in files:
+            patch = f.patch or "No patch available (binary, renamed, or empty change)."
+            if len(patch) > MAX_FILE_PATCH_CHARS:
+                omitted = len(patch) - MAX_FILE_PATCH_CHARS
+                patch = (
+                    patch[:MAX_FILE_PATCH_CHARS]
+                    + f"\n... [patch truncated: {omitted} chars omitted]"
+                )
             diff_summary.append(
-                f"File: {f.filename} ({f.status})\nPatch:\n{f.patch}\n{'-' * 40}"
+                f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
             )
-        return "\n".join(diff_summary) if diff_summary else "No files changed."
+        full_diff = "\n".join(diff_summary) if diff_summary else "No files changed."
+        return _truncate_text_to_token_limit(
+            full_diff, max_tokens=MAX_DIFF_TOKENS, label="PR Diff"
+        )
     except Exception as e:
         return f"Error fetching PR diff: {e}"
 
@@ -462,10 +585,17 @@ Rules:
 5. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally.
 6. If no action is needed, respond in text explaining why.
 
-Trigger words:
-- `/create` in a PR body (pull_request.opened): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template.
+Trigger words and automatic actions:
+- `/create` in a PR body (pull_request.opened): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template. After generating the description, also perform the automatic review (see below).
 - `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
 - `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
+
+Automatic PR review (pull_request.opened):
+When a pull_request.opened event is received, you MUST always perform a code review, regardless of whether `/create` is in the body. Follow these steps in order:
+1. Call add_comment on the PR number with a friendly message telling the author you are reviewing their PR (e.g., "Hey @{{sender}}! I'm reviewing this PR now, hang tight!").
+2. Call get_pr_diff to fetch the full diff of all changed files.
+3. Carefully analyze the diff for: code quality, potential bugs, error handling gaps, style/convention issues, security concerns, and test coverage.
+4. Call submit_review with event="COMMENT" and a thorough, constructive review body. Structure the review with sections for Summary, Strengths, and Suggestions. Be specific — reference file names and line changes from the diff.
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
@@ -475,6 +605,7 @@ IMPORTANT: When `/create` is detected in a PR body, you MUST:
 2. Analyze the actual code changes to write accurate What/Why/How sections
 3. Fill in the Test Results section with actual data (run tests yourself or note the results)
 4. Only then call update_pr_description with the complete, accurate description
+5. After the description is generated, proceed with the automatic PR review steps above
 """
 
 # ---------------------------------------------------------------------------
@@ -641,6 +772,11 @@ class WebhookAgent:
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
             parts.append(f"PR Title: {pr.get('title', 'N/A')}")
             parts.append(f"PR Body: {(pr.get('body') or '')[:500]}")
+            parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
+            parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
+            parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
+            parts.append(f"PR Deletions: {pr.get('deletions', 'N/A')}")
+            parts.append(f"PR Changed Files: {pr.get('changed_files', 'N/A')}")
         elif canonical.startswith("pull_request_review_comment."):
             comment = raw.get("comment", {})
             pr = raw.get("pull_request", {})
@@ -657,6 +793,9 @@ class WebhookAgent:
             parts.append(f"\nPR Diff:\n{raw['pr_diff']}")
 
         text = "\n".join(parts)
+        text = _truncate_text_to_token_limit(
+            text, max_tokens=MAX_INPUT_TOKENS, label="User payload"
+        )
         return genai_types.Content(
             role="user",
             parts=[genai_types.Part(text=text)],

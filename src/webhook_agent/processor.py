@@ -118,8 +118,8 @@ class WebhookProcessor:
             return False
 
         event_name = ev.get("event_name")
-        # Ignore automated CI status and check suite noise
-        if event_name in ("check_suite", "check_run", "status"):
+        # Ignore automated CI status, check suite noise, and installation lifecycle events
+        if event_name in ("check_suite", "check_run", "status", "installation"):
             return False
 
         # Ignore read-only PR lifecycle events that do not trigger actions
@@ -164,9 +164,12 @@ class WebhookProcessor:
             dry_run=os.environ.get("DRY_RUN", "0") in ("1", "true", "True"),
         )
 
-        repo_name = payload.get("repository", {}).get("full_name") or payload.get(
-            "raw_payload", {}
-        ).get("repository", {}).get("full_name")
+        raw_repo = payload.get("repository")
+        if not isinstance(raw_repo, dict) and isinstance(
+            payload.get("raw_payload"), dict
+        ):
+            raw_repo = payload["raw_payload"].get("repository")
+        repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
         if not repo_name:
             logger.warning("No repository found in event payload")
             return
