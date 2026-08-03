@@ -514,10 +514,10 @@ Available tools (7 API-aligned primitives):
 
 Rules:
 1. Only call tools from the provided set. Do NOT invent tools or parameters.
-2. When a real user comments on an issue or pull request, you MUST respond. Use update_issue(number, comment=...) to reply.
+2. Only respond when a real user explicitly mentions '@hannibal-hub-agents' or issues a trigger command (/create, /review, /resolve, /analyze). Do NOT post automated replies to passive review approvals, label changes, or generic comments without a command or mention.
 3. Keep arguments concise and correct.
-4. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally.
-5. If no action is needed, respond in text explaining why.
+4. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally when they mention the bot or issue a command.
+5. If no action is needed or no trigger command/mention is present, respond in text explaining why no tool call is required.
 
 Trigger words and automatic actions:
 - `/create` in a PR body (pull_request.opened): First call get_issue(number, include_diff=True) to fetch code changes, then use the PR_TEMPLATE to structure a descriptive PR body. Call update_issue(number, body=...) with the filled template. Then perform the automatic review (see below).
@@ -784,6 +784,11 @@ class WebhookAgent:
         read_only_events: set[str] = {
             "pull_request.synchronize",
             "pull_request.closed",
+            "pull_request.labeled",
+            "pull_request.unlabeled",
+            "pull_request.assigned",
+            "pull_request.unassigned",
+            "pull_request_review.submitted",
             "label.deleted",
             "installation.created",
             "installation.deleted",

@@ -131,8 +131,20 @@ class WebhookProcessor:
         if event_name in ("check_suite", "check_run", "status", "installation"):
             return False
 
-        # Ignore read-only PR lifecycle events that do not trigger actions
-        if event_name == "pull_request" and action in ("closed", "synchronize"):
+        # Ignore read-only PR metadata lifecycle events that do not trigger actions
+        if event_name == "pull_request" and action in (
+            "closed",
+            "synchronize",
+            "labeled",
+            "unlabeled",
+            "assigned",
+            "unassigned",
+            "review_requested",
+        ):
+            return False
+
+        # Ignore pull_request_review submissions to prevent bot loop responses on review approvals
+        if event_name == "pull_request_review":
             return False
 
         return True

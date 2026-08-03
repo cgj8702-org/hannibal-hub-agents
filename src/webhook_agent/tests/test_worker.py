@@ -266,14 +266,15 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is True
 
-    def test_human_review_allowed(self):
+    def test_pull_request_review_ignored(self):
+        """pull_request_review submissions should be suppressed to prevent feedback loops."""
         ev = _make_normalized(
             "pull_request_review",
             action="submitted",
             include_review=True,
             comment_author="human-user",
         )
-        assert self.processor.should_process_event(ev) is True
+        assert self.processor.should_process_event(ev) is False
 
     def test_pull_request_edited_ignored(self):
         """pull_request.edited from generic user should be in the ignored events set."""
