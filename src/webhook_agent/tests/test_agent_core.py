@@ -89,15 +89,14 @@ class TestAgentCoreRun:
         core = AgentCore(gh_client=MagicMock(), dry_run=True)
         ev = {
             "delivery_id": "test-003",
-            "event_name": "pull_request",
-            "action": "synchronize",
-            "canonical": "pull_request.synchronize",
+            "event_name": "ping",
+            "canonical": "ping",
             "sender": {"login": "human"},
             "repository": {"full_name": "owner/repo"},
-            "raw_payload": {"pull_request": {"number": 1}, "action": "synchronize"},
+            "raw_payload": {"action": "ping"},
         }
         results = core.run(ev, "owner/repo")
-        # synchronize is read-only, WebhookAgent blocks it
+        # ping is read-only, WebhookAgent blocks it
         assert len(results) == 1
         assert results[0].success is False
         assert "read-only" in results[0].detail

@@ -505,42 +505,26 @@ def review(
 # Load the PR template once at module load time
 _PR_TEMPLATE = _load_pr_template()
 
-SYSTEM_INSTRUCTION = f"""You are the planner for a GitHub App agent. Your role is to decide which tool(s) to call based on the incoming webhook event.
+SYSTEM_INSTRUCTION = f"""You are an autonomous GitHub Webhook Agent. Your role is to analyze incoming GitHub webhook events and decide autonomously whether to call a tool or refrain from taking action.
 
 Available tools (7 API-aligned primitives):
   Files API:  read_file, write_file
   Issues API: get_issue, update_issue
   Pulls API:  open_pr, merge_pr, review
 
-Rules:
-1. Only call tools from the provided set. Do NOT invent tools or parameters.
-2. Only respond when a real user explicitly mentions '@hannibal-hub-agents' or issues a trigger command (/create, /review, /resolve, /analyze). Do NOT post automated replies to passive review approvals, label changes, or generic comments without a command or mention.
-3. Keep arguments concise and correct.
-4. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally when they mention the bot or issue a command.
-5. If no action is needed or no trigger command/mention is present, respond in text explaining why no tool call is required.
-
-Trigger words and automatic actions:
-- `/create` in a PR body (pull_request.opened): First call get_issue(number, include_diff=True) to fetch code changes, then use the PR_TEMPLATE to structure a descriptive PR body. Call update_issue(number, body=...) with the filled template. Then perform the automatic review (see below).
-- `/review` or `/analyze` in issue comments: Call update_issue(number, comment=...) to acknowledge, then provide feedback.
-- `/resolve` or "resolve conflicts" in PR comments: Call get_issue(number) to check mergeability. If mergeable is False, call read_file(path, ref=head_branch) and read_file(path, ref=base_branch) for each conflicting file, merge the changes, then call write_file(branch=head_branch, path, content, message) to push the resolution. Confirm with update_issue(number, comment=...).
-- `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
-
-Automatic PR review (pull_request.opened):
-When a pull_request.opened event is received, you MUST always perform a code review:
-1. Call update_issue(number, comment="Hey there! I'm reviewing this PR now, hang tight!") to acknowledge.
-2. Call get_issue(number, include_diff=True) to fetch the full diff.
-3. Analyze the diff for: code quality, potential bugs, error handling, style, security, and test coverage.
-4. Call review(pr_number, body=..., event="COMMENT") with a thorough, constructive review. Structure with Summary, Strengths, and Suggestions sections. Reference specific file names and changes.
+AUTONOMOUS DECISION RULES:
+1. Carefully analyze the canonical event type, sender, and payload content.
+2. Call tools ONLY when an action or response is genuinely required:
+   - When a PR is opened with /create in the body: First call get_issue(number, include_diff=True) to fetch code changes, use the PR_TEMPLATE to structure a descriptive body, call update_issue(number, body=...) with the filled template, then perform an automatic code review via review(pr_number, body=...).
+   - When a PR is opened (without /create): Call get_issue(number, include_diff=True) and submit an automatic code review via review(pr_number, body=...).
+   - When a real user asks a question, requests a review (/review), asks to resolve conflicts (/resolve), or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
+3. Refrain from calling tools when no action is needed:
+   - If the event is informational, passive, a routine metadata change (e.g. label added, assigned, PR closed), or a simple comment without a command or mention, do NOT call any mutation tools.
+   - Respond in plain text explaining clearly why no tool call is required (e.g., "Event pull_request.labeled received for PR #34 — no action required.").
+4. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally when they issue commands or request assistance.
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
-
-IMPORTANT: When `/create` is detected in a PR body, you MUST:
-1. Call get_issue(number, include_diff=True) to understand the code changes
-2. Analyze the actual code changes to write accurate What/Why/How sections
-3. Fill in the Test Results section with actual data
-4. Call update_issue(number, body=...) with the complete, accurate description
-5. After the description is generated, proceed with the automatic PR review steps above
 """
 
 # ---------------------------------------------------------------------------
@@ -782,18 +766,6 @@ class WebhookAgent:
 
         # Check read-only events
         read_only_events: set[str] = {
-            "pull_request.synchronize",
-            "pull_request.closed",
-            "pull_request.labeled",
-            "pull_request.unlabeled",
-            "pull_request.assigned",
-            "pull_request.unassigned",
-            "pull_request_review.submitted",
-            "label.deleted",
-            "installation.created",
-            "installation.deleted",
-            "installation.suspend",
-            "installation.unsuspend",
             "ping",
             "unknown",
         }

@@ -266,67 +266,29 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is True
 
-    def test_pull_request_review_ignored(self):
-        """pull_request_review submissions should be suppressed to prevent feedback loops."""
+    def test_pull_request_review_allowed(self):
+        """pull_request_review submissions pass should_process_event for LLM evaluation."""
         ev = _make_normalized(
             "pull_request_review",
             action="submitted",
             include_review=True,
             comment_author="human-user",
         )
-        assert self.processor.should_process_event(ev) is False
+        assert self.processor.should_process_event(ev) is True
 
-    def test_pull_request_edited_ignored(self):
-        """pull_request.edited from generic user should be in the ignored events set."""
-        ev = _make_normalized(
-            "pull_request", action="edited", sender_login="random-user"
-        )
-        assert self.processor.should_process_event(ev) is False
-
-    def test_edited_action_allowed_for_trusted_users(self):
-        """Edited comments/PRs from cgj8702 or cgj8702-agents should NOT be ignored."""
-        ev1 = _make_normalized("issue_comment", action="edited", sender_login="cgj8702")
-        assert self.processor.should_process_event(ev1) is True
-
-        ev2 = _make_normalized(
-            "issue_comment", action="edited", sender_login="cgj8702-agents"
-        )
-        assert self.processor.should_process_event(ev2) is True
-
-        ev3 = _make_normalized(
-            "issue_comment", action="edited", sender_login="random-user"
-        )
-        assert self.processor.should_process_event(ev3) is False
-
-    def test_check_suite_and_ci_noise_ignored(self):
-        """Automated CI noise events (check_suite, check_run, status) should be ignored."""
-        assert (
-            self.processor.should_process_event(
-                _make_normalized("check_suite", action="requested")
-            )
-            is False
-        )
-        assert (
-            self.processor.should_process_event(
-                _make_normalized("check_run", action="completed")
-            )
-            is False
-        )
-        assert self.processor.should_process_event(_make_normalized("status")) is False
-
-    def test_read_only_pr_lifecycle_events_ignored(self):
-        """pull_request.closed and pull_request.synchronize should be ignored early."""
+    def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):
+        """PR lifecycle events pass should_process_event for autonomous LLM evaluation."""
         assert (
             self.processor.should_process_event(
                 _make_normalized("pull_request", action="closed")
             )
-            is False
+            is True
         )
         assert (
             self.processor.should_process_event(
                 _make_normalized("pull_request", action="synchronize")
             )
-            is False
+            is True
         )
 
     def test_installation_events_ignored(self):
