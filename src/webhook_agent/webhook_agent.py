@@ -27,8 +27,8 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
-from .memory_service import InMemoryMemoryService
 from .bot_identity import _is_bot_event
+from .memory_service import InMemoryMemoryService
 
 logger = logging.getLogger("webhook_agent")
 
@@ -177,15 +177,19 @@ def _is_transient_error(error: Exception) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# ADK Tool Functions
+# ADK Tool Functions — API-Aligned Primitives
 # Each function becomes an ADK tool automatically. The docstring and type
 # hints define the JSON schema that Gemma sees.
+#
+# Tools are organized by GitHub API surface:
+#   Files API:  read_file, write_file
+#   Issues API: get_issue, update_issue  (PRs are issues in GitHub's API)
+#   Pulls API:  open_pr, merge_pr, review
 # ---------------------------------------------------------------------------
 
 
 def _get_gh_from_ctx(ctx: Context) -> Github:
     """Retrieve the Github client from the agent context."""
-    # Check both raw key and prefixed user: key (from InMemorySessionService.user_state)
     gh = ctx.state.get("gh_client") or ctx.state.get("user:gh_client")
     if gh is None:
         raise RuntimeError("GitHub client not found in agent context")
@@ -194,179 +198,222 @@ def _get_gh_from_ctx(ctx: Context) -> Github:
 
 def _get_repo_full_name(ctx: Context) -> str:
     """Retrieve the repo full name from the agent context."""
-    # Check both raw key and prefixed user: key (from InMemorySessionService.user_state)
     name = ctx.state.get("repo_full_name") or ctx.state.get("user:repo_full_name")
     if name is None:
         raise RuntimeError("repo_full_name not found in agent context")
     return name
 
 
-def add_comment(ctx: Context, issue_number: int, body: str) -> str:
-    """Add a general comment to an issue or pull request.
+# ---------------------------------------------------------------------------
+# Files API
+# ---------------------------------------------------------------------------
+
+
+def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
+    """Read a file from the repository at a specific git ref.
 
     Args:
-        issue_number: Issue or PR number.
-        body: Comment body (Markdown).
+        file_path: Path to the file in the repository.
+        ref: Branch name, tag, or commit SHA. Defaults to the repo default branch.
 
     Returns:
-        A string describing the result.
+        The file content string, token-capped.
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
     try:
         repo = gh.get_repo(repo_name)
-        issue = repo.get_issue(number=issue_number)
-        comment = issue.create_comment(body=body)
-        return f"Commented: {comment.html_url}"
+        kwargs: dict[str, Any] = {}
+        if ref is not None:
+            kwargs["ref"] = ref
+        content_file = repo.get_contents(file_path, **kwargs)
+        if isinstance(content_file, list):
+            return f"Error: '{file_path}' is a directory, not a file."
+        decoded = content_file.decoded_content.decode("utf-8", errors="replace")
+        return _truncate_text_to_token_limit(
+            decoded, max_tokens=MAX_DIFF_TOKENS, label="File content"
+        )
     except Exception as e:
-        return f"Error adding comment: {e}"
+        return f"Error reading file: {e}"
 
 
-def add_label(ctx: Context, labels: list[str], issue_number: int | None = None) -> str:
-    """Add labels to an issue, PR, or repository.
-
-    Args:
-        labels: List of label names to add.
-        issue_number: Optional issue/PR number. If omitted, adds to the repo.
-
-    Returns:
-        A string describing the result.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        if issue_number:
-            issue = repo.get_issue(number=issue_number)
-            issue.add_to_labels(*labels)
-        else:
-            repo.add_to_labels(*labels)
-        return f"Labels added: {labels}"
-    except Exception as e:
-        return f"Error adding labels: {e}"
-
-
-def add_review_comment(ctx: Context, pr_number: int, body: str) -> str:
-    """Leave a general review-style comment or fallback comment on a PR.
-
-    Args:
-        pr_number: Pull request number.
-        body: Review comment body (Markdown).
-
-    Returns:
-        A string describing the result.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-        try:
-            review = pr.create_review(body=body)
-            detail = getattr(review, "html_url", str(review))
-        except Exception:
-            comment = pr.create_issue_comment(body=body)
-            detail = getattr(comment, "html_url", str(comment))
-        return f"Reviewed/commented: {detail}"
-    except Exception as e:
-        return f"Error adding review comment: {e}"
-
-
-def reply_to_review_comment(
-    ctx: Context, pr_number: int, comment_id: int, body: str
-) -> str:
-    """Reply to a specific review comment on a pull request.
-
-    Args:
-        pr_number: Pull request number.
-        comment_id: Review comment ID to reply to.
-        body: Reply body (Markdown).
-
-    Returns:
-        A string describing the result.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-
-        # Try to find the comment in PR reviews for a threaded reply
-        target_comment = None
-        try:
-            for review in pr.get_reviews():
-                for comment in review.comments:
-                    if comment.id == comment_id:
-                        target_comment = comment
-                        break
-                if target_comment:
-                    break
-        except Exception:
-            logger.debug("Failed to iterate reviews for comment %s", comment_id)
-
-        if target_comment:
-            reply = target_comment.create_comment(body)
-            return f"Replied to review comment: {reply.html_url}"
-
-        # Fallback: check if it's a general PR comment
-        try:
-            issue = repo.get_issue(number=pr_number)
-            comment = issue.get_comment(comment_id)
-            reply = issue.create_comment(body=f"Re: {comment.body[:100]}...\n\n{body}")
-            return f"Replied to issue comment: {reply.html_url}"
-        except Exception:
-            return f"Could not find comment {comment_id} to reply to"
-    except Exception as e:
-        return f"Error replying to review comment: {e}"
-
-
-def submit_review(
+def write_file(
     ctx: Context,
-    pr_number: int,
-    body: str,
-    event: str = "COMMENT",
+    branch: str,
+    file_path: str,
+    content: str,
+    message: str,
+    base_branch: str | None = None,
 ) -> str:
-    """Submit a formal review on a pull request with an event type.
+    """Create or update a file on a branch with a commit message.
 
     Args:
-        pr_number: Pull request number.
-        body: Review body (Markdown).
-        event: Review event type. One of APPROVE, COMMENT, REQUEST_CHANGES.
+        branch: Target branch to commit to. Created from base_branch if it does not exist.
+        file_path: Path to the file in the repository.
+        content: Complete file content to write.
+        message: Commit message describing the change.
+        base_branch: Branch to create the target from if it does not exist.
 
     Returns:
-        A string describing the result.
+        A string describing the commit result.
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
     try:
         repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-        review = pr.create_review(body=body, event=event)
-        detail = getattr(review, "html_url", str(review))
-        return f"Submitted review: {detail}"
+        base = base_branch or repo.default_branch
+        branch_created = False
+        try:
+            repo.get_branch(branch)
+        except Exception:
+            sb = repo.get_branch(base)
+            repo.create_git_ref(ref=f"refs/heads/{branch}", sha=sb.commit.sha)
+            branch_created = True
+
+        try:
+            repo.create_file(file_path, message, content, branch=branch)
+        except Exception:
+            existing = repo.get_contents(file_path, ref=branch)
+            repo.update_file(file_path, message, content, existing.sha, branch=branch)
+        status = f"Committed '{file_path}' to {branch}"
+        if branch_created:
+            status += f" (branch created from {base})"
+        return status
     except Exception as e:
-        return f"Error submitting review: {e}"
+        return f"Error writing file: {e}"
 
 
-def assign_reviewers(ctx: Context, pr_number: int, reviewers: list[str]) -> str:
-    """Request reviewers on a pull request.
+# ---------------------------------------------------------------------------
+# Issues API (PRs are issues in GitHub's API)
+# ---------------------------------------------------------------------------
+
+
+def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
+    """Get metadata for an issue or pull request.
 
     Args:
-        pr_number: Pull request number.
-        reviewers: List of GitHub usernames to request as reviewers.
+        number: Issue or PR number.
+        include_diff: If true and the item is a PR, include file diffs and mergeability.
 
     Returns:
-        A string describing the result.
+        Structured metadata. For PRs includes title, state, branches, mergeable
+        status, and changed files. If include_diff is true, also includes
+        token-capped file patches.
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
     try:
         repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-        pr.create_review_request(reviewers=reviewers)
-        return f"Requested reviewers: {reviewers}"
+        issue = repo.get_issue(number=number)
+        parts: list[str] = [
+            f"#{number}: {issue.title}",
+            f"State: {issue.state}",
+            f"Labels: {', '.join(lbl.name for lbl in issue.labels) or 'none'}",
+        ]
+
+        try:
+            pr = repo.get_pull(number)
+            is_pr = True
+        except Exception:
+            is_pr = False
+
+        if is_pr:
+            parts.append("Type: Pull Request")
+            parts.append(f"Head: {pr.head.ref}")
+            parts.append(f"Base: {pr.base.ref}")
+            parts.append(f"Mergeable: {pr.mergeable}")
+            parts.append(f"Mergeable state: {pr.mergeable_state}")
+            parts.append(f"Changed files: {pr.changed_files}")
+            parts.append(f"Additions: +{pr.additions}  Deletions: -{pr.deletions}")
+
+            if include_diff:
+                files = pr.get_files()
+                diff_lines: list[str] = []
+                for f in files:
+                    patch = f.patch or "No patch available (binary/renamed/empty)."
+                    if len(patch) > MAX_FILE_PATCH_CHARS:
+                        omitted = len(patch) - MAX_FILE_PATCH_CHARS
+                        patch = (
+                            patch[:MAX_FILE_PATCH_CHARS]
+                            + f"\n... [patch truncated: {omitted} chars omitted]"
+                        )
+                    diff_lines.append(
+                        f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
+                    )
+                diff_text = "\n".join(diff_lines) if diff_lines else "No files changed."
+                diff_text = _truncate_text_to_token_limit(
+                    diff_text, max_tokens=MAX_DIFF_TOKENS, label="PR Diff"
+                )
+                parts.append(f"\nDiff:\n{diff_text}")
+        else:
+            parts.append("Type: Issue")
+            body_preview = (issue.body or "")[:500]
+            if body_preview:
+                parts.append(f"Body: {body_preview}")
+
+        return "\n".join(parts)
     except Exception as e:
-        return f"Error assigning reviewers: {e}"
+        return f"Error fetching issue/PR: {e}"
+
+
+def update_issue(
+    ctx: Context,
+    number: int,
+    comment: str | None = None,
+    title: str | None = None,
+    body: str | None = None,
+    state: str | None = None,
+    labels: list[str] | None = None,
+) -> str:
+    """Update an issue or pull request. Can perform multiple actions at once.
+
+    Args:
+        number: Issue or PR number.
+        comment: Post a comment on the issue or PR.
+        title: Update the title.
+        body: Update the body or description.
+        state: Set state to open or closed.
+        labels: List of label names to add.
+
+    Returns:
+        A string summarizing all actions taken.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        issue = repo.get_issue(number=number)
+        actions: list[str] = []
+
+        if comment:
+            c = issue.create_comment(body=comment)
+            actions.append(f"Commented: {c.html_url}")
+
+        edit_kwargs: dict[str, Any] = {}
+        if title is not None:
+            edit_kwargs["title"] = title
+        if body is not None:
+            edit_kwargs["body"] = body
+        if state is not None:
+            edit_kwargs["state"] = state
+        if edit_kwargs:
+            issue.edit(**edit_kwargs)
+            actions.append(f"Updated: {', '.join(edit_kwargs.keys())}")
+
+        if labels:
+            issue.add_to_labels(*labels)
+            actions.append(f"Labels added: {labels}")
+
+        return (
+            f"#{number}: " + "; ".join(actions) if actions else f"#{number}: no changes"
+        )
+    except Exception as e:
+        return f"Error updating issue/PR: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Pulls API (PR-specific extensions)
+# ---------------------------------------------------------------------------
 
 
 def open_pr(
@@ -423,108 +470,18 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
         return f"Error merging PR: {e}"
 
 
-def create_branch_commit(
-    ctx: Context,
-    branch_name: str,
-    file_path: str,
-    file_content: str,
-    base_branch: str | None = None,
-) -> str:
-    """Create a new branch (from base or default) and add or update a file.
-
-    Args:
-        branch_name: New branch name.
-        file_path: File path to create or update.
-        file_content: File content.
-        base_branch: Base branch (defaults to repo default).
-
-    Returns:
-        A string describing the result.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        base = base_branch or repo.default_branch
-        ref = f"refs/heads/{branch_name}"
-        created = False
-        try:
-            repo.get_branch(branch_name)
-        except Exception:
-            sb = repo.get_branch(base)
-            repo.create_git_ref(ref=ref, sha=sb.commit.sha)
-            created = True
-
-        try:
-            repo.create_file(
-                file_path,
-                f"Add {file_path} via agent",
-                file_content,
-                branch=branch_name,
-            )
-        except Exception:
-            existing = repo.get_contents(file_path, ref=branch_name)
-            repo.update_file(
-                file_path,
-                f"Update {file_path} via agent",
-                file_content,
-                existing.sha,
-                branch=branch_name,
-            )
-        return f"Branch {branch_name} prepared (created={created})"
-    except Exception as e:
-        return f"Error creating branch/commit: {e}"
-
-
-def get_pr_diff(ctx: Context, pr_number: int) -> str:
-    """Fetch the file diffs and changed files in a pull request.
-
-    Args:
-        pr_number: Pull request number.
-
-    Returns:
-        A string containing the diff summary, capped to stay within 15k tokens.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-        files = pr.get_files()
-        diff_summary = []
-        for f in files:
-            patch = f.patch or "No patch available (binary, renamed, or empty change)."
-            if len(patch) > MAX_FILE_PATCH_CHARS:
-                omitted = len(patch) - MAX_FILE_PATCH_CHARS
-                patch = (
-                    patch[:MAX_FILE_PATCH_CHARS]
-                    + f"\n... [patch truncated: {omitted} chars omitted]"
-                )
-            diff_summary.append(
-                f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
-            )
-        full_diff = "\n".join(diff_summary) if diff_summary else "No files changed."
-        return _truncate_text_to_token_limit(
-            full_diff, max_tokens=MAX_DIFF_TOKENS, label="PR Diff"
-        )
-    except Exception as e:
-        return f"Error fetching PR diff: {e}"
-
-
-def update_pr_description(
+def review(
     ctx: Context,
     pr_number: int,
-    body: str | None = None,
-    title: str | None = None,
-    ready_for_review: bool | None = None,
+    body: str,
+    event: str = "COMMENT",
 ) -> str:
-    """Update a pull request's description, title, or mark it as ready for review.
+    """Submit a formal review on a pull request.
 
     Args:
         pr_number: Pull request number.
-        body: New pull request description (Markdown).
-        title: Optional new pull request title.
-        ready_for_review: Set to true to transition draft PRs to ready-for-review.
+        body: Review body (Markdown).
+        event: Review event type. One of APPROVE, COMMENT, REQUEST_CHANGES.
 
     Returns:
         A string describing the result.
@@ -534,38 +491,11 @@ def update_pr_description(
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
-        edit_kwargs: dict[str, Any] = {}
-        if body is not None:
-            edit_kwargs["body"] = body
-        if title is not None:
-            edit_kwargs["title"] = title
-        if edit_kwargs:
-            pr.edit(**edit_kwargs)
-        if ready_for_review:
-            pr.add_to_labels("ready for review")
-        return f"Updated PR #{pr.number}"
+        rv = pr.create_review(body=body, event=event)
+        detail = getattr(rv, "html_url", str(rv))
+        return f"Submitted review: {detail}"
     except Exception as e:
-        return f"Error updating PR description: {e}"
-
-
-def create_issue(ctx: Context, title: str, body: str = "") -> str:
-    """Create a new issue in the repository.
-
-    Args:
-        title: Issue title.
-        body: Issue body (Markdown).
-
-    Returns:
-        A string describing the result.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        issue = repo.create_issue(title=title, body=body)
-        return f"Created issue #{issue.number} {issue.html_url}"
-    except Exception as e:
-        return f"Error creating issue: {e}"
+        return f"Error submitting review: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -577,34 +507,39 @@ _PR_TEMPLATE = _load_pr_template()
 
 SYSTEM_INSTRUCTION = f"""You are the planner for a GitHub App agent. Your role is to decide which tool(s) to call based on the incoming webhook event.
 
+Available tools (7 API-aligned primitives):
+  Files API:  read_file, write_file
+  Issues API: get_issue, update_issue
+  Pulls API:  open_pr, merge_pr, review
+
 Rules:
 1. Only call tools from the provided set. Do NOT invent tools or parameters.
-2. When a real user comments on an issue or pull request, you MUST respond. The user is engaging with the agent — treat this as a conversation and reply appropriately.
+2. When a real user comments on an issue or pull request, you MUST respond. Use update_issue(number, comment=...) to reply.
 3. Keep arguments concise and correct.
-4. For PR review events, prefer submit_review over add_review_comment when a formal review is appropriate.
-5. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally.
-6. If no action is needed, respond in text explaining why.
+4. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally.
+5. If no action is needed, respond in text explaining why.
 
 Trigger words and automatic actions:
-- `/create` in a PR body (pull_request.opened): First call get_pr_diff to understand the code changes, then use the PR_TEMPLATE to structure a descriptive PR body with concrete technical details. Include the actual test results after running them. Call update_pr_description with the filled template. After generating the description, also perform the automatic review (see below).
-- `/review` or `/analyze` in issue comments (issue_comment.created): Call add_comment to acknowledge the review request and provide feedback.
+- `/create` in a PR body (pull_request.opened): First call get_issue(number, include_diff=True) to fetch code changes, then use the PR_TEMPLATE to structure a descriptive PR body. Call update_issue(number, body=...) with the filled template. Then perform the automatic review (see below).
+- `/review` or `/analyze` in issue comments: Call update_issue(number, comment=...) to acknowledge, then provide feedback.
+- `/resolve` or "resolve conflicts" in PR comments: Call get_issue(number) to check mergeability. If mergeable is False, call read_file(path, ref=head_branch) and read_file(path, ref=base_branch) for each conflicting file, merge the changes, then call write_file(branch=head_branch, path, content, message) to push the resolution. Confirm with update_issue(number, comment=...).
 - `@hannibal-hub-agents` or `@hannibal` mentions: Respond as above.
 
 Automatic PR review (pull_request.opened):
-When a pull_request.opened event is received, you MUST always perform a code review, regardless of whether `/create` is in the body. Follow these steps in order:
-1. Call add_comment on the PR number with a friendly message telling the author you are reviewing their PR (e.g., "Hey there! I'm reviewing this PR now, hang tight!").
-2. Call get_pr_diff to fetch the full diff of all changed files.
-3. Carefully analyze the diff for: code quality, potential bugs, error handling gaps, style/convention issues, security concerns, and test coverage.
-4. Call submit_review with event="COMMENT" and a thorough, constructive review body. Structure the review with sections for Summary, Strengths, and Suggestions. Be specific — reference file names and line changes from the diff.
+When a pull_request.opened event is received, you MUST always perform a code review:
+1. Call update_issue(number, comment="Hey there! I'm reviewing this PR now, hang tight!") to acknowledge.
+2. Call get_issue(number, include_diff=True) to fetch the full diff.
+3. Analyze the diff for: code quality, potential bugs, error handling, style, security, and test coverage.
+4. Call review(pr_number, body=..., event="COMMENT") with a thorough, constructive review. Structure with Summary, Strengths, and Suggestions sections. Reference specific file names and changes.
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
 
 IMPORTANT: When `/create` is detected in a PR body, you MUST:
-1. Call get_pr_diff to understand what files were changed and their content
+1. Call get_issue(number, include_diff=True) to understand the code changes
 2. Analyze the actual code changes to write accurate What/Why/How sections
-3. Fill in the Test Results section with actual data (run tests yourself or note the results)
-4. Only then call update_pr_description with the complete, accurate description
+3. Fill in the Test Results section with actual data
+4. Call update_issue(number, body=...) with the complete, accurate description
 5. After the description is generated, proceed with the automatic PR review steps above
 """
 
@@ -665,18 +600,13 @@ class WebhookAgent:
             ),
             instruction=SYSTEM_INSTRUCTION,
             tools=[
-                add_comment,
-                add_label,
-                add_review_comment,
-                reply_to_review_comment,
-                submit_review,
-                assign_reviewers,
+                read_file,
+                write_file,
+                get_issue,
+                update_issue,
                 open_pr,
                 merge_pr,
-                create_branch_commit,
-                get_pr_diff,
-                update_pr_description,
-                create_issue,
+                review,
             ],
         )
 
@@ -708,18 +638,13 @@ class WebhookAgent:
             ),
             instruction=SYSTEM_INSTRUCTION,
             tools=[
-                add_comment,
-                add_label,
-                add_review_comment,
-                reply_to_review_comment,
-                submit_review,
-                assign_reviewers,
+                read_file,
+                write_file,
+                get_issue,
+                update_issue,
                 open_pr,
                 merge_pr,
-                create_branch_commit,
-                get_pr_diff,
-                update_pr_description,
-                create_issue,
+                review,
             ],
         )
 
