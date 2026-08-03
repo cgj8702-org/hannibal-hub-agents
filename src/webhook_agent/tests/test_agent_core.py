@@ -143,8 +143,8 @@ class TestAgentCoreRun:
 
 class TestActionResult:
     def test_create(self):
-        r = ActionResult(tool="add_comment", success=True, detail="commented")
-        assert r.tool == "add_comment"
+        r = ActionResult(tool="update_issue", success=True, detail="commented")
+        assert r.tool == "update_issue"
         assert r.success is True
         assert r.detail == "commented"
 
@@ -280,3 +280,284 @@ class TestTokenTruncation:
         text = msg.parts[0].text
         assert len(text) < 60000  # Truncated
         assert "token limit" in text
+
+
+# ---------------------------------------------------------------------------
+# Tests: Tool Registration (7 API-aligned primitives)
+# ---------------------------------------------------------------------------
+
+
+class TestToolRegistration:
+    def test_agent_has_exactly_7_tools(self):
+        """WebhookAgent should register exactly 7 API-aligned tool primitives."""
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        tool_names = [t.__name__ for t in agent._agent.tools]
+        assert len(tool_names) == 7
+
+    def test_agent_tools_are_api_aligned(self):
+        """Tool names should match the 7 API-aligned primitives."""
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        tool_names = sorted(t.__name__ for t in agent._agent.tools)
+        expected = sorted(
+            [
+                "read_file",
+                "write_file",
+                "get_issue",
+                "update_issue",
+                "open_pr",
+                "merge_pr",
+                "review",
+            ]
+        )
+        assert tool_names == expected
+
+    def test_no_removed_tools_present(self):
+        """Removed tools should not be registered."""
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        tool_names = {t.__name__ for t in agent._agent.tools}
+        removed = {
+            "add_comment",
+            "add_label",
+            "add_review_comment",
+            "reply_to_review_comment",
+            "submit_review",
+            "assign_reviewers",
+            "create_branch_commit",
+            "get_pr_diff",
+            "update_pr_description",
+            "create_issue",
+        }
+        assert tool_names.isdisjoint(removed), (
+            f"Found removed tools: {tool_names & removed}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: read_file tool
+# ---------------------------------------------------------------------------
+
+
+class TestReadFile:
+    def test_read_file_returns_content(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        mock_content = MagicMock()
+        mock_content.decoded_content = b"print('hello world')"
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.get_contents.return_value = mock_content
+
+        result = read_file(ctx, "src/main.py")
+        assert "hello world" in result
+        repo.get_contents.assert_called_once_with("src/main.py")
+
+    def test_read_file_with_ref(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        mock_content = MagicMock()
+        mock_content.decoded_content = b"v2 code"
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.get_contents.return_value = mock_content
+
+        result = read_file(ctx, "src/main.py", ref="feature-branch")
+        assert "v2 code" in result
+        repo.get_contents.assert_called_once_with("src/main.py", ref="feature-branch")
+
+    def test_read_file_directory_returns_error(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.get_contents.return_value = [MagicMock(), MagicMock()]
+
+        result = read_file(ctx, "src/")
+        assert "directory" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_issue tool
+# ---------------------------------------------------------------------------
+
+
+class TestGetIssue:
+    def test_get_issue_returns_pr_metadata(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import get_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        mock_issue.title = "Fix bug"
+        mock_issue.state = "open"
+        mock_issue.labels = []
+        repo.get_issue.return_value = mock_issue
+
+        mock_pr = MagicMock()
+        mock_pr.head.ref = "fix-branch"
+        mock_pr.base.ref = "main"
+        mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
+        mock_pr.changed_files = 2
+        mock_pr.additions = 10
+        mock_pr.deletions = 3
+        repo.get_pull.return_value = mock_pr
+
+        result = get_issue(ctx, 42)
+        assert "Fix bug" in result
+        assert "fix-branch" in result
+        assert "main" in result
+        assert "Mergeable: True" in result
+        assert "Pull Request" in result
+
+    def test_get_issue_with_diff(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import get_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        mock_issue.title = "Add feature"
+        mock_issue.state = "open"
+        mock_issue.labels = []
+        repo.get_issue.return_value = mock_issue
+
+        mock_pr = MagicMock()
+        mock_pr.head.ref = "feat"
+        mock_pr.base.ref = "main"
+        mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
+        mock_pr.changed_files = 1
+        mock_pr.additions = 5
+        mock_pr.deletions = 0
+
+        mock_file = MagicMock()
+        mock_file.filename = "src/app.py"
+        mock_file.status = "modified"
+        mock_file.patch = "+new line"
+        mock_pr.get_files.return_value = [mock_file]
+        repo.get_pull.return_value = mock_pr
+
+        result = get_issue(ctx, 1, include_diff=True)
+        assert "src/app.py" in result
+        assert "+new line" in result
+        assert "Diff:" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: update_issue tool
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateIssue:
+    def test_update_issue_posts_comment(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import update_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        mock_comment = MagicMock()
+        mock_comment.html_url = "https://github.com/owner/repo/issues/1#comment-123"
+        mock_issue.create_comment.return_value = mock_comment
+        repo.get_issue.return_value = mock_issue
+
+        result = update_issue(ctx, 1, comment="Hello!")
+        assert "Commented" in result
+        mock_issue.create_comment.assert_called_once_with(body="Hello!")
+
+    def test_update_issue_edits_title_and_body(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import update_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        repo.get_issue.return_value = mock_issue
+
+        result = update_issue(ctx, 1, title="New Title", body="New body")
+        assert "Updated" in result
+        mock_issue.edit.assert_called_once_with(title="New Title", body="New body")
+
+    def test_update_issue_adds_labels(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import update_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        repo.get_issue.return_value = mock_issue
+
+        result = update_issue(ctx, 1, labels=["bug", "urgent"])
+        assert "Labels added" in result
+        mock_issue.add_to_labels.assert_called_once_with("bug", "urgent")
+
+    def test_update_issue_multiple_actions(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import update_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        mock_comment = MagicMock()
+        mock_comment.html_url = "https://github.com/owner/repo/issues/1#comment-456"
+        mock_issue.create_comment.return_value = mock_comment
+        repo.get_issue.return_value = mock_issue
+
+        result = update_issue(
+            ctx, 1, comment="LGTM!", title="Updated", labels=["approved"]
+        )
+        assert "Commented" in result
+        assert "Updated" in result
+        assert "Labels added" in result
+
+    def test_update_issue_no_changes(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import update_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        repo.get_issue.return_value = mock_issue
+
+        result = update_issue(ctx, 1)
+        assert "no changes" in result
