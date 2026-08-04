@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from github import Github
@@ -24,6 +25,8 @@ from google.adk.agents.context import Context
 from google.adk.models import Gemini
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
@@ -499,29 +502,53 @@ def review(
 
 
 # ---------------------------------------------------------------------------
+# Utility & Sub-Agent Tools
+# ---------------------------------------------------------------------------
+
+
+def get_current_time(ctx: Context) -> dict[str, str]:
+    """Get the current UTC date and time in ISO 8601 format.
+
+    Returns:
+        A dictionary containing current_utc_time string.
+    """
+    return {"current_utc_time": datetime.now(timezone.utc).isoformat()}
+
+
+# Sub-agent for Google Search grounding without breaking AFC for root tools
+search_sub_agent = Agent(
+    name="search_agent",
+    model=os.environ.get("GEMMA_MODEL", "gemma-4-31b-it"),
+    instruction="You are a technical search specialist. Search the web for documentation, CVEs, syntax issues, and library details.",
+    tools=[google_search],
+)
+
+search_tool = AgentTool(search_sub_agent)
+
+
+# ---------------------------------------------------------------------------
 # System instruction for the agent
 # ---------------------------------------------------------------------------
 
 # Load the PR template once at module load time
 _PR_TEMPLATE = _load_pr_template()
 
-SYSTEM_INSTRUCTION = f"""You are an autonomous GitHub Webhook Agent. Your role is to analyze incoming GitHub webhook events and decide autonomously whether to call a tool or refrain from taking action.
+SYSTEM_INSTRUCTION = f"""You are a skilled autonomous GitHub Webhook Agent for the Hannibal Hub ecosystem.
 
-Available tools (7 API-aligned primitives):
+Your reasoning process follows 6 steps:
+
+1. **Understand Intent & Context**: Analyze the incoming event, user sender, PR/issue details, and conversation history.
+2. **Autonomous Action Decision**: Decide if an action is required. Call tools ONLY if a user commands (/create, /review, /resolve, /analyze), asks a question, or directly mentions @hannibal-hub-agents, or for PR opened reviews. If the event is routine metadata, respond in text explaining why no tool call is needed.
+3. **Validate Tool Parameters**: Verify pr_number, branch names, file_paths, and commit messages before calling tools. Use get_current_time if date/time calculations are needed.
+4. **Execute Primitives**: Call read_file, write_file, get_issue, update_issue, open_pr, merge_pr, review, get_current_time, or search_agent.
+5. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections.
+6. **Execution Summary**: Summarize completed actions clearly.
+
+Available tools:
   Files API:  read_file, write_file
   Issues API: get_issue, update_issue
   Pulls API:  open_pr, merge_pr, review
-
-AUTONOMOUS DECISION RULES:
-1. Carefully analyze the canonical event type, sender, and payload content.
-2. Call tools ONLY when an action or response is genuinely required:
-   - When a PR is opened with /create in the body: First call get_issue(number, include_diff=True) to fetch code changes, use the PR_TEMPLATE to structure a descriptive body, call update_issue(number, body=...) with the filled template, then perform an automatic code review via review(pr_number, body=...).
-   - When a PR is opened (without /create): Call get_issue(number, include_diff=True) and submit an automatic code review via review(pr_number, body=...).
-   - When a real user asks a question, requests a review (/review), asks to resolve conflicts (/resolve), or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
-3. Refrain from calling tools when no action is needed:
-   - If the event is informational, passive, a routine metadata change (e.g. label added, assigned, PR closed), or a simple comment without a command or mention, do NOT call any mutation tools.
-   - Respond in plain text explaining clearly why no tool call is required (e.g., "Event pull_request.labeled received for PR #34 — no action required.").
-4. The bot's GitHub login is 'hannibal-hub-agents[bot]'. Only this account is the agent itself. All other senders (including 'cgj8702-agents') are real users and should be responded to normally when they issue commands or request assistance.
+  Utilities:  get_current_time, search_agent (for web search & docs)
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
@@ -591,6 +618,8 @@ class WebhookAgent:
                 open_pr,
                 merge_pr,
                 review,
+                get_current_time,
+                search_tool,
             ],
         )
 
@@ -629,6 +658,8 @@ class WebhookAgent:
                 open_pr,
                 merge_pr,
                 review,
+                get_current_time,
+                search_tool,
             ],
         )
 

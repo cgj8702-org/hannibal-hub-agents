@@ -282,25 +282,31 @@ class TestTokenTruncation:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Tool Registration (7 API-aligned primitives)
+# Tests: Tool Registration (7 API-aligned primitives + utilities)
 # ---------------------------------------------------------------------------
 
 
 class TestToolRegistration:
-    def test_agent_has_exactly_7_tools(self):
-        """WebhookAgent should register exactly 7 API-aligned tool primitives."""
+    def test_agent_has_exactly_9_tools(self):
+        """WebhookAgent should register 7 API primitives + 2 utility tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
-        tool_names = [t.__name__ for t in agent._agent.tools]
-        assert len(tool_names) == 7
+        tool_names = [
+            getattr(t, "name", getattr(t, "__name__", str(t)))
+            for t in agent._agent.tools
+        ]
+        assert len(tool_names) == 9
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 7 API-aligned primitives."""
+        """Tool names should match the 7 API primitives + get_current_time + search_agent."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
-        tool_names = sorted(t.__name__ for t in agent._agent.tools)
+        tool_names = sorted(
+            getattr(t, "name", getattr(t, "__name__", str(t)))
+            for t in agent._agent.tools
+        )
         expected = sorted(
             [
                 "read_file",
@@ -310,6 +316,8 @@ class TestToolRegistration:
                 "open_pr",
                 "merge_pr",
                 "review",
+                "get_current_time",
+                "search_agent",
             ]
         )
         assert tool_names == expected
@@ -319,7 +327,10 @@ class TestToolRegistration:
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
-        tool_names = {t.__name__ for t in agent._agent.tools}
+        tool_names = {
+            getattr(t, "name", getattr(t, "__name__", str(t)))
+            for t in agent._agent.tools
+        }
         removed = {
             "add_comment",
             "add_label",
@@ -335,6 +346,24 @@ class TestToolRegistration:
         assert tool_names.isdisjoint(removed), (
             f"Found removed tools: {tool_names & removed}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_current_time tool
+# ---------------------------------------------------------------------------
+
+
+class TestGetCurrentTime:
+    def test_returns_iso_utc_timestamp(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import get_current_time
+
+        ctx = MagicMock()
+        res = get_current_time(ctx)
+        assert "current_utc_time" in res
+        assert "T" in res["current_utc_time"]
+        assert "+00:00" in res["current_utc_time"] or "Z" in res["current_utc_time"]
 
 
 # ---------------------------------------------------------------------------
