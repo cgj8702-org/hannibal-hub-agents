@@ -1043,6 +1043,9 @@ class WebhookAgent:
                     self._session_service.user_state.setdefault(
                         self._app_name, {}
                     ).setdefault(user_id, {})["sender"] = user_id
+
+                    # Execute the ADK runner with current model
+                    await _execute_agent()
                     return  # Success - exit the retry loop
 
                 except Exception as e:
