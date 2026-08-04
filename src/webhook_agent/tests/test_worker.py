@@ -157,8 +157,8 @@ class TestShouldProcessEvent:
     def test_deduplicate_processed_twice(self):
         ev = _make_normalized("pull_request", action="opened", delivery_id="dup-001")
         assert self.processor.should_process_event(ev) is True
-        # Simulate process_event adding the delivery_id to the set
-        self.processor._processed_deliveries.add("dup-001")
+        # Simulate process_event adding the delivery_id to the dict
+        self.processor._processed_deliveries["dup-001"] = None
         # Second call with same delivery should now be suppressed
         assert self.processor.should_process_event(ev) is False
 
@@ -371,3 +371,52 @@ class TestShouldProcessEvent:
 
             assert "readarray -t modified_files *.ipynb" in caplog.text
             assert "modified files" not in caplog.text
+
+
+class TestAddEyesReaction:
+    def test_adds_reaction_to_issue_comment(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _add_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = mock_issue.get_comment.return_value
+
+        payload = {
+            "canonical": "issue_comment.created",
+            "raw_payload": {
+                "issue": {"number": 42},
+                "comment": {"id": 101},
+            },
+        }
+
+        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+
+        mock_gh.get_repo.assert_called_once_with("owner/repo")
+        mock_repo.get_issue.assert_called_once_with(42)
+        mock_issue.get_comment.assert_called_once_with(101)
+        mock_comment.create_reaction.assert_called_once_with("eyes")
+
+    def test_adds_reaction_to_pr_review_comment(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _add_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = mock_repo.get_pull.return_value
+        mock_comment = mock_pr.get_review_comment.return_value
+
+        payload = {
+            "canonical": "pull_request_review_comment.created",
+            "raw_payload": {
+                "pull_request": {"number": 15},
+                "comment": {"id": 202},
+            },
+        }
+
+        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+
+        mock_repo.get_pull.assert_called_once_with(15)
+        mock_pr.get_review_comment.assert_called_once_with(202)
+        mock_comment.create_reaction.assert_called_once_with("eyes")

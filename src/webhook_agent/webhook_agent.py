@@ -134,7 +134,7 @@ def _truncate_text_to_token_limit(
         return (
             f"{current_text}\n\n"
             f"[⚠️ {label} truncated: reduced to {current_tokens} tokens "
-            f"(omitted {omitted_chars} characters) to stay under {max_tokens} token limit]"
+            f"(omitted {omitted_chars} characters) to stay within {max_tokens} token limit]"
         )
 
     # Step 2: Fallback character estimation if API is offline/unauthenticated
