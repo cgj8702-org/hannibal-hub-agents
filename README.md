@@ -17,6 +17,7 @@ flowchart TD
     
     Queue -->|"Trigger Pull"| Worker["Background Worker Task"]
     Worker -->|"App Authentication"| Creds["GitHub App JWT / Installation Token"]
+    Worker -->|"Instant 👀 Reaction (0-Token)"| GH_React["GitHub Comment Reaction"]
     Worker -->|"Load Context"| GH_API["GitHub REST API"]
     Worker -->|"Decide Actions"| Gemma["Gemma 4 Planner / Gemini API"]
     Worker -->|"Policy Verification"| Policy{"Mutations Allowed?"}
@@ -45,9 +46,14 @@ flowchart TD
 │   ├── publish_test_message.py    # Test webhook payload publisher
 │   └── ruff-all.sh          # Clinical linting & formatting validation script
 ├── src/
-│   └── webhook_agent/       # Core package
+│   ├── token_optimized_agent/ # Zero-Cost ADK Token Optimization Module
+│   │   ├── agent.py         # Task Mode sub-agents & stateless helper agent definitions
+│   │   ├── app.py           # App with EventsCompactionConfig & ContextCacheConfig
+│   │   ├── callbacks.py     # Tool response payload truncation & MessagePruningPlugin
+│   │   └── tools.py         # Off-context artifact storage & lookup tools
+│   └── webhook_agent/       # Core Webhook Orchestrator Package
 │       ├── worker.py        # Pub/Sub subscriber entry point and main polling loop
-│       ├── processor.py     # Canonical event routing, deduplication, & AgentCore delegation
+│       ├── processor.py     # Event routing, deduplication, 👀 reaction, & AgentCore delegation
 │       ├── agent_core.py    # ADK agent wrapper & execution entry point
 │       ├── webhook_agent.py # ADK-powered WebhookAgent with tool execution & writeback policy
 │       ├── bot_identity.py  # Multi-signal bot identity detection for loop avoidance
@@ -58,11 +64,26 @@ flowchart TD
 │       ├── types.py         # Common dataclasses and ActionResult definitions
 │       ├── templates/       # Local prompt & code review templates
 │       └── tests/           # Pytest test suite & fixtures
+├── tests/
+│   └── unit/                # Unit tests for token optimization & callbacks
 ├── main.py                  # Distributed process manager entry point
-├── pyproject.toml           # Dependency specification (uv-compatible)
+├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 ├── README.md                # Repository documentation
 └── cloud_run_function.md    # Serverless webhook router implementation guide
 ```
+
+---
+
+## ⚡ High-Efficiency Token Optimization & Programmatic Features
+
+The project includes built-in strategies to maximize context efficiency and eliminate unnecessary LLM calls:
+
+1. **Programmatic 👀 Reaction**: Immediately adds an `eyes` reaction to user comments upon receiving webhooks in `processor.py` (0 token cost).
+2. **Context Compaction (`EventsCompactionConfig`)**: Automatically summarizes long multi-turn session event histories using Gemini AI Studio models.
+3. **Context Caching (`ContextCacheConfig`)**: Caches static system prompts, rules, and tool schemas across requests.
+4. **Sub-Agent Isolation (`include_contents="none"` & `mode="task"`)**: Isolates complex multi-turn sub-tasks using Task Mode with Pydantic output schemas, while keeping utility helpers stateless.
+5. **Tool Payload Truncation (`after_tool_callback`)**: Truncates tool output arrays (max 5 items), long strings (max 1,000 chars), and total serialized JSON (max 4,000 chars) to prevent prompt overflow.
+6. **Off-Context Data Storage (`InMemoryArtifactService`)**: Stores large datasets and documents off-context as artifacts rather than dumping raw text into model prompts.
 
 ---
 
@@ -76,30 +97,12 @@ This project uses `uv` for lightning-fast dependency management:
 uv sync
 ```
 
-### 2. Configuration & Secret Management
-Ensure the required environment variables are configured. You can load secrets directly from **GCP Secret Manager** into memory without keeping plain-text secrets or key files on disk:
+### 2. Running Tests
+Run the full test suite (including token optimization and worker tests):
 
 ```bash
-# Load secrets directly from GCP Secret Manager into memory
-source scripts/load_secrets.sh
+uv run pytest
 ```
-
-#### Infrastructure Config:
-- `PUBSUB_PROJECT`: Dedicated Google Cloud Project ID (e.g. `cgj8702-webhook-agent`).
-- `PUBSUB_TOPIC`: Full topic path (`projects/.../topics/webhooks`).
-- `PUBSUB_SUBSCRIPTION`: Full subscription path (`projects/.../subscriptions/webhooks-sub`).
-- `PUBSUB_DEAD_LETTER_TOPIC`: Dead-letter topic path for failed payloads.
-- `GOOGLE_APPLICATION_CREDENTIALS`: Path to Service Account JSON key for Pub/Sub & Cloud Logging.
-
-#### Agent & GitHub App Config:
-- `GITHUB_APP_ID`: Numeric App ID of your GitHub App.
-- `GITHUB_INSTALLATION_ID`: Target installation ID for token exchange.
-- `GITHUB_PRIVATE_KEY_PATH`: Path to the private key PEM file for your GitHub App (`/tmp/keys/github-app-private-key.pem`).
-- `GEMINI_API_KEY` / `GOOGLE_API_KEY`: Gemini API credentials.
-- `GEMMA_MODEL`: Primary model for planning calls (defaults to `gemma-4-31b-it`).
-- `GEMMA_MODEL_FALLBACK`: Fallback model on transient errors (defaults to `gemma-4-26b-a4b-it`).
-- `GEMMA_MODEL_MAX_RETRIES`: Maximum retry attempts on transient errors (defaults to `5`).
-- `ALLOW_AUTOMATED_MUTATIONS`: Set to `1` or `true` to allow active writebacks to GitHub repos.
 
 ---
 
@@ -130,24 +133,3 @@ journalctl --user -u hannibal-webhook-agent.service -f
 ```
 
 All pushes to `main` automatically trigger [`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml) to deploy code updates and restart `hannibal-webhook-agent.service` via IAP SSH!
-
-### Migrating Backlogged Pub/Sub Messages
-To migrate backlogged messages between Pub/Sub projects or subscriptions:
-
-```bash
-uv run python scripts/migrate_pubsub_messages.py \
-    --source-subscription projects/OLD_PROJECT/subscriptions/webhook-sub \
-    --target-topic projects/NEW_PROJECT/topics/webhooks
-```
-
----
-
-## 🔒 Security & Policy Gates
-
-1. **Edge Signature Verification**: All incoming webhooks are validated at the Cloud Run router using `WEBHOOK_SECRET` HMAC signatures. Unauthenticated payloads are rejected before reaching Pub/Sub.
-2. **Short-lived Token Rotation**: `github_credential_helper.py` handles automatic caching and rotation of installation access tokens (valid for max 1 hour).
-3. **Loop Avoidance**: `bot_identity.py` evaluates multi-signal bot identity checks (`sender.login`, `comment.user`, `performed_via_github_app`) to suppress self-referential bot actions.
-4. **Purity Gates & Writeback Policy**: `WebhookAgent` checks `ALLOW_AUTOMATED_MUTATIONS`. If not enabled, all mutations fall back to log-only operations, preventing unauthorized automated commits or comments.
-5. **Agentic Guardrails**:
-   - **Least Privilege Tooling**: The planner exposes only the minimum necessary tool schemas required for the event context.
-   - **Context-Aware Prompting**: Prompts are enriched with PR diffs, issue comments, and repo context.
