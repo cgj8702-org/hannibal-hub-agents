@@ -157,8 +157,8 @@ class TestShouldProcessEvent:
     def test_deduplicate_processed_twice(self):
         ev = _make_normalized("pull_request", action="opened", delivery_id="dup-001")
         assert self.processor.should_process_event(ev) is True
-        # Simulate process_event adding the delivery_id to the set
-        self.processor._processed_deliveries.add("dup-001")
+        # Simulate process_event adding the delivery_id to the dict
+        self.processor._processed_deliveries["dup-001"] = None
         # Second call with same delivery should now be suppressed
         assert self.processor.should_process_event(ev) is False
 

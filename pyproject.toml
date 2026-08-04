@@ -27,5 +27,11 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+filterwarnings = [
+    "ignore::DeprecationWarning:google.adk.*",
+    "ignore:.*BaseAgentConfig is deprecated.*:DeprecationWarning",
+    "ignore:.*EventsCompactionConfig.*:UserWarning",
+    "ignore:.*FeatureName.AGENT_CONFIG is enabled.*:UserWarning",
+]
 
