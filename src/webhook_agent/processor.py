@@ -49,6 +49,10 @@ class WebhookProcessor:
     * ``raw_payload`` – the original JSON body of the webhook.
     """
 
+    # Maximum number of delivery IDs to retain for duplicate suppression.
+    # Prevents unbounded memory growth in long-running processes.
+    _MAX_PROCESSED_DELIVERIES = 10_000
+
     def __init__(self) -> None:
         # Keep track of processed deliveries to prevent duplicate handling.
         self._processed_deliveries: set[str] = set()
@@ -149,6 +153,11 @@ class WebhookProcessor:
         delivery_id = payload.get("delivery_id", "unknown")
         if delivery_id != "unknown":
             self._processed_deliveries.add(delivery_id)
+            # Bound the set size to avoid unbounded memory growth.
+            if len(self._processed_deliveries) > self._MAX_PROCESSED_DELIVERIES:
+                self._processed_deliveries = set(
+                    list(self._processed_deliveries)[-self._MAX_PROCESSED_DELIVERIES :]
+                )
 
         logger.info("Event processed: %s", event_key)
 
