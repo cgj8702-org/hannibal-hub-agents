@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -158,6 +159,41 @@ def _truncate_text_to_token_limit(
 # Retry configuration for transient server errors
 _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 _FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-2.5-flash")
+
+
+class SlidingWindowPacer:
+    """Tracks token usage over a sliding 60-second window to prevent 429 quota errors on Gemma 4."""
+
+    def __init__(self, tpm_limit: int = 14000) -> None:
+        self.tpm_limit = tpm_limit
+        self.history: list[tuple[float, int]] = []
+
+    def _clean(self, now: float) -> None:
+        cutoff = now - 60.0
+        self.history = [item for item in self.history if item[0] > cutoff]
+
+    def current_tpm(self) -> int:
+        now = time.time()
+        self._clean(now)
+        return sum(tokens for _, tokens in self.history)
+
+    async def pace_or_check(self, tokens_needed: int) -> float:
+        """Calculate required delay to stay under tpm_limit, returns sleep seconds."""
+        now = time.time()
+        self._clean(now)
+        current = sum(tokens for _, tokens in self.history)
+        if current + tokens_needed > self.tpm_limit:
+            if self.history:
+                oldest_time = self.history[0][0]
+                return max(0.5, 60.0 - (now - oldest_time) + 0.5)
+        return 0.0
+
+    def record(self, token_count: int) -> None:
+        self.history.append((time.time(), token_count))
+
+
+# Global pacer instance for Gemma 4 TPM protection
+_GLOBAL_PACER = SlidingWindowPacer(tpm_limit=14000)
 
 
 def _is_transient_error(error: Exception) -> bool:
@@ -600,7 +636,7 @@ class WebhookAgent:
         self._memory_service = InMemoryMemoryService()
 
         # Track current model and fallback state
-        self._current_model_name = os.environ.get("GEMMA_MODEL", "gemini-2.5-flash")
+        self._current_model_name = os.environ.get("GEMMA_MODEL", "gemma-4-31b-it")
         self._fallback_triggered = False
 
         # Create the ADK agent with all tools
@@ -880,12 +916,20 @@ class WebhookAgent:
         results: list[ActionResult] = []
 
         async def _execute_agent():
-            """Execute the agent run. Returns True on success, raises on transient error."""
-            logger.debug(
-                "⚡ Executing ADK agent run (trace: %s, attempt=%d)",
-                trace_id[-4:],
-                1,  # First attempt, will be updated in retry loop
-            )
+            # Apply TPM pacing for Gemma 4 models to guarantee no 16k quota errors
+            msg_text = user_message.parts[0].text if user_message.parts else ""
+            est_tokens = len(msg_text) // 4 + 500
+            if "gemma" in self._current_model_name.lower():
+                wait_sec = await _GLOBAL_PACER.pace_or_check(est_tokens)
+                if wait_sec > 0:
+                    logger.info(
+                        "⏳ Pacing request for %.1fs to respect Gemma 4 16k TPM quota (trace: %s)",
+                        wait_sec,
+                        trace_id[-4:],
+                    )
+                    await asyncio.sleep(wait_sec)
+                _GLOBAL_PACER.record(est_tokens)
+
             async for event in self._runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
