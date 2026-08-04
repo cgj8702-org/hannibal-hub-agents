@@ -755,8 +755,18 @@ class WebhookAgent:
             comment = raw.get("comment", {})
             issue = raw.get("issue", {})
             comment_body = (comment.get("body") or "")[:500]
-            parts.append(f"Issue/PR Number: {issue.get('number', 'unknown')}")
+            is_pr = bool(issue.get("pull_request"))
+            pr_num = issue.get("number", "unknown")
+            parts.append(f"Issue/PR Number: {pr_num}")
+            parts.append(f"Thread Type: {'Pull Request' if is_pr else 'Issue'}")
             parts.append(f"Comment: {comment_body}")
+            if is_pr:
+                parts.append(
+                    f"Note: This comment is on Pull Request #{pr_num}. "
+                    f"To perform requested actions like code reviews (/review), descriptions (/create), "
+                    f"or conflict resolution (/resolve), first call get_issue({pr_num}, include_diff=True) "
+                    f"to inspect the PR metadata and code changes."
+                )
         elif canonical.startswith("pull_request."):
             pr = raw.get("pull_request", {})
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
