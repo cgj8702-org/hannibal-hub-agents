@@ -54,8 +54,8 @@ class WebhookProcessor:
     _MAX_PROCESSED_DELIVERIES = 10_000
 
     def __init__(self) -> None:
-        # Keep track of processed deliveries to prevent duplicate handling.
-        self._processed_deliveries: set[str] = set()
+        # Keep track of processed deliveries to prevent duplicate handling (FIFO capped dict).
+        self._processed_deliveries: dict[str, None] = {}
         # Load essential GitHub credentials from the environment.
         try:
             self.app_id = int(os.environ["GITHUB_APP_ID"])
@@ -152,12 +152,11 @@ class WebhookProcessor:
 
         delivery_id = payload.get("delivery_id", "unknown")
         if delivery_id != "unknown":
-            self._processed_deliveries.add(delivery_id)
-            # Bound the set size to avoid unbounded memory growth.
+            self._processed_deliveries[delivery_id] = None
+            # Bound the dict size to avoid unbounded memory growth (FIFO eviction).
             if len(self._processed_deliveries) > self._MAX_PROCESSED_DELIVERIES:
-                self._processed_deliveries = set(
-                    list(self._processed_deliveries)[-self._MAX_PROCESSED_DELIVERIES :]
-                )
+                oldest_delivery_id = next(iter(self._processed_deliveries))
+                del self._processed_deliveries[oldest_delivery_id]
 
         logger.info("Event processed: %s", event_key)
 
