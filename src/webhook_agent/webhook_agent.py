@@ -157,7 +157,7 @@ def _truncate_text_to_token_limit(
 
 # Retry configuration for transient server errors
 _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
-_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemma-4-26b-a4b-it")
+_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-2.5-flash")
 
 
 def _is_transient_error(error: Exception) -> bool:
