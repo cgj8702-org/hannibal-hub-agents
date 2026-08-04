@@ -37,6 +37,35 @@ from .github_credential_helper import (
 logger = logging.getLogger("webhook_processor")
 
 
+def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
+    """Programmatically react with eyes emoji to incoming comment events."""
+    try:
+        canonical = payload.get("canonical", "")
+        raw = payload.get("raw_payload", {})
+        repo = gh.get_repo(repo_name)
+
+        if canonical.startswith("issue_comment."):
+            issue_data = raw.get("issue", {})
+            comment_data = raw.get("comment", {})
+            issue_num = issue_data.get("number")
+            comment_id = comment_data.get("id")
+            if issue_num and comment_id:
+                issue = repo.get_issue(issue_num)
+                comment = issue.get_comment(comment_id)
+                comment.create_reaction("eyes")
+        elif canonical.startswith("pull_request_review_comment."):
+            pr_data = raw.get("pull_request", {})
+            comment_data = raw.get("comment", {})
+            pr_num = pr_data.get("number")
+            comment_id = comment_data.get("id")
+            if pr_num and comment_id:
+                pr = repo.get_pull(pr_num)
+                comment = pr.get_review_comment(comment_id)
+                comment.create_reaction("eyes")
+    except Exception as exc:
+        logger.warning("Failed to add eyes reaction to comment: %s", exc)
+
+
 class WebhookProcessor:
     """Handles inbound webhook events.
 
@@ -188,6 +217,11 @@ class WebhookProcessor:
             return
 
         logger.info("Agent starting execution for repo %s", repo_name)
+
+        dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
+        if not dry_run:
+            _add_eyes_reaction(gh, repo_name, payload)
+
         results = agent.run(payload, repo_name)
         if results:
             for r in results:
