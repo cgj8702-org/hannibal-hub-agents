@@ -44,10 +44,13 @@ gcloud config list
 Support both absolute ISO 8601 timestamps and relative offsets depending on diagnostic context.
 
 ### 1. Relative Time Queries (Real-Time Debugging)
-Use relative offsets when inspecting recent activity:
+Use relative offsets when inspecting recent activity via the `--freshness` flag. NOTE: relative offsets like `"-15m"` are NOT valid inside the timestamp filter expression — they cause `INVALID_ARGUMENT` errors. Use `--freshness` instead:
 ```bash
 # Query python logs from the past 15 minutes
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python" AND timestamp >= "-15m"' --project=cgj8702-webhook-agent --order=asc --limit=100
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=asc --freshness='15m' --limit=100
+
+# Query all python logs from the past hour, newest first
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=desc --freshness='1h' --limit=100
 ```
 
 ### 2. Absolute Bounded Window Queries (Historical Traceability)
@@ -114,3 +117,8 @@ gcloud logging read 'severity>=WARNING' --project=cgj8702-webhook-agent --limit=
 ### 3. Pagination & Unbounded Query Traps
 * **Gotcha:** Running `gcloud logging read 'timestamp >= ...'` with `--order=asc` and high limits over large date ranges can cause GCP API pagination to return earlier high-volume log streams instead of target entries.
 * **Remedy:** Combine `logName` filtering with bounded timestamp ranges (`timestamp >= ... AND timestamp <= ...`).
+
+### 4. Relative Timestamps Rejected in Filter Expression
+* **Gotcha:** `gcloud logging read` rejects relative offsets inside the filter expression — e.g. `timestamp >= "-15m"` fails with `INVALID_ARGUMENT: The value '-15m' is of incorrect type.`
+* **Impact:** Any skill/script that embeds relative offsets in the filter will error out before returning logs.
+* **Remedy:** Always pass relative time windows via the CLI `--freshness` flag, e.g. `--freshness='30m'` or `--freshness='1h'`. Filter expressions must use absolute ISO 8601 timestamps only (e.g. `timestamp >= "2026-08-04T00:30:00Z"`).
