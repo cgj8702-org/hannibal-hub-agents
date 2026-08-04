@@ -10,8 +10,8 @@ async def truncate_tool_response_callback(
     tool: BaseTool,
     args: dict[str, Any],
     tool_context: ToolContext,
-    tool_response: dict[str, Any],
-) -> dict[str, Any]:
+    tool_response: Any,
+) -> Any:
     """Truncate tool response payloads to prevent context overflow.
 
     Default limits:
@@ -37,6 +37,13 @@ async def truncate_tool_response_callback(
                 "summary": serialized[:max_total_payload] + "... [PAYLOAD TRUNCATED]",
                 "_payload_truncated": True,
             }
+        return tool_response
+
+    if isinstance(tool_response, list) and len(tool_response) > max_items:
+        return tool_response[:max_items]
+
+    if isinstance(tool_response, str) and len(tool_response) > max_char_len:
+        return tool_response[:max_char_len] + "... [TRUNCATED]"
 
     return tool_response
 
