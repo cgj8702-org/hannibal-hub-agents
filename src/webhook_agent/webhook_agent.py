@@ -69,9 +69,9 @@ BOT_LOGIN = "hannibal-hub-agents[bot]"
 # ---------------------------------------------------------------------------
 # Input Token Safety Limits (Capped to stay under 16k/min cumulative limit)
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 6000  # Cap user prompt payload per turn to 6k tokens
-MAX_DIFF_TOKENS = 4000  # Cap PR diff tool response to 4k tokens (~14k chars)
-MAX_FILE_PATCH_CHARS = 2000  # Cap per-file diff patch in get_pr_diff
+MAX_INPUT_TOKENS = 3500  # Cap user prompt payload per turn to 3.5k tokens
+MAX_DIFF_TOKENS = 2500  # Cap PR diff tool response to 2.5k tokens (~9k chars)
+MAX_FILE_PATCH_CHARS = 1500  # Cap per-file diff patch in get_issue
 
 
 def count_tokens_exact(
@@ -600,7 +600,7 @@ class WebhookAgent:
         self._memory_service = InMemoryMemoryService()
 
         # Track current model and fallback state
-        self._current_model_name = os.environ.get("GEMMA_MODEL", "gemma-4-31b-it")
+        self._current_model_name = os.environ.get("GEMMA_MODEL", "gemini-2.5-flash")
         self._fallback_triggered = False
 
         # Create the ADK agent with all tools
