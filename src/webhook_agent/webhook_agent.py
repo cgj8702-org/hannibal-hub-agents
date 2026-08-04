@@ -181,6 +181,50 @@ def get_model_chain() -> list[str]:
     return [m for m in chain if not (m in seen or seen.add(m))]
 
 
+def _select_model_for_event(event_data: dict[str, Any]) -> str:
+    """Select appropriate model based on event type and content commands.
+
+    Routes heavy workloads (pull_request.opened, slash commands, @mentions)
+    to the primary model (GEMMA_MODEL), and routine lifecycle events
+    (closed, reopened, labels, casual comments) to the lightweight model
+    (GEMMA_LIGHTWEIGHT_MODEL).
+    """
+    primary = os.environ.get("GEMMA_MODEL", "gemini-3.6-flash")
+    lightweight = os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", "gemini-3.5-flash-lite")
+
+    if os.environ.get("ENABLE_DYNAMIC_MODEL_ROUTING", "1") not in (
+        "1",
+        "true",
+        "True",
+    ):
+        return primary
+
+    canonical = event_data.get("canonical", "")
+    raw = event_data.get("raw_payload", {})
+
+    if canonical == "pull_request.opened":
+        return primary
+
+    if canonical.startswith("issue_comment.") or canonical.startswith(
+        "pull_request_review_comment."
+    ):
+        comment_body = ""
+        if isinstance(raw.get("comment"), dict):
+            comment_body = raw["comment"].get("body") or ""
+
+        commands = (
+            "/review",
+            "/create",
+            "/resolve",
+            "/help",
+            "@hannibal-hub-agents",
+        )
+        if any(cmd in comment_body for cmd in commands):
+            return primary
+
+    return lightweight
+
+
 _FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-3.5-flash-lite")
 
 
@@ -939,6 +983,18 @@ class WebhookAgent:
             "📝 Built user message for agent (length: %d chars)",
             len(user_message.parts[0].text) if user_message.parts else 0,
         )
+
+        # Select model tier dynamically for this event
+        selected_model = _select_model_for_event(event_data)
+        if self._current_model_name != selected_model:
+            logger.info(
+                "🔀 Dynamic Model Router: assigned model %s for event '%s' (trace: %s)",
+                selected_model,
+                canonical,
+                trace_id[-4:],
+            )
+            self._current_model_name = selected_model
+            self._agent.model = Gemini(model=selected_model)
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []

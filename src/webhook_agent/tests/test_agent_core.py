@@ -223,6 +223,56 @@ class TestWebhookAgentModelChain:
         assert agent._current_model_name != initial_model
 
 
+class TestDynamicModelRouting:
+    def test_pull_request_opened_routes_to_primary_model(self):
+        from webhook_agent.webhook_agent import _select_model_for_event
+
+        event_data = {"canonical": "pull_request.opened"}
+        assert _select_model_for_event(event_data) == "gemini-3.6-flash"
+
+    def test_slash_command_comment_routes_to_primary_model(self):
+        from webhook_agent.webhook_agent import _select_model_for_event
+
+        event_data = {
+            "canonical": "issue_comment.created",
+            "raw_payload": {"comment": {"body": "Please /review this PR"}},
+        }
+        assert _select_model_for_event(event_data) == "gemini-3.6-flash"
+
+    def test_bot_mention_comment_routes_to_primary_model(self):
+        from webhook_agent.webhook_agent import _select_model_for_event
+
+        event_data = {
+            "canonical": "pull_request_review_comment.created",
+            "raw_payload": {
+                "comment": {"body": "Hey @hannibal-hub-agents what do you think?"}
+            },
+        }
+        assert _select_model_for_event(event_data) == "gemini-3.6-flash"
+
+    def test_routine_comment_routes_to_lightweight_model(self):
+        from webhook_agent.webhook_agent import _select_model_for_event
+
+        event_data = {
+            "canonical": "issue_comment.created",
+            "raw_payload": {"comment": {"body": "Looks good to me!"}},
+        }
+        assert _select_model_for_event(event_data) == "gemini-3.5-flash-lite"
+
+    def test_pull_request_closed_routes_to_lightweight_model(self):
+        from webhook_agent.webhook_agent import _select_model_for_event
+
+        event_data = {"canonical": "pull_request.closed"}
+        assert _select_model_for_event(event_data) == "gemini-3.5-flash-lite"
+
+    def test_disabled_dynamic_routing_forces_primary_model(self, monkeypatch):
+        from webhook_agent.webhook_agent import _select_model_for_event
+
+        monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "0")
+        event_data = {"canonical": "pull_request.closed"}
+        assert _select_model_for_event(event_data) == "gemini-3.6-flash"
+
+
 # ---------------------------------------------------------------------------
 # Tests: Input Token Safety Truncation
 # ---------------------------------------------------------------------------
