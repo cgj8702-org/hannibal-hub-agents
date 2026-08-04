@@ -158,7 +158,30 @@ def _truncate_text_to_token_limit(
 
 # Retry configuration for transient server errors
 _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
-_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-2.5-flash")
+
+
+def get_model_chain() -> list[str]:
+    """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
+
+    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.6-flash)
+    Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
+    Tier 2 (2,000,000 TPM / 10k RPD): gemini-3.6-flash
+    Tier 3 (1,000,000 TPM / 10k RPD): gemini-2.5-flash
+    Tier 4 (16,000 TPM / 14.4k RPD): gemma-4-26b
+    """
+    primary = os.environ.get("GEMMA_MODEL", "gemini-3.6-flash")
+    chain = [
+        primary,
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-2.5-flash",
+        "gemma-4-26b",
+    ]
+    seen: set[str] = set()
+    return [m for m in chain if not (m in seen or seen.add(m))]
+
+
+_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-3.5-flash-lite")
 
 
 class SlidingWindowPacer:
@@ -635,8 +658,10 @@ class WebhookAgent:
         # Memory service — in-memory conversation memory
         self._memory_service = InMemoryMemoryService()
 
-        # Track current model and fallback state
-        self._current_model_name = os.environ.get("GEMMA_MODEL", "gemma-4-31b-it")
+        # Track current model chain (TPM Descending)
+        self._model_chain = get_model_chain()
+        self._chain_index = 0
+        self._current_model_name = self._model_chain[self._chain_index]
         self._fallback_triggered = False
 
         # Create the ADK agent with all tools
@@ -667,37 +692,26 @@ class WebhookAgent:
             memory_service=self._memory_service,
         )
 
+    def _advance_model_chain(self) -> str | None:
+        """Cascade to next model in TPM descending chain on rate limit or server error."""
+        if self._chain_index + 1 < len(self._model_chain):
+            self._chain_index += 1
+            next_model = self._model_chain[self._chain_index]
+            logger.warning(
+                "⚠️ Cascading model chain from %s -> %s (Tier %d/%d)",
+                self._current_model_name,
+                next_model,
+                self._chain_index + 1,
+                len(self._model_chain),
+            )
+            self._current_model_name = next_model
+            self._agent.model = Gemini(model=next_model)
+            return next_model
+        return None
+
     def _create_fallback_agent(self) -> None:
         """Switch to fallback model when primary model is unavailable."""
-        if self._fallback_triggered:
-            return
-
-        logger.info(
-            " Switching to fallback model: %s (primary was: %s)",
-            _FALLBACK_MODEL,
-            self._current_model_name,
-        )
-        self._fallback_triggered = True
-
-        # Create new agent with fallback model
-        self._agent = Agent(
-            name="webhook_agent",
-            model=Gemini(
-                model=_FALLBACK_MODEL,
-            ),
-            instruction=SYSTEM_INSTRUCTION,
-            tools=[
-                read_file,
-                write_file,
-                get_issue,
-                update_issue,
-                open_pr,
-                merge_pr,
-                review,
-                get_current_time,
-                search_tool,
-            ],
-        )
+        self._advance_model_chain()
 
         # Recreate runner with new agent
         self._runner = Runner(
@@ -1015,45 +1029,24 @@ class WebhookAgent:
                     self._session_service.user_state.setdefault(
                         self._app_name, {}
                     ).setdefault(user_id, {})["sender"] = user_id
-
-                    await _execute_agent()
                     return  # Success - exit the retry loop
 
-                except GenAIServerError as e:
+                except Exception as e:
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
-                        logger.debug(
-                            "Transient API error on attempt %d/%d (trace: %s): code=%s, error=%s",
-                            attempt + 1,
-                            _MAX_RETRIES,
-                            trace_id[-4:],
-                            getattr(e, "code", "unknown"),
-                            e,
-                        )
+                        self._advance_model_chain()
                         logger.warning(
-                            "Transient error on attempt %d/%d (trace: %s): %s",
+                            "Transient error on attempt %d/%d (trace: %s): %s. Active model is now: %s",
                             attempt + 1,
                             _MAX_RETRIES,
                             trace_id[-4:],
                             e,
+                            self._current_model_name,
                         )
-                        # Try fallback model after first transient error
-                        if attempt == 0 and not self._fallback_triggered:
-                            logger.debug("Triggering fallback model switch (attempt 1)")
-                            self._create_fallback_agent()
                         continue
                     logger.debug(
                         "Non-transient error or exhausted retries: raising exception (trace: %s)",
                         trace_id[-4:],
-                    )
-                    raise  # Non-transient error or exhausted retries
-
-                except Exception as e:
-                    # Non-server errors are not retried
-                    logger.debug(
-                        "Non-server error during agent run (trace: %s): type=%s",
-                        trace_id[-4:],
-                        type(e).__name__,
                     )
                     logger.exception(
                         "ADK agent run failed (trace: %s): %s",

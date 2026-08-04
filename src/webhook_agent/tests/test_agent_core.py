@@ -194,27 +194,33 @@ class TestIsTransientError:
 
 
 # ---------------------------------------------------------------------------
-# Tests: WebhookAgent fallback model
+# Tests: WebhookAgent Model Chain (TPM Descending)
 # ---------------------------------------------------------------------------
 
 
-class TestWebhookAgentFallback:
-    def test_fallback_model_environment_variable(self):
-        """WebhookAgent should use GEMMA_MODEL_FALLBACK env var for fallback."""
-        from webhook_agent.webhook_agent import _FALLBACK_MODEL
+class TestWebhookAgentModelChain:
+    def test_get_model_chain_orders_tpm_descending(self):
+        """get_model_chain should order models by TPM descending without duplicates."""
+        from webhook_agent.webhook_agent import get_model_chain
 
-        assert _FALLBACK_MODEL == "gemma-4-26b-a4b-it"
+        chain = get_model_chain()
+        assert len(chain) == len(set(chain))
+        assert "gemini-3.5-flash-lite" in chain
+        assert "gemini-3.6-flash" in chain
+        assert "gemma-4-26b" in chain
 
-    def test_fallback_triggered_only_once(self):
-        """Fallback model should only be triggered once per agent instance."""
+    def test_advance_model_chain_mutates_agent_model(self):
+        """_advance_model_chain should dynamically cascade to the next tier model."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
-        agent._create_fallback_agent()
-        # Second call should be a no-op
-        agent._create_fallback_agent()  # Should not raise or create duplicate
+        initial_model = agent._current_model_name
 
-        assert agent._fallback_triggered is True
+        next_model = agent._advance_model_chain()
+        assert next_model is not None
+        assert agent._current_model_name == next_model
+        assert agent._agent.model.model == next_model
+        assert agent._current_model_name != initial_model
 
 
 # ---------------------------------------------------------------------------
