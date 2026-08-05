@@ -1,6 +1,6 @@
 # Dynamic Model Router Improvement Plan
 
-> Comparing `hannibal-hub-agents` event-type-based model routing vs `adk-samples` patterns
+> Comparing `hannibal-hub-agents` event-type-based model routing vs `adk-samples` patterns and proposing a Hybrid Model Routing Architecture.
 
 ---
 
@@ -21,12 +21,12 @@ In a webhook-driven agent framework handling multi-turn GitHub issue/PR sessions
 
 Therefore, **model routing in `hannibal-hub-agents` must remain strictly stateless and evaluated on a per-event/per-turn basis.**
 
-### 🎯 Proposed Improvement
+### 💡 The Hybrid Model Routing Approach
 
-By combining our event-type classification logic with LHA's `before_model_callback` and `DispatchingLlm` wrapper—while keeping session state stateless regarding model selection—we achieve:
-1. **Stateless, Per-Event Default Routing**: Dynamic tier selection based on webhook payload payload signals without session state bleed.
-2. **Clean Abstraction (`DispatchingLlm`)**: Eliminates dangerous runtime hot-swapping of `agent.model`.
-3. **Resilient Rate Limiting & Fallbacks**: Integrates seamlessly with our existing TPM sliding window and fallback cascades.
+To combine the strengths of both approaches, we propose a **Hybrid Model Routing Architecture**:
+1. **Layer 1: Fast Webhook Payload Heuristics**: Immediate pre-classification based on event payload type, action, slash commands (`/review`, `/create`, `/resolve`), and `@mentions`.
+2. **Layer 2: ADK `before_model_callback` Context Evaluator**: Per-turn inspection of prompt token size, conversation history depth, and explicit inline command overrides (e.g. `model=pro` or `/review --tier=heavy`).
+3. **DispatchingLLM Wrapper Execution**: Seamless routing to model backends without mutating `agent.model` or polluting persistent session state.
 
 ---
 
@@ -36,9 +36,10 @@ By combining our event-type classification logic with LHA's `before_model_callba
 2. [adk-samples Reference Implementations](#2-adk-samples-reference-implementations)
 3. [Side-by-Side Comparison](#3-side-by-side-comparison)
 4. [Issues in Current Implementation](#4-issues-in-current-implementation)
-5. [Improvement Plan](#5-improvement-plan)
-6. [Migration Strategy](#6-migration-strategy)
-7. [Risk Assessment](#7-risk-assessment)
+5. [The Hybrid Model Routing Architecture](#5-the-hybrid-model-routing-architecture)
+6. [Improvement Plan & Implementation Details](#6-improvement-plan--implementation-details)
+7. [Migration Strategy](#7-migration-strategy)
+8. [Risk Assessment](#8-risk-assessment)
 
 ---
 
@@ -116,22 +117,6 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
     return lightweight
 ```
 
-### Call Site
-
-```python
-# Select model tier dynamically for this event
-selected_model = _select_model_for_event(event_data)
-if self._current_model_name != selected_model:
-    logger.info(
-        "🔀 Dynamic Model Router: assigned model %s for event '%s' (trace: %s)",
-        selected_model,
-        canonical,
-        trace_id[-4:],
-    )
-    self._current_model_name = selected_model
-    self._agent.model = Gemini(model=selected_model)  # Hot-swap
-```
-
 ### Event Classification Summary
 
 | Event Type | Classification | Model Tier | Rationale |
@@ -155,69 +140,117 @@ The LHA pattern introduces dynamic model routing using two primary components:
 1. **`before_model_callback` / `select_model_callback`**: Callback invoked prior to LLM execution to evaluate which model to invoke.
 2. **`DispatchingLlm` Wrapper**: A wrapper class implementing the model interface that routes requests to underlying model backends without mutating the agent object or recreating the runner.
 
-In LHA, `session.state["selected_model"]` is used to persist model overrides across turns. **However, as noted in our architectural decision, persistent session state overrides are ill-suited for GitHub event webhooks where event complexity fluctuates between heavy commands and routine updates within the same conversation session.**
+In LHA, `session.state["selected_model"]` is used to persist model overrides across turns. However, as noted in our architectural decision, persistent session state overrides are ill-suited for GitHub event webhooks where event complexity fluctuates between heavy commands and routine updates within the same conversation session.
 
 ---
 
 ## 3. Side-by-Side Comparison
 
-| Architectural Feature | `hannibal-hub-agents` Current | `adk-samples` (LHA) | Proposed Refined Architecture |
+| Architectural Feature | `hannibal-hub-agents` Current | `adk-samples` (LHA) | Proposed Hybrid Architecture |
 |-----------------------|--------------------------------|---------------------|-------------------------------|
-| **Routing Strategy** | Event-type payload classification | Per-turn callback (`select_model_callback`) | **Stateless Per-Event Callback** |
+| **Routing Strategy** | Event-type payload classification | Per-turn callback (`select_model_callback`) | **Hybrid Payload Heuristics + Per-Turn Context Callback** |
 | **State Persistence** | Stateless | Persistent (`session.state["selected_model"]`) | **Strictly Stateless (No Session State Overrides)** |
-| **Model Swapping** | Direct mutation (`agent.model = ...`) | `DispatchingLlm` multi-backend wrapper | **`DispatchingLlm` Wrapper** |
-| **Error Fallbacks** | Cascading TPM retry loop | Environment variable precedence chain | **Cascading TPM Retry Loop + Fallback Tier** |
-| **Concurrency Safety**| Vulnerable to race conditions | Thread-safe via wrapper dispatch | **Thread-safe & Purely Functional** |
+| **Model Swapping** | Mutates `agent.model` at runtime | `DispatchingLlm` wrapper | **`DispatchingLlm` Wrapper** |
+| **Context Awareness** | Static event payload rules | Session state flags | **Dynamic (Payload Rules + Token Size/Complexity Check)** |
+| **Explicit Overrides** | None | Session state string | **Per-turn command flags (e.g., `/review --model=heavy`)** |
+| **Fallback Cascade** | Descending tier retry loop | Single retry | **TPM Pacing + Fallback Cascade via Dispatcher** |
 
 ---
 
 ## 4. Issues in Current Implementation
 
-1. **Mutable Agent Hot-Swapping**:
-   Mutating `self._agent.model = Gemini(model=selected_model)` directly updates global/shared agent state. If events are processed concurrently or in multi-threaded contexts, mutating `self._agent.model` introduces race conditions.
-
-2. **Coupling Runner to Agent Instance**:
-   Changing models via object attribute replacement requires manual state tracking (`self._current_model_name`) and bypasses ADK's standard callback lifecycle.
-
-3. **Potential Session State Contamination (if persistent state were introduced)**:
-   If model selection were stored in `session.state`, a user running `/review` on PR #10 would cause subsequent `label` or `closed` events on PR #10 to incorrectly run on the heavy model tier.
+1. **Dangerous Mutability (`agent.model` Hot-Swapping)**: Mutating `self._agent.model` directly before runner execution is brittle and non-thread-safe.
+2. **Context Blindness**: Payload-only classification misses situations where a "routine" comment contains a massive code snippet or complex query requiring a primary tier model.
+3. **Rigid Tier Allocation**: Lacks inline mechanisms for users or admins to specify tier overrides per turn.
 
 ---
 
-## 5. Improvement Plan
+## 5. The Hybrid Model Routing Architecture
 
-### Phase 1: Implement `DispatchingLlm` Pattern
-Replace direct `self._agent.model` assignment with a `DispatchingLlm` class that wraps model backends:
-- Maintain pre-initialized instances for `GEMMA_MODEL` and `GEMMA_LIGHTWEIGHT_MODEL`.
-- Dispatch model invocations based on context without modifying the `Agent` instance.
+The Hybrid Router integrates fast payload heuristics with ADK's `before_model_callback` evaluation and `DispatchingLlm` execution wrapper.
 
-### Phase 2: Refactor to Stateless `before_model_callback`
-- Implement `before_model_callback` in ADK to select the active model key on a per-turn basis.
-- Pass event metadata (event type, comment commands) via request execution context rather than mutating `session.state`.
-- Explicitly avoid writing or reading `session.state["selected_model"]`.
+```
+           GitHub Webhook Event
+                    │
+                    ▼
+    [ Layer 1: Fast Payload Heuristics ]
+    (Inspect canonical event name & command triggers)
+                    │
+                    ▼
+     [ Initial Tier Assignment Strategy ]
+                    │
+                    ▼
+   [ Layer 2: ADK before_model_callback ]
+   ├─ Check explicit per-turn overrides (e.g. /review model=pro)
+   ├─ Inspect context token size & thread depth
+   └─ Promote lightweight -> primary if context > threshold
+                    │
+                    ▼
+      [ Layer 3: DispatchingLlm Wrapper ]
+    ├─ Routes request to target Gemini model backend
+    └─ Integrates TPM sliding window & fallback cascade
+```
 
-### Phase 3: Unified TPM Pacing & Fallback Cascade
-- Standardize error handling (HTTP 429/503) so that if a primary model is rate-limited, the `DispatchingLlm` falls back to the lightweight tier or fallback chain cleanly within the same request lifecycle.
-
-### Phase 4: Model Capability Metadata Integration
-- Define model metadata (max tokens, tool schema formatting requirements, cost factor) in a central registry to ensure dynamic switching respects model capability boundaries.
+### Key Capabilities of the Hybrid Router:
+1. **Payload-First Fast Path**: Webhook metadata quickly determines the base tier (e.g., `pull_request.opened` -> Primary; `label.added` -> Lightweight) without processing full history first.
+2. **Context & Token Size Adjustment**: The `before_model_callback` checks prompt length. If a casual comment includes a 5,000 token log dump, it automatically promotes the turn to the primary model tier.
+3. **Explicit Per-Turn Overrides**: Slash commands can include explicit tier hints (e.g. `/review --tier=heavy` or `/create --fast`) which override heuristic defaults for that single execution without polluting session state.
+4. **Clean Abstraction**: `DispatchingLlm` handles backend routing cleanly without mutating `agent.model`.
 
 ---
 
-## 6. Migration Strategy
+## 6. Improvement Plan & Implementation Details
 
-1. **Step 1 (Infrastructure)**: Introduce `DispatchingLlm` in `src/webhook_agent/agent_core.py`.
-2. **Step 2 (Callback Routing)**: Migrate `_select_model_for_event()` into a stateless context provider for `before_model_callback`.
-3. **Step 3 (Cleanup)**: Remove `self._agent.model = Gemini(...)` hot-swap calls in `webhook_agent.py`.
-4. **Step 4 (Validation)**: Update `test_agent_core.py` to verify that multi-turn sessions with mixed event types (e.g., `/review` followed by casual comment) evaluate models independently without state bleed.
+### 6.1 `DispatchingLlm` Interface
+
+```python
+class DispatchingLlm(BaseLlm):
+    """LLM Wrapper routing per-call to lightweight or primary models without mutating agent.model."""
+
+    def __init__(self, primary_model: BaseLlm, lightweight_model: BaseLlm):
+        self.primary_model = primary_model
+        self.lightweight_model = lightweight_model
+
+    async def generate_response(self, prompt: str, session: Session, **kwargs) -> LlmResponse:
+        model_tier = session.temp_state.get("turn_model_tier", "primary")
+        selected = self.primary_model if model_tier == "primary" else self.lightweight_model
+        return await selected.generate_response(prompt, session, **kwargs)
+```
+
+### 6.2 `before_model_callback` Hybrid Router
+
+```python
+async def hybrid_model_router_callback(callback_context: CallbackContext) -> None:
+    """Per-turn callback evaluating payload heuristics, token length, and command overrides."""
+    event_data = callback_context.session.temp_state.get("event_data", {})
+    
+    # Step 1: Base Payload Heuristics
+    tier = _select_model_for_event(event_data)
+
+    # Step 2: Context Token Length Check (Promote if prompt > 4000 tokens)
+    prompt_tokens = estimate_tokens(callback_context.prompt)
+    if tier == "lightweight" and prompt_tokens > 4000:
+        tier = "primary"
+
+    # Step 3: Temporary Per-Turn Assignment (Stateless)
+    callback_context.session.temp_state["turn_model_tier"] = tier
+```
 
 ---
 
-## 7. Risk Assessment
+## 7. Migration Strategy
 
-| Risk | Likelihood | Impact | Mitigation Strategy |
-|------|------------|--------|---------------------|
-| **Session State Bleed** | High (if state used) | Medium | **Eliminated by strictly keeping routing stateless and omitting `session.state["selected_model"]`.** |
-| **Race Conditions in Multi-Threading** | Low | High | Resolved by adopting thread-safe `DispatchingLlm` wrapper. |
-| **Rate Limit Cascades** | Medium | Low | Preserved existing sliding window TPM rate-limiter and fallback cascade. |
-| **Callback Overhead** | Low | Low | Evaluation involves fast in-memory payload inspection. |
+1. **Phase 1 (Preparation)**: Create `DispatchingLlm` and unit tests in `webhook_agent.py`.
+2. **Phase 2 (Hybrid Callback Integration)**: Implement `hybrid_model_router_callback` combining payload heuristics and prompt token checks.
+3. **Phase 3 (Deprecate Hot-Swapping)**: Replace `self._agent.model = Gemini(...)` with `DispatchingLlm`.
+4. **Phase 4 (Validation)**: Run unit and integration tests verifying stateless per-event routing under concurrent multi-turn workloads.
+
+---
+
+## 8. Risk Assessment
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Callback latency overhead | Minimal (<5ms) | Pre-compute payload heuristics; keep token estimation lightweight |
+| Fallback loop complexity | Medium | Retain existing TPM descending cascade logic inside `DispatchingLlm` |
+| Session state bleed | High | Strictly store turn-level tier decisions in transient per-turn state (`temp_state`), never in persistent `session.state` |
