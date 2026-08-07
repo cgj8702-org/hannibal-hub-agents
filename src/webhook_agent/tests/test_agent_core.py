@@ -343,8 +343,8 @@ class TestTokenTruncation:
 
 
 class TestToolRegistration:
-    def test_agent_has_exactly_9_tools(self):
-        """WebhookAgent should register 7 API primitives + 2 utility tools."""
+    def test_agent_has_exactly_11_tools(self):
+        """WebhookAgent should register 9 API primitives + 2 utility tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -352,10 +352,10 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._agent.tools
         ]
-        assert len(tool_names) == 9
+        assert len(tool_names) == 11
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 7 API primitives + get_current_time + search_agent."""
+        """Tool names should match the 9 API primitives + get_current_time + search_agent."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -368,7 +368,9 @@ class TestToolRegistration:
                 "read_file",
                 "write_file",
                 "get_issue",
+                "get_commit_diff",
                 "update_issue",
+                "add_comment",
                 "open_pr",
                 "merge_pr",
                 "review",
@@ -388,7 +390,6 @@ class TestToolRegistration:
             for t in agent._agent.tools
         }
         removed = {
-            "add_comment",
             "add_label",
             "add_review_comment",
             "reply_to_review_comment",
@@ -557,11 +558,11 @@ class TestGetIssue:
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateIssue:
-    def test_update_issue_posts_comment(self):
+class TestAddComment:
+    def test_add_comment_posts_comment(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import update_issue
+        from webhook_agent.webhook_agent import add_comment
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -573,10 +574,12 @@ class TestUpdateIssue:
         mock_issue.create_comment.return_value = mock_comment
         repo.get_issue.return_value = mock_issue
 
-        result = update_issue(ctx, 1, comment="Hello!")
+        result = add_comment(ctx, 1, body="Hello!")
         assert "Commented" in result
         mock_issue.create_comment.assert_called_once_with(body="Hello!")
 
+
+class TestUpdateIssue:
     def test_update_issue_edits_title_and_body(self):
         from unittest.mock import MagicMock
 
@@ -619,15 +622,9 @@ class TestUpdateIssue:
 
         repo = ctx.state["gh_client"].get_repo.return_value
         mock_issue = MagicMock()
-        mock_comment = MagicMock()
-        mock_comment.html_url = "https://github.com/owner/repo/issues/1#comment-456"
-        mock_issue.create_comment.return_value = mock_comment
         repo.get_issue.return_value = mock_issue
 
-        result = update_issue(
-            ctx, 1, comment="LGTM!", title="Updated", labels=["approved"]
-        )
-        assert "Commented" in result
+        result = update_issue(ctx, 1, title="Updated", labels=["approved"])
         assert "Updated" in result
         assert "Labels added" in result
 
