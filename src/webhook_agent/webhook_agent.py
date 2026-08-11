@@ -596,6 +596,34 @@ def open_pr(
         return f"Error opening PR: {e}"
 
 
+def update_branch_from_base(ctx: Context, pr_number: int) -> str:
+    """Update a pull request's head branch with the latest changes from its base branch.
+
+    Uses GitHub's native branch update API (equivalent to clicking 'Update branch').
+    Use this when a PR is out of date or has merge conflicts with the base branch.
+
+    Args:
+        pr_number: Pull request number.
+
+    Returns:
+        A string describing the update result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        updated = pr.update_branch()
+        if updated:
+            return f"Successfully updated PR #{pr_number} branch '{pr.head.ref}' with latest changes from '{pr.base.ref}'."
+        return f"PR #{pr_number} branch '{pr.head.ref}' is already up to date with '{pr.base.ref}'."
+    except Exception as e:
+        return (
+            f"Error updating PR #{pr_number} branch: {e}. "
+            f"If there are complex merge conflicts, notify the user that manual local rebase is required."
+        )
+
+
 def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     """Merge a pull request with safety checks.
 
@@ -854,22 +882,22 @@ Your reasoning process follows 7 steps:
    - **DUPLICATE SUPPRESSION RULE**: If you (hannibal-hub-agents[bot]) already submitted a formal review for the PR within the last 120 seconds or for the current head commit SHA, **DO NOT** submit another formal review!
    - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=...)` to post a formal code review.
    - **PR Synchronize (`pull_request.synchronize`)**: Call `get_commit_diff(before_sha, head_sha)` to review ONLY the newly pushed commits. Then invoke `review(pr_number, body=..., event="APPROVE")` if all prior feedback is resolved, or `event="REQUEST_CHANGES"` if new issues are found.
-   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using `_PR_TEMPLATE`, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=...)`.
-   - When responding to user comments like "I have addressed the feedback and pushed commit X": If the PR is already reviewed/approved, acknowledge with a plain comment via `add_comment(issue_number, body=...)` or a reaction, rather than invoking `review()`.
-   - When a user asks a question, requests conflict resolution (`/resolve`), or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
+   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using the PR template, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=..., event=...)`.
+   - When conflict resolution is requested (`/resolve`): Call `update_branch_from_base(pr_number)`. NEVER use `write_file` to attempt resolving git merge conflicts. If `update_branch_from_base` fails, inform the user that a local `git rebase` is required.
+   - When a user asks a question or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
    - If the event is routine metadata without a command or question, respond in plain text explaining why no tool call is needed.
 3. **Grounding Pre-Check**: Before claiming that code, teardown blocks, or unit tests are missing in a PR review:
    - You MUST call `read_file()` or `search_agent()` to inspect the target files first.
    - Never suggest creating a unit test file or adding cleanup logic without first verifying existing tests in tests/ or teardown blocks in the target module.
 4. **Validate Tool Parameters**: Verify pr_number, branch names, file_paths, and commit messages before calling tools. Use get_current_time if date/time calculations are needed.
-5. **Execute Primitives**: Call read_file, write_file, get_issue, get_commit_diff, update_issue, add_comment, open_pr, merge_pr, review, get_current_time, or search_agent.
+5. **Execute Primitives**: Call read_file, write_file, get_issue, get_commit_diff, update_issue, add_comment, open_pr, update_branch_from_base, merge_pr, review, get_current_time, or search_agent.
 6. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections. Use the code_review_template.md for review output.
 7. **Execution Summary**: Summarize completed actions clearly.
 
 Available tools:
   Files API:  read_file, write_file
   Issues API: get_issue, update_issue, add_comment
-  Pulls API:  get_commit_diff, open_pr, merge_pr, review
+  Pulls API:  get_commit_diff, open_pr, update_branch_from_base, merge_pr, review
   Utilities:  get_current_time, search_agent (for web search & docs)
 
 Dynamic PR Review Status Transitions:
@@ -995,6 +1023,7 @@ class WebhookAgent:
                 update_issue,
                 add_comment,
                 open_pr,
+                update_branch_from_base,
                 merge_pr,
                 review,
                 get_current_time,
