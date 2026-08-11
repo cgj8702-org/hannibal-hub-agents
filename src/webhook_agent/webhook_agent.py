@@ -85,8 +85,6 @@ BOT_LOGIN = "hannibal-hub-agents[bot]"
 # Input Token Safety Limits (Capped to stay under token budget)
 # ---------------------------------------------------------------------------
 MAX_INPUT_TOKENS = 3500  # Cap user prompt payload per turn to 3.5k tokens
-MAX_DIFF_TOKENS = 2500  # Cap PR diff tool response to 2.5k tokens (~9k chars)
-MAX_FILE_PATCH_CHARS = 1500  # Cap per-file diff patch in get_issue
 
 
 def count_tokens_exact(
@@ -315,9 +313,7 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
         if isinstance(content_file, list):
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
-        return _truncate_text_to_token_limit(
-            decoded, max_tokens=MAX_DIFF_TOKENS, label="File content"
-        )
+        return decoded
     except Exception as e:
         return f"Error reading file: {e}"
 
@@ -416,19 +412,10 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
                 diff_lines: list[str] = []
                 for f in files:
                     patch = f.patch or "No patch available (binary/renamed/empty)."
-                    if len(patch) > MAX_FILE_PATCH_CHARS:
-                        omitted = len(patch) - MAX_FILE_PATCH_CHARS
-                        patch = (
-                            patch[:MAX_FILE_PATCH_CHARS]
-                            + f"\n... [patch truncated: {omitted} chars omitted]"
-                        )
                     diff_lines.append(
                         f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
                     )
                 diff_text = "\n".join(diff_lines) if diff_lines else "No files changed."
-                diff_text = _truncate_text_to_token_limit(
-                    diff_text, max_tokens=MAX_DIFF_TOKENS, label="PR Diff"
-                )
                 parts.append(f"\nDiff:\n{diff_text}")
 
         else:
