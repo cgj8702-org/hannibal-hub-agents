@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -584,6 +585,89 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
         return f"Error merging PR: {e}"
 
 
+def _parse_scorecard_scores(body: str) -> list[int]:
+    """Extract numeric scores from the scorecard table in a review body.
+
+    Looks for the pattern '|  N  |' where N is 1-5 in the scorecard rows.
+    Returns a list of parsed integer scores, or empty list if none found.
+    """
+    import re
+
+    scores: list[int] = []
+    for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
+        score = int(match.group(1))
+        if 1 <= score <= 5:
+            scores.append(score)
+    return scores
+
+
+def _parse_confidence(body: str) -> int | None:
+    """Extract the confidence self-assessment score from a review body.
+
+    Looks for 'My Confidence:' followed by a number 1-5.
+    Returns the score or None if not found.
+    """
+    match = re.search(r"\*\*My Confidence:\*\*\s*(\d)", body)
+    if match:
+        val = int(match.group(1))
+        if 1 <= val <= 5:
+            return val
+    return None
+
+
+def _enforce_verdict(body: str, event: str) -> tuple[str, str]:
+    """Programmatically enforce verdict rules based on scorecard scores.
+
+    Parses the review body, extracts scores and confidence, and overrides
+    the LLM-chosen event if it violates the mechanical verdict rules.
+
+    Returns:
+        Tuple of (possibly_modified_body, enforced_event).
+    """
+    scores = _parse_scorecard_scores(body)
+    confidence = _parse_confidence(body)
+    original_event = event.upper()
+    enforced_event = original_event
+    override_reasons: list[str] = []
+
+    if scores:
+        min_score = min(scores)
+        avg_score = sum(scores) / len(scores)
+
+        if min_score <= 2 and original_event == "APPROVE":
+            enforced_event = "REQUEST_CHANGES"
+            override_reasons.append(f"scorecard has category scoring {min_score}/5")
+
+        if avg_score < 3.5 and original_event == "APPROVE":
+            enforced_event = "REQUEST_CHANGES"
+            override_reasons.append(
+                f"average score {avg_score:.1f} is below 3.5 threshold"
+            )
+
+    if confidence is not None and confidence <= 3 and original_event == "APPROVE":
+        enforced_event = "COMMENT"
+        override_reasons.append(
+            f"confidence level {confidence}/5 is too low to approve"
+        )
+
+    if override_reasons and enforced_event != original_event:
+        reasons_str = "; ".join(override_reasons)
+        body += (
+            f"\n\n---\n"
+            f"> **Verdict Override:** Agent requested `{original_event}` but "
+            f"was overridden to `{enforced_event}` by policy guardrail "
+            f"({reasons_str})."
+        )
+        logger.warning(
+            "Verdict override: %s -> %s (%s)",
+            original_event,
+            enforced_event,
+            reasons_str,
+        )
+
+    return body, enforced_event
+
+
 def review(
     ctx: Context,
     pr_number: int,
@@ -591,6 +675,10 @@ def review(
     event: str = "COMMENT",
 ) -> str:
     """Submit a formal review on a pull request.
+
+    The verdict is programmatically enforced based on scorecard scores
+    parsed from the review body. If the agent's chosen event violates
+    the verdict rules, it is overridden before submission.
 
     Args:
         pr_number: Pull request number.
@@ -600,6 +688,8 @@ def review(
     Returns:
         A string describing the result.
     """
+    body, event = _enforce_verdict(body, event)
+
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
     try:
@@ -607,7 +697,7 @@ def review(
         pr = repo.get_pull(pr_number)
         rv = pr.create_review(body=body, event=event)
         detail = getattr(rv, "html_url", str(rv))
-        return f"Submitted review: {detail}"
+        return f"Submitted review ({event}): {detail}"
     except Exception as e:
         return f"Error submitting review: {e}"
 
