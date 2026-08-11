@@ -696,7 +696,7 @@ def _parse_confidence(body: str) -> int | None:
 
 
 def _enforce_verdict(body: str, event: str) -> tuple[str, str]:
-    """Programmatically enforce verdict rules based on scorecard scores.
+    """Programmatically enforce verdict rules based on scorecard scores and safety checks.
 
     Parses the review body, extracts scores and confidence, and overrides
     the LLM-chosen event if it violates the mechanical verdict rules.
@@ -728,6 +728,17 @@ def _enforce_verdict(body: str, event: str) -> tuple[str, str]:
         enforced_event = "COMMENT"
         override_reasons.append(
             f"confidence level {confidence}/5 is too low to approve"
+        )
+
+    # Programmatic check for dropped platform markers in lockfiles
+    if (
+        "sys_platform ==" in body
+        and "dropped" in body.lower()
+        and original_event == "APPROVE"
+    ):
+        enforced_event = "REQUEST_CHANGES"
+        override_reasons.append(
+            "detected potential environment marker removal in lockfile diff"
         )
 
     if override_reasons and enforced_event != original_event:
@@ -925,6 +936,15 @@ Always scan for these patterns, which are frequently missed:
 - Resource leaks (unclosed files, connections, clients)
 - String formatting that breaks on Unicode or special characters
 - Missing error handling on network calls, file I/O, or database operations
+
+### Dependabot / Dependency PR Protocol (MANDATORY)
+
+When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with `dependabot/`):
+- Focus on **dependency security, version scope, and lockfile integrity**.
+- Do NOT perform a human architectural code review — evaluate version bumps and lockfile changes.
+- Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
+- Watch for **accidental environment marker deletions** (e.g., dropping `sys_platform == 'win32'`) or unexpected modifications to unrelated packages in the lockfile.
+- If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`.
 
 ### Code Review Template
 
