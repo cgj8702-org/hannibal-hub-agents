@@ -774,6 +774,30 @@ def review(
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+
+        # Supersede / dismiss prior bot reviews
+        bot_user = gh.get_user().login
+        existing_reviews = pr.get_reviews()
+        for prev_rv in existing_reviews:
+            if prev_rv.user and prev_rv.user.login == bot_user:
+                # Dismiss previous review if it is in an active state (CHANGES_REQUESTED or APPROVED)
+                if prev_rv.state in ("CHANGES_REQUESTED", "APPROVED"):
+                    try:
+                        prev_rv.dismiss(
+                            "Superseded by fresh code review on latest commit."
+                        )
+                        logger.info(
+                            "Dismissed prior bot review %s on PR #%d",
+                            prev_rv.id,
+                            pr_number,
+                        )
+                    except Exception as dismiss_err:
+                        logger.warning(
+                            "Could not dismiss prior bot review %s: %s",
+                            prev_rv.id,
+                            dismiss_err,
+                        )
+
         rv = pr.create_review(body=body, event=event)
         _COMMENT_RATE_LIMITER.record(target_key)
         detail = getattr(rv, "html_url", str(rv))
