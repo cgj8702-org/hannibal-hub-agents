@@ -471,6 +471,36 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
         return f"Error fetching issue/PR: {e}"
 
 
+# ---------------------------------------------------------------------------
+# Rate Limiting & Safety Guardrails
+# ---------------------------------------------------------------------------
+
+
+class CommentRateLimiter:
+    """Sliding window rate limiter to prevent comment spam per issue/PR."""
+
+    def __init__(self, max_comments: int = 3, window_seconds: float = 60.0) -> None:
+        self.max_comments = max_comments
+        self.window_seconds = window_seconds
+        self._history: dict[str, list[float]] = {}
+
+    def is_allowed(self, target_key: str) -> bool:
+        now = time.time()
+        cutoff = now - self.window_seconds
+        timestamps = [t for t in self._history.get(target_key, []) if t > cutoff]
+        self._history[target_key] = timestamps
+        return len(timestamps) < self.max_comments
+
+    def record(self, target_key: str) -> None:
+        now = time.time()
+        if target_key not in self._history:
+            self._history[target_key] = []
+        self._history[target_key].append(now)
+
+
+_COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
+
+
 def update_issue(
     ctx: Context,
     number: int,
@@ -501,7 +531,14 @@ def update_issue(
         actions: list[str] = []
 
         if comment:
+            target_key = f"{repo_name}#{number}"
+            if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
+                return (
+                    f"Error: Comment rate limit exceeded for #{number} "
+                    f"(max 3 comments per minute per thread)."
+                )
             c = issue.create_comment(body=comment)
+            _COMMENT_RATE_LIMITER.record(target_key)
             actions.append(f"Commented: {c.html_url}")
 
         edit_kwargs: dict[str, Any] = {}
@@ -565,7 +602,7 @@ def open_pr(
 
 
 def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
-    """Merge a pull request.
+    """Merge a pull request with safety checks.
 
     Args:
         pr_number: Pull request number.
@@ -579,6 +616,41 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+
+        # Safety Check 1: Mergeability & conflicts
+        if pr.mergeable is False:
+            return (
+                f"Error: Cannot merge PR #{pr_number}. "
+                f"Mergeable state is '{pr.mergeable_state}' (conflicts or dirty state)."
+            )
+
+        # Safety Check 2: CI Status Checks
+        commit = repo.get_commit(pr.head.sha)
+        combined_status = commit.get_combined_status()
+        if combined_status.state == "failure":
+            return (
+                f"Error: Cannot merge PR #{pr_number}. "
+                f"Combined CI status check state is '{combined_status.state}'."
+            )
+
+        # Safety Check 3: Blocking Reviews
+        reviews = pr.get_reviews()
+        latest_reviews: dict[str, str] = {}
+        for r in reviews:
+            if r.user and r.user.login:
+                latest_reviews[r.user.login] = r.state
+
+        if any(state == "CHANGES_REQUESTED" for state in latest_reviews.values()):
+            blocking = [
+                user
+                for user, state in latest_reviews.items()
+                if state == "CHANGES_REQUESTED"
+            ]
+            return (
+                f"Error: Cannot merge PR #{pr_number}. "
+                f"Active CHANGES_REQUESTED reviews from: {', '.join(blocking)}."
+            )
+
         res = pr.merge(merge_method=merge_method)
         return f"Merged: {res}"
     except Exception as e:
@@ -688,14 +760,22 @@ def review(
     Returns:
         A string describing the result.
     """
+    repo_name = _get_repo_full_name(ctx)
+    target_key = f"{repo_name}#{pr_number}"
+    if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
+        return (
+            f"Error: Review/comment rate limit exceeded for #{pr_number} "
+            f"(max 3 comments per minute per thread)."
+        )
+
     body, event = _enforce_verdict(body, event)
 
     gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
         rv = pr.create_review(body=body, event=event)
+        _COMMENT_RATE_LIMITER.record(target_key)
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({event}): {detail}"
     except Exception as e:
