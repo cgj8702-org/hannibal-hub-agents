@@ -35,6 +35,11 @@ from google.genai.errors import ServerError as GenAIServerError
 from .bot_identity import _is_bot_event
 from .memory_service import InMemoryMemoryService
 
+try:
+    from logic.rate_limiter import get_active_api_key, rpm_waiter
+except ImportError:
+    from ..logic.rate_limiter import get_active_api_key, rpm_waiter
+
 logger = logging.getLogger("webhook_agent")
 
 
@@ -77,7 +82,7 @@ class ActionResult:
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
 # ---------------------------------------------------------------------------
-# Input Token Safety Limits (Capped to stay under 16k/min cumulative limit)
+# Input Token Safety Limits (Capped to stay under token budget)
 # ---------------------------------------------------------------------------
 MAX_INPUT_TOKENS = 3500  # Cap user prompt payload per turn to 3.5k tokens
 MAX_DIFF_TOKENS = 2500  # Cap PR diff tool response to 2.5k tokens (~9k chars)
@@ -92,7 +97,7 @@ def count_tokens_exact(
     Returns exact token count from the API if credentials are configured,
     or None if unavailable/offline.
     """
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key = get_active_api_key()
     try:
         from google import genai
 
@@ -211,7 +216,7 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
     canonical = event_data.get("canonical", "")
     raw = event_data.get("raw_payload", {})
 
-    if canonical == "pull_request.opened":
+    if canonical in ("pull_request.opened", "pull_request.synchronize"):
         return primary
 
     if canonical.startswith("issue_comment.") or canonical.startswith(
@@ -235,41 +240,6 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
 
 
 _FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-3.5-flash-lite")
-
-
-class SlidingWindowPacer:
-    """Tracks token usage over a sliding 60-second window to prevent 429 quota errors on Gemma 4."""
-
-    def __init__(self, tpm_limit: int = 14000) -> None:
-        self.tpm_limit = tpm_limit
-        self.history: list[tuple[float, int]] = []
-
-    def _clean(self, now: float) -> None:
-        cutoff = now - 60.0
-        self.history = [item for item in self.history if item[0] > cutoff]
-
-    def current_tpm(self) -> int:
-        now = time.time()
-        self._clean(now)
-        return sum(tokens for _, tokens in self.history)
-
-    async def pace_or_check(self, tokens_needed: int) -> float:
-        """Calculate required delay to stay under tpm_limit, returns sleep seconds."""
-        now = time.time()
-        self._clean(now)
-        current = sum(tokens for _, tokens in self.history)
-        if current + tokens_needed > self.tpm_limit:
-            if self.history:
-                oldest_time = self.history[0][0]
-                return max(0.5, 60.0 - (now - oldest_time) + 0.5)
-        return 0.0
-
-    def record(self, token_count: int) -> None:
-        self.history.append((time.time(), token_count))
-
-
-# Global pacer instance for Gemma 4 TPM protection
-_GLOBAL_PACER = SlidingWindowPacer(tpm_limit=14000)
 
 
 def _is_transient_error(error: Exception) -> bool:
@@ -413,7 +383,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
     Returns:
         Structured metadata. For PRs includes title, state, branches, mergeable
         status, and changed files. If include_diff is true, also includes
-        token-capped file patches.
+        file patches.
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
@@ -460,6 +430,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
                     diff_text, max_tokens=MAX_DIFF_TOKENS, label="PR Diff"
                 )
                 parts.append(f"\nDiff:\n{diff_text}")
+
         else:
             parts.append("Type: Issue")
             body_preview = (issue.body or "")[:500]
@@ -469,6 +440,31 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
         return "\n".join(parts)
     except Exception as e:
         return f"Error fetching issue/PR: {e}"
+
+
+def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
+    """Fetch incremental code diff between two commits for PR updates.
+
+    Args:
+        base_sha: Base commit SHA (e.g. the PR's previous head before a push).
+        head_sha: Head commit SHA (e.g. the PR's new head after a push).
+
+    Returns:
+        A string describing the incremental diff between the two commits.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        comparison = repo.compare(base_sha, head_sha)
+        diff_lines = [f"Incremental Diff ({base_sha[:7]}..{head_sha[:7]}):\n"]
+        for f in comparison.files:
+            diff_lines.append(
+                f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
+            )
+        return "\n".join(diff_lines)
+    except Exception as e:
+        return f"Error fetching commit diff: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -504,17 +500,17 @@ _COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
 def update_issue(
     ctx: Context,
     number: int,
-    comment: str | None = None,
     title: str | None = None,
     body: str | None = None,
     state: str | None = None,
     labels: list[str] | None = None,
 ) -> str:
-    """Update an issue or pull request. Can perform multiple actions at once.
+    """Update an issue or pull request metadata (title, body, state, labels).
+
+    For posting discussion comments, use add_comment() instead.
 
     Args:
         number: Issue or PR number.
-        comment: Post a comment on the issue or PR.
         title: Update the title.
         body: Update the body or description.
         state: Set state to open or closed.
@@ -529,17 +525,6 @@ def update_issue(
         repo = gh.get_repo(repo_name)
         issue = repo.get_issue(number=number)
         actions: list[str] = []
-
-        if comment:
-            target_key = f"{repo_name}#{number}"
-            if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
-                return (
-                    f"Error: Comment rate limit exceeded for #{number} "
-                    f"(max 3 comments per minute per thread)."
-                )
-            c = issue.create_comment(body=comment)
-            _COMMENT_RATE_LIMITER.record(target_key)
-            actions.append(f"Commented: {c.html_url}")
 
         edit_kwargs: dict[str, Any] = {}
         if title is not None:
@@ -561,6 +546,29 @@ def update_issue(
         )
     except Exception as e:
         return f"Error updating issue/PR: {e}"
+
+
+def add_comment(ctx: Context, issue_number: int, body: str) -> str:
+    """Post a standard discussion comment on an issue or PR conversation thread.
+
+    This does NOT trigger a code review or edit the issue/PR description.
+
+    Args:
+        issue_number: Issue or PR number.
+        body: Comment body (Markdown).
+
+    Returns:
+        A string describing the result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        issue = repo.get_issue(number=issue_number)
+        c = issue.create_comment(body=body)
+        return f"Commented on #{issue_number}: {c.html_url}"
+    except Exception as e:
+        return f"Error commenting on issue/PR: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -841,24 +849,35 @@ _CODE_REVIEW_TEMPLATE = _load_code_review_template()
 
 SYSTEM_INSTRUCTION = f"""You are a skilled autonomous GitHub Webhook Agent for the Hannibal Hub ecosystem.
 
-Your reasoning process follows 6 steps:
+Your reasoning process follows 7 steps:
 
 1. **Understand Intent & Context**: Analyze the incoming event, user sender, PR/issue details, and conversation history.
-2. **Autonomous Action Decision**: Decide if an action is required:
-   - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=..., event=...)` to post a formal code review.
-   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using the PR template, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=..., event=...)`.
+2. **Autonomous Action Decision & Self-Awareness**: Decide if an action is required, and check for duplication:
+   - **DUPLICATE SUPPRESSION RULE**: If you (hannibal-hub-agents[bot]) already submitted a formal review for the PR within the last 120 seconds or for the current head commit SHA, **DO NOT** submit another formal review!
+   - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=...)` to post a formal code review.
+   - **PR Synchronize (`pull_request.synchronize`)**: Call `get_commit_diff(before_sha, head_sha)` to review ONLY the newly pushed commits. Then invoke `review(pr_number, body=..., event="APPROVE")` if all prior feedback is resolved, or `event="REQUEST_CHANGES"` if new issues are found.
+   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using `_PR_TEMPLATE`, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=...)`.
+   - When responding to user comments like "I have addressed the feedback and pushed commit X": If the PR is already reviewed/approved, acknowledge with a plain comment via `add_comment(issue_number, body=...)` or a reaction, rather than invoking `review()`.
    - When a user asks a question, requests conflict resolution (`/resolve`), or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
    - If the event is routine metadata without a command or question, respond in plain text explaining why no tool call is needed.
-3. **Validate Tool Parameters**: Verify pr_number, branch names, file_paths, and commit messages before calling tools. Use get_current_time if date/time calculations are needed.
-4. **Execute Primitives**: Call read_file, write_file, get_issue, update_issue, open_pr, merge_pr, review, get_current_time, or search_agent.
-5. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections.
-6. **Execution Summary**: Summarize completed actions clearly.
+3. **Grounding Pre-Check**: Before claiming that code, teardown blocks, or unit tests are missing in a PR review:
+   - You MUST call `read_file()` or `search_agent()` to inspect the target files first.
+   - Never suggest creating a unit test file or adding cleanup logic without first verifying existing tests in tests/ or teardown blocks in the target module.
+4. **Validate Tool Parameters**: Verify pr_number, branch names, file_paths, and commit messages before calling tools. Use get_current_time if date/time calculations are needed.
+5. **Execute Primitives**: Call read_file, write_file, get_issue, get_commit_diff, update_issue, add_comment, open_pr, merge_pr, review, get_current_time, or search_agent.
+6. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections. Use the code_review_template.md for review output.
+7. **Execution Summary**: Summarize completed actions clearly.
 
 Available tools:
   Files API:  read_file, write_file
-  Issues API: get_issue, update_issue
-  Pulls API:  open_pr, merge_pr, review
+  Issues API: get_issue, update_issue, add_comment
+  Pulls API:  get_commit_diff, open_pr, merge_pr, review
   Utilities:  get_current_time, search_agent (for web search & docs)
+
+Dynamic PR Review Status Transitions:
+  - When suggestions/issues found: MUST call review(pr_number, body, event="REQUEST_CHANGES").
+  - When all feedback is resolved by a new commit: MUST call review(pr_number, body, event="APPROVE").
+  - When responding to general questions: use add_comment(number, body=...) or review(..., event="COMMENT").
 
 ---
 
@@ -924,20 +943,6 @@ When generating PR descriptions, use this template as a guide:
 
 # Retry configuration for transient server errors
 _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
-_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemma-4-26b-a4b-it")
-
-
-def _is_transient_error(error: Exception) -> bool:
-    """Check if an error is transient and should be retried.
-
-    Transient errors include server unavailability (503), rate limiting (429),
-    and other temporary issues.
-    """
-    if isinstance(error, GenAIServerError):
-        error_code = getattr(error, "code", None)
-        # Retry on 503 (UNAVAILABLE), 500 (INTERNAL_ERROR), 429 (RESOURCE_EXHAUSTED)
-        return error_code in (503, 500, 429, 502, 504)
-    return False
 
 
 class WebhookAgent:
@@ -979,7 +984,9 @@ class WebhookAgent:
                 read_file,
                 write_file,
                 get_issue,
+                get_commit_diff,
                 update_issue,
+                add_comment,
                 open_pr,
                 merge_pr,
                 review,
@@ -1256,25 +1263,30 @@ class WebhookAgent:
         results: list[ActionResult] = []
 
         async def _execute_agent():
-            # Apply TPM pacing for Gemma 4 models to guarantee no 16k quota errors
+            # Apply dynamic sliding-window rate limiting (RPM/TPM aware per tier)
             msg_text = user_message.parts[0].text if user_message.parts else ""
             est_tokens = len(msg_text) // 4 + 500
-            if "gemma" in self._current_model_name.lower():
-                wait_sec = await _GLOBAL_PACER.pace_or_check(est_tokens)
-                if wait_sec > 0:
-                    logger.info(
-                        "⏳ Pacing request for %.1fs to respect Gemma 4 16k TPM quota (trace: %s)",
-                        wait_sec,
-                        trace_id[-4:],
-                    )
-                    await asyncio.sleep(wait_sec)
-                _GLOBAL_PACER.record(est_tokens)
+            await rpm_waiter.check_and_wait(
+                model=self._current_model_name,
+                estimated_tokens=est_tokens,
+            )
 
             async for event in self._runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
                 new_message=user_message,
             ):
+                # Handle token recording if usage metadata is available
+                if hasattr(event, "usage_metadata") and event.usage_metadata:
+                    total_tok = getattr(
+                        event.usage_metadata, "total_token_count", 0
+                    ) or getattr(event.usage_metadata, "total_tokens", 0)
+                    if total_tok > 0:
+                        await rpm_waiter.record_actual_tokens(
+                            model=self._current_model_name,
+                            actual_tokens=total_tok,
+                        )
+
                 # Handle function response events — these are tool results from ADK
                 if hasattr(event, "get_function_responses"):
                     responses = event.get_function_responses()
@@ -1343,6 +1355,34 @@ class WebhookAgent:
                             session_id,
                             user_id,
                         )
+
+                    # Deduplication check: if a review was submitted < 30s ago, inject notice
+                    if session and session.state:
+                        last_review_ts = session.state.get("last_review_timestamp", 0)
+                        now = time.time()
+                        time_since_review = now - last_review_ts
+                        if time_since_review < 30.0:
+                            notice = (
+                                f"\n\n[⚠️ SYSTEM NOTICE: You submitted a formal PR review {time_since_review:.1f} seconds ago. "
+                                "Do NOT call review() again unless explicitly requested by a new /review command.]"
+                            )
+                            if user_message.parts and hasattr(
+                                user_message.parts[0], "text"
+                            ):
+                                user_message.parts[0].text += notice
+
+                        previous_critique = session.state.get(
+                            "last_review_critique", ""
+                        )
+                        if previous_critique:
+                            critique_notice = (
+                                f"\n\n[YOUR PREVIOUS REVIEW CRITIQUE]:\n{previous_critique}\n"
+                                "Verify line-by-line which specific items were resolved by the new commit."
+                            )
+                            if user_message.parts and hasattr(
+                                user_message.parts[0], "text"
+                            ):
+                                user_message.parts[0].text += critique_notice
 
                     # Set user_state values - they get merged into session.state by InMemorySessionService
                     # This is needed because session copies are returned and our direct mutations wouldn't persist
