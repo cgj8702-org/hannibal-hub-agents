@@ -1,0 +1,158 @@
+{
+    "models/gemini-2.0-flash": {
+        "free": {
+            "rpm": 0,
+            "tpm": 0,
+            "rpd": 0.0
+        },
+        "paid": {
+            "rpm": 2000,
+            "tpm": 4000000,
+            "rpd": 1000000.0
+        }
+    },
+    "models/gemini-2.0-flash-lite": {
+        "free": {
+            "rpm": 0,
+            "tpm": 0,
+            "rpd": 0.0
+        },
+        "paid": {
+            "rpm": 4000,
+            "tpm": 4000000,
+            "rpd": 1000000.0
+        }
+    },
+    "models/gemini-2.5-flash-lite": {
+        "free": {
+            "rpm": 10,
+            "tpm": 250000,
+            "rpd": 20.0
+        },
+        "paid": {
+            "rpm": 4000,
+            "tpm": 4000000,
+            "rpd": 1000000.0
+        }
+    },
+    "models/gemini-3.1-flash-lite": {
+        "free": {
+            "rpm": 15,
+            "tpm": 250000,
+            "rpd": 500.0
+        },
+        "paid": {
+            "rpm": 4000,
+            "tpm": 4000000,
+            "rpd": 150000.0
+        }
+    },
+    "models/gemini-3.5-flash-lite": {
+        "free": {
+            "rpm": 15,
+            "tpm": 250000,
+            "rpd": 500.0
+        },
+        "paid": {
+            "rpm": 4000,
+            "tpm": 4000000,
+            "rpd": 150000.0
+        }
+    },
+    "models/gemma-4-26b-a4b-it": {
+        "free": {
+            "rpm": 30,
+            "tpm": 16000,
+            "rpd": 14400.0
+        },
+        "paid": {
+            "rpm": 30,
+            "tpm": 16000,
+            "rpd": 14400.0
+        }
+    },
+    "models/gemma-4-31b-it": {
+        "free": {
+            "rpm": 30,
+            "tpm": 16000,
+            "rpd": 14400.0
+        },
+        "paid": {
+            "rpm": 30,
+            "tpm": 16000,
+            "rpd": 14400.0
+        }
+    },
+    "models/gemini-2.5-flash": {
+        "free": {
+            "rpm": 5,
+            "tpm": 250000,
+            "rpd": 20.0
+        },
+        "paid": {
+            "rpm": 1000,
+            "tpm": 1000000,
+            "rpd": 10000.0
+        }
+    },
+    "models/gemini-3-flash": {
+        "free": {
+            "rpm": 5,
+            "tpm": 250000,
+            "rpd": 20.0
+        },
+        "paid": {
+            "rpm": 1000,
+            "tpm": 2000000,
+            "rpd": 10000.0
+        }
+    },
+    "models/gemini-3.5-flash": {
+        "free": {
+            "rpm": 5,
+            "tpm": 250000,
+            "rpd": 20.0
+        },
+        "paid": {
+            "rpm": 1000,
+            "tpm": 2000000,
+            "rpd": 10000.0
+        }
+    },
+    "models/gemini-3.6-flash": {
+        "free": {
+            "rpm": 5,
+            "tpm": 250000,
+            "rpd": 20.0
+        },
+        "paid": {
+            "rpm": 1000,
+            "tpm": 2000000,
+            "rpd": 10000.0
+        }
+    },
+    "models/gemini-2.5-pro": {
+        "free": {
+            "rpm": 0,
+            "tpm": 0,
+            "rpd": 0.0
+        },
+        "paid": {
+            "rpm": 150,
+            "tpm": 2000000,
+            "rpd": 1000.0
+        }
+    },
+    "models/gemini-3.1-pro": {
+        "free": {
+            "rpm": 0,
+            "tpm": 0,
+            "rpd": 0.0
+        },
+        "paid": {
+            "rpm": 25,
+            "tpm": 2000000,
+            "rpd": 250.0
+        }
+    }
+}

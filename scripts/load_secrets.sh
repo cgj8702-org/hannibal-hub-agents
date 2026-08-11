@@ -10,7 +10,9 @@ echo "Loading secrets from Secret Manager project [${PROJECT_ID}]..."
 
 export GITHUB_APP_ID=$(gcloud secrets versions access latest --secret="GITHUB_APP_ID" --project="${PROJECT_ID}")
 export GITHUB_INSTALLATION_ID=$(gcloud secrets versions access latest --secret="GITHUB_INSTALLATION_ID" --project="${PROJECT_ID}")
-export GEMINI_API_KEY=$(gcloud secrets versions access latest --secret="GEMINI_API_KEY" --project="${PROJECT_ID}")
+export FREE_KEY=$(gcloud secrets versions access latest --secret="FREE_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
+export PAID_KEY=$(gcloud secrets versions access latest --secret="PAID_KEY" --project="${PROJECT_ID}" 2>/dev/null || gcloud secrets versions access latest --secret="GEMINI_API_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
+export GEMINI_API_KEY="${PAID_KEY:-${FREE_KEY:-}}"
 export GOOGLE_API_KEY="${GEMINI_API_KEY}"
 export WEBHOOK_SECRET=$(gcloud secrets versions access latest --secret="WEBHOOK_SECRET" --project="${PROJECT_ID}")
 
