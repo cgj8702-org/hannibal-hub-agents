@@ -539,6 +539,8 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     """Post a standard discussion comment on an issue or PR conversation thread.
 
     This does NOT trigger a code review or edit the issue/PR description.
+    If a code review report is detected in the body, it is automatically
+    redirected to the review() tool.
 
     Args:
         issue_number: Issue or PR number.
@@ -547,12 +549,33 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     Returns:
         A string describing the result.
     """
-    gh = _get_gh_from_ctx(ctx)
+    # Programmatic Guardrail: Redirect code review reports erroneously sent to add_comment to review()
+    if (
+        "Code Review Report" in body
+        or "| Category" in body
+        or "**Scorecard**" in body
+        or "## 4. Verdict Determination" in body
+    ):
+        logger.warning(
+            "Redirecting code review report from add_comment() to review() for #%d",
+            issue_number,
+        )
+        return review(ctx, pr_number=issue_number, body=body, event="COMMENT")
+
     repo_name = _get_repo_full_name(ctx)
+    target_key = f"{repo_name}#{issue_number}"
+    if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
+        return (
+            f"Error: Comment rate limit exceeded for #{issue_number} "
+            f"(max 3 comments per minute per thread)."
+        )
+
+    gh = _get_gh_from_ctx(ctx)
     try:
         repo = gh.get_repo(repo_name)
         issue = repo.get_issue(number=issue_number)
         c = issue.create_comment(body=body)
+        _COMMENT_RATE_LIMITER.record(target_key)
         return f"Commented on #{issue_number}: {c.html_url}"
     except Exception as e:
         return f"Error commenting on issue/PR: {e}"
