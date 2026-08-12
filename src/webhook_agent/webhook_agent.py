@@ -180,7 +180,7 @@ _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 class DepletedModelRegistry:
     """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events."""
 
-    def __init__(self, cooldown_seconds: float = 3600.0) -> None:
+    def __init__(self, cooldown_seconds: float = 86400.0) -> None:
         self.cooldown = cooldown_seconds
         self._depleted: dict[str, float] = {}
 
@@ -207,7 +207,7 @@ class DepletedModelRegistry:
         return [m for m in chain if not self.is_depleted(m)]
 
 
-_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(cooldown_seconds=3600.0)
+_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(cooldown_seconds=86400.0)
 
 
 def get_model_chain() -> list[str]:
