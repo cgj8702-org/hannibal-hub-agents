@@ -190,7 +190,7 @@ def get_max_input_tokens() -> int:
 
 
 def count_tokens_exact(
-    contents: str | list[Any], model_name: str = "gemma-4-31b-it"
+    contents: str | list[Any], model_name: str = "gemini-3.5-flash-lite"
 ) -> int | None:
     """Count input tokens using Google GenAI SDK's client.models.count_tokens().
 
@@ -343,7 +343,12 @@ class DepletedModelRegistry:
         return [m for m in chain if not self.is_depleted(m)]
 
 
-_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
+try:
+    from logic.firestore_registry import (
+        firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
+    )
+except ImportError:
+    _DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
 
 
 def get_model_chain() -> list[str]:
@@ -1404,7 +1409,7 @@ class WebhookAgent:
 
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(
-            text, max_tokens=MAX_INPUT_TOKENS, label="User payload"
+            text, max_tokens=get_max_input_tokens(), label="User payload"
         )
         return genai_types.Content(
             role="user",

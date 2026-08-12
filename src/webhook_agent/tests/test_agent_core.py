@@ -652,3 +652,22 @@ class TestUpdateIssue:
 
         result = update_issue(ctx, 1)
         assert "no changes" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_max_input_tokens & payload truncation
+# ---------------------------------------------------------------------------
+
+
+class TestTokenLimits:
+    def test_get_max_input_tokens_paid_tier(self, monkeypatch):
+        from webhook_agent.webhook_agent import get_max_input_tokens
+
+        monkeypatch.setenv("HANNIBAL_TIER", "paid")
+        assert get_max_input_tokens() == 35000
+
+    def test_get_max_input_tokens_free_tier(self, monkeypatch):
+        from webhook_agent.webhook_agent import get_max_input_tokens
+
+        monkeypatch.setenv("HANNIBAL_TIER", "free")
+        assert get_max_input_tokens() == 3500
