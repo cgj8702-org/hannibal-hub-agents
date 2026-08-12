@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -47,17 +48,25 @@ logger = logging.getLogger("webhook_agent")
 # ---------------------------------------------------------------------------
 
 
-def _load_pr_template() -> str:
-    """Load the PR description template from the templates directory."""
-    template_path = os.path.join(
-        os.path.dirname(__file__), "templates", "pr_template.md"
-    )
+def _load_template(filename: str) -> str:
+    """Load a template file from the templates directory."""
+    template_path = os.path.join(os.path.dirname(__file__), "templates", filename)
     try:
         with open(template_path, encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
-        logger.warning("PR template not found at %s", template_path)
+        logger.warning("Template not found at %s", template_path)
         return ""
+
+
+def _load_pr_template() -> str:
+    """Load the PR description template from the templates directory."""
+    return _load_template("pr_template.md")
+
+
+def _load_code_review_template() -> str:
+    """Load the code review template from the templates directory."""
+    return _load_template("code_review_template.md")
 
 
 @dataclass
@@ -445,6 +454,36 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
         return f"Error fetching commit diff: {e}"
 
 
+# ---------------------------------------------------------------------------
+# Rate Limiting & Safety Guardrails
+# ---------------------------------------------------------------------------
+
+
+class CommentRateLimiter:
+    """Sliding window rate limiter to prevent comment spam per issue/PR."""
+
+    def __init__(self, max_comments: int = 3, window_seconds: float = 60.0) -> None:
+        self.max_comments = max_comments
+        self.window_seconds = window_seconds
+        self._history: dict[str, list[float]] = {}
+
+    def is_allowed(self, target_key: str) -> bool:
+        now = time.time()
+        cutoff = now - self.window_seconds
+        timestamps = [t for t in self._history.get(target_key, []) if t > cutoff]
+        self._history[target_key] = timestamps
+        return len(timestamps) < self.max_comments
+
+    def record(self, target_key: str) -> None:
+        now = time.time()
+        if target_key not in self._history:
+            self._history[target_key] = []
+        self._history[target_key].append(now)
+
+
+_COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
+
+
 def update_issue(
     ctx: Context,
     number: int,
@@ -557,8 +596,36 @@ def open_pr(
         return f"Error opening PR: {e}"
 
 
+def update_branch_from_base(ctx: Context, pr_number: int) -> str:
+    """Update a pull request's head branch with the latest changes from its base branch.
+
+    Uses GitHub's native branch update API (equivalent to clicking 'Update branch').
+    Use this when a PR is out of date or has merge conflicts with the base branch.
+
+    Args:
+        pr_number: Pull request number.
+
+    Returns:
+        A string describing the update result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        updated = pr.update_branch()
+        if updated:
+            return f"Successfully updated PR #{pr_number} branch '{pr.head.ref}' with latest changes from '{pr.base.ref}'."
+        return f"PR #{pr_number} branch '{pr.head.ref}' is already up to date with '{pr.base.ref}'."
+    except Exception as e:
+        return (
+            f"Error updating PR #{pr_number} branch: {e}. "
+            f"If there are complex merge conflicts, notify the user that manual local rebase is required."
+        )
+
+
 def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
-    """Merge a pull request.
+    """Merge a pull request with safety checks.
 
     Args:
         pr_number: Pull request number.
@@ -572,10 +639,139 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+
+        # Safety Check 1: Mergeability & conflicts
+        if pr.mergeable is False:
+            return (
+                f"Error: Cannot merge PR #{pr_number}. "
+                f"Mergeable state is '{pr.mergeable_state}' (conflicts or dirty state)."
+            )
+
+        # Safety Check 2: CI Status Checks
+        commit = repo.get_commit(pr.head.sha)
+        combined_status = commit.get_combined_status()
+        if combined_status.state == "failure":
+            return (
+                f"Error: Cannot merge PR #{pr_number}. "
+                f"Combined CI status check state is '{combined_status.state}'."
+            )
+
+        # Safety Check 3: Blocking Reviews
+        reviews = pr.get_reviews()
+        latest_reviews: dict[str, str] = {}
+        for r in reviews:
+            if r.user and r.user.login:
+                latest_reviews[r.user.login] = r.state
+
+        if any(state == "CHANGES_REQUESTED" for state in latest_reviews.values()):
+            blocking = [
+                user
+                for user, state in latest_reviews.items()
+                if state == "CHANGES_REQUESTED"
+            ]
+            return (
+                f"Error: Cannot merge PR #{pr_number}. "
+                f"Active CHANGES_REQUESTED reviews from: {', '.join(blocking)}."
+            )
+
         res = pr.merge(merge_method=merge_method)
         return f"Merged: {res}"
     except Exception as e:
         return f"Error merging PR: {e}"
+
+
+def _parse_scorecard_scores(body: str) -> list[int]:
+    """Extract numeric scores from the scorecard table in a review body.
+
+    Looks for the pattern '|  N  |' where N is 1-5 in the scorecard rows.
+    Returns a list of parsed integer scores, or empty list if none found.
+    """
+    import re
+
+    scores: list[int] = []
+    for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
+        score = int(match.group(1))
+        if 1 <= score <= 5:
+            scores.append(score)
+    return scores
+
+
+def _parse_confidence(body: str) -> int | None:
+    """Extract the confidence self-assessment score from a review body.
+
+    Looks for 'My Confidence:' followed by a number 1-5.
+    Returns the score or None if not found.
+    """
+    match = re.search(r"\*\*My Confidence:\*\*\s*(\d)", body)
+    if match:
+        val = int(match.group(1))
+        if 1 <= val <= 5:
+            return val
+    return None
+
+
+def _enforce_verdict(body: str, event: str) -> tuple[str, str]:
+    """Programmatically enforce verdict rules based on scorecard scores and safety checks.
+
+    Parses the review body, extracts scores and confidence, and overrides
+    the LLM-chosen event if it violates the mechanical verdict rules.
+
+    Returns:
+        Tuple of (possibly_modified_body, enforced_event).
+    """
+    scores = _parse_scorecard_scores(body)
+    confidence = _parse_confidence(body)
+    original_event = event.upper()
+    enforced_event = original_event
+    override_reasons: list[str] = []
+
+    if scores:
+        min_score = min(scores)
+        avg_score = sum(scores) / len(scores)
+
+        if min_score <= 2 and original_event == "APPROVE":
+            enforced_event = "REQUEST_CHANGES"
+            override_reasons.append(f"scorecard has category scoring {min_score}/5")
+
+        if avg_score < 3.5 and original_event == "APPROVE":
+            enforced_event = "REQUEST_CHANGES"
+            override_reasons.append(
+                f"average score {avg_score:.1f} is below 3.5 threshold"
+            )
+
+    if confidence is not None and confidence <= 3 and original_event == "APPROVE":
+        enforced_event = "COMMENT"
+        override_reasons.append(
+            f"confidence level {confidence}/5 is too low to approve"
+        )
+
+    # Programmatic check for dropped platform markers in lockfiles
+    if (
+        "sys_platform ==" in body
+        and "dropped" in body.lower()
+        and original_event == "APPROVE"
+    ):
+        enforced_event = "REQUEST_CHANGES"
+        override_reasons.append(
+            "detected potential environment marker removal in lockfile diff"
+        )
+
+    if override_reasons and enforced_event != original_event:
+        reasons_str = "; ".join(override_reasons)
+        body += (
+            f"\n\n---\n"
+            f"> **Verdict Override:** Agent requested `{original_event}` but "
+            f"was overridden to `{enforced_event}` by policy guardrail "
+            f"({reasons_str})."
+        )
+        logger.warning(
+            "Verdict override: %s -> %s (%s)",
+            original_event,
+            enforced_event,
+            reasons_str,
+        )
+
+    return body, enforced_event
 
 
 def review(
@@ -586,6 +782,10 @@ def review(
 ) -> str:
     """Submit a formal review on a pull request.
 
+    The verdict is programmatically enforced based on scorecard scores
+    parsed from the review body. If the agent's chosen event violates
+    the verdict rules, it is overridden before submission.
+
     Args:
         pr_number: Pull request number.
         body: Review body (Markdown).
@@ -594,16 +794,48 @@ def review(
     Returns:
         A string describing the result.
     """
-    gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
+    target_key = f"{repo_name}#{pr_number}"
+    if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
+        return (
+            f"Error: Review/comment rate limit exceeded for #{pr_number} "
+            f"(max 3 comments per minute per thread)."
+        )
+
+    body, event = _enforce_verdict(body, event)
+
+    gh = _get_gh_from_ctx(ctx)
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+
+        # Supersede / dismiss prior bot reviews
+        bot_user = gh.get_user().login
+        existing_reviews = pr.get_reviews()
+        for prev_rv in existing_reviews:
+            if prev_rv.user and prev_rv.user.login == bot_user:
+                # Dismiss previous review if it is in an active state (CHANGES_REQUESTED or APPROVED)
+                if prev_rv.state in ("CHANGES_REQUESTED", "APPROVED"):
+                    try:
+                        prev_rv.dismiss(
+                            "Superseded by fresh code review on latest commit."
+                        )
+                        logger.info(
+                            "Dismissed prior bot review %s on PR #%d",
+                            prev_rv.id,
+                            pr_number,
+                        )
+                    except Exception as dismiss_err:
+                        logger.warning(
+                            "Could not dismiss prior bot review %s: %s",
+                            prev_rv.id,
+                            dismiss_err,
+                        )
+
         rv = pr.create_review(body=body, event=event)
-        ctx.state["last_review_timestamp"] = time.time()
-        ctx.state["last_review_critique"] = body
+        _COMMENT_RATE_LIMITER.record(target_key)
         detail = getattr(rv, "html_url", str(rv))
-        return f"Submitted review: {detail}"
+        return f"Submitted review ({event}): {detail}"
     except Exception as e:
         return f"Error submitting review: {e}"
 
@@ -637,8 +869,9 @@ search_tool = AgentTool(search_sub_agent)
 # System instruction for the agent
 # ---------------------------------------------------------------------------
 
-# Load the PR template once at module load time
+# Load templates once at module load time
 _PR_TEMPLATE = _load_pr_template()
+_CODE_REVIEW_TEMPLATE = _load_code_review_template()
 
 SYSTEM_INSTRUCTION = f"""You are a skilled autonomous GitHub Webhook Agent for the Hannibal Hub ecosystem.
 
@@ -649,28 +882,90 @@ Your reasoning process follows 7 steps:
    - **DUPLICATE SUPPRESSION RULE**: If you (hannibal-hub-agents[bot]) already submitted a formal review for the PR within the last 120 seconds or for the current head commit SHA, **DO NOT** submit another formal review!
    - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=...)` to post a formal code review.
    - **PR Synchronize (`pull_request.synchronize`)**: Call `get_commit_diff(before_sha, head_sha)` to review ONLY the newly pushed commits. Then invoke `review(pr_number, body=..., event="APPROVE")` if all prior feedback is resolved, or `event="REQUEST_CHANGES"` if new issues are found.
-   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using `_PR_TEMPLATE`, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=...)`.
-   - When responding to user comments like "I have addressed the feedback and pushed commit X": If the PR is already reviewed/approved, acknowledge with a plain comment via `add_comment(issue_number, body=...)` or a reaction, rather than invoking `review()`.
-   - When a user asks a question, requests conflict resolution (`/resolve`), or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
+   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using the PR template, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=..., event=...)`.
+   - When conflict resolution is requested (`/resolve`): Call `update_branch_from_base(pr_number)`. NEVER use `write_file` to attempt resolving git merge conflicts. If `update_branch_from_base` fails, inform the user that a local `git rebase` is required.
+   - When a user asks a question or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
    - If the event is routine metadata without a command or question, respond in plain text explaining why no tool call is needed.
 3. **Grounding Pre-Check**: Before claiming that code, teardown blocks, or unit tests are missing in a PR review:
    - You MUST call `read_file()` or `search_agent()` to inspect the target files first.
    - Never suggest creating a unit test file or adding cleanup logic without first verifying existing tests in tests/ or teardown blocks in the target module.
 4. **Validate Tool Parameters**: Verify pr_number, branch names, file_paths, and commit messages before calling tools. Use get_current_time if date/time calculations are needed.
-5. **Execute Primitives**: Call read_file, write_file, get_issue, get_commit_diff, update_issue, add_comment, open_pr, merge_pr, review, get_current_time, or search_agent.
+5. **Execute Primitives**: Call read_file, write_file, get_issue, get_commit_diff, update_issue, add_comment, open_pr, update_branch_from_base, merge_pr, review, get_current_time, or search_agent.
 6. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections. Use the code_review_template.md for review output.
 7. **Execution Summary**: Summarize completed actions clearly.
 
 Available tools:
   Files API:  read_file, write_file
   Issues API: get_issue, update_issue, add_comment
-  Pulls API:  get_commit_diff, open_pr, merge_pr, review
+  Pulls API:  get_commit_diff, open_pr, update_branch_from_base, merge_pr, review
   Utilities:  get_current_time, search_agent (for web search & docs)
 
 Dynamic PR Review Status Transitions:
   - When suggestions/issues found: MUST call review(pr_number, body, event="REQUEST_CHANGES").
   - When all feedback is resolved by a new commit: MUST call review(pr_number, body, event="APPROVE").
   - When responding to general questions: use add_comment(number, body=...) or review(..., event="COMMENT").
+
+---
+
+## Code Review Protocol (MANDATORY)
+
+You are a SENIOR ENGINEER performing code reviews, not a cheerleader. Your job is to catch problems, protect code quality, and provide honest, actionable feedback. Agreeing with everything is a failure mode.
+
+### Review Procedure
+
+When reviewing a PR, you MUST:
+1. Call `get_issue(number, include_diff=True)` to fetch the full diff.
+2. Analyze every changed file systematically for correctness, security, performance, readability, and test coverage.
+3. Structure your review body using the Code Review Template below.
+4. Fill in ALL scorecard categories with honest scores and cite specific evidence from the diff.
+5. Determine the verdict MECHANICALLY from the scorecard (see Verdict Rules).
+6. Call `review(pr_number, body=..., event=VERDICT)` where VERDICT is APPROVE, REQUEST_CHANGES, or COMMENT.
+
+### Verdict Rules (Non-Negotiable)
+
+These rules override your judgment. Apply them mechanically based on your scorecard:
+- ANY category scoring 1 (Critical) -> event MUST be REQUEST_CHANGES
+- ANY category scoring 2 (Poor) -> event MUST be REQUEST_CHANGES
+- Average score below 3.5 -> event MUST be REQUEST_CHANGES
+- Your confidence level is 3 or below -> event MUST be COMMENT (never APPROVE when uncertain)
+- All categories 3+ AND average >= 3.5 AND confidence >= 4 -> event MAY be APPROVE
+
+### Critical Thinking Requirements
+
+- Finding zero issues is suspicious. If a PR changes more than 10 lines and you have no suggestions, re-read the diff more carefully.
+- Every review MUST include at least ONE specific, actionable suggestion — even for excellent code (naming improvements, documentation gaps, test ideas, edge cases).
+- Never say code is "rock-solid" or "verified" without citing specific evidence for each claim.
+- Do not summarize what the code does back to the author — they already know. Focus on what could go WRONG.
+- If the PR is large (>500 lines changed), recommend splitting it and note this in your review.
+
+### Common Issues to Watch For
+
+Always scan for these patterns, which are frequently missed:
+- Off-by-one errors in loop boundaries or string slicing
+- Missing null/None checks on API responses or dictionary lookups
+- Race conditions in async or multi-threaded code
+- Environment variables read at import time vs. runtime
+- Exception handlers that swallow errors silently (bare except, catch-all without re-raise)
+- Hardcoded secrets, API keys, project IDs, or environment-specific values
+- Missing input validation on user-provided or external data
+- Resource leaks (unclosed files, connections, clients)
+- String formatting that breaks on Unicode or special characters
+- Missing error handling on network calls, file I/O, or database operations
+
+### Dependabot / Dependency PR Protocol (MANDATORY)
+
+When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with `dependabot/`):
+- Focus on **dependency security, version scope, and lockfile integrity**.
+- Do NOT perform a human architectural code review — evaluate version bumps and lockfile changes.
+- Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
+- Watch for **accidental environment marker deletions** (e.g., dropping `sys_platform == 'win32'`) or unexpected modifications to unrelated packages in the lockfile.
+- If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`.
+
+### Code Review Template
+
+{_CODE_REVIEW_TEMPLATE}
+
+---
 
 When generating PR descriptions, use this template as a guide:
 {_PR_TEMPLATE}
@@ -728,6 +1023,7 @@ class WebhookAgent:
                 update_issue,
                 add_comment,
                 open_pr,
+                update_branch_from_base,
                 merge_pr,
                 review,
                 get_current_time,
