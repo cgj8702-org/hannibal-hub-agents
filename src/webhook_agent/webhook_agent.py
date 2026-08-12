@@ -837,13 +837,16 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
                 f"Mergeable state is '{pr.mergeable_state}' (conflicts or dirty state)."
             )
 
-        # Safety Check 2: CI Status Checks
-        commit = repo.get_commit(pr.head.sha)
-        combined_status = commit.get_combined_status()
-        if combined_status.state == "failure":
+        # Safety Check 2: CI Status Checks — GitHub computes `mergeable_state`
+        # server-side and it already reflects required CI check results. We rely on
+        # it instead of commit.get_combined_status() because that endpoint returns
+        # 403 "Resource not accessible by integration" for the GitHub App
+        # installation (no status-read permission).
+        if pr.mergeable_state in ("blocked", "dirty"):
             return (
                 f"Error: Cannot merge PR #{pr_number}. "
-                f"Combined CI status check state is '{combined_status.state}'."
+                f"Mergeable state is '{pr.mergeable_state}' "
+                "(blocked by failing/pending required CI checks or conflicts)."
             )
 
         # Safety Check 3: Blocking Reviews
@@ -946,25 +949,32 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
             "detected potential environment marker removal in lockfile diff"
         )
 
-    # Programmatic CI build check and mergeability guardrails
+    # Programmatic CI build check and mergeability guardrails.
+    #
+    # NOTE: The previous implementation called commit.get_combined_status(), which
+    # hits the "Get the combined status for a specific reference" endpoint. That
+    # endpoint returns 403 "Resource not accessible by integration" for the GitHub
+    # App installation (no status-read permission). We now rely on the PR's
+    # server-computed `mergeable_state` field, which GitHub already populates with
+    # CI check results:
+    #   - "dirty"   -> merge conflicts with base branch
+    #   - "blocked" -> failing or pending required CI checks
+    #   - "behind"  -> head branch is behind base branch
     if pr and original_event == "APPROVE":
         try:
-            if (
-                getattr(pr, "mergeable", True) is False
-                or getattr(pr, "mergeable_state", "") == "dirty"
-            ):
+            mergeable_state = getattr(pr, "mergeable_state", "") or ""
+            if mergeable_state in ("dirty", "blocked", "behind"):
                 enforced_event = "REQUEST_CHANGES"
-                override_reasons.append(
-                    "PR has unresolved merge conflicts with base branch"
-                )
-
-            head_sha = getattr(getattr(pr, "head", None), "sha", None)
-            if head_sha and hasattr(pr, "base") and hasattr(pr.base, "repo"):
-                commit = pr.base.repo.get_commit(head_sha)
-                combined = commit.get_combined_status()
-                if getattr(combined, "state", None) == "failure":
-                    enforced_event = "REQUEST_CHANGES"
-                    override_reasons.append("CI build status check is failing")
+                if mergeable_state == "dirty":
+                    override_reasons.append(
+                        "PR has unresolved merge conflicts with base branch"
+                    )
+                else:
+                    override_reasons.append(
+                        f"PR is not cleanly mergeable "
+                        f"(mergeable_state='{mergeable_state}'; blocked by "
+                        "failing/pending CI checks or behind base branch)"
+                    )
         except Exception as gate_err:
             logger.warning("Could not check PR CI/mergeability gating: %s", gate_err)
 
