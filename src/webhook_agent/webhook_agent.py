@@ -323,11 +323,13 @@ def _is_transient_error(error: Exception) -> bool:
     if isinstance(error, GenAIServerError):
         error_code = getattr(error, "code", None)
         return error_code in (503, 500, 429, 502, 504)
-    err_str = str(error)
+    err_str = str(error).lower()
+    err_type = type(error).__name__.lower()
     if (
         "429" in err_str
-        or "RESOURCE_EXHAUSTED" in err_str
-        or "ResourceExhausted" in type(error).__name__
+        or "resource_exhausted" in err_str
+        or "resourceexhausted" in err_type
+        or "clienterror" in err_type
     ):
         return True
     return False
