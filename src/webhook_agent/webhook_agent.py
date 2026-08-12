@@ -59,6 +59,67 @@ def _load_template(filename: str) -> str:
         return ""
 
 
+def _sanitize_pr_body(body: str) -> str:
+    """Programmatically strip raw template instruction headers and placeholders from PR bodies."""
+    if not body:
+        return body
+
+    lines = body.splitlines()
+    sanitized: list[str] = []
+
+    forbidden_exact = {
+        "# 🤖 Pull Request Description Template",
+        "# 📋 Title Format",
+        "## 📋 Title Format",
+        "# 🤖 Pull Request Description Template",
+        "Use this template when creating or editing pull request descriptions in the Hannibal Hub Agents repository.",
+        "Use this template when creating or editing pull request descriptions.",
+        "*[Check the boxes that apply, bestie!]*",
+        "*[Provide a clear summary of the change. Don't just tell us WHAT you changed, tell us WHY. What was the root cause? Why is this the right solution?]*",
+        "*[For AI contributors: Please provide a clinical audit of your process.]*",
+        "*[Clinical-grade validation time! Please ensure all of these are checked before requesting a review.]*",
+    }
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped in forbidden_exact:
+            continue
+        if stripped.startswith("[type] Brief description"):
+            continue
+        if stripped.startswith("**Types:**") or stripped.startswith(
+            "- `feat:` New feature"
+        ):
+            continue
+
+        sanitized.append(line)
+
+    result = "\n".join(sanitized)
+    result = re.sub(r"^(?:---|\s+)+", "", result).strip()
+    return result
+
+
+def _fetch_repo_pr_template(gh: Any, repo_name: str) -> str:
+    """Fetch the target repository's custom PR template via PyGithub if available."""
+    try:
+        repo = gh.get_repo(repo_name)
+        candidate_paths = [
+            ".github/PULL_REQUEST_TEMPLATE/prod_pull_request_template.md",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+            ".github/pull_request_template.md",
+        ]
+        for path in candidate_paths:
+            try:
+                content_file = repo.get_contents(path)
+                if hasattr(content_file, "decoded_content"):
+                    return content_file.decoded_content.decode("utf-8")
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.debug("Could not fetch remote PR template for %s: %s", repo_name, exc)
+
+    return _load_pr_template()
+
+
 def _load_pr_template() -> str:
     """Load the PR description template from the templates directory."""
     return _load_template("pr_template.md")
@@ -593,7 +654,7 @@ def update_issue(
         if title is not None:
             edit_kwargs["title"] = title
         if body is not None:
-            edit_kwargs["body"] = body
+            edit_kwargs["body"] = _sanitize_pr_body(body)
         if state is not None:
             edit_kwargs["state"] = state
         if edit_kwargs:
@@ -682,6 +743,7 @@ def open_pr(
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
+    body = _sanitize_pr_body(body)
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.create_pull(
@@ -1089,7 +1151,7 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 
 ---
 
-When generating PR descriptions, use this template as a guide:
+When generating PR descriptions (`open_pr` or `update_issue`), use this template as a guide. STRICTLY PROHIBITED: NEVER include template instruction headers (e.g. `# 🤖 Pull Request Description Template` or `## 📋 Title Format`) or placeholder comments in your output. Start directly with `## 🗒️ Description` or the repository's native PR template section:
 {_PR_TEMPLATE}
 """
 

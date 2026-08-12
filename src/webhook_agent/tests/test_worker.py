@@ -340,6 +340,39 @@ class TestShouldProcessEvent:
         )
         assert _should_prefetch_diff("pull_request.closed", {}) is False
 
+    def test_sanitize_pr_body(self):
+        """_sanitize_pr_body strips raw instruction headers and title format text."""
+        from webhook_agent.webhook_agent import _sanitize_pr_body
+
+        raw_body = (
+            "# 🤖 Pull Request Description Template\n"
+            "## 📋 Title Format\n"
+            "[type] Brief description of changes\n"
+            "## 🗒️ Description\n"
+            "### What\nAdded new feature\n"
+        )
+        sanitized = _sanitize_pr_body(raw_body)
+        assert "# 🤖 Pull Request Description Template" not in sanitized
+        assert "## 📋 Title Format" not in sanitized
+        assert "[type] Brief description of changes" not in sanitized
+        assert "## 🗒️ Description" in sanitized
+        assert "Added new feature" in sanitized
+
+    def test_fetch_repo_pr_template_fallback(self):
+        """_fetch_repo_pr_template returns local pr_template if remote fetch fails."""
+        from webhook_agent.webhook_agent import _fetch_repo_pr_template
+
+        class MockRepo:
+            def get_contents(self, path):
+                raise Exception("Not found")
+
+        class MockGithub:
+            def get_repo(self, name):
+                return MockRepo()
+
+        template = _fetch_repo_pr_template(MockGithub(), "org/repo")
+        assert "## 🗒️ Description" in template
+
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):
         """PR lifecycle events pass should_process_event for autonomous LLM evaluation."""
         assert (
