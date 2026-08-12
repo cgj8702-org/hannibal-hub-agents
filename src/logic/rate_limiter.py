@@ -99,9 +99,8 @@ def _resolve_tier() -> str:
     if active_gemini_key and active_gemini_key in paid_keys:
         return "paid"
 
-    for p_key in paid_keys:
-        if p_key.lower() not in ("", "dummy", "none"):
-            return "paid"
+    if paid_keys:
+        return "paid"
 
     return "free"
 

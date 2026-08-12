@@ -148,5 +148,17 @@ class FirestoreDepletedModelRegistry:
 
         return False
 
+    @property
+    def _depleted(self) -> dict[str, tuple[float, float]]:
+        return self._local_depleted
+
+    def clear(self) -> None:
+        """Clear local depleted memory cache."""
+        self._local_depleted.clear()
+
+    def filter_chain(self, chain: list[str], key_alias: str = "") -> list[str]:
+        """Filter out models currently marked as depleted."""
+        return [m for m in chain if not self.is_depleted(m, key_alias=key_alias)]
+
 
 firestore_depleted_registry = FirestoreDepletedModelRegistry()
