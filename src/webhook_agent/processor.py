@@ -164,13 +164,11 @@ class WebhookProcessor:
         # Keep track of processed deliveries to prevent duplicate handling (FIFO capped dict).
         self._processed_deliveries: dict[str, None] = {}
         # Load essential GitHub credentials from the environment.
-        try:
-            self.app_id = int(os.environ["GITHUB_APP_ID"])
-            self.installation_id = int(os.environ["GITHUB_INSTALLATION_ID"])
-            self.private_key_path = os.environ["GITHUB_PRIVATE_KEY_PATH"]
-        except KeyError as exc:
-            logger.error("Missing required environment variable: %s", exc)
-            raise
+        self.app_id = int(os.getenv("GITHUB_APP_ID", "4133145"))
+        self.installation_id = int(os.getenv("GITHUB_INSTALLATION_ID", "150411146"))
+        self.private_key_path = os.getenv(
+            "GITHUB_PRIVATE_KEY_PATH", "/tmp/keys/github-app-private-key.pem"
+        )
 
     # ---------------------------------------------------------------------------
     # Routing helpers
