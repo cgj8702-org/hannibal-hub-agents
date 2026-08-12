@@ -1,0 +1,149 @@
+"""Firestore-backed Depleted Model Registry for cross-process 429 quota depletion tracking.
+
+Uses Google Cloud Firestore for persistent depletion state and TTL auto-purging,
+with graceful fallback to in-memory tracking when Firestore is unavailable.
+"""
+
+from __future__ import annotations
+
+import datetime
+import logging
+import os
+import time
+from typing import Any
+
+logger = logging.getLogger("firestore_registry")
+
+try:
+    from google.cloud import firestore
+
+    _HAS_FIRESTORE = True
+except ImportError:
+    firestore = None  # type: ignore[assignment]
+    _HAS_FIRESTORE = False
+
+
+class FirestoreDepletedModelRegistry:
+    """Tracks models and API key pairs that hit 429 quota exhaustion.
+
+    Stores depletion state in Firestore collection 'depleted_models' with an 'expire_at'
+    timestamp field for Firestore native TTL auto-deletion, falling back to local memory.
+    """
+
+    def __init__(
+        self,
+        collection_name: str = "depleted_models",
+        default_cooldown: float = 3600.0,
+    ) -> None:
+        self.collection_name = collection_name
+        self.default_cooldown = default_cooldown
+        self._local_depleted: dict[str, tuple[float, float]] = {}
+        self._db: Any = None
+        self._initialized = False
+
+    def _get_db(self) -> Any | None:
+        if not self._initialized:
+            self._initialized = True
+            if _HAS_FIRESTORE and os.getenv(
+                "ENABLE_FIRESTORE_REGISTRY", "0"
+            ).lower() in ("1", "true"):
+                try:
+                    project_id = os.getenv("GCP_PROJECT_ID") or os.getenv(
+                        "PUBSUB_PROJECT"
+                    )
+                    self._db = firestore.Client(project=project_id)
+                    logger.info(
+                        "🔥 Firestore Depleted Model Registry initialized for project [%s]",
+                        project_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not initialize Firestore client: %s. Using local memory.",
+                        exc,
+                    )
+                    self._db = None
+        return self._db
+
+    def mark_depleted(
+        self, model_name: str, error: Exception | None = None, key_alias: str = ""
+    ) -> None:
+        """Mark a model (and optional key alias) as depleted across memory and Firestore."""
+        cooldown = self.default_cooldown
+        metric_type = "DEFAULT (1h)"
+
+        if error is not None:
+            err_str = str(error).lower()
+            if "perday" in err_str or "dayperproject" in err_str:
+                cooldown = 86400.0  # 24 Hours for RPD daily limit
+                metric_type = "RPD (24h)"
+            elif (
+                "perminute" in err_str
+                or "minuteperproject" in err_str
+                or "tokensperminute" in err_str
+            ):
+                cooldown = 60.0  # 60 Seconds for RPM/TPM minute limit
+                metric_type = "RPM/TPM (60s)"
+
+        doc_id = f"{key_alias}_{model_name}" if key_alias else model_name
+        now = time.time()
+        self._local_depleted[doc_id] = (now, cooldown)
+        logger.warning("🔴 Model '%s' marked DEPLETED [%s]", doc_id, metric_type)
+
+        db = self._get_db()
+        if db is not None:
+            try:
+                expire_dt = datetime.datetime.now(
+                    datetime.timezone.utc
+                ) + datetime.timedelta(seconds=cooldown)
+                db.collection(self.collection_name).document(doc_id).set(
+                    {
+                        "model": model_name,
+                        "key_alias": key_alias,
+                        "depleted_at": firestore.SERVER_TIMESTAMP,
+                        "cooldown_seconds": cooldown,
+                        "expire_at": expire_dt,
+                        "metric_type": metric_type,
+                    }
+                )
+                logger.info(
+                    "🔥 Persisted depletion record for '%s' to Firestore (TTL: %s)",
+                    doc_id,
+                    expire_dt,
+                )
+            except Exception as exc:
+                logger.warning("Failed to write depletion to Firestore: %s", exc)
+
+    def is_depleted(self, model_name: str, key_alias: str = "") -> bool:
+        """Check whether a model/key pair is currently depleted."""
+        doc_id = f"{key_alias}_{model_name}" if key_alias else model_name
+        now = time.time()
+
+        # Check local memory first
+        if doc_id in self._local_depleted:
+            ts, cooldown = self._local_depleted[doc_id]
+            if now - ts <= cooldown:
+                return True
+            del self._local_depleted[doc_id]
+            logger.info("🟢 Local depletion cooldown expired for '%s'", doc_id)
+
+        # Fallback check Firestore if enabled
+        db = self._get_db()
+        if db is not None:
+            try:
+                doc = db.collection(self.collection_name).document(doc_id).get()
+                if doc.exists:
+                    data = doc.to_dict() or {}
+                    expire_at = data.get("expire_at")
+                    if expire_at:
+                        if isinstance(expire_at, datetime.datetime):
+                            if expire_at > datetime.datetime.now(datetime.timezone.utc):
+                                return True
+                        # Expired in Firestore
+                        return False
+            except Exception as exc:
+                logger.debug("Firestore depletion read check skipped: %s", exc)
+
+        return False
+
+
+firestore_depleted_registry = FirestoreDepletedModelRegistry()

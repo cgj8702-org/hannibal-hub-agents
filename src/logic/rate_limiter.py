@@ -36,17 +36,21 @@ def _load_rate_limits(registry_path: Path) -> dict[str, dict[str, Any]]:
 
 
 def get_active_api_key() -> str:
-    """Get active API key from FREE_KEY or PAID_KEY based on resolved tier and synchronize os.environ."""
+    """Get active API key from WEBHOOK_PAID_KEY / PAID_KEY or WEBHOOK_FREE_KEY / FREE_KEY based on resolved tier and synchronize os.environ."""
     tier = _resolve_tier()
     if tier == "paid":
         key = (
-            os.getenv("PAID_KEY")
+            os.getenv("WEBHOOK_PAID_KEY")
+            or os.getenv("PAID_KEY")
+            or os.getenv("WEBHOOK_FREE_KEY")
             or os.getenv("FREE_KEY")
             or os.getenv("GEMINI_API_KEY", "")
         )
     else:
         key = (
-            os.getenv("FREE_KEY")
+            os.getenv("WEBHOOK_FREE_KEY")
+            or os.getenv("FREE_KEY")
+            or os.getenv("WEBHOOK_PAID_KEY")
             or os.getenv("PAID_KEY")
             or os.getenv("GEMINI_API_KEY", "")
         )
@@ -63,28 +67,29 @@ def _resolve_tier() -> str:
 
     Resolution cascade:
     1. Explicit override: HANNIBAL_TIER env var ("free" or "paid").
-    2. Active key match: If GEMINI_API_KEY matches FREE_KEY or PAID_KEY.
-    3. Presence fallback: PAID_KEY exists and is non-empty/non-dummy -> paid, else free.
+    2. Active key match: If GEMINI_API_KEY matches WEBHOOK_FREE_KEY/FREE_KEY or WEBHOOK_PAID_KEY/PAID_KEY.
+    3. Presence fallback: WEBHOOK_PAID_KEY or PAID_KEY exists and is non-empty/non-dummy -> paid, else free.
     """
     explicit_tier = os.getenv("HANNIBAL_TIER", "").lower()
     if explicit_tier in ("free", "paid"):
         return explicit_tier
 
-    free_key = os.getenv("FREE_KEY")
-    paid_key = os.getenv("PAID_KEY")
+    free_keys = {k for k in (os.getenv("WEBHOOK_FREE_KEY"), os.getenv("FREE_KEY")) if k}
+    paid_keys = {k for k in (os.getenv("WEBHOOK_PAID_KEY"), os.getenv("PAID_KEY")) if k}
     active_gemini_key = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
 
     if (
         active_gemini_key
-        and free_key
-        and active_gemini_key == free_key
-        and active_gemini_key != paid_key
+        and active_gemini_key in free_keys
+        and active_gemini_key not in paid_keys
     ):
         return "free"
-    if active_gemini_key and paid_key and active_gemini_key == paid_key:
+    if active_gemini_key and active_gemini_key in paid_keys:
         return "paid"
-    if paid_key and paid_key.lower() not in ("", "dummy", "none"):
-        return "paid"
+
+    for p_key in paid_keys:
+        if p_key.lower() not in ("", "dummy", "none"):
+            return "paid"
 
     return "free"
 
