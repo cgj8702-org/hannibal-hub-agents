@@ -36,9 +36,9 @@ from .bot_identity import _is_bot_event
 from .memory_service import InMemoryMemoryService
 
 try:
-    from logic.rate_limiter import get_active_api_key, rpm_waiter
+    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
 except ImportError:
-    from ..logic.rate_limiter import get_active_api_key, rpm_waiter
+    from ..logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
 
 logger = logging.getLogger("webhook_agent")
 
@@ -174,7 +174,19 @@ BOT_LOGIN = "hannibal-hub-agents[bot]"
 # ---------------------------------------------------------------------------
 # Input Token Safety Limits (Capped to stay under token budget)
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 3500  # Cap user prompt payload per turn to 3.5k tokens
+MAX_INPUT_TOKENS = 3500  # Default 3.5k tokens cap for Free Tier / Gemma models
+
+
+def get_max_input_tokens() -> int:
+    """Return max token input budget based on active tier capability.
+
+    Free Tier / Gemma models: 3,500 tokens.
+    Paid Tier Gemini Flash models: 35,000 tokens (10x context window).
+    """
+    tier = _resolve_tier()
+    if tier == "paid":
+        return 35000
+    return MAX_INPUT_TOKENS
 
 
 def count_tokens_exact(
@@ -183,15 +195,21 @@ def count_tokens_exact(
     """Count input tokens using Google GenAI SDK's client.models.count_tokens().
 
     Returns exact token count from the API if credentials are configured,
-    or None if unavailable/offline.
+    or None if credentials fail or method is unavailable.
     """
-    api_key = get_active_api_key()
     try:
-        from google import genai
+        from google.genai import Client
 
-        client = genai.Client(api_key=api_key) if api_key else genai.Client()
-        response = client.models.count_tokens(model=model_name, contents=contents)
-        return response.total_tokens
+        api_key = get_active_api_key()
+        if not api_key:
+            return None
+        client = Client(api_key=api_key)
+
+        res = client.models.count_tokens(
+            model=model_name,
+            contents=contents if isinstance(contents, list) else [contents],
+        )
+        return getattr(res, "total_tokens", None)
     except Exception as exc:
         logger.debug("count_tokens API call skipped/unavailable: %s", exc)
         return None
@@ -199,7 +217,7 @@ def count_tokens_exact(
 
 def _truncate_text_to_token_limit(
     text: str,
-    max_tokens: int = MAX_INPUT_TOKENS,
+    max_tokens: int | None = None,
     model_name: str = "gemma-4-31b-it",
     label: str = "Input",
 ) -> str:
@@ -210,6 +228,9 @@ def _truncate_text_to_token_limit(
     """
     if not text:
         return text
+
+    if max_tokens is None:
+        max_tokens = get_max_input_tokens()
 
     # Step 1: Try exact token count via google.genai API
     exact_count = count_tokens_exact(text, model_name=model_name)
@@ -330,13 +351,17 @@ def get_model_chain() -> list[str]:
 
     Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
 
-    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.6-flash)
+    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.5-flash-lite on Free, gemini-3.6-flash on Paid)
     Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
     Tier 2 (2,000,000 TPM / 10k RPD): gemini-3.6-flash
     Tier 3 (1,000,000 TPM / 10k RPD): gemini-2.5-flash
     Tier 4 (16,000 TPM / 14.4k RPD): gemma-4-26b
     """
-    primary = os.environ.get("GEMMA_MODEL", "gemini-3.6-flash")
+    active_tier = _resolve_tier()
+    default_primary = (
+        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+    )
+    primary = os.environ.get("GEMMA_MODEL", default_primary)
     chain = [
         primary,
         "gemini-3.5-flash-lite",
@@ -351,14 +376,17 @@ def get_model_chain() -> list[str]:
 
 
 def _select_model_for_event(event_data: dict[str, Any]) -> str:
-    """Select appropriate model based on event type and content commands.
+    """Select appropriate model based on event type, active tier, and content commands.
 
+    On Free Tier, defaults primary to gemini-3.5-flash-lite (500 RPD) to protect gemini-3.6-flash (20 RPD).
     Routes heavy workloads (pull_request.opened, slash commands, @mentions)
-    to the primary model (GEMMA_MODEL), and routine lifecycle events
-    (closed, reopened, labels, casual comments) to the lightweight model
-    (GEMMA_LIGHTWEIGHT_MODEL).
+    to the primary model, and routine lifecycle events to the lightweight model.
     """
-    primary = os.environ.get("GEMMA_MODEL", "gemini-3.6-flash")
+    active_tier = _resolve_tier()
+    default_primary = (
+        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+    )
+    primary = os.environ.get("GEMMA_MODEL", default_primary)
     lightweight = os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", "gemini-3.5-flash-lite")
 
     if os.environ.get("ENABLE_DYNAMIC_MODEL_ROUTING", "1") not in (
@@ -1080,7 +1108,7 @@ def get_current_time(ctx: Context) -> dict[str, str]:
 # Sub-agent for Google Search grounding without breaking AFC for root tools
 search_sub_agent = Agent(
     name="search_agent",
-    model=os.environ.get("GEMMA_MODEL", "gemma-4-31b-it"),
+    model=os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite"),
     instruction="You are a technical search specialist. Search the web for documentation, CVEs, syntax issues, and library details.",
     tools=[google_search],
 )
