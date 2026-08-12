@@ -74,8 +74,16 @@ def _resolve_tier() -> str:
     if explicit_tier in ("free", "paid"):
         return explicit_tier
 
-    free_keys = {k for k in (os.getenv("WEBHOOK_FREE_KEY"), os.getenv("FREE_KEY")) if k}
-    paid_keys = {k for k in (os.getenv("WEBHOOK_PAID_KEY"), os.getenv("PAID_KEY")) if k}
+    free_keys = {
+        k
+        for k in (os.getenv("WEBHOOK_FREE_KEY"), os.getenv("FREE_KEY"))
+        if k and k.lower() not in ("dummy", "none")
+    }
+    paid_keys = {
+        k
+        for k in (os.getenv("WEBHOOK_PAID_KEY"), os.getenv("PAID_KEY"))
+        if k and k.lower() not in ("dummy", "none")
+    }
     active_gemini_key = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
 
     if (

@@ -134,12 +134,15 @@ class FirestoreDepletedModelRegistry:
                 if doc.exists:
                     data = doc.to_dict() or {}
                     expire_at = data.get("expire_at")
-                    if expire_at:
-                        if isinstance(expire_at, datetime.datetime):
-                            if expire_at > datetime.datetime.now(datetime.timezone.utc):
-                                return True
-                        # Expired in Firestore
-                        return False
+                    if expire_at and isinstance(expire_at, datetime.datetime):
+                        if expire_at.tzinfo is None:
+                            expire_at = expire_at.replace(tzinfo=datetime.timezone.utc)
+                        now_utc = datetime.datetime.now(datetime.timezone.utc)
+                        if expire_at > now_utc:
+                            remaining = (expire_at - now_utc).total_seconds()
+                            self._local_depleted[doc_id] = (now, remaining)
+                            return True
+                    return False
             except Exception as exc:
                 logger.debug("Firestore depletion read check skipped: %s", exc)
 
