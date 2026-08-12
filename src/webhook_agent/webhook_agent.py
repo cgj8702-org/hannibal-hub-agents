@@ -172,8 +172,48 @@ def _truncate_text_to_token_limit(
 _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 
 
+# ---------------------------------------------------------------------------
+# Process-Wide Model Depletion Registry
+# ---------------------------------------------------------------------------
+
+
+class DepletedModelRegistry:
+    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events."""
+
+    def __init__(self, cooldown_seconds: float = 3600.0) -> None:
+        self.cooldown = cooldown_seconds
+        self._depleted: dict[str, float] = {}
+
+    def mark_depleted(self, model_name: str) -> None:
+        self._depleted[model_name] = time.time()
+        logger.warning(
+            "🔴 Model '%s' marked DEPLETED for %ds across process",
+            model_name,
+            self.cooldown,
+        )
+
+    def is_depleted(self, model_name: str) -> bool:
+        if model_name not in self._depleted:
+            return False
+        if time.time() - self._depleted[model_name] > self.cooldown:
+            del self._depleted[model_name]
+            logger.info(
+                "🟢 Model '%s' depletion cooldown expired, restored to pool", model_name
+            )
+            return False
+        return True
+
+    def filter_chain(self, chain: list[str]) -> list[str]:
+        return [m for m in chain if not self.is_depleted(m)]
+
+
+_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(cooldown_seconds=3600.0)
+
+
 def get_model_chain() -> list[str]:
     """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
+
+    Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
 
     Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.6-flash)
     Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
@@ -190,7 +230,9 @@ def get_model_chain() -> list[str]:
         "gemma-4-26b",
     ]
     seen: set[str] = set()
-    return [m for m in chain if not (m in seen or seen.add(m))]
+    deduped = [m for m in chain if not (m in seen or seen.add(m))]
+    available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
+    return available if available else deduped
 
 
 def _select_model_for_event(event_data: dict[str, Any]) -> str:
@@ -209,32 +251,39 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
         "true",
         "True",
     ):
-        return primary
+        target = primary
+    else:
+        canonical = event_data.get("canonical", "")
+        raw = event_data.get("raw_payload", {})
 
-    canonical = event_data.get("canonical", "")
-    raw = event_data.get("raw_payload", {})
+        if canonical in ("pull_request.opened", "pull_request.synchronize"):
+            target = primary
+        elif canonical.startswith("issue_comment.") or canonical.startswith(
+            "pull_request_review_comment."
+        ):
+            comment_body = ""
+            if isinstance(raw.get("comment"), dict):
+                comment_body = raw["comment"].get("body") or ""
 
-    if canonical in ("pull_request.opened", "pull_request.synchronize"):
-        return primary
+            commands = (
+                "/review",
+                "/create",
+                "/resolve",
+                "/help",
+                "@hannibal-hub-agents",
+            )
+            if any(cmd in comment_body for cmd in commands):
+                target = primary
+            else:
+                target = lightweight
+        else:
+            target = lightweight
 
-    if canonical.startswith("issue_comment.") or canonical.startswith(
-        "pull_request_review_comment."
-    ):
-        comment_body = ""
-        if isinstance(raw.get("comment"), dict):
-            comment_body = raw["comment"].get("body") or ""
+    if _DEPLETED_MODEL_REGISTRY.is_depleted(target):
+        chain = get_model_chain()
+        target = chain[0] if chain else target
 
-        commands = (
-            "/review",
-            "/create",
-            "/resolve",
-            "/help",
-            "@hannibal-hub-agents",
-        )
-        if any(cmd in comment_body for cmd in commands):
-            return primary
-
-    return lightweight
+    return target
 
 
 _FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-3.5-flash-lite")
@@ -1064,15 +1113,19 @@ class WebhookAgent:
 
     def _advance_model_chain(self) -> str | None:
         """Cascade to next model in TPM descending chain on rate limit or server error."""
-        if self._chain_index + 1 < len(self._model_chain):
-            self._chain_index += 1
+        # Mark current model depleted so subsequent events skip it immediately
+        _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name)
+
+        # Refresh model chain to get available non-depleted models
+        self._model_chain = get_model_chain()
+        self._chain_index = 0
+
+        if self._model_chain:
             next_model = self._model_chain[self._chain_index]
             logger.warning(
-                "⚠️ Cascading model chain from %s -> %s (Tier %d/%d)",
+                "⚠️ Cascading model chain from %s -> %s",
                 self._current_model_name,
                 next_model,
-                self._chain_index + 1,
-                len(self._model_chain),
             )
             self._current_model_name = next_model
             self._agent.model = Gemini(model=next_model)
