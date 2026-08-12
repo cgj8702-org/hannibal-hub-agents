@@ -38,22 +38,26 @@ def _load_rate_limits(registry_path: Path) -> dict[str, dict[str, Any]]:
 def get_active_api_key() -> str:
     """Get active API key from WEBHOOK_PAID_KEY / PAID_KEY or WEBHOOK_FREE_KEY / FREE_KEY based on resolved tier and synchronize os.environ."""
     tier = _resolve_tier()
-    if tier == "paid":
-        key = (
-            os.getenv("WEBHOOK_PAID_KEY")
-            or os.getenv("PAID_KEY")
-            or os.getenv("WEBHOOK_FREE_KEY")
-            or os.getenv("FREE_KEY")
-            or os.getenv("GEMINI_API_KEY", "")
-        )
-    else:
-        key = (
-            os.getenv("WEBHOOK_FREE_KEY")
-            or os.getenv("FREE_KEY")
-            or os.getenv("WEBHOOK_PAID_KEY")
-            or os.getenv("PAID_KEY")
-            or os.getenv("GEMINI_API_KEY", "")
-        )
+    candidate_keys = (
+        [
+            os.getenv("WEBHOOK_PAID_KEY"),
+            os.getenv("PAID_KEY"),
+            os.getenv("WEBHOOK_FREE_KEY"),
+            os.getenv("FREE_KEY"),
+        ]
+        if tier == "paid"
+        else [
+            os.getenv("WEBHOOK_FREE_KEY"),
+            os.getenv("FREE_KEY"),
+            os.getenv("WEBHOOK_PAID_KEY"),
+            os.getenv("PAID_KEY"),
+        ]
+    )
+
+    key = next(
+        (k for k in candidate_keys if k and k.lower() not in ("dummy", "none")),
+        os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", "")),
+    )
 
     if key:
         os.environ["GEMINI_API_KEY"] = key
