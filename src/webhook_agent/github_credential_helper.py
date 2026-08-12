@@ -110,57 +110,11 @@ def save_cached_token(installation_id: int, token: InstallationToken) -> None:
     p.write_text(json.dumps({"token": token.token, "expires_at": token.expires_at}))
 
 
-def load_private_key(path_or_pem: str | None = None) -> str:
-    """Load GitHub App private key PEM content.
-
-    Order of preference:
-    1. Direct PEM content if passed string starts with '-----BEGIN'
-    2. Environment variable GITHUB_PRIVATE_KEY
-    3. GCP Secret Manager 'GITHUB_PRIVATE_KEY' if project available
-    4. Reading file at path_or_pem or default candidate paths
-    """
-    if path_or_pem and path_or_pem.strip().startswith("-----BEGIN"):
-        return path_or_pem
-
-    env_pem = os.getenv("GITHUB_PRIVATE_KEY")
-    if env_pem and env_pem.strip().startswith("-----BEGIN"):
-        return env_pem
-
-    # Fallback to GCP Secret Manager if in cloud mode
-    if os.getenv("RAG_MODE", "cloud") == "cloud":
-        try:
-            project_id = (
-                os.getenv("PUBSUB_PROJECT")
-                or os.getenv("GCP_PROJECT_ID")
-                or "cgj8702-webhook-agent"
-            )
-            from google.cloud import secretmanager
-
-            client = secretmanager.SecretManagerServiceClient()
-            name = f"projects/{project_id}/secrets/GITHUB_PRIVATE_KEY/versions/latest"
-            val = client.access_secret_version(
-                request={"name": name}
-            ).payload.data.decode("UTF-8")
-            if val and val.strip().startswith("-----BEGIN"):
-                return val
-        except Exception:
-            pass
-
-    candidates = [
-        path_or_pem,
-        os.getenv("GITHUB_PRIVATE_KEY_PATH"),
-        "/tmp/keys/github-app-private-key.pem",
-        os.path.expanduser("~/hannibal-hub-agents.2026-06-24.private-key.pem"),
-    ]
-    for cand in candidates:
-        if cand:
-            p = Path(cand)
-            if p.exists() and p.is_file():
-                return p.read_text()
-
-    raise FileNotFoundError(
-        f"GitHub App private key not found in environment, Secret Manager, or candidate paths: {candidates}"
-    )
+def load_private_key(path: str) -> str:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"private key not found: {path}")
+    return p.read_text()
 
 
 def main() -> int:
