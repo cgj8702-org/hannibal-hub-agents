@@ -266,6 +266,17 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is True
 
+    def test_suppress_dependabot_comment(self):
+        """Comments mentioning @dependabot should be suppressed from processing."""
+        ev = _make_normalized(
+            "issue_comment",
+            action="created",
+            include_comment=True,
+            comment_author="human-user",
+        )
+        ev["raw_payload"]["comment"]["body"] = "@dependabot recreate"
+        assert self.processor.should_process_event(ev) is False
+
     def test_pull_request_review_allowed(self):
         """pull_request_review submissions pass should_process_event for LLM evaluation."""
         ev = _make_normalized(

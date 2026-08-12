@@ -136,6 +136,7 @@ class WebhookProcessor:
 
         * Duplicate deliveries are suppressed.
         * Bot events originating from the app are suppressed.
+        * Comments mentioning @dependabot are suppressed.
         * The ``edited`` action is filtered out.
         * Automated CI noise events (check_suite, check_run, status) are suppressed.
         * Read-only PR lifecycle events (pull_request.closed) are suppressed.
@@ -146,6 +147,12 @@ class WebhookProcessor:
         if delivery_id in self._processed_deliveries:
             return False
         if _is_bot_event(ev):
+            return False
+
+        raw = ev.get("raw_payload") or {}
+        comment = raw.get("comment") or {}
+        comment_body = comment.get("body") or ""
+        if "@dependabot" in comment_body.lower():
             return False
 
         action = ev.get("action")
