@@ -224,13 +224,20 @@ class TestWebhookAgentModelChain:
 
 
 class TestDynamicModelRouting:
-    def test_pull_request_opened_routes_to_primary_model(self):
+    def setup_method(self):
+        from webhook_agent.webhook_agent import _DEPLETED_MODEL_REGISTRY
+
+        _DEPLETED_MODEL_REGISTRY._depleted.clear()
+
+    def test_pull_request_opened_routes_to_primary_model(self, monkeypatch):
+        monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
         from webhook_agent.webhook_agent import _select_model_for_event
 
         event_data = {"canonical": "pull_request.opened"}
         assert _select_model_for_event(event_data) == "gemini-3.6-flash"
 
-    def test_slash_command_comment_routes_to_primary_model(self):
+    def test_slash_command_comment_routes_to_primary_model(self, monkeypatch):
+        monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
         from webhook_agent.webhook_agent import _select_model_for_event
 
         event_data = {
@@ -239,7 +246,8 @@ class TestDynamicModelRouting:
         }
         assert _select_model_for_event(event_data) == "gemini-3.6-flash"
 
-    def test_bot_mention_comment_routes_to_primary_model(self):
+    def test_bot_mention_comment_routes_to_primary_model(self, monkeypatch):
+        monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
         from webhook_agent.webhook_agent import _select_model_for_event
 
         event_data = {
@@ -266,6 +274,7 @@ class TestDynamicModelRouting:
         assert _select_model_for_event(event_data) == "gemini-3.5-flash-lite"
 
     def test_disabled_dynamic_routing_forces_primary_model(self, monkeypatch):
+        monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
         from webhook_agent.webhook_agent import _select_model_for_event
 
         monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "0")
@@ -343,8 +352,8 @@ class TestTokenTruncation:
 
 
 class TestToolRegistration:
-    def test_agent_has_exactly_11_tools(self):
-        """WebhookAgent should register 9 API primitives + 2 utility tools."""
+    def test_agent_has_exactly_12_tools(self):
+        """WebhookAgent should register 10 API primitives + 2 utility tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -352,10 +361,10 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._agent.tools
         ]
-        assert len(tool_names) == 11
+        assert len(tool_names) == 12
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 9 API primitives + get_current_time + search_agent."""
+        """Tool names should match the 10 API primitives + get_current_time + search_agent."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -372,6 +381,7 @@ class TestToolRegistration:
                 "update_issue",
                 "add_comment",
                 "open_pr",
+                "update_branch_from_base",
                 "merge_pr",
                 "review",
                 "get_current_time",

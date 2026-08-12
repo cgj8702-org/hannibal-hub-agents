@@ -909,10 +909,12 @@ def review(
         pr = repo.get_pull(pr_number)
 
         # Supersede / dismiss prior bot reviews
-        bot_user = gh.get_user().login
         existing_reviews = pr.get_reviews()
         for prev_rv in existing_reviews:
-            if prev_rv.user and prev_rv.user.login == bot_user:
+            if prev_rv.user and (
+                prev_rv.user.login in (BOT_LOGIN, "hannibal-hub-agents")
+                or prev_rv.user.login.startswith("hannibal-hub-agents")
+            ):
                 # Dismiss previous review if it is in an active state (CHANGES_REQUESTED or APPROVED)
                 if prev_rv.state in ("CHANGES_REQUESTED", "APPROVED"):
                     try:
