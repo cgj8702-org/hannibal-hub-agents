@@ -37,6 +37,25 @@ from .github_credential_helper import (
 logger = logging.getLogger("webhook_processor")
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env var, treating empty/unset as the default.
+
+    ``os.getenv(name, default)`` only falls back when the variable is *unset*;
+    an empty string (e.g. ``GITHUB_APP_ID=`` from a failed secret resolution)
+    passes through and crashes ``int()``. This helper treats empty as unset.
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid integer for %s=%r, using default %d", name, raw, default
+        )
+        return default
+
+
 def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Programmatically react with eyes emoji to incoming comment events."""
     try:
@@ -164,8 +183,10 @@ class WebhookProcessor:
         # Keep track of processed deliveries to prevent duplicate handling (FIFO capped dict).
         self._processed_deliveries: dict[str, None] = {}
         # Load essential GitHub credentials from the environment.
-        self.app_id = int(os.getenv("GITHUB_APP_ID", "4133145"))
-        self.installation_id = int(os.getenv("GITHUB_INSTALLATION_ID", "150411146"))
+        # Empty env vars (e.g. from a failed secret resolution) are treated as
+        # unset so the worker fails with a clear error instead of int('') crashing.
+        self.app_id = _env_int("GITHUB_APP_ID", 4133145)
+        self.installation_id = _env_int("GITHUB_INSTALLATION_ID", 150411146)
         self.private_key_path = os.getenv(
             "GITHUB_PRIVATE_KEY_PATH", "/tmp/keys/github-app-private-key.pem"
         )

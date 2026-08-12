@@ -8,13 +8,30 @@ PROJECT_ID="${PUBSUB_PROJECT:-cgj8702-webhook-agent}"
 
 echo "Loading secrets from Secret Manager project [${PROJECT_ID}]..."
 
-export GITHUB_APP_ID=$(gcloud secrets versions access latest --secret="GITHUB_APP_ID" --project="${PROJECT_ID}")
-export GITHUB_INSTALLATION_ID=$(gcloud secrets versions access latest --secret="GITHUB_INSTALLATION_ID" --project="${PROJECT_ID}")
+# GITHUB_APP_ID and GITHUB_INSTALLATION_ID are GCE VM metadata, NOT secrets.
+# They are already defined in .envrc and exposed via the VM metadata server.
+# Do NOT override them from Secret Manager — doing so produces empty strings
+# that crash int() in processor.py (see GH issue where webhook agent broke
+# after commit a073079 added cross-repo RAG_MODE gates).
+# Instead, ensure they are available for the worker/processor.
+if [ -z "${GITHUB_APP_ID:-}" ]; then
+    echo "WARNING: GITHUB_APP_ID not set; expect it from .envrc or VM metadata"
+fi
+if [ -z "${GITHUB_INSTALLATION_ID:-}" ]; then
+    echo "WARNING: GITHUB_INSTALLATION_ID not set; expect it from .envrc or VM metadata"
+fi
+
+# --- Secrets that actually belong in Secret Manager ---
+
 export FREE_KEY=$(gcloud secrets versions access latest --secret="FREE_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
 export PAID_KEY=$(gcloud secrets versions access latest --secret="PAID_KEY" --project="${PROJECT_ID}" 2>/dev/null || gcloud secrets versions access latest --secret="GEMINI_API_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
 export GEMINI_API_KEY="${PAID_KEY:-${FREE_KEY:-}}"
 export GOOGLE_API_KEY="${GEMINI_API_KEY}"
 export WEBHOOK_SECRET=$(gcloud secrets versions access latest --secret="WEBHOOK_SECRET" --project="${PROJECT_ID}")
+if [ -z "$WEBHOOK_SECRET" ]; then
+    echo "FATAL: WEBHOOK_SECRET resolved to empty from Secret Manager (project=${PROJECT_ID})" >&2
+    exit 1
+fi
 
 # Save private key to ephemeral path
 mkdir -p /tmp/keys
