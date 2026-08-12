@@ -172,8 +172,73 @@ def _truncate_text_to_token_limit(
 _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 
 
+# ---------------------------------------------------------------------------
+# Process-Wide Model Depletion Registry
+# ---------------------------------------------------------------------------
+
+
+class DepletedModelRegistry:
+    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events.
+
+    Dynamically sets cooldown based on error metric:
+    - RPD (Requests Per Day): 24 Hours (86,400s)
+    - RPM / TPM (Requests/Tokens Per Minute): 60 Seconds
+    - Default Fallback: 1 Hour (3,600s)
+    """
+
+    def __init__(self, default_cooldown: float = 3600.0) -> None:
+        self.default_cooldown = default_cooldown
+        self._depleted: dict[str, tuple[float, float]] = {}
+
+    def mark_depleted(self, model_name: str, error: Exception | None = None) -> None:
+        cooldown = self.default_cooldown
+        metric_type = "DEFAULT (1h)"
+
+        if error is not None:
+            err_str = str(error).lower()
+            if "perday" in err_str or "dayperproject" in err_str:
+                cooldown = 86400.0  # 24 Hours for RPD daily limit
+                metric_type = "RPD (24h)"
+            elif (
+                "perminute" in err_str
+                or "minuteperproject" in err_str
+                or "tokensperminute" in err_str
+            ):
+                cooldown = 60.0  # 60 Seconds for RPM/TPM minute limit
+                metric_type = "RPM/TPM (60s)"
+
+        self._depleted[model_name] = (time.time(), cooldown)
+        logger.warning(
+            "🔴 Model '%s' marked DEPLETED [%s] across process",
+            model_name,
+            metric_type,
+        )
+
+    def is_depleted(self, model_name: str) -> bool:
+        if model_name not in self._depleted:
+            return False
+        timestamp, cooldown = self._depleted[model_name]
+        if time.time() - timestamp > cooldown:
+            del self._depleted[model_name]
+            logger.info(
+                "🟢 Model '%s' depletion cooldown expired (%ds), restored to pool",
+                model_name,
+                int(cooldown),
+            )
+            return False
+        return True
+
+    def filter_chain(self, chain: list[str]) -> list[str]:
+        return [m for m in chain if not self.is_depleted(m)]
+
+
+_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
+
+
 def get_model_chain() -> list[str]:
     """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
+
+    Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
 
     Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.6-flash)
     Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
@@ -190,7 +255,9 @@ def get_model_chain() -> list[str]:
         "gemma-4-26b",
     ]
     seen: set[str] = set()
-    return [m for m in chain if not (m in seen or seen.add(m))]
+    deduped = [m for m in chain if not (m in seen or seen.add(m))]
+    available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
+    return available if available else deduped
 
 
 def _select_model_for_event(event_data: dict[str, Any]) -> str:
@@ -209,32 +276,39 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
         "true",
         "True",
     ):
-        return primary
+        target = primary
+    else:
+        canonical = event_data.get("canonical", "")
+        raw = event_data.get("raw_payload", {})
 
-    canonical = event_data.get("canonical", "")
-    raw = event_data.get("raw_payload", {})
+        if canonical in ("pull_request.opened", "pull_request.synchronize"):
+            target = primary
+        elif canonical.startswith("issue_comment.") or canonical.startswith(
+            "pull_request_review_comment."
+        ):
+            comment_body = ""
+            if isinstance(raw.get("comment"), dict):
+                comment_body = raw["comment"].get("body") or ""
 
-    if canonical in ("pull_request.opened", "pull_request.synchronize"):
-        return primary
+            commands = (
+                "/review",
+                "/create",
+                "/resolve",
+                "/help",
+                "@hannibal-hub-agents",
+            )
+            if any(cmd in comment_body for cmd in commands):
+                target = primary
+            else:
+                target = lightweight
+        else:
+            target = lightweight
 
-    if canonical.startswith("issue_comment.") or canonical.startswith(
-        "pull_request_review_comment."
-    ):
-        comment_body = ""
-        if isinstance(raw.get("comment"), dict):
-            comment_body = raw["comment"].get("body") or ""
+    if _DEPLETED_MODEL_REGISTRY.is_depleted(target):
+        chain = get_model_chain()
+        target = chain[0] if chain else target
 
-        commands = (
-            "/review",
-            "/create",
-            "/resolve",
-            "/help",
-            "@hannibal-hub-agents",
-        )
-        if any(cmd in comment_body for cmd in commands):
-            return primary
-
-    return lightweight
+    return target
 
 
 _FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-3.5-flash-lite")
@@ -539,6 +613,8 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     """Post a standard discussion comment on an issue or PR conversation thread.
 
     This does NOT trigger a code review or edit the issue/PR description.
+    If a code review report is detected in the body, it is automatically
+    redirected to the review() tool.
 
     Args:
         issue_number: Issue or PR number.
@@ -547,12 +623,33 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     Returns:
         A string describing the result.
     """
-    gh = _get_gh_from_ctx(ctx)
+    # Programmatic Guardrail: Redirect code review reports erroneously sent to add_comment to review()
+    if (
+        "Code Review Report" in body
+        or "| Category" in body
+        or "**Scorecard**" in body
+        or "## 4. Verdict Determination" in body
+    ):
+        logger.warning(
+            "Redirecting code review report from add_comment() to review() for #%d",
+            issue_number,
+        )
+        return review(ctx, pr_number=issue_number, body=body, event="COMMENT")
+
     repo_name = _get_repo_full_name(ctx)
+    target_key = f"{repo_name}#{issue_number}"
+    if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
+        return (
+            f"Error: Comment rate limit exceeded for #{issue_number} "
+            f"(max 3 comments per minute per thread)."
+        )
+
+    gh = _get_gh_from_ctx(ctx)
     try:
         repo = gh.get_repo(repo_name)
         issue = repo.get_issue(number=issue_number)
         c = issue.create_comment(body=body)
+        _COMMENT_RATE_LIMITER.record(target_key)
         return f"Commented on #{issue_number}: {c.html_url}"
     except Exception as e:
         return f"Error commenting on issue/PR: {e}"
@@ -1039,26 +1136,30 @@ class WebhookAgent:
             memory_service=self._memory_service,
         )
 
-    def _advance_model_chain(self) -> str | None:
+    def _advance_model_chain(self, error: Exception | None = None) -> str | None:
         """Cascade to next model in TPM descending chain on rate limit or server error."""
-        if self._chain_index + 1 < len(self._model_chain):
-            self._chain_index += 1
+        # Mark current model depleted with smart metric-aware cooldown parsing
+        _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name, error=error)
+
+        # Refresh model chain to get available non-depleted models
+        self._model_chain = get_model_chain()
+        self._chain_index = 0
+
+        if self._model_chain:
             next_model = self._model_chain[self._chain_index]
             logger.warning(
-                "⚠️ Cascading model chain from %s -> %s (Tier %d/%d)",
+                "⚠️ Cascading model chain from %s -> %s",
                 self._current_model_name,
                 next_model,
-                self._chain_index + 1,
-                len(self._model_chain),
             )
             self._current_model_name = next_model
             self._agent.model = Gemini(model=next_model)
             return next_model
         return None
 
-    def _create_fallback_agent(self) -> None:
+    def _create_fallback_agent(self, error: Exception | None = None) -> None:
         """Switch to fallback model when primary model is unavailable."""
-        self._advance_model_chain()
+        self._advance_model_chain(error=error)
 
         # Recreate runner with new agent
         self._runner = Runner(
@@ -1439,7 +1540,7 @@ class WebhookAgent:
                 except Exception as e:
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
-                        self._advance_model_chain()
+                        self._advance_model_chain(error=e)
                         logger.warning(
                             "Transient error on attempt %d/%d (trace: %s): %s. Active model is now: %s",
                             attempt + 1,
