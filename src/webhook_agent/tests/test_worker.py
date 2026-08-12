@@ -373,6 +373,42 @@ class TestShouldProcessEvent:
         template = _fetch_repo_pr_template(MockGithub(), "org/repo")
         assert "## 🗒️ Description" in template
 
+    def test_fetch_repo_pr_template_dev_vs_prod(self):
+        """_fetch_repo_pr_template selects dev vs prod template based on git diff changed files."""
+        from webhook_agent.webhook_agent import _fetch_repo_pr_template
+
+        class MockFile:
+            def __init__(self, name, content):
+                self.name = name
+                self.decoded_content = content.encode("utf-8")
+
+        class MockRepo:
+            def get_contents(self, path):
+                if path == ".github/PULL_REQUEST_TEMPLATE":
+                    return [
+                        MockFile("dev_pull_request_template.md", "DEV TEMPLATE"),
+                        MockFile("prod_pull_request_template.md", "PROD TEMPLATE"),
+                    ]
+                raise Exception("Not found")
+
+        class MockGithub:
+            def get_repo(self, name):
+                return MockRepo()
+
+        # Dev-only changes
+        dev_tpl = _fetch_repo_pr_template(
+            MockGithub(), "org/repo", changed_files=["dev/auditor.py", "docs/README.md"]
+        )
+        assert dev_tpl == "DEV TEMPLATE"
+
+        # Prod changes
+        prod_tpl = _fetch_repo_pr_template(
+            MockGithub(),
+            "org/repo",
+            changed_files=["src/hannibal/main.py", "dev/auditor.py"],
+        )
+        assert prod_tpl == "PROD TEMPLATE"
+
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):
         """PR lifecycle events pass should_process_event for autonomous LLM evaluation."""
         assert (

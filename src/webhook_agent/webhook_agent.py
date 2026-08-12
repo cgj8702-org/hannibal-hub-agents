@@ -98,12 +98,41 @@ def _sanitize_pr_body(body: str) -> str:
     return result
 
 
-def _fetch_repo_pr_template(gh: Any, repo_name: str) -> str:
-    """Fetch the target repository's custom PR template via PyGithub if available."""
+def _fetch_repo_pr_template(
+    gh: Any, repo_name: str, changed_files: list[str] | None = None
+) -> str:
+    """Fetch the target repository's custom PR template via PyGithub based on git diff analysis."""
     try:
         repo = gh.get_repo(repo_name)
+
+        # Check if PULL_REQUEST_TEMPLATE directory exists for multi-template repos (e.g. hannibal-hub)
+        try:
+            templates = repo.get_contents(".github/PULL_REQUEST_TEMPLATE")
+            if isinstance(templates, list):
+                template_map = {t.name: t for t in templates}
+                is_dev_only = False
+                if changed_files:
+                    is_dev_only = all(
+                        f.startswith("dev/")
+                        or f.startswith("scripts/")
+                        or f.startswith("docs/")
+                        or f.startswith(".github/")
+                        for f in changed_files
+                    )
+
+                target_file = (
+                    "dev_pull_request_template.md"
+                    if is_dev_only and "dev_pull_request_template.md" in template_map
+                    else "prod_pull_request_template.md"
+                )
+                if target_file in template_map:
+                    content_file = template_map[target_file]
+                    if hasattr(content_file, "decoded_content"):
+                        return content_file.decoded_content.decode("utf-8")
+        except Exception:
+            pass
+
         candidate_paths = [
-            ".github/PULL_REQUEST_TEMPLATE/prod_pull_request_template.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
             ".github/pull_request_template.md",
         ]
@@ -1151,7 +1180,15 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 
 ---
 
-When generating PR descriptions (`open_pr` or `update_issue`), use this template as a guide. STRICTLY PROHIBITED: NEVER include template instruction headers (e.g. `# 🤖 Pull Request Description Template` or `## 📋 Title Format`) or placeholder comments in your output. Start directly with `## 🗒️ Description` or the repository's native PR template section:
+### PR Description & Template Evaluation Protocol (MANDATORY)
+
+When generating or updating PR descriptions (`open_pr` or `update_issue`):
+1. **Diff Evaluation**: Inspect the git diff and list of changed files.
+   - **Dev PR (`dev_pull_request_template.md`)**: Select if changes are strictly limited to `dev/`, `scripts/`, `docs/`, or non-production tooling.
+   - **Prod PR (`prod_pull_request_template.md`)**: Select if changes touch `src/`, `rag_service/`, core APIs, or production architecture.
+2. **Template Sanitization**: Fill out the appropriate section headers. STRICTLY PROHIBITED: NEVER include template instruction headers (e.g. `# 🤖 Pull Request Description Template` or `## 📋 Title Format`) or placeholder instruction comments in your output. Start directly with the section headers (`## 🗒️ Description` or `## 🍵 The Tea`).
+
+Default fallback layout:
 {_PR_TEMPLATE}
 """
 
