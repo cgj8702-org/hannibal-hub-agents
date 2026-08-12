@@ -35,28 +35,50 @@ def _load_rate_limits(registry_path: Path) -> dict[str, dict[str, Any]]:
     return {}
 
 
+_CONFIG_CACHE: tuple[float, str] = (0.0, "free")
+
+
+def _get_firestore_tier() -> str:
+    """Read WEBHOOK_TIER from Firestore collection system_config/runtime with 30s local cache."""
+    global _CONFIG_CACHE
+    now = time.time()
+    last_fetch, cached_tier = _CONFIG_CACHE
+    if now - last_fetch < 30.0:
+        return cached_tier
+
+    try:
+        from logic.firestore_registry import firestore_depleted_registry
+
+        db = firestore_depleted_registry._get_db()
+        if db is not None:
+            doc = db.collection("system_config").document("runtime").get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                val = str(data.get("WEBHOOK_TIER", "")).lower()
+                if val in ("free", "paid"):
+                    _CONFIG_CACHE = (now, val)
+                    return val
+    except Exception as exc:
+        logger.debug("Firestore dynamic config read skipped: %s", exc)
+
+    return "free"
+
+
 def get_active_api_key() -> str:
-    """Get active API key from WEBHOOK_PAID_KEY / PAID_KEY or WEBHOOK_FREE_KEY / FREE_KEY based on resolved tier and synchronize os.environ."""
+    """Get active API key strictly for Webhook Agent based on resolved WEBHOOK_TIER.
+
+    When tier is 'free' (default) -> Load ONLY WEBHOOK_FREE_KEY / FREE_KEY.
+    When tier is 'paid' -> Load ONLY WEBHOOK_PAID_KEY / PAID_KEY.
+    """
     tier = _resolve_tier()
-    candidate_keys = (
-        [
-            os.getenv("WEBHOOK_PAID_KEY"),
-            os.getenv("PAID_KEY"),
-            os.getenv("WEBHOOK_FREE_KEY"),
-            os.getenv("FREE_KEY"),
-        ]
-        if tier == "paid"
-        else [
-            os.getenv("WEBHOOK_FREE_KEY"),
-            os.getenv("FREE_KEY"),
-            os.getenv("WEBHOOK_PAID_KEY"),
-            os.getenv("PAID_KEY"),
-        ]
-    )
+    if tier == "paid":
+        candidate_keys = [os.getenv("WEBHOOK_PAID_KEY"), os.getenv("PAID_KEY")]
+    else:
+        candidate_keys = [os.getenv("WEBHOOK_FREE_KEY"), os.getenv("FREE_KEY")]
 
     key = next(
         (k for k in candidate_keys if k and k.lower() not in ("dummy", "none")),
-        os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", "")),
+        "",
     )
 
     if key:
@@ -67,42 +89,18 @@ def get_active_api_key() -> str:
 
 
 def _resolve_tier() -> str:
-    """Resolve the active tier using the hannibal-hub-agents Key Resolution Protocol.
+    """Resolve active tier for Webhook Agent (strictly defaulting to 'free').
 
     Resolution cascade:
-    1. Explicit override: HANNIBAL_TIER env var ("free" or "paid").
-    2. Active key match: If GEMINI_API_KEY matches WEBHOOK_FREE_KEY/FREE_KEY or WEBHOOK_PAID_KEY/PAID_KEY.
-    3. Presence fallback: WEBHOOK_PAID_KEY or PAID_KEY exists and is non-empty/non-dummy -> paid, else free.
+    1. Explicit env override: WEBHOOK_TIER or HANNIBAL_TIER ("free" or "paid").
+    2. Dynamic Firestore config: system_config/runtime -> WEBHOOK_TIER.
+    3. Strict default: "free".
     """
-    explicit_tier = os.getenv("HANNIBAL_TIER", "").lower()
-    if explicit_tier in ("free", "paid"):
-        return explicit_tier
+    env_tier = (os.getenv("WEBHOOK_TIER") or os.getenv("HANNIBAL_TIER", "")).lower()
+    if env_tier in ("free", "paid"):
+        return env_tier
 
-    free_keys = {
-        k
-        for k in (os.getenv("WEBHOOK_FREE_KEY"), os.getenv("FREE_KEY"))
-        if k and k.lower() not in ("dummy", "none")
-    }
-    paid_keys = {
-        k
-        for k in (os.getenv("WEBHOOK_PAID_KEY"), os.getenv("PAID_KEY"))
-        if k and k.lower() not in ("dummy", "none")
-    }
-    active_gemini_key = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
-
-    if (
-        active_gemini_key
-        and active_gemini_key in free_keys
-        and active_gemini_key not in paid_keys
-    ):
-        return "free"
-    if active_gemini_key and active_gemini_key in paid_keys:
-        return "paid"
-
-    if paid_keys:
-        return "paid"
-
-    return "free"
+    return _get_firestore_tier()
 
 
 class RPMWaiter:
