@@ -287,6 +287,59 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is True
 
+    def test_prefetch_pr_diff(self, monkeypatch):
+        """_prefetch_pr_diff programmatically populates raw_payload['pr_diff']."""
+        from webhook_agent.processor import _prefetch_pr_diff
+
+        class MockFile:
+            filename = "src/main.py"
+            status = "modified"
+            patch = "@@ -1 +1 @@\n-old\n+new"
+
+        class MockPR:
+            def get_files(self):
+                return [MockFile()]
+
+        class MockRepo:
+            def get_pull(self, number):
+                return MockPR()
+
+        class MockGithub:
+            def get_repo(self, name):
+                return MockRepo()
+
+        ev = _make_normalized("pull_request", action="opened")
+        ev["canonical"] = "pull_request.opened"
+        ev["raw_payload"]["pull_request"] = {"number": 123}
+
+        _prefetch_pr_diff(MockGithub(), "org/repo", ev)
+
+        assert "pr_diff" in ev["raw_payload"]
+        assert "File: src/main.py" in ev["raw_payload"]["pr_diff"]
+        assert "@@ -1 +1 @@" in ev["raw_payload"]["pr_diff"]
+
+    def test_should_prefetch_diff_guardrail(self):
+        """_should_prefetch_diff prevents context bloat on routine comments or non-review events."""
+        from webhook_agent.processor import _should_prefetch_diff
+
+        assert _should_prefetch_diff("pull_request.opened", {}) is True
+        assert _should_prefetch_diff("pull_request.synchronize", {}) is True
+        assert (
+            _should_prefetch_diff(
+                "issue_comment.created",
+                {"comment": {"body": "Please /review this PR"}},
+            )
+            is True
+        )
+        # Routine comments or closed events should NOT pre-fetch diffs
+        assert (
+            _should_prefetch_diff(
+                "issue_comment.created", {"comment": {"body": "Thanks for updating!"}}
+            )
+            is False
+        )
+        assert _should_prefetch_diff("pull_request.closed", {}) is False
+
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):
         """PR lifecycle events pass should_process_event for autonomous LLM evaluation."""
         assert (

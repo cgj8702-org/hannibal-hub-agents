@@ -66,6 +66,84 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
         logger.warning("Failed to add eyes reaction to comment: %s", exc)
 
 
+def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
+    """Determine if a PR diff pre-fetch is necessary for this event to avoid prompt bloat.
+
+    Pre-fetching is restricted to PR creation/updates, review requests, and explicit
+    review slash commands (/review, /audit, /test, /resolve).
+    """
+    if canonical in (
+        "pull_request.opened",
+        "pull_request.synchronize",
+        "pull_request.ready_for_review",
+        "pull_request.reopened",
+        "pull_request_review_requested",
+    ):
+        return True
+
+    if canonical.startswith("issue_comment.") or canonical.startswith(
+        "pull_request_review_comment."
+    ):
+        comment_body = (raw.get("comment", {}) or {}).get("body", "").lower()
+        review_triggers = {
+            "/review",
+            "/audit",
+            "/test",
+            "/resolve",
+            "/critique",
+            "please review",
+        }
+        if any(trigger in comment_body for trigger in review_triggers):
+            return True
+
+    return False
+
+
+def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
+    """Programmatically pre-fetch PR diff and inject into raw_payload for 1-turn review execution."""
+    try:
+        canonical = payload.get("canonical", "")
+        raw = payload.get("raw_payload")
+        if not isinstance(raw, dict) or "pr_diff" in raw:
+            return
+
+        if not _should_prefetch_diff(canonical, raw):
+            return
+
+        pr_number = None
+        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
+            pr_number = raw["pull_request"].get("number")
+        elif (
+            "issue" in raw
+            and isinstance(raw["issue"], dict)
+            and raw["issue"].get("pull_request")
+        ):
+            pr_number = raw["issue"].get("number")
+
+        if not pr_number:
+            return
+
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        diff_lines: list[str] = []
+        for f in pr.get_files():
+            patch = f.patch or "No patch available (binary/renamed/empty)."
+            diff_lines.append(
+                f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
+            )
+
+        if diff_lines:
+            raw["pr_diff"] = "\n".join(diff_lines)
+            logger.info(
+                "Pre-fetched PR #%d diff (%d files) for 1-turn review",
+                pr_number,
+                len(diff_lines),
+            )
+    except Exception as exc:
+        logger.warning("Could not pre-fetch PR diff: %s", exc)
+
+
 class WebhookProcessor:
     """Handles inbound webhook events.
 
@@ -230,6 +308,7 @@ class WebhookProcessor:
         dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
         if not dry_run:
             _add_eyes_reaction(gh, repo_name, payload)
+            _prefetch_pr_diff(gh, repo_name, payload)
 
         results = agent.run(payload, repo_name)
         if results:

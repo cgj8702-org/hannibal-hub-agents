@@ -809,11 +809,11 @@ def _parse_confidence(body: str) -> int | None:
     return None
 
 
-def _enforce_verdict(body: str, event: str) -> tuple[str, str]:
+def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     """Programmatically enforce verdict rules based on scorecard scores and safety checks.
 
     Parses the review body, extracts scores and confidence, and overrides
-    the LLM-chosen event if it violates the mechanical verdict rules.
+    the LLM-chosen event if it violates mechanical verdict or CI safety rules.
 
     Returns:
         Tuple of (possibly_modified_body, enforced_event).
@@ -854,6 +854,28 @@ def _enforce_verdict(body: str, event: str) -> tuple[str, str]:
         override_reasons.append(
             "detected potential environment marker removal in lockfile diff"
         )
+
+    # Programmatic CI build check and mergeability guardrails
+    if pr and original_event == "APPROVE":
+        try:
+            if (
+                getattr(pr, "mergeable", True) is False
+                or getattr(pr, "mergeable_state", "") == "dirty"
+            ):
+                enforced_event = "REQUEST_CHANGES"
+                override_reasons.append(
+                    "PR has unresolved merge conflicts with base branch"
+                )
+
+            head_sha = getattr(getattr(pr, "head", None), "sha", None)
+            if head_sha and hasattr(pr, "base") and hasattr(pr.base, "repo"):
+                commit = pr.base.repo.get_commit(head_sha)
+                combined = commit.get_combined_status()
+                if getattr(combined, "state", None) == "failure":
+                    enforced_event = "REQUEST_CHANGES"
+                    override_reasons.append("CI build status check is failing")
+        except Exception as gate_err:
+            logger.warning("Could not check PR CI/mergeability gating: %s", gate_err)
 
     if override_reasons and enforced_event != original_event:
         reasons_str = "; ".join(override_reasons)
@@ -901,12 +923,11 @@ def review(
             f"(max 3 comments per minute per thread)."
         )
 
-    body, event = _enforce_verdict(body, event)
-
     gh = _get_gh_from_ctx(ctx)
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+        body, event = _enforce_verdict(body, event, pr)
 
         # Supersede / dismiss prior bot reviews
         existing_reviews = pr.get_reviews()
@@ -1402,6 +1423,7 @@ class WebhookAgent:
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
+        emitted_texts: list[str] = []
 
         async def _execute_agent():
             # Apply dynamic sliding-window rate limiting (RPM/TPM aware per tier)
@@ -1453,6 +1475,7 @@ class WebhookAgent:
                 ):
                     for part in event.content.parts:
                         if hasattr(part, "text") and part.text:
+                            emitted_texts.append(part.text)
                             logger.debug(
                                 "💭 Agent response received (trace: %s): %s",
                                 trace_id[-4:],
@@ -1592,6 +1615,62 @@ class WebhookAgent:
                 )
 
         asyncio.run(_run())
+
+        # Programmatic review fallback: if no review tool was called during a PR review event,
+        # but text critique/scorecard was produced, post the review programmatically.
+        canonical = event_data.get("canonical", "")
+        raw = event_data.get("raw_payload", {})
+        comment_body = (
+            (raw.get("comment", {}) or {}).get("body", "")
+            if isinstance(raw, dict)
+            else ""
+        )
+        is_pr_review_event = (
+            canonical.startswith("pull_request.")
+            or canonical.startswith("pull_request_review")
+            or "/review" in comment_body
+        )
+        has_review_action = any(r.tool == "review" for r in results)
+
+        if is_pr_review_event and not has_review_action and emitted_texts:
+            full_text = "\n\n".join(emitted_texts)
+            if (
+                "Scorecard" in full_text
+                or "| Category |" in full_text
+                or "Verdict:" in full_text
+            ):
+                pr_number = None
+                if isinstance(raw, dict):
+                    pr_number = (raw.get("pull_request") or {}).get("number") or (
+                        raw.get("issue") or {}
+                    ).get("number")
+
+                if pr_number:
+                    try:
+                        repo = gh_client.get_repo(repo_full_name)
+                        pr = repo.get_pull(pr_number)
+                        body, enforced_event = _enforce_verdict(
+                            full_text, "COMMENT", pr
+                        )
+                        rv = pr.create_review(body=body, event=enforced_event)
+                        detail = getattr(rv, "html_url", str(rv))
+                        results.append(
+                            ActionResult(
+                                tool="review",
+                                success=True,
+                                detail=f"Programmatic fallback review ({enforced_event}): {detail}",
+                            )
+                        )
+                        logger.info(
+                            "Programmatic fallback review submitted for PR #%d (%s)",
+                            pr_number,
+                            enforced_event,
+                        )
+                    except Exception as fallback_err:
+                        logger.warning(
+                            "Programmatic fallback review submission failed: %s",
+                            fallback_err,
+                        )
 
         if not results:
             logger.info(
