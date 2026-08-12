@@ -178,27 +178,52 @@ _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 
 
 class DepletedModelRegistry:
-    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events."""
+    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events.
 
-    def __init__(self, cooldown_seconds: float = 86400.0) -> None:
-        self.cooldown = cooldown_seconds
-        self._depleted: dict[str, float] = {}
+    Dynamically sets cooldown based on error metric:
+    - RPD (Requests Per Day): 24 Hours (86,400s)
+    - RPM / TPM (Requests/Tokens Per Minute): 60 Seconds
+    - Default Fallback: 1 Hour (3,600s)
+    """
 
-    def mark_depleted(self, model_name: str) -> None:
-        self._depleted[model_name] = time.time()
+    def __init__(self, default_cooldown: float = 3600.0) -> None:
+        self.default_cooldown = default_cooldown
+        self._depleted: dict[str, tuple[float, float]] = {}
+
+    def mark_depleted(self, model_name: str, error: Exception | None = None) -> None:
+        cooldown = self.default_cooldown
+        metric_type = "DEFAULT (1h)"
+
+        if error is not None:
+            err_str = str(error).lower()
+            if "perday" in err_str or "dayperproject" in err_str:
+                cooldown = 86400.0  # 24 Hours for RPD daily limit
+                metric_type = "RPD (24h)"
+            elif (
+                "perminute" in err_str
+                or "minuteperproject" in err_str
+                or "tokensperminute" in err_str
+            ):
+                cooldown = 60.0  # 60 Seconds for RPM/TPM minute limit
+                metric_type = "RPM/TPM (60s)"
+
+        self._depleted[model_name] = (time.time(), cooldown)
         logger.warning(
-            "🔴 Model '%s' marked DEPLETED for %ds across process",
+            "🔴 Model '%s' marked DEPLETED [%s] across process",
             model_name,
-            self.cooldown,
+            metric_type,
         )
 
     def is_depleted(self, model_name: str) -> bool:
         if model_name not in self._depleted:
             return False
-        if time.time() - self._depleted[model_name] > self.cooldown:
+        timestamp, cooldown = self._depleted[model_name]
+        if time.time() - timestamp > cooldown:
             del self._depleted[model_name]
             logger.info(
-                "🟢 Model '%s' depletion cooldown expired, restored to pool", model_name
+                "🟢 Model '%s' depletion cooldown expired (%ds), restored to pool",
+                model_name,
+                int(cooldown),
             )
             return False
         return True
@@ -207,7 +232,7 @@ class DepletedModelRegistry:
         return [m for m in chain if not self.is_depleted(m)]
 
 
-_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(cooldown_seconds=86400.0)
+_DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
 
 
 def get_model_chain() -> list[str]:
@@ -1111,10 +1136,10 @@ class WebhookAgent:
             memory_service=self._memory_service,
         )
 
-    def _advance_model_chain(self) -> str | None:
+    def _advance_model_chain(self, error: Exception | None = None) -> str | None:
         """Cascade to next model in TPM descending chain on rate limit or server error."""
-        # Mark current model depleted so subsequent events skip it immediately
-        _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name)
+        # Mark current model depleted with smart metric-aware cooldown parsing
+        _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name, error=error)
 
         # Refresh model chain to get available non-depleted models
         self._model_chain = get_model_chain()
@@ -1132,9 +1157,9 @@ class WebhookAgent:
             return next_model
         return None
 
-    def _create_fallback_agent(self) -> None:
+    def _create_fallback_agent(self, error: Exception | None = None) -> None:
         """Switch to fallback model when primary model is unavailable."""
-        self._advance_model_chain()
+        self._advance_model_chain(error=error)
 
         # Recreate runner with new agent
         self._runner = Runner(
@@ -1515,7 +1540,7 @@ class WebhookAgent:
                 except Exception as e:
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
-                        self._advance_model_chain()
+                        self._advance_model_chain(error=e)
                         logger.warning(
                             "Transient error on attempt %d/%d (trace: %s): %s. Active model is now: %s",
                             attempt + 1,
