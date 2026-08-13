@@ -471,8 +471,8 @@ def get_model_chain() -> list[str]:
         primary,
         "gemini-3.5-flash-lite",
         "gemini-3.6-flash",
-        "gemini-2.5-flash",
-        "gemma-4-26b",
+        "gemma-4-31b-it",
+        "gemma-4-26b-a4b-it",
     ]
     seen: set[str] = set()
     deduped = [m for m in chain if m in allowed and not (m in seen or seen.add(m))]
@@ -1412,20 +1412,27 @@ class WebhookAgent:
         self._model_chain = get_model_chain()
         self._chain_index = 0
 
-        if self._model_chain:
-            next_model = self._model_chain[self._chain_index]
-            logger.warning(
-                "⚠️ Cascading model chain from %s -> %s",
-                self._current_model_name,
-                next_model,
-            )
-            self._current_model_name = next_model
-            self._agent.model = Gemini(
-                model=next_model,
-                client_kwargs={"api_key": get_active_api_key()},
-            )
-            return next_model
-        return None
+        # Prioritize picking a different model candidate to prevent self-cascading
+        other_models = [m for m in self._model_chain if m != self._current_model_name]
+        if other_models:
+            next_model = other_models[0]
+        elif self._model_chain:
+            next_model = self._model_chain[0]
+            time.sleep(2.0)
+        else:
+            return None
+
+        logger.warning(
+            "Cascading model chain from %s -> %s",
+            self._current_model_name,
+            next_model,
+        )
+        self._current_model_name = next_model
+        self._agent.model = Gemini(
+            model=next_model,
+            client_kwargs={"api_key": get_active_api_key()},
+        )
+        return next_model
 
     def _create_fallback_agent(self, error: Exception | None = None) -> None:
         """Switch to fallback model when primary model is unavailable."""
