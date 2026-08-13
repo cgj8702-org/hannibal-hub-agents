@@ -4,9 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-Environment="HANNIBAL_TIER=free"
+# Use the new WEBHOOK_TIER env var (HANNIBAL_TIER is deprecated).
+Environment="WEBHOOK_TIER=free"
 WorkingDirectory=/home/carly/hannibal-hub-agents
-ExecStart=/bin/bash -c 'source /home/carly/hannibal-hub-agents/scripts/load_secrets.sh && exec /home/carly/.local/bin/uv run python main.py'
+# Source local .envrc (developer VM values) before loading secrets so
+# GITHUB_APP_ID / GITHUB_INSTALLATION_ID / PRIVATE_KEY_PATH are available
+# to the credential helper. Then load secrets from Secret Manager.
+ExecStart=/bin/bash -c 'source /home/carly/hannibal-hub-agents/.envrc >/dev/null 2>&1 || true && source /home/carly/hannibal-hub-agents/scripts/load_secrets.sh && exec /home/carly/.local/bin/uv run python main.py'
 Restart=always
 RestartSec=5s
 
