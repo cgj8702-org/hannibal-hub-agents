@@ -67,14 +67,33 @@ def _get_firestore_tier() -> str:
 def get_active_api_key() -> str:
     """Get active API key strictly for Webhook Agent based on resolved WEBHOOK_TIER.
 
-    When tier is 'free' (default) -> Load ONLY WEBHOOK_FREE_KEY / FREE_KEY.
-    When tier is 'paid' -> Load ONLY WEBHOOK_PAID_KEY / PAID_KEY.
+    When tier is 'free' (default) -> Load WEBHOOK_FREE_KEY / FREE_KEY / GEMINI_API_KEY / GOOGLE_API_KEY.
+    When tier is 'paid' -> Load WEBHOOK_PAID_KEY / PAID_KEY / GEMINI_API_KEY / GOOGLE_API_KEY.
+
+    The standard ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY`` env vars are checked as
+    last-resort fallbacks so the agent still resolves a key when the deployment
+    injects it under the standard names instead of the ``WEBHOOK_*_KEY`` names.
     """
     tier = _resolve_tier()
     if tier == "paid":
-        candidate_keys = [os.getenv("WEBHOOK_PAID_KEY"), os.getenv("PAID_KEY")]
+        tier_candidates = [
+            os.getenv("WEBHOOK_PAID_KEY"),
+            os.getenv("PAID_KEY"),
+        ]
     else:
-        candidate_keys = [os.getenv("WEBHOOK_FREE_KEY"), os.getenv("FREE_KEY")]
+        tier_candidates = [
+            os.getenv("WEBHOOK_FREE_KEY"),
+            os.getenv("FREE_KEY"),
+        ]
+
+    # Always check the standard env vars as a final fallback, regardless of tier,
+    # since the deployment may inject the key under the standard names.
+    fallback_candidates = [
+        os.getenv("GEMINI_API_KEY"),
+        os.getenv("GOOGLE_API_KEY"),
+    ]
+
+    candidate_keys = tier_candidates + fallback_candidates
 
     key = next(
         (k for k in candidate_keys if k and k.lower() not in ("dummy", "none")),
