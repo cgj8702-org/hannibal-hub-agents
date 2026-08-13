@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import AsyncGenerator
 from concurrent.futures import CancelledError
 from datetime import UTC, datetime
 from typing import Any
@@ -110,6 +111,37 @@ def _truncate_input_for_tier(
         f"({len(text)} chars -> {max_chars} chars)]"
     )
     return text[: max_chars - len(truncated_msg)] + truncated_msg
+
+
+_orig_gemini_generate_content_async = Gemini.generate_content_async
+
+
+async def _rate_limited_generate_content_async(
+    self, llm_request: Any, stream: bool = False
+) -> AsyncGenerator[Any, None]:
+    model_name = getattr(
+        llm_request, "model", getattr(self, "model", "gemini-3.5-flash-lite")
+    )
+    contents_str = str(getattr(llm_request, "contents", ""))
+    estimated_tokens = max(1, len(contents_str) // 4)
+
+    try:
+        await rpm_waiter.check_and_wait(
+            model=model_name,
+            estimated_tokens=estimated_tokens,
+        )
+    except Exception as exc:
+        logger.warning(
+            "RPM/TPM pre-flight check error on model '%s': %s", model_name, exc
+        )
+
+    async for response in _orig_gemini_generate_content_async(
+        self, llm_request, stream=stream
+    ):
+        yield response
+
+
+Gemini.generate_content_async = _rate_limited_generate_content_async
 
 
 # Persistent background event loop used to run ADK coroutines safely from
