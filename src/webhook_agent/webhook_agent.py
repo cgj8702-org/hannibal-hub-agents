@@ -16,10 +16,50 @@ import asyncio
 import logging
 import os
 import re
+import threading
 import time
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+# Persistent background event loop used to run ADK coroutines safely from
+# synchronous callers. Using a single long-lived loop prevents repeatedly
+# creating and closing event loops (which caused "Event loop is closed"
+# errors when background transports attempted to schedule callbacks during
+# loop shutdown). We run the loop in a daemon thread and schedule coroutines
+# onto it via asyncio.run_coroutine_threadsafe.
+_BG_LOOP: asyncio.AbstractEventLoop | None = None
+_BG_LOOP_THREAD: threading.Thread | None = None
+
+
+def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
+    global _BG_LOOP, _BG_LOOP_THREAD
+    if _BG_LOOP and _BG_LOOP.is_running():
+        return _BG_LOOP
+
+    loop = asyncio.new_event_loop()
+
+    def _loop_worker() -> None:
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+
+    thread = threading.Thread(target=_loop_worker, name="adk-bg-loop", daemon=True)
+    thread.start()
+    _BG_LOOP = loop
+    _BG_LOOP_THREAD = thread
+    return _BG_LOOP
+
+
+def run_in_bg_loop(coro: asyncio.coroutines) -> Any:
+    """Schedule coroutine on the background loop and wait for result."""
+    loop = _ensure_bg_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return future.result()
+    except CancelledError:
+        raise
+
 
 from github import Github
 from google.adk.agents import Agent
@@ -1756,7 +1796,12 @@ class WebhookAgent:
                     )
                 )
 
-        asyncio.run(_run())
+        # Run the ADK coroutine on the persistent background loop to avoid
+        # "Event loop is closed" issues when the process receives signals or
+        # when httpx/anyio transports attempt to close transports on a loop
+        # that has been shut down. This schedules the coroutine and waits
+        # for completion synchronously.
+        run_in_bg_loop(_run())
 
         # Programmatic review fallback: if no review tool was called during a PR review event,
         # but text critique/scorecard was produced, post the review programmatically.
