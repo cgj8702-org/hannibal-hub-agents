@@ -23,6 +23,8 @@ dependencies = [
 dev = [
     "anyio>=4.0.0",
     "mypy>=2.1.0",
+    "pdfplumber>=0.11.0",
+    "pypdf>=5.0.0",
     "pytest>=9.1.1",
     "ruff>=0.15.20",
 ]

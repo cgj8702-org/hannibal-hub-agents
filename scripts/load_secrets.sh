@@ -23,21 +23,14 @@ fi
 
 # --- Secrets that actually belong in Secret Manager ---
 
-# Fetch API keys from Secret Manager by their ACTUAL secret names:
+# Fetch API keys from Secret Manager by their canonical secret names:
 #   - Secret Manager: WEBHOOK_FREE_KEY / WEBHOOK_PAID_KEY
-#   - Code reads:     WEBHOOK_FREE_KEY / WEBHOOK_PAID_KEY (primary)
-#                              FREE_KEY / PAID_KEY (secondary fallback)
-#   - google.genai:   GEMINI_API_KEY / GOOGLE_API_KEY (standard)
+#   - Code reads:     WEBHOOK_FREE_KEY / WEBHOOK_PAID_KEY strictly
 export WEBHOOK_FREE_KEY=$(gcloud secrets versions access latest --secret="WEBHOOK_FREE_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
-export WEBHOOK_PAID_KEY=$(gcloud secrets versions access latest --secret="WEBHOOK_PAID_KEY" --project="${PROJECT_ID}" 2>/dev/null || gcloud secrets versions access latest --secret="PAID_KEY" --project="${PROJECT_ID}" 2>/dev/null || gcloud secrets versions access latest --secret="GEMINI_API_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
-# Mirror under legacy/secondary names so all code paths resolve the key
-export FREE_KEY="${WEBHOOK_FREE_KEY}"
-export PAID_KEY="${WEBHOOK_PAID_KEY}"
-export GEMINI_API_KEY="${WEBHOOK_PAID_KEY:-${WEBHOOK_FREE_KEY:-}}"
-export GOOGLE_API_KEY="${GEMINI_API_KEY}"
+export WEBHOOK_PAID_KEY=$(gcloud secrets versions access latest --secret="WEBHOOK_PAID_KEY" --project="${PROJECT_ID}" 2>/dev/null || echo "")
 
-if [ -z "${GEMINI_API_KEY}" ]; then
-    echo "FATAL: No API key resolved — GEMINI_API_KEY is empty after loading secrets" >&2
+if [ -z "${WEBHOOK_FREE_KEY}" ] && [ -z "${WEBHOOK_PAID_KEY}" ]; then
+    echo "FATAL: Neither WEBHOOK_FREE_KEY nor WEBHOOK_PAID_KEY resolved from Secret Manager" >&2
     exit 1
 fi
 export WEBHOOK_SECRET=$(gcloud secrets versions access latest --secret="WEBHOOK_SECRET" --project="${PROJECT_ID}")

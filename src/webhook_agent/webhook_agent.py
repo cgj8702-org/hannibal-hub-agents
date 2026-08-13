@@ -23,6 +23,38 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from github import Github
+from google.adk.agents import Agent
+from google.adk.agents.context import Context
+from google.adk.models import Gemini
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
+from google.genai import types as genai_types
+from google.genai.errors import ServerError as GenAIServerError
+
+from .bot_identity import _is_bot_event
+from .memory_service import InMemoryMemoryService
+
+try:
+    from logic.rate_limiter import (
+        _resolve_tier,
+        get_active_api_key,
+        get_allowed_models,
+        rpm_waiter,
+    )
+except ImportError:
+    from ..logic.rate_limiter import (
+        _resolve_tier,
+        get_active_api_key,
+        get_allowed_models,
+        rpm_waiter,
+    )
+
+logger = logging.getLogger("webhook_agent")
+
+
 # Persistent background event loop used to run ADK coroutines safely from
 # synchronous callers. Using a single long-lived loop prevents repeatedly
 # creating and closing event loops (which caused "Event loop is closed"
@@ -59,28 +91,6 @@ def run_in_bg_loop(coro: asyncio.coroutines) -> Any:
         return future.result()
     except CancelledError:
         raise
-
-
-from github import Github
-from google.adk.agents import Agent
-from google.adk.agents.context import Context
-from google.adk.models import Gemini
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
-from google.adk.tools.agent_tool import AgentTool
-from google.genai import types as genai_types
-from google.genai.errors import ServerError as GenAIServerError
-
-from .bot_identity import _is_bot_event
-from .memory_service import InMemoryMemoryService
-
-try:
-    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-except ImportError:
-    from ..logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-
-logger = logging.getLogger("webhook_agent")
 
 
 # ---------------------------------------------------------------------------
@@ -379,25 +389,36 @@ class DepletedModelRegistry:
 
 
 try:
+    from logic.rate_limiter import (
+        _resolve_tier,
+        get_active_api_key,
+        get_allowed_models,
+        rpm_waiter,
+    )
     from logic.firestore_registry import (
         firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
     )
 except ImportError:
+    from ..logic.rate_limiter import (
+        _resolve_tier,
+        get_active_api_key,
+        get_allowed_models,
+        rpm_waiter,
+    )
+
     _DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
+
+logger = logging.getLogger("webhook_agent")
 
 
 def get_model_chain() -> list[str]:
     """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
 
-    Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
-
-    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.5-flash-lite on Free, gemini-3.6-flash on Paid)
-    Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
-    Tier 2 (2,000,000 TPM / 10k RPD): gemini-3.6-flash
-    Tier 3 (1,000,000 TPM / 10k RPD): gemini-2.5-flash
-    Tier 4 (16,000 TPM / 14.4k RPD): gemma-4-26b
+    Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY,
+    and restricts candidates to models allowed on the active tier.
     """
     active_tier = _resolve_tier()
+    allowed = set(get_allowed_models(active_tier))
     default_primary = (
         "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
     )
@@ -410,7 +431,7 @@ def get_model_chain() -> list[str]:
         "gemma-4-26b",
     ]
     seen: set[str] = set()
-    deduped = [m for m in chain if not (m in seen or seen.add(m))]
+    deduped = [m for m in chain if m in allowed and not (m in seen or seen.add(m))]
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
     return available if available else deduped
 
