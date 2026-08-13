@@ -1353,9 +1353,9 @@ Your reasoning process follows 7 steps:
 
 1. **Understand Intent & Context**: Analyze the incoming event, user sender, PR/issue details, and conversation history.
 2. **Autonomous Action Decision & Self-Awareness**: Decide if an action is required, and check for duplication:
-   - **DUPLICATE SUPPRESSION RULE**: If you (hannibal-hub-agents[bot]) already submitted a formal review for the PR within the last 120 seconds or for the current head commit SHA, **DO NOT** submit another formal review!
+   - **DUPLICATE SUPPRESSION RULE**: Duplicate suppression ONLY applies if the exact same webhook payload (same delivery ID and identical commit SHA) is processed twice. A new commit push (`pull_request.synchronize`) has a NEW head commit SHA and is NEVER a duplicate! You MUST review every new commit push!
    - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=...)` to post a formal code review.
-   - **PR Synchronize (`pull_request.synchronize`)**: Call `get_commit_diff(before_sha, head_sha)` to review ONLY the newly pushed commits. Then invoke `review(pr_number, body=..., event="APPROVE")` if all prior feedback is resolved, or `event="REQUEST_CHANGES"` if new issues are found.
+   - **PR Synchronize (`pull_request.synchronize`)**: When a new commit is pushed to a PR, you MUST call `get_commit_diff(before_sha, head_sha)` or `get_issue(pr_number, include_diff=True)` to inspect the newly pushed changes. Re-evaluate any prior feedback. If all issues are resolved, invoke `review(pr_number, body=..., event="APPROVE")`; if new or remaining issues exist, invoke `review(pr_number, body=..., event="REQUEST_CHANGES")`.
    - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using the PR template, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=..., event=...)`.
    - When conflict resolution is requested (`/resolve`): Call `update_branch_from_base(pr_number)`. NEVER use `write_file` to attempt resolving git merge conflicts. If `update_branch_from_base` fails, inform the user that a local `git rebase` is required.
    - When a user asks a question or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
@@ -1609,7 +1609,8 @@ class WebhookAgent:
                 )
         elif canonical.startswith("pull_request."):
             pr = raw.get("pull_request", {})
-            parts.append(f"PR Number: {pr.get('number', 'unknown')}")
+            pr_num = pr.get("number", "unknown")
+            parts.append(f"PR Number: {pr_num}")
             parts.append(f"PR Title: {pr.get('title', 'N/A')}")
             parts.append(f"PR Body: {(pr.get('body') or '')[:500]}")
             parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
@@ -1617,6 +1618,22 @@ class WebhookAgent:
             parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
             parts.append(f"PR Deletions: {pr.get('deletions', 'N/A')}")
             parts.append(f"PR Changed Files: {pr.get('changed_files', 'N/A')}")
+
+            if (
+                canonical == "pull_request.synchronize"
+                or raw.get("action") == "synchronize"
+            ):
+                before_sha = raw.get("before", "")
+                head_sha = (pr.get("head") or {}).get("sha", "")
+                parts.append(
+                    f"\n[NEW COMMIT PUSHED - Event: pull_request.synchronize]\n"
+                    f"Before SHA: {before_sha}\n"
+                    f"Head SHA: {head_sha}\n"
+                    f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
+                    f"This is NOT a duplicate delivery. You MUST call get_commit_diff('{before_sha}', '{head_sha}') "
+                    f"or get_issue({pr_num}, include_diff=True) to review the newly pushed changes and "
+                    f"submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                )
         elif canonical.startswith("pull_request_review_comment."):
             comment = raw.get("comment", {})
             pr = raw.get("pull_request", {})
