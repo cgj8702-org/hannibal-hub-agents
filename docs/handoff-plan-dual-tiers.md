@@ -18,7 +18,7 @@ When running under `FREE_KEY` (Free Tier), those limits drop significantly (e.g.
 In `hannibal-hub-agents`, API keys are named **`FREE_KEY`** (Free Tier 0) and **`PAID_KEY`** (Paid Tier 1).
 
 The rate limiter dynamically resolves the tier using this exact resolution cascade:
-1. **Explicit Override:** If `HANNIBAL_TIER` environment variable is explicitly set (`"free"` or `"paid"`), use it.
+1. **Explicit Override:** If `WEBHOOK_TIER` environment variable is explicitly set (`"free"` or `"paid"`), use it.
 2. **Active Key Match:** If `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is active in the execution environment:
    - If `GEMINI_API_KEY == PAID_KEY` -> Tier is `"paid"`.
    - If `GEMINI_API_KEY == FREE_KEY` -> Tier is `"free"`.
@@ -102,6 +102,7 @@ Rate Limit PDF Parser & Dual-Tier Generator
 ============================================
 Classifies vendor PDFs into 'free' or 'paid' tier reports and outputs dual-tier JSON schemas.
 """
+
 import argparse
 import json
 import logging
@@ -111,6 +112,7 @@ from typing import Any
 import pypdf
 
 logger = logging.getLogger("rate_limit_parser")
+
 
 def classify_pdf(raw_text: str) -> str:
     """Determines if PDF text represents a 'paid' tier (Tier 1+) or 'free' tier rate limit document."""
@@ -125,6 +127,7 @@ def classify_pdf(raw_text: str) -> str:
     ):
         return "paid"
     return "free"
+
 
 def parse_scaled_value(val: Any) -> float:
     if not val or val == "-":
@@ -147,6 +150,7 @@ def parse_scaled_value(val: Any) -> float:
     except ValueError:
         return 0.0
 
+
 def extract_tier_entry(entry_data: dict | None) -> dict[str, float | int]:
     if not entry_data:
         return {"rpm": 15, "tpm": 0, "rpd": 0.0}
@@ -164,12 +168,13 @@ def extract_tier_entry(entry_data: dict | None) -> dict[str, float | int]:
 
 This is the ported code from `hannibal-hub` that fixes model key lookups (`models/` normalization), multi-request sliding window TPM expiration, and burst RPM handling.
 
-> **⚠️ Correction to the original plan:** This is **NOT** the "exact pristine code" from `hannibal-hub`. The source `src/hannibal/logic/rate_limiter.py` resolves tier via `CHAT_KEY` + `HANNIBAL_TIER` (from `hannibal.infra.config`), **not** via `FREE_KEY`/`PAID_KEY`/`GEMINI_API_KEY`. The tier-resolution block below is a **deliberate adaptation** for `hannibal-hub-agents`' key naming. Additionally, the source contains a **zero-quota fast-fail** that the original plan dropped — it is restored below (see the `ValueError` block). This fast-fail is **critical**: on Free Tier, `gemini-2.0-flash` and `gemini-2.0-flash-lite` have 0 RPM/RPD and must be rejected immediately rather than hanging or sleeping.
+> **⚠️ Correction to the original plan:** This is **NOT** the "exact pristine code" from `hannibal-hub`. The source `src/hannibal/logic/rate_limiter.py` resolves tier via `CHAT_KEY` + `CHATBOT_TIER` (from `hannibal.infra.config`), **not** via `FREE_KEY`/`PAID_KEY`/`GEMINI_API_KEY`. The tier-resolution block below is a **deliberate adaptation** for `hannibal-hub-agents`' key naming. Additionally, the source contains a **zero-quota fast-fail** that the original plan dropped — it is restored below (see the `ValueError` block). This fast-fail is **critical**: on Free Tier, `gemini-2.0-flash` and `gemini-2.0-flash-lite` have 0 RPM/RPD and must be rejected immediately rather than hanging or sleeping.
 
 ```python
 """
 Rate Limiter for Hannibal Hub Agents API calls.
 """
+
 import asyncio
 import collections
 import json
@@ -181,6 +186,7 @@ from typing import Any
 
 logger = logging.getLogger("hannibal_rate_limiter")
 
+
 def _load_rate_limits(registry_path: Path) -> dict[str, dict[str, Any]]:
     """Dynamically load rate limits (rpm and tpm) for free and paid tiers from registry JSON."""
     try:
@@ -189,6 +195,7 @@ def _load_rate_limits(registry_path: Path) -> dict[str, dict[str, Any]]:
     except Exception as e:
         logger.error("Failed to load rate_limits.json: %s", e)
     return {}
+
 
 class RPMWaiter:
     def __init__(
@@ -204,7 +211,9 @@ class RPMWaiter:
         self.token_histories: dict[str, list[Any]] = collections.defaultdict(list)
         self.lock = asyncio.Lock()
         self.clock = clock
-        self.registry_path = registry_path or (Path(__file__).parents[1] / "assets" / "registries" / "rate_limits.json")
+        self.registry_path = registry_path or (
+            Path(__file__).parents[1] / "assets" / "registries" / "rate_limits.json"
+        )
         self.model_limits = _load_rate_limits(self.registry_path)
 
     async def check_and_wait(
@@ -218,10 +227,13 @@ class RPMWaiter:
 
         if not tier:
             import os
+
             # hannibal-hub-agents Key Resolution Protocol
             free_key = os.getenv("FREE_KEY")
             paid_key = os.getenv("PAID_KEY")
-            active_gemini_key = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
+            active_gemini_key = os.getenv(
+                "GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", "")
+            )
 
             # Resolve tier by comparing active GEMINI_API_KEY against FREE_KEY and PAID_KEY
             if active_gemini_key and paid_key and active_gemini_key == paid_key:
@@ -233,17 +245,21 @@ class RPMWaiter:
             else:
                 inferred_tier = "free"
 
-            tier = os.getenv("HANNIBAL_TIER", inferred_tier).lower()
+            tier = os.getenv("CHATBOT_TIER", inferred_tier).lower()
 
         full_model_key = model if model.startswith("models/") else f"models/{model}"
-        model_entry = self.model_limits.get(model, self.model_limits.get(full_model_key, {}))
+        model_entry = self.model_limits.get(
+            model, self.model_limits.get(full_model_key, {})
+        )
         if isinstance(model_entry, dict) and tier in model_entry:
             tier_entry = model_entry[tier]
         else:
             tier_entry = model_entry if isinstance(model_entry, dict) else {}
 
         rpm_limit = (
-            rpm_override if rpm_override is not None else tier_entry.get("rpm", self.default_limit)
+            rpm_override
+            if rpm_override is not None
+            else tier_entry.get("rpm", self.default_limit)
         )
         # Zero-quota fast-fail: reject models with 0 RPM/RPD on the active tier
         # (e.g. gemini-2.0-flash / gemini-2.0-flash-lite on Free Tier) immediately.
@@ -253,9 +269,13 @@ class RPMWaiter:
             and (tier_entry.get("rpm") == 0 or tier_entry.get("rpd") == 0.0)
         ):
             logger.warning(
-                "FAST FAIL (%s): Model has 0 quota on tier '%s'. Rejecting.", model, tier
+                "FAST FAIL (%s): Model has 0 quota on tier '%s'. Rejecting.",
+                model,
+                tier,
             )
-            raise ValueError(f"Model '{model}' is unavailable on tier '{tier}' (0 quota).")
+            raise ValueError(
+                f"Model '{model}' is unavailable on tier '{tier}' (0 quota)."
+            )
 
         if rpm_limit <= 0:
             rpm_limit = self.default_limit
@@ -269,7 +289,9 @@ class RPMWaiter:
 
             # Prune old RPM & TPM histories
             history[:] = [t for t in history if now - t <= self.window]
-            token_history[:] = [entry for entry in token_history if now - entry[0] <= self.window]
+            token_history[:] = [
+                entry for entry in token_history if now - entry[0] <= self.window
+            ]
 
             # 1. RPM Check (bursts allowed up to limit)
             wait_rpm = 0.0
@@ -289,7 +311,9 @@ class RPMWaiter:
             if tpm_limit > 0 and estimated_tokens > 0:
                 active_tpm = sum(tok for _, tok, _ in token_history)
                 if active_tpm + estimated_tokens > tpm_limit:
-                    needed_tokens_to_expire = (active_tpm + estimated_tokens) - tpm_limit
+                    needed_tokens_to_expire = (
+                        active_tpm + estimated_tokens
+                    ) - tpm_limit
                     accumulated = 0
                     required_ts = now
                     for entry in token_history:
@@ -318,7 +342,9 @@ class RPMWaiter:
         if wait_time > 0:
             await asyncio.sleep(wait_time)
 
-    async def record_actual_tokens(self, model: str = "default", actual_tokens: int = 0) -> None:
+    async def record_actual_tokens(
+        self, model: str = "default", actual_tokens: int = 0
+    ) -> None:
         """Update or record real token usage returned in API response."""
         if actual_tokens <= 0:
             return
@@ -327,7 +353,9 @@ class RPMWaiter:
             now = self.clock()
             token_history = self.token_histories[model]
 
-            token_history[:] = [entry for entry in token_history if now - entry[0] <= self.window]
+            token_history[:] = [
+                entry for entry in token_history if now - entry[0] <= self.window
+            ]
 
             unfinalized = next((entry for entry in token_history if not entry[2]), None)
             if unfinalized:
@@ -335,6 +363,7 @@ class RPMWaiter:
                 unfinalized[2] = True
             else:
                 token_history.append([now, actual_tokens, True])
+
 
 rpm_waiter = RPMWaiter()
 ```
@@ -414,7 +443,9 @@ Pass the agent's previous review critique from session state into follow-up turn
 # Use session.state instead, e.g.:
 #   session = await self._session_service.get_session(app_name, user_id, session_id)
 #   previous_critique = (session.state or {}).get("last_review_critique", "")
-previous_critique = self._session_service.get_state(session_id, "last_review_critique", "")
+previous_critique = self._session_service.get_state(
+    session_id, "last_review_critique", ""
+)
 if previous_critique:
     turn_prompt += (
         f"\n\n[YOUR PREVIOUS REVIEW CRITIQUE]:\n{previous_critique}\n"
@@ -431,7 +462,9 @@ Remove artificial character/token truncation in `get_issue()` and `read_file()`,
 
 ```python
 # In get_issue(): Pass full file patches directly without arbitrary character truncation
-diff_lines.append(f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}")
+diff_lines.append(
+    f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
+)
 # ALSO remove the whole-diff _truncate_text_to_token_limit(diff_text, max_tokens=MAX_DIFF_TOKENS, ...) call
 # AND remove the MAX_DIFF_TOKENS cap in read_file()
 ```
