@@ -478,7 +478,7 @@ class TestShouldProcessEvent:
         import logging
         from unittest.mock import MagicMock, patch
 
-        from webhook_agent.types import ActionResult
+        from webhook_agent.webhook_types import ActionResult
 
         ev = _make_normalized("pull_request", action="opened")
         mock_result = ActionResult(
