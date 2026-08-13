@@ -506,9 +506,62 @@ class TestShouldProcessEvent:
             assert "modified files" not in caplog.text
 
 
+class TestAgentCoreSingleton:
+    """Regression test: AgentCore/WebhookAgent must be constructed once per
+    WebhookProcessor and reused across events, not rebuilt per event — otherwise
+    the ADK session/memory services are silently lost on every single webhook.
+    """
+
+    def _make_pr_opened_event(self, delivery_id: str, pr_number: int) -> dict:
+        return {
+            "delivery_id": delivery_id,
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "test-user", "type": "User"},
+            "installation": {"id": 12345},
+            "repository": {
+                "full_name": "owner/repo",
+                "owner": {"login": "owner"},
+            },
+            "raw_payload": {
+                "action": "opened",
+                "number": pr_number,
+                "pull_request": {"number": pr_number, "title": f"PR {pr_number}"},
+            },
+        }
+
+    def test_agent_core_constructed_once_across_multiple_events(self):
+        from unittest.mock import MagicMock, patch
+
+        with (
+            patch("webhook_agent.processor.load_cached_token") as mock_load_token,
+            patch("webhook_agent.processor.Github") as mock_github_cls,
+            patch("webhook_agent.processor.AgentCore") as mock_agent_core_cls,
+        ):
+            mock_load_token.return_value = MagicMock(token="fake-token")
+            mock_github_cls.return_value = MagicMock()
+
+            mock_agent_core_instance = MagicMock()
+            mock_agent_core_instance.run.return_value = []
+            mock_agent_core_cls.return_value = mock_agent_core_instance
+
+            processor = WebhookProcessor()
+
+            processor.process_event(self._make_pr_opened_event("delivery-001", 42))
+            processor.process_event(self._make_pr_opened_event("delivery-002", 43))
+
+            # The constructor must only run once, no matter how many events
+            # are processed by this WebhookProcessor instance.
+            assert mock_agent_core_cls.call_count == 1
+
+            # Both events must have been dispatched through that SAME instance.
+            assert mock_agent_core_instance.run.call_count == 2
+
+
 class TestAddEyesReaction:
     def test_adds_reaction_to_issue_comment(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _add_eyes_reaction
 
         mock_gh = MagicMock()
@@ -533,6 +586,7 @@ class TestAddEyesReaction:
 
     def test_adds_reaction_to_pr_review_comment(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _add_eyes_reaction
 
         mock_gh = MagicMock()

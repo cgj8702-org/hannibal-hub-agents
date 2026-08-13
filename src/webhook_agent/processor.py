@@ -190,6 +190,20 @@ class WebhookProcessor:
         self.private_key_path = os.getenv(
             "GITHUB_PRIVATE_KEY_PATH", "/tmp/keys/github-app-private-key.pem"
         )
+        # Built lazily on first process_event() call — NOT here. Keeps
+        # WebhookProcessor() cheap to construct for tests that only exercise
+        # routing/filtering (see test_worker.py), and ensures the ADK
+        # session/memory services inside WebhookAgent are constructed exactly
+        # once and reused for the lifetime of this worker process, instead of
+        # being discarded and rebuilt on every event.
+        self._agent_core: AgentCore | None = None
+
+    def _get_agent_core(self) -> AgentCore:
+        if self._agent_core is None:
+            self._agent_core = AgentCore(
+                dry_run=os.environ.get("DRY_RUN", "0") in ("1", "true", "True"),
+            )
+        return self._agent_core
 
     # ---------------------------------------------------------------------------
     # Routing helpers
@@ -307,10 +321,7 @@ class WebhookProcessor:
 
         gh = Github(auth=Auth.Token(inst_token.token))
 
-        agent = AgentCore(
-            gh_client=gh,
-            dry_run=os.environ.get("DRY_RUN", "0") in ("1", "true", "True"),
-        )
+        agent = self._get_agent_core()
 
         raw_repo = payload.get("repository")
         if not isinstance(raw_repo, dict) and isinstance(
@@ -329,7 +340,7 @@ class WebhookProcessor:
             _add_eyes_reaction(gh, repo_name, payload)
             _prefetch_pr_diff(gh, repo_name, payload)
 
-        results = agent.run(payload, repo_name)
+        results = agent.run(payload, repo_name, gh_client=gh)
         if results:
             for r in results:
                 msg = getattr(r, "detail", None) or getattr(r, "message", str(r))
