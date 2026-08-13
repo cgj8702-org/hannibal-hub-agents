@@ -42,136 +42,16 @@ try:
     from logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
-        get_allowed_models,
+        get_active_model,
         rpm_waiter,
     )
 except ImportError:
     from ..logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
-        get_allowed_models,
+        get_active_model,
         rpm_waiter,
     )
-
-logger = logging.getLogger("webhook_agent")
-
-FREE_TIER_MAX_INPUT_TOKENS = 15000
-
-
-def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
-    """Reads TPM limit for model and tier from rate_limits.json."""
-    active_tier = tier or _resolve_tier()
-    try:
-        import json
-        from pathlib import Path
-
-        registry_path = (
-            Path(__file__).resolve().parents[1]
-            / "assets"
-            / "registries"
-            / "rate_limits.json"
-        )
-        if registry_path.exists():
-            rate_limits = json.loads(registry_path.read_text(encoding="utf-8"))
-            full_key = model if model.startswith("models/") else f"models/{model}"
-            entry = rate_limits.get(model, rate_limits.get(full_key, {}))
-            tier_data = entry.get(active_tier, entry) if isinstance(entry, dict) else {}
-            if isinstance(tier_data, dict):
-                tpm_val = tier_data.get("tpm", 0)
-                if isinstance(tpm_val, (int, float)) and tpm_val > 0:
-                    return int(tpm_val)
-    except Exception:
-        pass
-    return 15000 if active_tier == "free" else 100000
-
-
-def _count_tokens_exact(text: str, model: str = "gemini-3.5-flash-lite") -> int:
-    """Uses Google GenAI free count_tokens API method for exact token calculation."""
-    if not text:
-        return 0
-    try:
-        client = get_shared_genai_client()
-        if client and hasattr(client, "models"):
-            resp = client.models.count_tokens(model=model, contents=text)
-            if resp and resp.total_tokens:
-                return int(resp.total_tokens)
-    except Exception:
-        pass
-    return len(text) // 4
-
-
-def _truncate_input_for_tier(
-    text: str,
-    model: str = "default",
-    tier: str | None = None,
-    max_tokens: int | None = None,
-) -> str:
-    """Chunk/truncate text input to remain strictly below TPM rate limits on Free Tier."""
-    if not text:
-        return text
-
-    active_tier = tier or _resolve_tier()
-    if active_tier != "free":
-        return text
-
-    tpm_limit = _get_model_tpm_limit(model, active_tier)
-    target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
-
-    current_tokens = _count_tokens_exact(
-        text, model=model if model != "default" else "gemini-3.5-flash-lite"
-    )
-    if current_tokens <= target_tokens:
-        return text
-
-    max_chars = target_tokens * 4
-    truncated_msg = (
-        f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
-        f"({current_tokens} tokens -> {target_tokens} tokens)]"
-    )
-    return text[: max_chars - len(truncated_msg)] + truncated_msg
-
-
-class RateLimitedGemini(Gemini):
-    """Production-grade Rate-Limited Gemini wrapper for ADK agent using free count_tokens API."""
-
-    async def generate_content_async(
-        self, llm_request: Any, stream: bool = False
-    ) -> AsyncGenerator[Any, None]:
-        model_name = getattr(
-            llm_request, "model", getattr(self, "model", "gemini-3.5-flash-lite")
-        )
-        estimated_tokens = 0
-
-        try:
-            if self.api_client:
-                ct_resp = await self.api_client.aio.models.count_tokens(
-                    model=model_name,
-                    contents=llm_request.contents,
-                )
-                if ct_resp and ct_resp.total_tokens:
-                    estimated_tokens = int(ct_resp.total_tokens)
-        except Exception as exc:
-            logger.debug("Free count_tokens API call skipped: %s", exc)
-
-        if estimated_tokens <= 0:
-            contents_str = str(getattr(llm_request, "contents", ""))
-            estimated_tokens = max(1, len(contents_str) // 4)
-
-        try:
-            await rpm_waiter.check_and_wait(
-                model=model_name,
-                estimated_tokens=estimated_tokens,
-            )
-        except Exception as exc:
-            logger.warning(
-                "RPM/TPM pre-flight check error on model '%s': %s", model_name, exc
-            )
-
-        async for response in super().generate_content_async(
-            llm_request, stream=stream
-        ):
-            yield response
-
 
 # Persistent background event loop used to run ADK coroutines safely from
 # synchronous callers. Using a single long-lived loop prevents repeatedly
@@ -261,6 +141,141 @@ def get_shared_genai_client() -> object | None:
     except Exception as exc:
         logger.exception("Failed to create shared GenAI client: %s", exc)
         return None
+
+
+logger = logging.getLogger("webhook_agent")
+
+
+def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
+    """Reads TPM limit for model and tier from rate_limits.json."""
+    active_tier = tier or _resolve_tier()
+    target_model = model if model and model != "default" else get_active_model()
+    try:
+        import json
+        from pathlib import Path
+
+        registry_path = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "registries"
+            / "rate_limits.json"
+        )
+        if registry_path.exists():
+            rate_limits = json.loads(registry_path.read_text(encoding="utf-8"))
+            full_key = (
+                target_model
+                if target_model.startswith("models/")
+                else f"models/{target_model}"
+            )
+            entry = rate_limits.get(target_model, rate_limits.get(full_key, {}))
+            tier_data = entry.get(active_tier, entry) if isinstance(entry, dict) else {}
+            if isinstance(tier_data, dict):
+                tpm_val = tier_data.get("tpm", 0)
+                if isinstance(tpm_val, (int, float)) and tpm_val > 0:
+                    return int(tpm_val)
+    except Exception:
+        pass
+    return 15000 if active_tier == "free" else 100000
+
+
+def _count_tokens_exact(text: str, model: str | None = None) -> int:
+    """Uses Google GenAI free count_tokens API method with proper active key, model, and tier."""
+    if not text:
+        return 0
+    active_key = get_active_api_key()
+    if not active_key:
+        return len(text) // 4
+
+    target_model = model if model and model != "default" else get_active_model()
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=active_key)
+        resp = client.models.count_tokens(model=target_model, contents=text)
+        if resp and resp.total_tokens:
+            return int(resp.total_tokens)
+    except Exception:
+        pass
+    return len(text) // 4
+
+
+def _truncate_input_for_tier(
+    text: str,
+    model: str = "default",
+    tier: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Chunk/truncate text input to remain strictly below TPM rate limits on Free Tier."""
+    if not text:
+        return text
+
+    active_tier = tier or _resolve_tier()
+    if active_tier != "free":
+        return text
+
+    target_model = model if model and model != "default" else get_active_model()
+    tpm_limit = _get_model_tpm_limit(target_model, active_tier)
+    target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
+
+    current_tokens = _count_tokens_exact(text, model=target_model)
+    if current_tokens <= target_tokens:
+        return text
+
+    max_chars = target_tokens * 4
+    truncated_msg = (
+        f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
+        f"({current_tokens} tokens -> {target_tokens} tokens)]"
+    )
+    return text[: max_chars - len(truncated_msg)] + truncated_msg
+
+
+class RateLimitedGemini(Gemini):
+    """Production-grade Rate-Limited Gemini wrapper for ADK agent using proper active model, tier, and key."""
+
+    async def generate_content_async(
+        self, llm_request: Any, stream: bool = False
+    ) -> AsyncGenerator[Any, None]:
+        model_name = getattr(
+            llm_request, "model", getattr(self, "model", get_active_model())
+        )
+        active_tier = _resolve_tier()
+        estimated_tokens = 0
+
+        try:
+            if self.api_client:
+                ct_resp = await self.api_client.aio.models.count_tokens(
+                    model=model_name,
+                    contents=llm_request.contents,
+                )
+                if ct_resp and ct_resp.total_tokens:
+                    estimated_tokens = int(ct_resp.total_tokens)
+        except Exception as exc:
+            logger.debug(
+                "Free count_tokens API call skipped on model '%s': %s", model_name, exc
+            )
+
+        if estimated_tokens <= 0:
+            contents_str = str(getattr(llm_request, "contents", ""))
+            estimated_tokens = max(1, len(contents_str) // 4)
+
+        try:
+            await rpm_waiter.check_and_wait(
+                model=model_name,
+                estimated_tokens=estimated_tokens,
+                tier=active_tier,
+            )
+        except Exception as exc:
+            logger.warning(
+                "RPM/TPM pre-flight check error on model '%s' (tier '%s'): %s",
+                model_name,
+                active_tier,
+                exc,
+            )
+
+        async for response in super().generate_content_async(
+            llm_request, stream=stream
+        ):
+            yield response
 
 
 # ---------------------------------------------------------------------------
@@ -554,33 +569,22 @@ try:
     from logic.firestore_registry import (
         firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
     )
-    from logic.rate_limiter import (
-        _resolve_tier,
-        get_active_api_key,
-        get_allowed_models,
-        rpm_waiter,
-    )
 except ImportError:
-    from ..logic.rate_limiter import (
-        _resolve_tier,
-        get_active_api_key,
-        get_allowed_models,
-        rpm_waiter,
-    )
-
     _DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
-
-logger = logging.getLogger("webhook_agent")
 
 
 def get_model_chain() -> list[str]:
     """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
 
-    Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY,
-    and restricts candidates to models allowed on the active tier.
+    Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
+
+    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.5-flash-lite on Free, gemini-3.6-flash on Paid)
+    Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
+    Tier 2 (2,000,000 TPM / 10k RPD): gemini-3.6-flash
+    Tier 3 (1,000,000 TPM / 10k RPD): gemini-2.5-flash
+    Tier 4 (16,000 TPM / 14.4k RPD): gemma-4-26b
     """
     active_tier = _resolve_tier()
-    allowed = set(get_allowed_models(active_tier))
     default_primary = (
         "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
     )
@@ -589,11 +593,11 @@ def get_model_chain() -> list[str]:
         primary,
         "gemini-3.5-flash-lite",
         "gemini-3.6-flash",
-        "gemma-4-31b-it",
-        "gemma-4-26b-a4b-it",
+        "gemini-2.5-flash",
+        "gemma-4-26b",
     ]
     seen: set[str] = set()
-    deduped = [m for m in chain if m in allowed and not (m in seen or seen.add(m))]
+    deduped = [m for m in chain if not (m in seen or seen.add(m))]
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
     return available if available else deduped
 
@@ -726,7 +730,7 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
         if isinstance(content_file, list):
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
-        return _truncate_input_for_tier(decoded)
+        return decoded
     except Exception as e:  # noqa: BLE001
         return f"Error reading file: {e}"
 
@@ -837,7 +841,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
             if body_preview:
                 parts.append(f"Body: {body_preview}")
 
-        return _truncate_input_for_tier("\n".join(parts))
+        return "\n".join(parts)
     except Exception as e:  # noqa: BLE001
         return f"Error fetching issue/PR: {e}"
 
@@ -862,7 +866,7 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
             diff_lines.append(
                 f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
             )
-        return _truncate_input_for_tier("\n".join(diff_lines))
+        return "\n".join(diff_lines)
     except Exception as e:  # noqa: BLE001
         return f"Error fetching commit diff: {e}"
 
@@ -1492,7 +1496,7 @@ class WebhookAgent:
         # Create the ADK agent with all tools
         self._agent = Agent(
             name="webhook_agent",
-            model=RateLimitedGemini(
+            model=Gemini(
                 model=self._current_model_name,
                 client_kwargs={"api_key": get_active_api_key()},
             ),
@@ -1530,27 +1534,20 @@ class WebhookAgent:
         self._model_chain = get_model_chain()
         self._chain_index = 0
 
-        # Prioritize picking a different model candidate to prevent self-cascading
-        other_models = [m for m in self._model_chain if m != self._current_model_name]
-        if other_models:
-            next_model = other_models[0]
-        elif self._model_chain:
-            next_model = self._model_chain[0]
-            time.sleep(2.0)
-        else:
-            return None
-
-        logger.warning(
-            "Cascading model chain from %s -> %s",
-            self._current_model_name,
-            next_model,
-        )
-        self._current_model_name = next_model
-        self._agent.model = RateLimitedGemini(
-            model=next_model,
-            client_kwargs={"api_key": get_active_api_key()},
-        )
-        return next_model
+        if self._model_chain:
+            next_model = self._model_chain[self._chain_index]
+            logger.warning(
+                "⚠️ Cascading model chain from %s -> %s",
+                self._current_model_name,
+                next_model,
+            )
+            self._current_model_name = next_model
+            self._agent.model = Gemini(
+                model=next_model,
+                client_kwargs={"api_key": get_active_api_key()},
+            )
+            return next_model
+        return None
 
     def _create_fallback_agent(self, error: Exception | None = None) -> None:
         """Switch to fallback model when primary model is unavailable."""
@@ -1789,7 +1786,7 @@ class WebhookAgent:
                 trace_id[-4:],
             )
             self._current_model_name = selected_model
-            self._agent.model = RateLimitedGemini(
+            self._agent.model = Gemini(
                 model=selected_model,
                 client_kwargs={"api_key": get_active_api_key()},
             )
