@@ -18,9 +18,40 @@ import os
 import re
 import threading
 import time
+from collections.abc import AsyncGenerator
 from concurrent.futures import CancelledError
 from datetime import UTC, datetime
 from typing import Any
+
+from github import Github
+from google.adk.agents import Agent
+from google.adk.agents.context import Context
+from google.adk.models import Gemini
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
+from google.genai import types as genai_types
+from google.genai.errors import ServerError as GenAIServerError
+
+from .bot_identity import _is_bot_event
+from .memory_service import InMemoryMemoryService
+from .webhook_types import ActionResult
+
+try:
+    from logic.rate_limiter import (
+        _resolve_tier,
+        get_active_api_key,
+        get_active_model,
+        rpm_waiter,
+    )
+except ImportError:
+    from ..logic.rate_limiter import (
+        _resolve_tier,
+        get_active_api_key,
+        get_active_model,
+        rpm_waiter,
+    )
 
 # Persistent background event loop used to run ADK coroutines safely from
 # synchronous callers. Using a single long-lived loop prevents repeatedly
@@ -112,27 +143,139 @@ def get_shared_genai_client() -> object | None:
         return None
 
 
-from github import Github
-from google.adk.agents import Agent
-from google.adk.agents.context import Context
-from google.adk.models import Gemini
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
-from google.adk.tools.agent_tool import AgentTool
-from google.genai import types as genai_types
-from google.genai.errors import ServerError as GenAIServerError
-
-from .bot_identity import _is_bot_event
-from .memory_service import InMemoryMemoryService
-from .webhook_types import ActionResult
-
-try:
-    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-except ImportError:
-    from ..logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-
 logger = logging.getLogger("webhook_agent")
+
+
+def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
+    """Reads TPM limit for model and tier from rate_limits.json."""
+    active_tier = tier or _resolve_tier()
+    target_model = model if model and model != "default" else get_active_model()
+    try:
+        import json
+        from pathlib import Path
+
+        registry_path = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "registries"
+            / "rate_limits.json"
+        )
+        if registry_path.exists():
+            rate_limits = json.loads(registry_path.read_text(encoding="utf-8"))
+            full_key = (
+                target_model
+                if target_model.startswith("models/")
+                else f"models/{target_model}"
+            )
+            entry = rate_limits.get(target_model, rate_limits.get(full_key, {}))
+            tier_data = entry.get(active_tier, entry) if isinstance(entry, dict) else {}
+            if isinstance(tier_data, dict):
+                tpm_val = tier_data.get("tpm", 0)
+                if isinstance(tpm_val, (int, float)) and tpm_val > 0:
+                    return int(tpm_val)
+    except Exception:
+        pass
+    return 15000 if active_tier == "free" else 100000
+
+
+def _count_tokens_exact(text: str, model: str | None = None) -> int:
+    """Uses Google GenAI free count_tokens API method with proper active key, model, and tier."""
+    if not text:
+        return 0
+    active_key = get_active_api_key()
+    if not active_key:
+        return len(text) // 4
+
+    target_model = model if model and model != "default" else get_active_model()
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=active_key)
+        resp = client.models.count_tokens(model=target_model, contents=text)
+        if resp and resp.total_tokens:
+            return int(resp.total_tokens)
+    except Exception:
+        pass
+    return len(text) // 4
+
+
+def _truncate_input_for_tier(
+    text: str,
+    model: str = "default",
+    tier: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Chunk/truncate text input to remain strictly below TPM rate limits on Free Tier."""
+    if not text:
+        return text
+
+    active_tier = tier or _resolve_tier()
+    if active_tier != "free":
+        return text
+
+    target_model = model if model and model != "default" else get_active_model()
+    tpm_limit = _get_model_tpm_limit(target_model, active_tier)
+    target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
+
+    current_tokens = _count_tokens_exact(text, model=target_model)
+    if current_tokens <= target_tokens:
+        return text
+
+    max_chars = target_tokens * 4
+    truncated_msg = (
+        f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
+        f"({current_tokens} tokens -> {target_tokens} tokens)]"
+    )
+    return text[: max_chars - len(truncated_msg)] + truncated_msg
+
+
+class RateLimitedGemini(Gemini):
+    """Production-grade Rate-Limited Gemini wrapper for ADK agent using proper active model, tier, and key."""
+
+    async def generate_content_async(
+        self, llm_request: Any, stream: bool = False
+    ) -> AsyncGenerator[Any, None]:
+        model_name = getattr(
+            llm_request, "model", getattr(self, "model", get_active_model())
+        )
+        active_tier = _resolve_tier()
+        estimated_tokens = 0
+
+        try:
+            if self.api_client:
+                ct_resp = await self.api_client.aio.models.count_tokens(
+                    model=model_name,
+                    contents=llm_request.contents,
+                )
+                if ct_resp and ct_resp.total_tokens:
+                    estimated_tokens = int(ct_resp.total_tokens)
+        except Exception as exc:
+            logger.debug(
+                "Free count_tokens API call skipped on model '%s': %s", model_name, exc
+            )
+
+        if estimated_tokens <= 0:
+            contents_str = str(getattr(llm_request, "contents", ""))
+            estimated_tokens = max(1, len(contents_str) // 4)
+
+        try:
+            await rpm_waiter.check_and_wait(
+                model=model_name,
+                estimated_tokens=estimated_tokens,
+                tier=active_tier,
+            )
+        except Exception as exc:
+            logger.warning(
+                "RPM/TPM pre-flight check error on model '%s' (tier '%s'): %s",
+                model_name,
+                active_tier,
+                exc,
+            )
+
+        async for response in super().generate_content_async(
+            llm_request, stream=stream
+        ):
+            yield response
 
 
 # ---------------------------------------------------------------------------
@@ -1210,9 +1353,9 @@ Your reasoning process follows 7 steps:
 
 1. **Understand Intent & Context**: Analyze the incoming event, user sender, PR/issue details, and conversation history.
 2. **Autonomous Action Decision & Self-Awareness**: Decide if an action is required, and check for duplication:
-   - **DUPLICATE SUPPRESSION RULE**: If you (hannibal-hub-agents[bot]) already submitted a formal review for the PR within the last 120 seconds or for the current head commit SHA, **DO NOT** submit another formal review!
+   - **DUPLICATE SUPPRESSION RULE**: Duplicate suppression ONLY applies if the exact same webhook payload (same delivery ID and identical commit SHA) is processed twice. A new commit push (`pull_request.synchronize`) has a NEW head commit SHA and is NEVER a duplicate! You MUST review every new commit push!
    - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=...)` to post a formal code review.
-   - **PR Synchronize (`pull_request.synchronize`)**: Call `get_commit_diff(before_sha, head_sha)` to review ONLY the newly pushed commits. Then invoke `review(pr_number, body=..., event="APPROVE")` if all prior feedback is resolved, or `event="REQUEST_CHANGES"` if new issues are found.
+   - **PR Synchronize (`pull_request.synchronize`)**: When a new commit is pushed to a PR, you MUST call `get_commit_diff(before_sha, head_sha)` or `get_issue(pr_number, include_diff=True)` to inspect the newly pushed changes. Re-evaluate any prior feedback. If all issues are resolved, invoke `review(pr_number, body=..., event="APPROVE")`; if new or remaining issues exist, invoke `review(pr_number, body=..., event="REQUEST_CHANGES")`.
    - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using the PR template, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=..., event=...)`.
    - When conflict resolution is requested (`/resolve`): Call `update_branch_from_base(pr_number)`. NEVER use `write_file` to attempt resolving git merge conflicts. If `update_branch_from_base` fails, inform the user that a local `git rebase` is required.
    - When a user asks a question or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
@@ -1466,7 +1609,8 @@ class WebhookAgent:
                 )
         elif canonical.startswith("pull_request."):
             pr = raw.get("pull_request", {})
-            parts.append(f"PR Number: {pr.get('number', 'unknown')}")
+            pr_num = pr.get("number", "unknown")
+            parts.append(f"PR Number: {pr_num}")
             parts.append(f"PR Title: {pr.get('title', 'N/A')}")
             parts.append(f"PR Body: {(pr.get('body') or '')[:500]}")
             parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
@@ -1474,6 +1618,22 @@ class WebhookAgent:
             parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
             parts.append(f"PR Deletions: {pr.get('deletions', 'N/A')}")
             parts.append(f"PR Changed Files: {pr.get('changed_files', 'N/A')}")
+
+            if (
+                canonical == "pull_request.synchronize"
+                or raw.get("action") == "synchronize"
+            ):
+                before_sha = raw.get("before", "")
+                head_sha = (pr.get("head") or {}).get("sha", "")
+                parts.append(
+                    f"\n[NEW COMMIT PUSHED - Event: pull_request.synchronize]\n"
+                    f"Before SHA: {before_sha}\n"
+                    f"Head SHA: {head_sha}\n"
+                    f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
+                    f"This is NOT a duplicate delivery. You MUST call get_commit_diff('{before_sha}', '{head_sha}') "
+                    f"or get_issue({pr_num}, include_diff=True) to review the newly pushed changes and "
+                    f"submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                )
         elif canonical.startswith("pull_request_review_comment."):
             comment = raw.get("comment", {})
             pr = raw.get("pull_request", {})

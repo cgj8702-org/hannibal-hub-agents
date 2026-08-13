@@ -376,20 +376,22 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._agent.tools
         )
-        expected = sorted([
-            "read_file",
-            "write_file",
-            "get_issue",
-            "get_commit_diff",
-            "update_issue",
-            "add_comment",
-            "open_pr",
-            "update_branch_from_base",
-            "merge_pr",
-            "review",
-            "get_current_time",
-            "search_agent",
-        ])
+        expected = sorted(
+            [
+                "read_file",
+                "write_file",
+                "get_issue",
+                "get_commit_diff",
+                "update_issue",
+                "add_comment",
+                "open_pr",
+                "update_branch_from_base",
+                "merge_pr",
+                "review",
+                "get_current_time",
+                "search_agent",
+            ]
+        )
         assert tool_names == expected
 
     def test_no_removed_tools_present(self):
