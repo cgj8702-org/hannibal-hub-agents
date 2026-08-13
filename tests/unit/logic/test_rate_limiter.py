@@ -1,7 +1,9 @@
 """Unit tests for RPMWaiter rate limiter in hannibal-hub-agents."""
 
 from pathlib import Path
+
 import pytest
+
 from logic.rate_limiter import RPMWaiter, _resolve_tier
 
 
@@ -23,7 +25,7 @@ def mock_registry(tmp_path: Path) -> Path:
 
 
 def test_tier_resolution_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HANNIBAL_TIER", raising=False)
+    monkeypatch.delenv("WEBHOOK_TIER", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("FREE_KEY", raising=False)
@@ -32,10 +34,10 @@ def test_tier_resolution_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
     # Default fallback when no env vars set -> free
     assert _resolve_tier() == "free"
 
-    # Explicit HANNIBAL_TIER override
-    monkeypatch.setenv("HANNIBAL_TIER", "paid")
+    # Explicit WEBHOOK_TIER override
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
     assert _resolve_tier() == "paid"
-    monkeypatch.delenv("HANNIBAL_TIER")
+    monkeypatch.delenv("WEBHOOK_TIER")
 
     # Match active key against PAID_KEY
     monkeypatch.setenv("PAID_KEY", "pk_123")

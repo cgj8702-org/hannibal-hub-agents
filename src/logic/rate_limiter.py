@@ -2,7 +2,7 @@
 Rate Limiter for Hannibal Hub Agents API calls.
 
 Ported from hannibal-hub with a deliberate tier-resolution adaptation:
-- hannibal-hub resolves tier via CHAT_KEY + HANNIBAL_TIER.
+- hannibal-hub resolves tier via CHAT_KEY + CHATBOT_TIER.
 - hannibal-hub-agents resolves tier via FREE_KEY / PAID_KEY / GEMINI_API_KEY.
 
 Supports:
@@ -111,14 +111,34 @@ def _resolve_tier() -> str:
     """Resolve active tier for Webhook Agent (strictly defaulting to 'free').
 
     Resolution cascade:
-    1. Explicit env override: WEBHOOK_TIER or HANNIBAL_TIER ("free" or "paid").
+    1. Explicit env override: WEBHOOK_TIER ("free" or "paid").
     2. Dynamic Firestore config: system_config/runtime -> WEBHOOK_TIER.
     3. Strict default: "free".
     """
-    env_tier = (os.getenv("WEBHOOK_TIER") or os.getenv("HANNIBAL_TIER", "")).lower()
+    # 1) Explicit overrides
+    env_tier = (os.getenv("WEBHOOK_TIER") or "").lower()
     if env_tier in ("free", "paid"):
         return env_tier
 
+    # 2) Resolve based on active API key vs known FREE/PAID keys
+    # Priority matching: exact PAID_KEY -> paid, exact FREE_KEY -> free,
+    # otherwise prefer paid if a non-dummy PAID_KEY is present.
+    active_key = (
+        os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    ).strip()
+    paid_key = (os.getenv("PAID_KEY") or "").strip()
+    free_key = (os.getenv("FREE_KEY") or "").strip()
+
+    if active_key:
+        if paid_key and active_key == paid_key:
+            return "paid"
+        if free_key and active_key == free_key:
+            return "free"
+        # If PAID_KEY exists and is not a dummy placeholder, prefer paid
+        if paid_key and paid_key.lower() not in ("", "dummy", "none"):
+            return "paid"
+
+    # 3) Dynamic Firestore config or strict default
     return _get_firestore_tier()
 
 

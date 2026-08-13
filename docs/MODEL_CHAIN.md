@@ -18,7 +18,7 @@ When rate limit errors (`429 RESOURCE_EXHAUSTED`) or transient server errors occ
 
 ## Dual-Tier Rate Limit Registry Matrix
 
-The rate limiter dynamically resolves tier via the key resolution cascade (`HANNIBAL_TIER` -> `GEMINI_API_KEY` match against `PAID_KEY` / `FREE_KEY` -> key presence fallback).
+The rate limiter dynamically resolves tier via the key resolution cascade (`WEBHOOK_TIER` -> `GEMINI_API_KEY` match against `PAID_KEY` / `FREE_KEY` -> key presence fallback).
 
 | Model | Free Tier RPM | Free Tier TPM | Free Tier RPD | Paid Tier RPM | Paid Tier TPM | Paid Tier RPD |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
