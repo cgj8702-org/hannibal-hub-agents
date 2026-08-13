@@ -46,7 +46,7 @@ try:
         rpm_waiter,
     )
 except ImportError:
-    from ..logic.rate_limiter import (
+    from src.logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
         get_active_model,
