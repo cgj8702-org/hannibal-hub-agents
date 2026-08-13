@@ -54,6 +54,63 @@ except ImportError:
 
 logger = logging.getLogger("webhook_agent")
 
+FREE_TIER_MAX_INPUT_TOKENS = 15000
+
+
+def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
+    """Reads TPM limit for model and tier from rate_limits.json."""
+    active_tier = tier or _resolve_tier()
+    try:
+        import json
+        from pathlib import Path
+
+        registry_path = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "registries"
+            / "rate_limits.json"
+        )
+        if registry_path.exists():
+            rate_limits = json.loads(registry_path.read_text(encoding="utf-8"))
+            full_key = model if model.startswith("models/") else f"models/{model}"
+            entry = rate_limits.get(model, rate_limits.get(full_key, {}))
+            tier_data = entry.get(active_tier, entry) if isinstance(entry, dict) else {}
+            if isinstance(tier_data, dict):
+                tpm_val = tier_data.get("tpm", 0)
+                if isinstance(tpm_val, (int, float)) and tpm_val > 0:
+                    return int(tpm_val)
+    except Exception:
+        pass
+    return 15000 if active_tier == "free" else 100000
+
+
+def _truncate_input_for_tier(
+    text: str,
+    model: str = "default",
+    tier: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Chunk/truncate text input to remain strictly below TPM rate limits on Free Tier."""
+    if not text:
+        return text
+
+    active_tier = tier or _resolve_tier()
+    if active_tier != "free":
+        return text
+
+    tpm_limit = _get_model_tpm_limit(model, active_tier)
+    target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
+
+    max_chars = target_tokens * 4
+    if len(text) <= max_chars:
+        return text
+
+    truncated_msg = (
+        f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
+        f"({len(text)} chars -> {max_chars} chars)]"
+    )
+    return text[: max_chars - len(truncated_msg)] + truncated_msg
+
 
 # Persistent background event loop used to run ADK coroutines safely from
 # synchronous callers. Using a single long-lived loop prevents repeatedly
@@ -433,14 +490,14 @@ class DepletedModelRegistry:
 
 
 try:
+    from logic.firestore_registry import (
+        firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
+    )
     from logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
         get_allowed_models,
         rpm_waiter,
-    )
-    from logic.firestore_registry import (
-        firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
     )
 except ImportError:
     from ..logic.rate_limiter import (
@@ -608,7 +665,7 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
         if isinstance(content_file, list):
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
-        return decoded
+        return _truncate_input_for_tier(decoded)
     except Exception as e:  # noqa: BLE001
         return f"Error reading file: {e}"
 
@@ -719,7 +776,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
             if body_preview:
                 parts.append(f"Body: {body_preview}")
 
-        return "\n".join(parts)
+        return _truncate_input_for_tier("\n".join(parts))
     except Exception as e:  # noqa: BLE001
         return f"Error fetching issue/PR: {e}"
 
@@ -744,7 +801,7 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
             diff_lines.append(
                 f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
             )
-        return "\n".join(diff_lines)
+        return _truncate_input_for_tier("\n".join(diff_lines))
     except Exception as e:  # noqa: BLE001
         return f"Error fetching commit diff: {e}"
 
