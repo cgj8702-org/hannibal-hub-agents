@@ -85,6 +85,21 @@ def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int
     return 15000 if active_tier == "free" else 100000
 
 
+def _count_tokens_exact(text: str, model: str = "gemini-3.5-flash-lite") -> int:
+    """Uses Google GenAI free count_tokens API method for exact token calculation."""
+    if not text:
+        return 0
+    try:
+        client = get_shared_genai_client()
+        if client and hasattr(client, "models"):
+            resp = client.models.count_tokens(model=model, contents=text)
+            if resp and resp.total_tokens:
+                return int(resp.total_tokens)
+    except Exception:
+        pass
+    return len(text) // 4
+
+
 def _truncate_input_for_tier(
     text: str,
     model: str = "default",
@@ -102,46 +117,60 @@ def _truncate_input_for_tier(
     tpm_limit = _get_model_tpm_limit(model, active_tier)
     target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
 
-    max_chars = target_tokens * 4
-    if len(text) <= max_chars:
+    current_tokens = _count_tokens_exact(
+        text, model=model if model != "default" else "gemini-3.5-flash-lite"
+    )
+    if current_tokens <= target_tokens:
         return text
 
+    max_chars = target_tokens * 4
     truncated_msg = (
         f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
-        f"({len(text)} chars -> {max_chars} chars)]"
+        f"({current_tokens} tokens -> {target_tokens} tokens)]"
     )
     return text[: max_chars - len(truncated_msg)] + truncated_msg
 
 
-_orig_gemini_generate_content_async = Gemini.generate_content_async
+class RateLimitedGemini(Gemini):
+    """Production-grade Rate-Limited Gemini wrapper for ADK agent using free count_tokens API."""
 
-
-async def _rate_limited_generate_content_async(
-    self, llm_request: Any, stream: bool = False
-) -> AsyncGenerator[Any, None]:
-    model_name = getattr(
-        llm_request, "model", getattr(self, "model", "gemini-3.5-flash-lite")
-    )
-    contents_str = str(getattr(llm_request, "contents", ""))
-    estimated_tokens = max(1, len(contents_str) // 4)
-
-    try:
-        await rpm_waiter.check_and_wait(
-            model=model_name,
-            estimated_tokens=estimated_tokens,
+    async def generate_content_async(
+        self, llm_request: Any, stream: bool = False
+    ) -> AsyncGenerator[Any, None]:
+        model_name = getattr(
+            llm_request, "model", getattr(self, "model", "gemini-3.5-flash-lite")
         )
-    except Exception as exc:
-        logger.warning(
-            "RPM/TPM pre-flight check error on model '%s': %s", model_name, exc
-        )
+        estimated_tokens = 0
 
-    async for response in _orig_gemini_generate_content_async(
-        self, llm_request, stream=stream
-    ):
-        yield response
+        try:
+            if self.api_client:
+                ct_resp = await self.api_client.aio.models.count_tokens(
+                    model=model_name,
+                    contents=llm_request.contents,
+                )
+                if ct_resp and ct_resp.total_tokens:
+                    estimated_tokens = int(ct_resp.total_tokens)
+        except Exception as exc:
+            logger.debug("Free count_tokens API call skipped: %s", exc)
 
+        if estimated_tokens <= 0:
+            contents_str = str(getattr(llm_request, "contents", ""))
+            estimated_tokens = max(1, len(contents_str) // 4)
 
-Gemini.generate_content_async = _rate_limited_generate_content_async
+        try:
+            await rpm_waiter.check_and_wait(
+                model=model_name,
+                estimated_tokens=estimated_tokens,
+            )
+        except Exception as exc:
+            logger.warning(
+                "RPM/TPM pre-flight check error on model '%s': %s", model_name, exc
+            )
+
+        async for response in super().generate_content_async(
+            llm_request, stream=stream
+        ):
+            yield response
 
 
 # Persistent background event loop used to run ADK coroutines safely from
@@ -1463,7 +1492,7 @@ class WebhookAgent:
         # Create the ADK agent with all tools
         self._agent = Agent(
             name="webhook_agent",
-            model=Gemini(
+            model=RateLimitedGemini(
                 model=self._current_model_name,
                 client_kwargs={"api_key": get_active_api_key()},
             ),
@@ -1517,7 +1546,7 @@ class WebhookAgent:
             next_model,
         )
         self._current_model_name = next_model
-        self._agent.model = Gemini(
+        self._agent.model = RateLimitedGemini(
             model=next_model,
             client_kwargs={"api_key": get_active_api_key()},
         )
@@ -1760,7 +1789,7 @@ class WebhookAgent:
                 trace_id[-4:],
             )
             self._current_model_name = selected_model
-            self._agent.model = Gemini(
+            self._agent.model = RateLimitedGemini(
                 model=selected_model,
                 client_kwargs={"api_key": get_active_api_key()},
             )
