@@ -1066,9 +1066,7 @@ def review(
                 and prev_rv.state in ("CHANGES_REQUESTED", "APPROVED")
             ):
                 try:
-                    prev_rv.dismiss(
-                        "Superseded by fresh code review on latest commit."
-                    )
+                    prev_rv.dismiss("Superseded by fresh code review on latest commit.")
                     logger.info(
                         "Dismissed prior bot review %s on PR #%d",
                         prev_rv.id,

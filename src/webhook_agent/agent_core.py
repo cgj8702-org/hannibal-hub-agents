@@ -32,7 +32,9 @@ class AgentCore:
     Delegates planning and execution to the ADK-powered WebhookAgent.
     """
 
-    def __init__(self, gh_client, dry_run: bool = False, planner=None):
+    def __init__(self, gh_client=None, dry_run: bool = False, planner=None):
+        # gh_client is optional so a long-lived AgentCore can be constructed
+        # once and reused while callers supply a fresh GitHub client per-call.
         self.gh = gh_client
         self.dry_run = dry_run
         # WebhookAgent replaces GemmaPlanner entirely
@@ -43,6 +45,7 @@ class AgentCore:
         event_data: dict[str, Any],
         repo_full_name: str,
         trace_id: str | None = None,
+        gh_client=None,
     ) -> list[ActionResult]:
         """Process a normalized event through the ADK-powered agent.
 
@@ -62,10 +65,15 @@ class AgentCore:
             repo_full_name,
         )
 
+        # Use the per-call gh_client when provided, otherwise fall back to
+        # the client stored on the instance. This allows a single long-lived
+        # AgentCore to be reused while callers refresh installation tokens.
+        gh = gh_client if gh_client is not None else self.gh
+
         # Delegate to the ADK-powered webhook agent
         results = self._webhook_agent.plan_and_execute(
             event_data=event_data,
-            gh_client=self.gh,
+            gh_client=gh,
             trace_id=trace_id,
         )
 
