@@ -18,7 +18,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from github import Github
@@ -71,7 +71,6 @@ def _sanitize_pr_body(body: str) -> str:
         "# 🤖 Pull Request Description Template",
         "# 📋 Title Format",
         "## 📋 Title Format",
-        "# 🤖 Pull Request Description Template",
         "Use this template when creating or editing pull request descriptions in the Hannibal Hub Agents repository.",
         "Use this template when creating or editing pull request descriptions.",
         "*[Check the boxes that apply, bestie!]*",
@@ -1107,7 +1106,7 @@ def get_current_time(ctx: Context) -> dict[str, str]:
     Returns:
         A dictionary containing current_utc_time string.
     """
-    return {"current_utc_time": datetime.now(timezone.utc).isoformat()}
+    return {"current_utc_time": datetime.now(UTC).isoformat()}
 
 
 # Sub-agent for Google Search grounding without breaking AFC for root tools
@@ -1272,11 +1271,15 @@ class WebhookAgent:
         self._current_model_name = self._model_chain[self._chain_index]
         self._fallback_triggered = False
 
+        # Ensure API key is resolved and propagated to env vars before model init
+        get_active_api_key()
+
         # Create the ADK agent with all tools
         self._agent = Agent(
             name="webhook_agent",
             model=Gemini(
                 model=self._current_model_name,
+                client_kwargs={"api_key": get_active_api_key()},
             ),
             instruction=SYSTEM_INSTRUCTION,
             tools=[
@@ -1320,7 +1323,10 @@ class WebhookAgent:
                 next_model,
             )
             self._current_model_name = next_model
-            self._agent.model = Gemini(model=next_model)
+            self._agent.model = Gemini(
+                model=next_model,
+                client_kwargs={"api_key": get_active_api_key()},
+            )
             return next_model
         return None
 
@@ -1561,7 +1567,10 @@ class WebhookAgent:
                 trace_id[-4:],
             )
             self._current_model_name = selected_model
-            self._agent.model = Gemini(model=selected_model)
+            self._agent.model = Gemini(
+                model=selected_model,
+                client_kwargs={"api_key": get_active_api_key()},
+            )
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
