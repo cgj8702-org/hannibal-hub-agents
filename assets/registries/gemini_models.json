@@ -1,0 +1,369 @@
+{
+  "models": [
+    {
+      "name": "models/antigravity-preview-05-2026",
+      "version": "0.1",
+      "display_name": "Antigravity Agent Preview",
+      "description": "Preview release of Antigravity Agent (05-2026)",
+      "input_token_limit": 131072,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/deep-research-max-preview-04-2026",
+      "version": "deepthink-exp-05-20",
+      "display_name": "Deep Research Max Preview (Apr-21-2026)",
+      "description": "Preview release (April 21st, 2026) of Deep Research Max",
+      "input_token_limit": 131072,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/deep-research-preview-04-2026",
+      "version": "deepthink-exp-05-20",
+      "display_name": "Deep Research Preview (Apr-21-2026)",
+      "description": "Preview release (April 21th, 2026) of Deep Research",
+      "input_token_limit": 131072,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/deep-research-pro-preview-12-2025",
+      "version": "deepthink-exp-05-20",
+      "display_name": "Deep Research Pro Preview (Dec-12-2025)",
+      "description": "Preview release (December 12th, 2025) of Deep Research Pro",
+      "input_token_limit": 131072,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-2.5-flash",
+      "version": "001",
+      "display_name": "Gemini 2.5 Flash",
+      "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025.",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-2.5-flash-lite",
+      "version": "001",
+      "display_name": "Gemini 2.5 Flash-Lite",
+      "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-2.5-pro",
+      "version": "2.5",
+      "display_name": "Gemini 2.5 Pro",
+      "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3-flash-preview",
+      "version": "3-flash-preview-12-2025",
+      "display_name": "Gemini 3 Flash Preview",
+      "description": "Gemini 3 Flash Preview",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.1-flash-lite",
+      "version": "3.1-flash-lite-05-2026",
+      "display_name": "Gemini 3.1 Flash Lite",
+      "description": "Gemini 3.1 Flash Lite",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.1-flash-lite-preview",
+      "version": "3.1-flash-lite-preview-03-2026",
+      "display_name": "Gemini 3.1 Flash Lite Preview",
+      "description": "Gemini 3.1 Flash Lite Preview",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.1-pro-preview",
+      "version": "3.1-pro-preview-01-2026",
+      "display_name": "Gemini 3.1 Pro Preview",
+      "description": "Gemini 3.1 Pro Preview",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.5-flash",
+      "version": "3.5-flash-05-2026",
+      "display_name": "Gemini 3.5 Flash",
+      "description": "Gemini 3.5 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.5-flash-lite",
+      "version": "3.5-flash-lite-07-2026",
+      "display_name": "Gemini 3.5 Flash Lite",
+      "description": "Gemini 3.5 Flash Lite",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.6-flash",
+      "version": "3.6-flash-07-2026",
+      "display_name": "Gemini 3.6 Flash",
+      "description": "Gemini 3.6 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-3.7-flash",
+      "version": "3.7-flash-08-2026",
+      "display_name": "Gemini 3.7 Flash",
+      "description": "Gemini 3.7 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-flash-latest",
+      "version": "Gemini Flash Latest",
+      "display_name": "Gemini Flash Latest",
+      "description": "Latest release of Gemini Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-flash-lite-latest",
+      "version": "Gemini Flash-Lite Latest",
+      "display_name": "Gemini Flash-Lite Latest",
+      "description": "Latest release of Gemini Flash-Lite",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-omni-flash-preview",
+      "version": "001",
+      "display_name": "Gemini Omni Flash Preview",
+      "description": "Gemini Omni Flash Preview",
+      "input_token_limit": 131072,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-pro-latest",
+      "version": "Gemini Pro Latest",
+      "display_name": "Gemini Pro Latest",
+      "description": "Latest release of Gemini Pro",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemma-4-26b-a4b-it",
+      "version": "001",
+      "display_name": "Gemma 4 26B A4B IT",
+      "description": "Gemma 4 26B A4B IT",
+      "input_token_limit": 262144,
+      "output_token_limit": 32768,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemma-4-31b-it",
+      "version": "001",
+      "display_name": "Gemma 4 31B IT",
+      "description": "Gemma 4 31B IT",
+      "input_token_limit": 262144,
+      "output_token_limit": 32768,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    }
+  ],
+  "updated_at": "2026-08-13T22:09:23.871152+00:00"
+}
