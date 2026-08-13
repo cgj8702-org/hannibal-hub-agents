@@ -23,6 +23,25 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from github import Github
+from google.adk.agents import Agent
+from google.adk.agents.context import Context
+from google.adk.models import Gemini
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
+from google.genai import types as genai_types
+from google.genai.errors import ServerError as GenAIServerError
+
+from .bot_identity import _is_bot_event
+from .memory_service import InMemoryMemoryService
+
+try:
+    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
+except ImportError:
+    from src.logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
+
 # Persistent background event loop used to run ADK coroutines safely from
 # synchronous callers. Using a single long-lived loop prevents repeatedly
 # creating and closing event loops (which caused "Event loop is closed"
@@ -60,25 +79,6 @@ def run_in_bg_loop(coro: asyncio.coroutines) -> Any:
     except CancelledError:
         raise
 
-
-from github import Github
-from google.adk.agents import Agent
-from google.adk.agents.context import Context
-from google.adk.models import Gemini
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
-from google.adk.tools.agent_tool import AgentTool
-from google.genai import types as genai_types
-from google.genai.errors import ServerError as GenAIServerError
-
-from .bot_identity import _is_bot_event
-from .memory_service import InMemoryMemoryService
-
-try:
-    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-except ImportError:
-    from ..logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
 
 logger = logging.getLogger("webhook_agent")
 
