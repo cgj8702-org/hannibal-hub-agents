@@ -8,8 +8,7 @@ from webhook_agent.agent_core import (
     AgentCore,
     generate_trace_id,
 )
-from webhook_agent.types import ActionResult
-
+from webhook_agent.webhook_types import ActionResult
 
 # ---------------------------------------------------------------------------
 # Tests: generate_trace_id
@@ -157,6 +156,7 @@ class TestIsTransientError:
     def test_returns_true_for_503_error(self):
         """503 UNAVAILABLE should be recognized as transient."""
         from google.genai.errors import ServerError
+
         from webhook_agent.webhook_agent import _is_transient_error
 
         error = ServerError(503, {}, None)
@@ -165,6 +165,7 @@ class TestIsTransientError:
     def test_returns_true_for_500_error(self):
         """500 INTERNAL_ERROR should be recognized as transient."""
         from google.genai.errors import ServerError
+
         from webhook_agent.webhook_agent import _is_transient_error
 
         error = ServerError(500, {}, None)
@@ -173,6 +174,7 @@ class TestIsTransientError:
     def test_returns_true_for_429_error(self):
         """429 RESOURCE_EXHAUSTED should be recognized as transient."""
         from google.genai.errors import ServerError
+
         from webhook_agent.webhook_agent import _is_transient_error
 
         error = ServerError(429, {}, None)
@@ -181,6 +183,7 @@ class TestIsTransientError:
     def test_returns_false_for_400_error(self):
         """400 BAD_REQUEST should NOT be recognized as transient."""
         from google.genai.errors import ServerError
+
         from webhook_agent.webhook_agent import _is_transient_error
 
         error = ServerError(400, {}, None)
@@ -373,22 +376,20 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._agent.tools
         )
-        expected = sorted(
-            [
-                "read_file",
-                "write_file",
-                "get_issue",
-                "get_commit_diff",
-                "update_issue",
-                "add_comment",
-                "open_pr",
-                "update_branch_from_base",
-                "merge_pr",
-                "review",
-                "get_current_time",
-                "search_agent",
-            ]
-        )
+        expected = sorted([
+            "read_file",
+            "write_file",
+            "get_issue",
+            "get_commit_diff",
+            "update_issue",
+            "add_comment",
+            "open_pr",
+            "update_branch_from_base",
+            "merge_pr",
+            "review",
+            "get_current_time",
+            "search_agent",
+        ])
         assert tool_names == expected
 
     def test_no_removed_tools_present(self):

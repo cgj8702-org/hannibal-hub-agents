@@ -13,8 +13,8 @@ import logging
 import uuid
 from typing import Any
 
-from .types import ActionResult
 from .webhook_agent import WebhookAgent
+from .webhook_types import ActionResult
 
 logger = logging.getLogger("agent_core")
 

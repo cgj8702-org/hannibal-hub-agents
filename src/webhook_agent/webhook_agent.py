@@ -19,7 +19,6 @@ import re
 import threading
 import time
 from concurrent.futures import CancelledError
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,6 +30,7 @@ from typing import Any
 # onto it via asyncio.run_coroutine_threadsafe.
 _BG_LOOP: asyncio.AbstractEventLoop | None = None
 _BG_LOOP_THREAD: threading.Thread | None = None
+_GENAI_CLIENT: object | None = None
 
 
 def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
@@ -46,6 +46,13 @@ def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
 
     thread = threading.Thread(target=_loop_worker, name="adk-bg-loop", daemon=True)
     thread.start()
+    # Wait briefly for the background thread to start the loop to avoid
+    # a race where run_coroutine_threadsafe is called before run_forever()
+    # begins. This prevents scheduling onto a non-running loop which can
+    # manifest as transport/loop shutdown races in httpx/anyio.
+    start_deadline = time.time() + 2.0
+    while not loop.is_running() and time.time() < start_deadline:
+        time.sleep(0.01)
     _BG_LOOP = loop
     _BG_LOOP_THREAD = thread
     return _BG_LOOP
@@ -56,9 +63,53 @@ def run_in_bg_loop(coro: asyncio.coroutines) -> Any:
     loop = _ensure_bg_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
-        return future.result()
+        # Wait for result; use a reasonably long timeout to avoid hanging
+        # the caller indefinitely if the remote model call stalls.
+        return future.result(timeout=300)
     except CancelledError:
         raise
+    except Exception:
+        # Re-raise after logging to make debugging easier in logs
+        logger.exception("Error running coroutine in background loop")
+        raise
+
+
+async def _create_genai_client_async(api_key: str):
+    """Create a google.genai Client on the background loop thread."""
+    from google.genai import Client
+
+    # Construct the client synchronously on the background loop to bind any
+    # async transports to that loop's lifecycle.
+    return Client(api_key=api_key)
+
+
+def get_shared_genai_client() -> object | None:
+    """Return a process-wide cached google.genai Client, creating it on the
+    background loop if needed. Returns None if no API key is configured.
+    """
+    global _GENAI_CLIENT
+    if _GENAI_CLIENT is not None:
+        return _GENAI_CLIENT
+
+    try:
+        api_key = get_active_api_key()
+    except Exception:
+        api_key = None
+
+    if not api_key:
+        logger.debug("No active GenAI API key available to construct shared client")
+        return None
+
+    try:
+        # Create client on background loop so httpx/anyio transports attach to
+        # the long-lived loop rather than ephemeral per-event loops.
+        client = run_in_bg_loop(_create_genai_client_async(api_key))
+        _GENAI_CLIENT = client
+        logger.info("Shared GenAI client created and cached on background loop")
+        return _GENAI_CLIENT
+    except Exception as exc:
+        logger.exception("Failed to create shared GenAI client: %s", exc)
+        return None
 
 
 from github import Github
@@ -74,6 +125,7 @@ from google.genai.errors import ServerError as GenAIServerError
 
 from .bot_identity import _is_bot_event
 from .memory_service import InMemoryMemoryService
+from .webhook_types import ActionResult
 
 try:
     from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
@@ -194,15 +246,6 @@ def _load_code_review_template() -> str:
     return _load_template("code_review_template.md")
 
 
-@dataclass
-class ActionResult:
-    """Result of executing a single agent tool."""
-
-    tool: str
-    success: bool
-    detail: str
-
-
 # Bot identity — used for writeback policy
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
@@ -233,13 +276,14 @@ def count_tokens_exact(
     or None if credentials fail or method is unavailable.
     """
     try:
-        from google.genai import Client
-
-        api_key = get_active_api_key()
-        if not api_key:
+        client = get_shared_genai_client()
+        if client is None:
             return None
-        client = Client(api_key=api_key)
 
+        # The Client.models.count_tokens may be sync; call directly. If the
+        # underlying client exposes an async API, those calls will still be
+        # bound to transports created on the background loop thanks to
+        # constructing the client there.
         res = client.models.count_tokens(
             model=model_name,
             contents=contents if isinstance(contents, list) else [contents],
