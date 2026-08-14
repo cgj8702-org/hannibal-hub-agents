@@ -96,10 +96,20 @@ def resolve_merge_conflicts(
         base_branch,
     )
 
+    git_env = os.environ.copy()
+    git_env["GIT_COMMITTER_NAME"] = "hannibal-hub-agents[bot]"
+    git_env["GIT_COMMITTER_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
+    git_env["GIT_AUTHOR_NAME"] = "hannibal-hub-agents[bot]"
+    git_env["GIT_AUTHOR_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
+
     try:
         # 1. Fetch remote branches
         subprocess.run(
-            ["git", "fetch", "origin"], cwd=repo_path, check=True, capture_output=True
+            ["git", "fetch", "origin"],
+            cwd=repo_path,
+            check=True,
+            capture_output=True,
+            env=git_env,
         )
 
         # 2. Create ultra-fast isolated Git Worktree (10ms overhead)
@@ -116,6 +126,26 @@ def resolve_merge_conflicts(
             cwd=repo_path,
             check=True,
             capture_output=True,
+            env=git_env,
+        )
+
+        # Configure local git user identity inside worktree
+        subprocess.run(
+            ["git", "config", "user.name", "hannibal-hub-agents[bot]"],
+            cwd=str(worktree_path),
+            check=True,
+            env=git_env,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "user.email",
+                "hannibal-hub-agents[bot]@users.noreply.github.com",
+            ],
+            cwd=str(worktree_path),
+            check=True,
+            env=git_env,
         )
 
         # 3. Attempt git merge inside isolated worktree
@@ -124,6 +154,7 @@ def resolve_merge_conflicts(
             cwd=str(worktree_path),
             capture_output=True,
             text=True,
+            env=git_env,
         )
 
         if merge_res.returncode == 0:
@@ -136,6 +167,7 @@ def resolve_merge_conflicts(
                 cwd=str(worktree_path),
                 check=True,
                 capture_output=True,
+                env=git_env,
             )
             return {
                 "success": True,
@@ -152,6 +184,7 @@ def resolve_merge_conflicts(
             cwd=str(worktree_path),
             capture_output=True,
             text=True,
+            env=git_env,
         )
         for line in ls_res.stdout.splitlines():
             parts = line.strip().split(maxsplit=3)
@@ -164,6 +197,7 @@ def resolve_merge_conflicts(
             cwd=str(worktree_path),
             capture_output=True,
             text=True,
+            env=git_env,
         )
         for line in status_res.stdout.splitlines():
             if len(line) >= 3:
@@ -270,7 +304,11 @@ def resolve_merge_conflicts(
 
         # 7. Commit & Push
         subprocess.run(
-            ["git", "add", "."], cwd=str(worktree_path), check=True, capture_output=True
+            ["git", "add", "."],
+            cwd=str(worktree_path),
+            check=True,
+            capture_output=True,
+            env=git_env,
         )
         subprocess.run(
             [
@@ -282,12 +320,14 @@ def resolve_merge_conflicts(
             cwd=str(worktree_path),
             check=True,
             capture_output=True,
+            env=git_env,
         )
         subprocess.run(
             ["git", "push", "origin", head_branch],
             cwd=str(worktree_path),
             check=True,
             capture_output=True,
+            env=git_env,
         )
 
         logger.info(
