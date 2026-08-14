@@ -129,17 +129,52 @@ def get_active_api_key() -> str:
     return key
 
 
+_METADATA_CACHE: tuple[float, str | None] = (0.0, None)
+
+
+def _get_gce_metadata_tier() -> str | None:
+    """Fetch WEBHOOK_TIER from GCE VM Instance Metadata server with 30s cache."""
+    global _METADATA_CACHE
+    now = time.time()
+    last_fetch, cached_tier = _METADATA_CACHE
+    if now - last_fetch < 30.0:
+        return cached_tier
+
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            "http://metadata.google.internal/computeMetadata/v1/instance/attributes/WEBHOOK_TIER",
+            headers={"Metadata-Flavor": "Google"},
+        )
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            val = resp.read().decode("utf-8").strip().lower()
+            if val in ("free", "paid"):
+                _METADATA_CACHE = (now, val)
+                return val
+    except Exception:
+        pass
+
+    _METADATA_CACHE = (now, None)
+    return None
+
+
 def _resolve_tier() -> str:
     """Resolve active tier for Webhook Agent (strictly defaulting to 'free').
 
     Resolution cascade:
     1. Explicit env override: WEBHOOK_TIER or HANNIBAL_TIER ("free" or "paid").
-    2. Dynamic Firestore config: system_config/runtime -> WEBHOOK_TIER.
-    3. Strict default: "free".
+    2. GCE VM Instance Metadata: instance/attributes/WEBHOOK_TIER.
+    3. Dynamic Firestore config: system_config/runtime -> WEBHOOK_TIER.
+    4. Strict default: "free".
     """
     env_tier = (os.getenv("WEBHOOK_TIER") or os.getenv("HANNIBAL_TIER", "")).lower()
     if env_tier in ("free", "paid"):
         return env_tier
+
+    gce_tier = _get_gce_metadata_tier()
+    if gce_tier in ("free", "paid"):
+        return gce_tier
 
     return _get_firestore_tier()
 

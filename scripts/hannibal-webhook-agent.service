@@ -4,7 +4,6 @@ After=network.target
 
 [Service]
 Type=simple
-Environment="HANNIBAL_TIER=free"
 WorkingDirectory=/home/carly/hannibal-hub-agents
 ExecStart=/bin/bash -c 'source /home/carly/hannibal-hub-agents/scripts/load_secrets.sh && exec /home/carly/.local/bin/uv run python main.py'
 Restart=always

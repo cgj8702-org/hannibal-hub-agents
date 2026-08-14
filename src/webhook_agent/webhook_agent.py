@@ -35,21 +35,48 @@ from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
 from .bot_identity import _is_bot_event
+from .callbacks import (
+    after_model_callback,
+    before_agent_callback,
+    before_model_callback,
+    before_tool_callback,
+    on_tool_error_callback,
+)
 from .memory_service import InMemoryMemoryService
 from .webhook_types import ActionResult
+
+
+def calculate_verdict(scores: dict[str, int], confidence: int) -> str:
+    """Calculates PR review verdict with 100% mathematical precision.
+
+    Rules:
+    - If any individual score <= 2: REQUEST_CHANGES
+    - If average score < 3.5: REQUEST_CHANGES
+    - If confidence <= 3: COMMENT
+    - Otherwise: APPROVE
+    """
+    if not scores:
+        return "COMMENT"
+    if any(s <= 2 for s in scores.values()):
+        return "REQUEST_CHANGES"
+    avg_score = sum(scores.values()) / len(scores)
+    if avg_score < 3.5:
+        return "REQUEST_CHANGES"
+    if confidence <= 3:
+        return "COMMENT"
+    return "APPROVE"
+
 
 try:
     from logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
-        get_active_model,
         rpm_waiter,
     )
 except ImportError:
-    from ..logic.rate_limiter import (
+    from src.logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
-        get_active_model,
         rpm_waiter,
     )
 
@@ -144,6 +171,11 @@ def get_shared_genai_client() -> object | None:
 
 
 logger = logging.getLogger("webhook_agent")
+
+
+def get_active_model() -> str:
+    """Return default active model name for the agent."""
+    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
@@ -1346,37 +1378,17 @@ search_tool = AgentTool(search_sub_agent)
 _PR_TEMPLATE = _load_pr_template()
 _CODE_REVIEW_TEMPLATE = _load_code_review_template()
 
-SYSTEM_INSTRUCTION = f"""You are a skilled autonomous GitHub Webhook Agent for the Hannibal Hub ecosystem.
+SYSTEM_INSTRUCTION = """You are a Senior Autonomous Engineer and Code Auditor for the Hannibal Hub ecosystem.
 
-Your reasoning process follows 7 steps:
+Your core mission is to protect repository hygiene, audit code changes with clinical precision, and generate pristine, actionable technical feedback.
 
-1. **Understand Intent & Context**: Analyze the incoming event, user sender, PR/issue details, and conversation history.
-2. **Autonomous Action Decision & Self-Awareness**: Decide if an action is required, and check for duplication:
-   - **DUPLICATE SUPPRESSION RULE**: Duplicate suppression ONLY applies if the exact same webhook payload (same delivery ID and identical commit SHA) is processed twice. A new commit push (`pull_request.synchronize`) has a NEW head commit SHA and is NEVER a duplicate! You MUST review every new commit push!
-   - When a user requests a code review (`/review`, `@hannibal-hub-agents review`, or PR opened): Call `get_issue(number, include_diff=True)` to inspect the code changes, then invoke `review(pr_number, body=...)` to post a formal code review.
-   - **PR Synchronize (`pull_request.synchronize`)**: When a new commit is pushed to a PR, you MUST call `get_commit_diff(before_sha, head_sha)` or `get_issue(pr_number, include_diff=True)` to inspect the newly pushed changes. Re-evaluate any prior feedback. If all issues are resolved, invoke `review(pr_number, body=..., event="APPROVE")`; if new or remaining issues exist, invoke `review(pr_number, body=..., event="REQUEST_CHANGES")`.
-   - When a PR description update is requested (`/create`): Call `get_issue(number, include_diff=True)`, format body using the PR template, call `update_issue(number, body=...)`, and invoke `review(pr_number, body=..., event=...)`.
-   - When conflict resolution is requested (`/resolve`): Call `update_branch_from_base(pr_number)`. NEVER use `write_file` to attempt resolving git merge conflicts. If `update_branch_from_base` fails, inform the user that a local `git rebase` is required.
-   - When a user asks a question or directly mentions @hannibal-hub-agents: Execute the requested operation using appropriate tools.
-   - If the event is routine metadata without a command or question, respond in plain text explaining why no tool call is needed.
-3. **Grounding Pre-Check**: Before claiming that code, teardown blocks, or unit tests are missing in a PR review:
-   - You MUST call `read_file()` or `search_agent()` to inspect the target files first.
-   - Never suggest creating a unit test file or adding cleanup logic without first verifying existing tests in tests/ or teardown blocks in the target module.
-4. **Validate Tool Parameters**: Verify pr_number, branch names, file_paths, and commit messages before calling tools. Use get_current_time if date/time calculations are needed.
-5. **Execute Primitives**: Call read_file, write_file, get_issue, get_commit_diff, update_issue, add_comment, open_pr, update_branch_from_base, merge_pr, review, get_current_time, or search_agent.
-6. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections. Use the code_review_template.md for review output.
-7. **Execution Summary**: Summarize completed actions clearly.
+### Reasoning & Grounding Principles
 
-Available tools:
-  Files API:  read_file, write_file
-  Issues API: get_issue, update_issue, add_comment
-  Pulls API:  get_commit_diff, open_pr, update_branch_from_base, merge_pr, review
-  Utilities:  get_current_time, search_agent (for web search & docs)
-
-Dynamic PR Review Status Transitions:
-  - When suggestions/issues found: MUST call review(pr_number, body, event="REQUEST_CHANGES").
-  - When all feedback is resolved by a new commit: MUST call review(pr_number, body, event="APPROVE").
-  - When responding to general questions: use add_comment(number, body=...) or review(..., event="COMMENT").
+1. **Understand Context**: Analyze user requests, pull request diffs, and codebase structure.
+2. **Grounding Pre-Check**: Before claiming that code, teardown blocks, or unit tests are missing in a PR review:
+   - You MUST call `read_file()` or `search_agent()` to inspect target files first.
+   - Never suggest creating unit tests or adding cleanup logic without verifying existing tests in `tests/` or teardown blocks in target modules.
+3. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections using the required template.
 
 ---
 
@@ -1387,12 +1399,10 @@ You are a SENIOR ENGINEER performing code reviews, not a cheerleader. Your job i
 ### Review Procedure
 
 When reviewing a PR, you MUST:
-1. Call `get_issue(number, include_diff=True)` to fetch the full diff.
-2. Analyze every changed file systematically for correctness, security, performance, readability, and test coverage.
-3. Structure your review body using the Code Review Template below.
-4. Fill in ALL scorecard categories with honest scores and cite specific evidence from the diff.
-5. Determine the verdict MECHANICALLY from the scorecard (see Verdict Rules).
-6. Call `review(pr_number, body=..., event=VERDICT)` where VERDICT is APPROVE, REQUEST_CHANGES, or COMMENT.
+1. Analyze every changed file systematically for correctness, security, performance, readability, and test coverage.
+2. Structure your review body using the Code Review Template below.
+3. Fill in ALL scorecard categories with honest scores and cite specific evidence from the diff.
+4. Determine the verdict MECHANICALLY from the scorecard (see Verdict Rules).
 
 ### Verdict Rules (Non-Negotiable)
 
@@ -1434,22 +1444,6 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 - Watch for **accidental environment marker deletions** (e.g., dropping `sys_platform == 'win32'`) or unexpected modifications to unrelated packages in the lockfile.
 - If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`.
 
-### Code Review Template
-
-{_CODE_REVIEW_TEMPLATE}
-
----
-
-### PR Description & Template Evaluation Protocol (MANDATORY)
-
-When generating or updating PR descriptions (`open_pr` or `update_issue`):
-1. **Diff Evaluation**: Inspect the git diff and list of changed files.
-   - **Dev PR (`dev_pull_request_template.md`)**: Select if changes are strictly limited to `dev/`, `scripts/`, `docs/`, or non-production tooling.
-   - **Prod PR (`prod_pull_request_template.md`)**: Select if changes touch `src/`, `rag_service/`, core APIs, or production architecture.
-2. **Template Sanitization**: Fill out the appropriate section headers. STRICTLY PROHIBITED: NEVER include template instruction headers (e.g. `# 🤖 Pull Request Description Template` or `## 📋 Title Format`) or placeholder instruction comments in your output. Start directly with the section headers (`## 🗒️ Description` or `## 🍵 The Tea`).
-
-Default fallback layout:
-{_PR_TEMPLATE}
 """
 
 # ---------------------------------------------------------------------------
@@ -1492,7 +1486,7 @@ class WebhookAgent:
         # Ensure API key is resolved and propagated to env vars before model init
         get_active_api_key()
 
-        # Create the ADK agent with all tools
+        # Create the ADK agent with all tools and callbacks
         self._agent = Agent(
             name="webhook_agent",
             model=Gemini(
@@ -1500,6 +1494,12 @@ class WebhookAgent:
                 client_kwargs={"api_key": get_active_api_key()},
             ),
             instruction=SYSTEM_INSTRUCTION,
+            output_key="code_review",
+            before_agent_callback=before_agent_callback,
+            before_model_callback=before_model_callback,
+            after_model_callback=after_model_callback,
+            before_tool_callback=before_tool_callback,
+            on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
                 write_file,
