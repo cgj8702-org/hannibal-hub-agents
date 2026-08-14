@@ -727,4 +727,4 @@ class TestProgrammaticResolveCommandRouter:
             assert results[0].success is True
             assert "Resolved conflicts in 2 files" in results[0].detail
             assert mock_resolve.call_count == 1
-            mock_pr.create_comment.assert_called_once()
+            mock_pr.create_issue_comment.assert_called_once()

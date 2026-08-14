@@ -1919,7 +1919,7 @@ class WebhookAgent:
                             f"Unable to automatically resolve merge conflicts for PR #{pr_number}.\n\n"
                             f"**Detail:** {status_detail}"
                         )
-                    pr.create_comment(comment_text)
+                    pr.create_issue_comment(comment_text)
                     return [
                         ActionResult(
                             tool="resolve_merge_conflicts",
