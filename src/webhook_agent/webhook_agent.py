@@ -38,18 +38,38 @@ from .bot_identity import _is_bot_event
 from .memory_service import InMemoryMemoryService
 from .webhook_types import ActionResult
 
+
+def calculate_verdict(scores: dict[str, int], confidence: int) -> str:
+    """Calculates PR review verdict with 100% mathematical precision.
+
+    Rules:
+    - If any individual score <= 2: REQUEST_CHANGES
+    - If average score < 3.5: REQUEST_CHANGES
+    - If confidence <= 3: COMMENT
+    - Otherwise: APPROVE
+    """
+    if not scores:
+        return "COMMENT"
+    if any(s <= 2 for s in scores.values()):
+        return "REQUEST_CHANGES"
+    avg_score = sum(scores.values()) / len(scores)
+    if avg_score < 3.5:
+        return "REQUEST_CHANGES"
+    if confidence <= 3:
+        return "COMMENT"
+    return "APPROVE"
+
+
 try:
     from logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
-        get_active_model,
         rpm_waiter,
     )
 except ImportError:
     from src.logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
-        get_active_model,
         rpm_waiter,
     )
 
@@ -144,6 +164,11 @@ def get_shared_genai_client() -> object | None:
 
 
 logger = logging.getLogger("webhook_agent")
+
+
+def get_active_model() -> str:
+    """Return default active model name for the agent."""
+    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
