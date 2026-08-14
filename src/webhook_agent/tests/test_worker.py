@@ -277,15 +277,15 @@ class TestShouldProcessEvent:
         ev["raw_payload"]["comment"]["body"] = "@dependabot recreate"
         assert self.processor.should_process_event(ev) is False
 
-    def test_pull_request_review_allowed(self):
-        """pull_request_review submissions pass should_process_event for LLM evaluation."""
+    def test_pull_request_review_submitted_suppressed(self):
+        """pull_request_review submissions are suppressed to prevent self-review feedback loops."""
         ev = _make_normalized(
             "pull_request_review",
             action="submitted",
             include_review=True,
             comment_author="human-user",
         )
-        assert self.processor.should_process_event(ev) is True
+        assert self.processor.should_process_event(ev) is False
 
     def test_prefetch_pr_diff(self, monkeypatch):
         """_prefetch_pr_diff programmatically populates raw_payload['pr_diff']."""
@@ -415,7 +415,7 @@ class TestShouldProcessEvent:
             self.processor.should_process_event(
                 _make_normalized("pull_request", action="closed")
             )
-            is True
+            is False
         )
         assert (
             self.processor.should_process_event(

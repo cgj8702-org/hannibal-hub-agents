@@ -1375,6 +1375,14 @@ def review(
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+
+        # Safety Check: Closed / Merged PR Protection
+        if pr.state == "closed" or getattr(pr, "merged", False):
+            logger.info(
+                "PR #%d is closed or merged; skipping review submission", pr_number
+            )
+            return f"Error: Cannot submit review for PR #{pr_number} because it is closed or merged."
+
         body, event = _enforce_verdict(body, event, pr)
 
         # Supersede / dismiss prior bot reviews
@@ -1833,6 +1841,32 @@ class WebhookAgent:
                     tool="plan",
                     success=True,
                     detail="dry-run: would process event through ADK agent",
+                )
+            ]
+
+        # Short-circuit execution if PR is closed or merged
+        raw = event_data.get("raw_payload") or {}
+        pr_data = (
+            raw.get("pull_request")
+            or (raw.get("issue") or {}).get("pull_request")
+            or {}
+        )
+        if isinstance(raw.get("issue"), dict) and not pr_data:
+            pr_data = raw.get("issue") or {}
+
+        pr_state = (pr_data.get("state") or "").lower()
+        is_merged = bool(pr_data.get("merged") or pr_data.get("merged_at"))
+        if pr_state == "closed" or is_merged:
+            logger.info(
+                "🔒 PR is closed or merged (state=%s, merged=%s); short-circuiting execution",
+                pr_state,
+                is_merged,
+            )
+            return [
+                ActionResult(
+                    tool="skip_closed_pr",
+                    success=True,
+                    detail=f"PR is closed/merged (state={pr_state}, merged={is_merged}); agent execution skipped.",
                 )
             ]
 

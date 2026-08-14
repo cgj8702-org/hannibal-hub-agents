@@ -21,42 +21,78 @@ def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
     Uses multiple signals to avoid false-negatives when GitHub varies
     the sender format across event types or API versions.
     """
-    if sender is None:
+    if not isinstance(sender, dict):
         return False
-    login = sender.get("login", "")
-    if login == BOT_LOGIN or login == BOT_APP_SLUG:
+    login = (sender.get("login") or "").strip().lower()
+    sender_type = (sender.get("type") or "").strip()
+
+    known_bot_logins = {
+        BOT_LOGIN.lower(),
+        BOT_APP_SLUG.lower(),
+        "hannibal-hub-agents[bot]",
+        "hannibal-hub-agents",
+        "github-actions[bot]",
+    }
+    if login in known_bot_logins:
         return True
-    if sender.get("type") == "Bot" and login.startswith(BOT_APP_SLUG):
+
+    if login.endswith("[bot]") and ("hannibal" in login or "agent" in login):
         return True
+
+    if sender_type == "Bot" and ("hannibal" in login or "agent" in login):
+        return True
+
     return False
 
 
 def _is_bot_event(normalized: dict[str, Any]) -> bool:
     """Determine whether a normalized webhook event originated from this bot.
 
-    Checks the top-level sender, the comment/review author, and the
-    ``performed_via_github_app`` field in the raw payload.
+    Checks top-level sender, raw_payload sender, comment author, review author,
+    and performed_via_github_app.
     """
+    # 1. Top-level sender check
     if _is_bot_sender(normalized.get("sender")):
         return True
 
-    raw = normalized.get("raw_payload", {})
+    raw = normalized.get("raw_payload")
+    if not isinstance(raw, dict):
+        return False
 
-    # Check comment / review author
-    comment = raw.get("comment") or raw.get("review")
-    if comment and _is_bot_sender(comment.get("user")):
+    # 2. Raw payload sender check
+    if _is_bot_sender(raw.get("sender")):
         return True
 
-    # Check performed_via_github_app (most reliable signal)
-    app_info = raw.get("performed_via_github_app")
-    # Also check within comment/review, where GitHub sometimes nests it
-    if not app_info and comment:
-        app_info = comment.get("performed_via_github_app")
+    # 3. Comment author check
+    comment = raw.get("comment")
+    if isinstance(comment, dict) and _is_bot_sender(comment.get("user")):
+        return True
 
-    if app_info:
-        if app_info.get("slug") == BOT_APP_SLUG:
+    # 4. Review author check
+    review = raw.get("review")
+    if isinstance(review, dict) and _is_bot_sender(review.get("user")):
+        return True
+
+    # 5. Review comment author check
+    review_comment = raw.get("review_comment")
+    if isinstance(review_comment, dict) and _is_bot_sender(review_comment.get("user")):
+        return True
+
+    # 6. Check performed_via_github_app (most reliable signal)
+    app_info = raw.get("performed_via_github_app")
+    if not app_info and isinstance(comment, dict):
+        app_info = comment.get("performed_via_github_app")
+    if not app_info and isinstance(review, dict):
+        app_info = review.get("performed_via_github_app")
+    if not app_info and isinstance(review_comment, dict):
+        app_info = review_comment.get("performed_via_github_app")
+
+    if isinstance(app_info, dict):
+        slug = (app_info.get("slug") or "").lower()
+        if slug in (BOT_APP_SLUG.lower(), "hannibal-hub-agents"):
             return True
-        if str(app_info.get("id", "")) == str(os.environ.get("GITHUB_APP_ID", "")):
+        app_id_env = str(os.environ.get("GITHUB_APP_ID", "")).strip()
+        if app_id_env and str(app_info.get("id", "")).strip() == app_id_env:
             return True
 
     return False

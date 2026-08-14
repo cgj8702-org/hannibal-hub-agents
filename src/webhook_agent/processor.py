@@ -280,6 +280,13 @@ class WebhookProcessor:
                 return False
 
         event_name = ev.get("event_name")
+        canonical = self.route_event(ev)
+        # Suppress closed PR events and review submission events to prevent self-review feedback loops and reviews on closed PRs
+        if canonical in ("pull_request.closed", "pull_request_review.submitted") or (
+            event_name == "pull_request" and action == "closed"
+        ):
+            return False
+
         # Ignore automated CI infrastructure noise and installation lifecycle events
         if event_name in ("check_suite", "check_run", "status", "installation"):
             return False
