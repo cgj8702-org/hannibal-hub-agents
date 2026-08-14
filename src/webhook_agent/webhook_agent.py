@@ -543,51 +543,50 @@ _MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 
 
 class DepletedModelRegistry:
-    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events.
-
-    Dynamically sets cooldown based on error metric:
-    - RPD (Requests Per Day): 24 Hours (86,400s)
-    - RPM / TPM (Requests/Tokens Per Minute): 60 Seconds
-    - Default Fallback: 1 Hour (3,600s)
-    """
+    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events."""
 
     def __init__(self, default_cooldown: float = 3600.0) -> None:
         self.default_cooldown = default_cooldown
         self._depleted: dict[str, tuple[float, float]] = {}
 
+    def _norm(self, name: str) -> str:
+        return name.replace("models/", "").strip().lower()
+
     def mark_depleted(self, model_name: str, error: Exception | None = None) -> None:
+        norm_name = self._norm(model_name)
         cooldown = self.default_cooldown
         metric_type = "DEFAULT (1h)"
 
         if error is not None:
             err_str = str(error).lower()
             if "perday" in err_str or "dayperproject" in err_str:
-                cooldown = 86400.0  # 24 Hours for RPD daily limit
+                cooldown = 86400.0
                 metric_type = "RPD (24h)"
             elif (
                 "perminute" in err_str
                 or "minuteperproject" in err_str
                 or "tokensperminute" in err_str
             ):
-                cooldown = 60.0  # 60 Seconds for RPM/TPM minute limit
+                cooldown = 60.0
                 metric_type = "RPM/TPM (60s)"
 
-        self._depleted[model_name] = (time.time(), cooldown)
+        self._depleted[norm_name] = (time.time(), cooldown)
         logger.warning(
-            "🔴 Model '%s' marked DEPLETED [%s] across process",
-            model_name,
+            "Model '%s' marked DEPLETED [%s] across process",
+            norm_name,
             metric_type,
         )
 
     def is_depleted(self, model_name: str) -> bool:
-        if model_name not in self._depleted:
+        norm_name = self._norm(model_name)
+        if norm_name not in self._depleted:
             return False
-        timestamp, cooldown = self._depleted[model_name]
+        timestamp, cooldown = self._depleted[norm_name]
         if time.time() - timestamp > cooldown:
-            del self._depleted[model_name]
+            del self._depleted[norm_name]
             logger.info(
-                "🟢 Model '%s' depletion cooldown expired (%ds), restored to pool",
-                model_name,
+                "Model '%s' depletion cooldown expired (%ds), restored to pool",
+                norm_name,
                 int(cooldown),
             )
             return False

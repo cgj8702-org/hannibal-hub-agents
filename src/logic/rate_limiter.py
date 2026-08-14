@@ -204,6 +204,11 @@ class RPMWaiter:
         )
         self.model_limits = _load_rate_limits(self.registry_path)
 
+    def _norm(self, model_name: str) -> str:
+        if not model_name:
+            return "default"
+        return model_name.replace("models/", "").strip().lower()
+
     async def check_and_wait(
         self,
         model: str = "default",
@@ -227,9 +232,10 @@ class RPMWaiter:
         if not tier:
             tier = _resolve_tier()
 
-        full_model_key = model if model.startswith("models/") else f"models/{model}"
+        norm_model = self._norm(model)
+        full_model_key = f"models/{norm_model}"
         model_entry = self.model_limits.get(
-            model, self.model_limits.get(full_model_key, {})
+            full_model_key, self.model_limits.get(norm_model, {})
         )
         if isinstance(model_entry, dict) and tier in model_entry:
             tier_entry = model_entry[tier]
@@ -241,8 +247,6 @@ class RPMWaiter:
             if rpm_override is not None
             else tier_entry.get("rpm", self.default_limit)
         )
-        # Zero-quota fast-fail: reject models with 0 RPM/RPD on the active tier
-        # (e.g. gemini-2.0-flash / gemini-2.0-flash-lite on Free Tier) immediately.
         if (
             rpm_override is None
             and tier_entry
@@ -250,11 +254,11 @@ class RPMWaiter:
         ):
             logger.warning(
                 "FAST FAIL (%s): Model has 0 quota on tier '%s'. Rejecting.",
-                model,
+                norm_model,
                 tier,
             )
             raise ValueError(
-                f"Model '{model}' is unavailable on tier '{tier}' (0 quota)."
+                f"Model '{norm_model}' is unavailable on tier '{tier}' (0 quota)."
             )
 
         if rpm_limit <= 0:
@@ -264,8 +268,8 @@ class RPMWaiter:
 
         async with self.lock:
             now = self.clock()
-            history = self.histories[model]
-            token_history = self.token_histories[model]
+            history = self.histories[norm_model]
+            token_history = self.token_histories[norm_model]
 
             # Prune old RPM & TPM histories
             history[:] = [t for t in history if now - t <= self.window]
@@ -280,7 +284,7 @@ class RPMWaiter:
                 wait_rpm = max(0.1, (oldest_ts + self.window) - now)
                 logger.warning(
                     "RPM THROTTLE (%s): Used %d/%d. Sleeping %.1fs...",
-                    model,
+                    norm_model,
                     len(history),
                     rpm_limit,
                     wait_rpm,
@@ -306,7 +310,7 @@ class RPMWaiter:
                     logger.warning(
                         "TPM THROTTLE (%s): Active %d+%d/%d TPM limit exceeded. "
                         "Waiting %.1fs for tokens to expire...",
-                        model,
+                        norm_model,
                         active_tpm,
                         estimated_tokens,
                         tpm_limit,
@@ -330,9 +334,10 @@ class RPMWaiter:
         if actual_tokens <= 0:
             return
 
+        norm_model = self._norm(model)
         async with self.lock:
             now = self.clock()
-            token_history = self.token_histories[model]
+            token_history = self.token_histories[norm_model]
 
             token_history[:] = [
                 entry for entry in token_history if now - entry[0] <= self.window
