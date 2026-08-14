@@ -143,16 +143,44 @@ def resolve_merge_conflicts(
                 "resolved_files": [],
             }
 
-        # 4. Identify conflicting files: git diff --name-only --diff-filter=U
-        unmerged_res = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=U"],
+        # 4. Identify conflicting files via git ls-files -u and git status --porcelain
+        unmerged_set: set[str] = set()
+
+        # Method A: git ls-files -u (lists index stage 1/2/3 unmerged entries)
+        ls_res = subprocess.run(
+            ["git", "ls-files", "-u"],
             cwd=str(worktree_path),
             capture_output=True,
             text=True,
         )
-        unmerged_files = [
-            f.strip() for f in unmerged_res.stdout.splitlines() if f.strip()
-        ]
+        for line in ls_res.stdout.splitlines():
+            parts = line.strip().split(maxsplit=3)
+            if len(parts) >= 4:
+                unmerged_set.add(parts[3])
+
+        # Method B: git status --porcelain
+        status_res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+        )
+        for line in status_res.stdout.splitlines():
+            if len(line) >= 3:
+                code = line[:2]
+                file_path = line[3:].strip()
+                if any(c in code for c in ("U", "A", "D")) and code in (
+                    "UU",
+                    "AA",
+                    "DD",
+                    "AU",
+                    "UA",
+                    "DU",
+                    "UD",
+                ):
+                    unmerged_set.add(file_path)
+
+        unmerged_files = sorted(unmerged_set)
         logger.info(
             "Found %d conflicting files for PR #%d: %s",
             len(unmerged_files),
@@ -161,9 +189,10 @@ def resolve_merge_conflicts(
         )
 
         if not unmerged_files:
+            merge_err = (merge_res.stderr or merge_res.stdout or "").strip()
             return {
                 "success": False,
-                "detail": f"Merge failed for PR #{pr_number} but no unmerged text files were identified.",
+                "detail": f"Merge failed for PR #{pr_number} but no unmerged text files were identified. Git output: {merge_err}",
                 "resolved_files": [],
             }
 
