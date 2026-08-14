@@ -8,6 +8,7 @@ synthesis, linter gating (scripts/ruff-all.sh), and unit test verification (pyte
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import uuid
@@ -27,14 +28,16 @@ def _synthesize_conflict_resolution(
     file_path: str,
     file_content: str,
     genai_client: Client,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str | None = None,
 ) -> str:
-    """Use Gemini generative reasoning to resolve conflict markers in a single file."""
+    """Use Gemini generative reasoning to agentically resolve conflict markers in a single file."""
     if "<<<<<<< " not in file_content or ">>>>>>> " not in file_content:
         return file_content
 
+    target_model = model_name or os.getenv("GEMMA_MODEL", "gemini-3.6-flash")
+
     prompt = (
-        f"You are a Senior Engineer resolving a git merge conflict in `{file_path}`.\n"
+        f"You are a Senior Engineer agentically resolving a git merge conflict in `{file_path}`.\n"
         f"The file below contains git conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).\n"
         f"Your task: Return the ENTIRE updated file content with ALL conflict markers removed, "
         f"synthesizing a clean, unified implementation that preserves both feature intents.\n\n"
@@ -47,7 +50,7 @@ def _synthesize_conflict_resolution(
 
     try:
         response = genai_client.models.generate_content(
-            model=model_name,
+            model=target_model,
             contents=prompt,
         )
         resolved_text = response.text or ""
@@ -61,7 +64,10 @@ def _synthesize_conflict_resolution(
         return resolved_text
     except Exception as exc:
         logger.exception(
-            "Failed to synthesize conflict resolution for %s: %s", file_path, exc
+            "Failed to synthesize conflict resolution for %s on model %s: %s",
+            file_path,
+            target_model,
+            exc,
         )
         return file_content
 
@@ -71,6 +77,7 @@ def resolve_merge_conflicts(
     head_branch: str,
     base_branch: str,
     genai_client: Client | None = None,
+    model_name: str | None = None,
     repo_root: str | Path = ".",
 ) -> dict[str, Any]:
     """Surgically resolves merge conflicts inside an ISOLATED Git Worktree
@@ -160,18 +167,37 @@ def resolve_merge_conflicts(
                 "resolved_files": [],
             }
 
-        # 5. Resolve conflict markers using Gemini synthesis if genai_client available
+        # 5. Resolve conflict markers using Gemini generative synthesis
         resolved_files = []
+        if genai_client is None:
+            try:
+                from logic.rate_limiter import get_active_api_key
+            except ImportError:
+                from src.logic.rate_limiter import get_active_api_key
+            active_key = get_active_api_key()
+            if active_key:
+                try:
+                    genai_client = Client(api_key=active_key)
+                except Exception as client_err:
+                    logger.warning(
+                        "Could not construct fallback GenAI client: %s", client_err
+                    )
+
         if genai_client is not None:
             for rel_file in unmerged_files:
                 file_path = worktree_path / rel_file
                 if file_path.exists() and file_path.is_file():
                     raw_content = file_path.read_text(encoding="utf-8")
                     if "<<<<<<< " in raw_content:
+                        logger.info(
+                            "Agentically synthesizing conflict resolution for %s via Gemini LLM...",
+                            rel_file,
+                        )
                         resolved_content = _synthesize_conflict_resolution(
                             file_path=rel_file,
                             file_content=raw_content,
                             genai_client=genai_client,
+                            model_name=model_name,
                         )
                         file_path.write_text(resolved_content, encoding="utf-8")
                         resolved_files.append(rel_file)

@@ -58,7 +58,13 @@ async def before_model_callback(
     """Execute pre-flight token metering, dynamic model TPM chunking, and rate limit waiting."""
     active_tier = callback_context.state.get("active_tier") or _resolve_tier()
     api_key = get_active_api_key()
-    target_model = getattr(llm_request, "model", None) or "gemini-2.5-flash"
+    try:
+        from webhook_agent.webhook_agent import get_active_model
+
+        default_model = get_active_model()
+    except ImportError:
+        default_model = "gemini-3.6-flash"
+    target_model = getattr(llm_request, "model", None) or default_model
 
     input_text = ""
     if hasattr(llm_request, "contents") and llm_request.contents:

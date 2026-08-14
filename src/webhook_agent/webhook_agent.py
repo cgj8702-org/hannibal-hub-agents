@@ -43,6 +43,7 @@ from .callbacks import (
     on_tool_error_callback,
 )
 from .memory_service import InMemoryMemoryService
+from .tools.resolve_conflicts import resolve_merge_conflicts
 from .webhook_types import ActionResult
 
 
@@ -173,9 +174,18 @@ def get_shared_genai_client() -> object | None:
 logger = logging.getLogger("webhook_agent")
 
 
-def get_active_model() -> str:
-    """Return default active model name for the agent."""
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+def get_active_model(event_data: dict[str, Any] | None = None) -> str:
+    """Return default active model name for the agent, using dynamic model routing and depletion registry."""
+    if event_data is not None:
+        return _select_model_for_event(event_data)
+    chain = get_model_chain()
+    if chain:
+        return chain[0]
+    active_tier = _resolve_tier()
+    default_primary = (
+        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+    )
+    return os.getenv("GEMMA_MODEL", default_primary)
 
 
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
@@ -421,6 +431,11 @@ def _load_code_review_template() -> str:
     return _load_template("code_review_template.md")
 
 
+def _load_sync_review_template() -> str:
+    """Load the synchronization review template from the templates directory."""
+    return _load_template("sync_review_template.md")
+
+
 # Bot identity — used for writeback policy
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
@@ -443,13 +458,14 @@ def get_max_input_tokens() -> int:
 
 
 def count_tokens_exact(
-    contents: str | list[Any], model_name: str = "gemini-3.5-flash-lite"
+    contents: str | list[Any], model_name: str | None = None
 ) -> int | None:
     """Count input tokens using Google GenAI SDK's client.models.count_tokens().
 
     Returns exact token count from the API if credentials are configured,
     or None if credentials fail or method is unavailable.
     """
+    target_model = model_name or get_active_model()
     try:
         client = get_shared_genai_client()
         if client is None:
@@ -460,7 +476,7 @@ def count_tokens_exact(
         # bound to transports created on the background loop thanks to
         # constructing the client there.
         res = client.models.count_tokens(
-            model=model_name,
+            model=target_model,
             contents=contents if isinstance(contents, list) else [contents],
         )
         return getattr(res, "total_tokens", None)
@@ -472,7 +488,7 @@ def count_tokens_exact(
 def _truncate_text_to_token_limit(
     text: str,
     max_tokens: int | None = None,
-    model_name: str = "gemma-4-31b-it",
+    model_name: str | None = None,
     label: str = "Input",
 ) -> str:
     """Truncate input text to guarantee it stays strictly under max_tokens limit.
@@ -483,11 +499,13 @@ def _truncate_text_to_token_limit(
     if not text:
         return text
 
+    target_model = model_name or get_active_model()
+
     if max_tokens is None:
         max_tokens = get_max_input_tokens()
 
     # Step 1: Try exact token count via google.genai API
-    exact_count = count_tokens_exact(text, model_name=model_name)
+    exact_count = count_tokens_exact(text, model_name=target_model)
 
     if exact_count is not None:
         if exact_count <= max_tokens:
@@ -500,7 +518,7 @@ def _truncate_text_to_token_limit(
             target_ratio = (max_tokens - 300) / current_tokens
             new_length = max(100, int(len(current_text) * target_ratio))
             current_text = current_text[:new_length]
-            new_count = count_tokens_exact(current_text, model_name=model_name)
+            new_count = count_tokens_exact(current_text, model_name=target_model)
             if new_count is None or new_count >= current_tokens:
                 current_text = current_text[: int(len(current_text) * 0.8)]
                 current_tokens = int(current_tokens * 0.8)
@@ -1096,6 +1114,43 @@ def update_branch_from_base(ctx: Context, pr_number: int) -> str:
         )
 
 
+def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
+    """Surgically resolve git merge conflicts in a pull request using an isolated Git worktree.
+
+    Uses an ephemeral Git Worktree, Gemini generative code block synthesis,
+    ruff checking, and pytest verification before pushing. Call this tool
+    when a user comments `/resolve` or asks to resolve merge conflicts on a PR.
+
+    Args:
+        pr_number: Pull request number.
+
+    Returns:
+        A string describing the conflict resolution status and files modified.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        genai_client = get_shared_genai_client()
+        active_model = ctx.state.get("active_model") or get_active_model()
+        res = resolve_merge_conflicts(
+            pr_number=pr_number,
+            head_branch=pr.head.ref,
+            base_branch=pr.base.ref,
+            genai_client=genai_client,
+            model_name=active_model,
+        )
+        if res.get("success"):
+            detail = res.get("detail", "")
+            return (
+                f"Successfully resolved merge conflicts for PR #{pr_number}: {detail}"
+            )
+        return f"Could not resolve merge conflicts for PR #{pr_number}: {res.get('detail')}"
+    except Exception as e:  # noqa: BLE001
+        return f"Error resolving merge conflicts for PR #{pr_number}: {e}"
+
+
 def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     """Merge a pull request with safety checks.
 
@@ -1156,28 +1211,38 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
 
 
 def _parse_scorecard_scores(body: str) -> list[int]:
-    """Extract numeric scores from the scorecard table in a review body.
+    """Extract individual category scores from a review body's scorecard.
 
-    Looks for the pattern '|  N  |' where N is 1-5 in the scorecard rows.
+    Supports both Callout list format ('* **Category:** N/5') and table format ('| **Category** | N |').
     Returns a list of parsed integer scores, or empty list if none found.
     """
     import re
 
     scores: list[int] = []
-    for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
+    # Match callout list format: * **Code Correctness:** 5/5
+    for match in re.finditer(r"\*\s*\*\*[^*]+\*\*\s*:\s*(\d)(?:/5)?", body):
         score = int(match.group(1))
         if 1 <= score <= 5:
             scores.append(score)
+
+    if not scores:
+        # Fallback to table format: | **Code Correctness** | 5 |
+        for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
+            score = int(match.group(1))
+            if 1 <= score <= 5:
+                scores.append(score)
     return scores
 
 
 def _parse_confidence(body: str) -> int | None:
     """Extract the confidence self-assessment score from a review body.
 
-    Looks for 'My Confidence:' followed by a number 1-5.
+    Looks for 'Confidence:' followed by a number 1-5 or N/5.
     Returns the score or None if not found.
     """
-    match = re.search(r"\*\*My Confidence:\*\*\s*(\d)", body)
+    import re
+
+    match = re.search(r"\*\*(?:My\s+)?Confidence:\*\*\s*(\d)", body)
     if match:
         val = int(match.group(1))
         if 1 <= val <= 5:
@@ -1362,7 +1427,7 @@ def get_current_time(ctx: Context) -> dict[str, str]:
 # Sub-agent for Google Search grounding without breaking AFC for root tools
 search_sub_agent = Agent(
     name="search_agent",
-    model=os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite"),
+    model=os.environ.get("GEMINI_SEARCH_MODEL", get_active_model()),
     instruction="You are a technical search specialist. Search the web for documentation, CVEs, syntax issues, and library details.",
     tools=[google_search],
 )
@@ -1377,10 +1442,11 @@ search_tool = AgentTool(search_sub_agent)
 # Load templates once at module load time
 _PR_TEMPLATE = _load_pr_template()
 _CODE_REVIEW_TEMPLATE = _load_code_review_template()
+_SYNC_REVIEW_TEMPLATE = _load_sync_review_template()
 
 SYSTEM_INSTRUCTION = """You are a Senior Autonomous Engineer and Code Auditor for the Hannibal Hub ecosystem.
 
-Your core mission is to protect repository hygiene, audit code changes with clinical precision, and generate pristine, actionable technical feedback.
+Your core mission is to protect repository hygiene, audit code changes with clinical precision, and generate pristine, actionable technical feedback. Zero sycophancy or generic cheerleading is permitted.
 
 ### Reasoning & Grounding Principles
 
@@ -1413,12 +1479,13 @@ These rules override your judgment. Apply them mechanically based on your scorec
 - Your confidence level is 3 or below -> event MUST be COMMENT (never APPROVE when uncertain)
 - All categories 3+ AND average >= 3.5 AND confidence >= 4 -> event MAY be APPROVE
 
-### Critical Thinking Requirements
+### Critical Thinking & Anti-Sycophancy Requirements
 
-- Finding zero issues is suspicious. If a PR changes more than 10 lines and you have no suggestions, re-read the diff more carefully.
+- **NO SYCOPHANCY / NO CHEERLEADING**: Do NOT use performative praise or generic cheerleading like "Splendid refactoring!", "Exemplary implementation!", or "Rock-solid PR!". State objective technical facts only.
+- **MANDATORY RISK & EDGE-CASE ANALYSIS**: Finding zero risks or edge cases is UNACCEPTABLE. Every review MUST include Section 4: Mandatory Risk & Edge-Case Analysis highlighting at least one potential failure mode, unhandled edge case, rate limit, timeout risk, or non-UTF8 input boundary — even for approved PRs.
 - Every review MUST include at least ONE specific, actionable suggestion — even for excellent code (naming improvements, documentation gaps, test ideas, edge cases).
-- Never say code is "rock-solid" or "verified" without citing specific evidence for each claim.
-- Do not summarize what the code does back to the author — they already know. Focus on what could go WRONG.
+- Never say code is "verified" without citing specific evidence from the diff for each claim.
+- Do not summarize what the code does back to the author — focus on what could go WRONG.
 - If the PR is large (>500 lines changed), recommend splitting it and note this in your review.
 
 ### Common Issues to Watch For
@@ -1509,6 +1576,7 @@ class WebhookAgent:
                 add_comment,
                 open_pr,
                 update_branch_from_base,
+                resolve_pr_conflicts,
                 merge_pr,
                 review,
                 get_current_time,
@@ -1772,6 +1840,72 @@ class WebhookAgent:
             "✅ All policy checks passed, building session context (trace: %s)",
             trace_id[-4:],
         )
+
+        # Programmatic Command Router: Intercept /resolve slash command for instant Git Worktree conflict resolution
+        raw = event_data.get("raw_payload", {})
+        comment_body = ""
+        if isinstance(raw, dict) and isinstance(raw.get("comment"), dict):
+            comment_body = (raw["comment"].get("body") or "").strip()
+
+        if "/resolve" in comment_body.lower():
+            pr_number = None
+            if isinstance(raw, dict):
+                pr_number = (raw.get("pull_request") or {}).get("number") or (
+                    raw.get("issue") or {}
+                ).get("number")
+
+            if pr_number:
+                selected_model = _select_model_for_event(event_data)
+                logger.info(
+                    "⚡ Programmatic Command Router: Intercepted /resolve for PR #%d (trace: %s, model: %s)",
+                    pr_number,
+                    trace_id[-4:],
+                    selected_model,
+                )
+                try:
+                    repo = gh_client.get_repo(repo_full_name)
+                    pr = repo.get_pull(pr_number)
+                    genai_client = get_shared_genai_client()
+                    res = resolve_merge_conflicts(
+                        pr_number=pr_number,
+                        head_branch=pr.head.ref,
+                        base_branch=pr.base.ref,
+                        genai_client=genai_client,
+                        model_name=selected_model,
+                    )
+                    status_detail = res.get("detail", "")
+                    if res.get("success"):
+                        comment_text = (
+                            f"I have surgically resolved the merge conflicts for PR #{pr_number} "
+                            f"against `{pr.base.ref}` using an isolated Git Worktree and pushed the updated branch.\n\n"
+                            f"**Detail:** {status_detail}"
+                        )
+                    else:
+                        comment_text = (
+                            f"Unable to automatically resolve merge conflicts for PR #{pr_number}.\n\n"
+                            f"**Detail:** {status_detail}"
+                        )
+                    pr.create_comment(comment_text)
+                    return [
+                        ActionResult(
+                            tool="resolve_merge_conflicts",
+                            success=res.get("success", False),
+                            detail=status_detail,
+                        )
+                    ]
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "Programmatic /resolve execution failed for PR #%d: %s",
+                        pr_number,
+                        exc,
+                    )
+                    return [
+                        ActionResult(
+                            tool="resolve_merge_conflicts",
+                            success=False,
+                            detail=f"Programmatic /resolve failed: {exc}",
+                        )
+                    ]
 
         # Derive session and user IDs
         session_id = self._derive_session_id(event_data)
