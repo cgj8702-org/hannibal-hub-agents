@@ -323,7 +323,10 @@ class TestTokenTruncation:
         mock_response_2.total_tokens = 14000
         mock_client.models.count_tokens.side_effect = [mock_response, mock_response_2]
 
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch(
+            "webhook_agent.webhook_agent.get_shared_genai_client",
+            return_value=mock_client,
+        ):
             truncated = _truncate_text_to_token_limit(
                 long_text, max_tokens=15000, label="Exact limit test"
             )
@@ -675,3 +678,52 @@ class TestTokenLimits:
 
         monkeypatch.setenv("HANNIBAL_TIER", "free")
         assert get_max_input_tokens() == 3500
+
+
+# ---------------------------------------------------------------------------
+# Tests: Programmatic Command Router for /resolve
+# ---------------------------------------------------------------------------
+
+
+class TestProgrammaticResolveCommandRouter:
+    def test_plan_and_execute_intercepts_resolve_command(self, monkeypatch):
+        from unittest.mock import MagicMock, patch
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
+        agent = WebhookAgent(dry_run=False)
+
+        mock_gh = MagicMock()
+        mock_pr = MagicMock()
+        mock_pr.head.ref = "feat-branch"
+        mock_pr.base.ref = "main"
+        mock_gh.get_repo.return_value.get_pull.return_value = mock_pr
+
+        event_data = {
+            "canonical": "issue_comment.created",
+            "sender": {"login": "human"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {
+                "issue": {"number": 63, "pull_request": {}},
+                "comment": {"body": "/resolve"},
+            },
+        }
+
+        with patch(
+            "webhook_agent.webhook_agent.resolve_merge_conflicts"
+        ) as mock_resolve:
+            mock_resolve.return_value = {
+                "success": True,
+                "detail": "Resolved conflicts in 2 files",
+            }
+            results = agent.plan_and_execute(
+                event_data=event_data,
+                gh_client=mock_gh,
+                trace_id="test-trace-123",
+            )
+            assert len(results) == 1
+            assert results[0].tool == "resolve_merge_conflicts"
+            assert results[0].success is True
+            assert "Resolved conflicts in 2 files" in results[0].detail
+            assert mock_resolve.call_count == 1
+            mock_pr.create_comment.assert_called_once()

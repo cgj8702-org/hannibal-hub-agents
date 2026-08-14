@@ -43,6 +43,7 @@ from .callbacks import (
     on_tool_error_callback,
 )
 from .memory_service import InMemoryMemoryService
+from .tools.resolve_conflicts import resolve_merge_conflicts
 from .webhook_types import ActionResult
 
 
@@ -1772,6 +1773,69 @@ class WebhookAgent:
             "✅ All policy checks passed, building session context (trace: %s)",
             trace_id[-4:],
         )
+
+        # Programmatic Command Router: Intercept /resolve slash command for instant Git Worktree conflict resolution
+        raw = event_data.get("raw_payload", {})
+        comment_body = ""
+        if isinstance(raw, dict) and isinstance(raw.get("comment"), dict):
+            comment_body = (raw["comment"].get("body") or "").strip()
+
+        if "/resolve" in comment_body.lower():
+            pr_number = None
+            if isinstance(raw, dict):
+                pr_number = (raw.get("pull_request") or {}).get("number") or (
+                    raw.get("issue") or {}
+                ).get("number")
+
+            if pr_number:
+                logger.info(
+                    "⚡ Programmatic Command Router: Intercepted /resolve for PR #%d (trace: %s)",
+                    pr_number,
+                    trace_id[-4:],
+                )
+                try:
+                    repo = gh_client.get_repo(repo_full_name)
+                    pr = repo.get_pull(pr_number)
+                    genai_client = get_shared_genai_client()
+                    res = resolve_merge_conflicts(
+                        pr_number=pr_number,
+                        head_branch=pr.head.ref,
+                        base_branch=pr.base.ref,
+                        genai_client=genai_client,
+                    )
+                    status_detail = res.get("detail", "")
+                    if res.get("success"):
+                        comment_text = (
+                            f"I have surgically resolved the merge conflicts for PR #{pr_number} "
+                            f"against `{pr.base.ref}` using an isolated Git Worktree and pushed the updated branch.\n\n"
+                            f"**Detail:** {status_detail}"
+                        )
+                    else:
+                        comment_text = (
+                            f"Unable to automatically resolve merge conflicts for PR #{pr_number}.\n\n"
+                            f"**Detail:** {status_detail}"
+                        )
+                    pr.create_comment(comment_text)
+                    return [
+                        ActionResult(
+                            tool="resolve_merge_conflicts",
+                            success=res.get("success", False),
+                            detail=status_detail,
+                        )
+                    ]
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "Programmatic /resolve execution failed for PR #%d: %s",
+                        pr_number,
+                        exc,
+                    )
+                    return [
+                        ActionResult(
+                            tool="resolve_merge_conflicts",
+                            success=False,
+                            detail=f"Programmatic /resolve failed: {exc}",
+                        )
+                    ]
 
         # Derive session and user IDs
         session_id = self._derive_session_id(event_data)
