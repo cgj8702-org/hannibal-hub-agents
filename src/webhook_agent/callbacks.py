@@ -35,12 +35,30 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     )
 
 
+MODEL_FREE_TPM_LIMITS = {
+    "gemma": 15000,
+    "gemini": 1000000,
+}
+
+
+def get_model_tpm_limit(model_name: str, tier: str = "free") -> int:
+    """Return max TPM limit based on specific model and active tier."""
+    model_lower = model_name.lower()
+    if tier == "free":
+        for family, limit in MODEL_FREE_TPM_LIMITS.items():
+            if family in model_lower:
+                return limit
+        return 15000 if "gemma" in model_lower else 1000000
+    return 4000000
+
+
 async def before_model_callback(
     callback_context: CallbackContext, llm_request: LlmRequest
 ) -> LlmResponse | None:
-    """Execute pre-flight token metering, Free Tier TPM chunking (<15k), and rate limit waiting."""
+    """Execute pre-flight token metering, dynamic model TPM chunking, and rate limit waiting."""
     active_tier = callback_context.state.get("active_tier") or _resolve_tier()
     api_key = get_active_api_key()
+    target_model = getattr(llm_request, "model", None) or "gemini-2.5-flash"
 
     input_text = ""
     if hasattr(llm_request, "contents") and llm_request.contents:
@@ -52,18 +70,22 @@ async def before_model_callback(
             from google import genai
 
             client = genai.Client(api_key=api_key)
-            model_name = getattr(llm_request, "model", None) or "gemini-2.5-flash"
-            resp = client.models.count_tokens(model=model_name, contents=input_text)
+            resp = client.models.count_tokens(model=target_model, contents=input_text)
             if resp and resp.total_tokens:
                 exact_tokens = int(resp.total_tokens)
         except Exception:
             pass
 
-    if active_tier == "free" and exact_tokens > 15000:
+    max_tpm = get_model_tpm_limit(target_model, active_tier)
+    if exact_tokens > max_tpm:
         logger.warning(
-            "Free Tier TPM truncation triggered: %d tokens > 15000", exact_tokens
+            "TPM truncation triggered for model %s (%s tier): %d tokens > max %d",
+            target_model,
+            active_tier,
+            exact_tokens,
+            max_tpm,
         )
-        exact_tokens = 14500
+        exact_tokens = int(max_tpm * 0.95)
 
     target_model = getattr(llm_request, "model", None) or "gemini-2.5-flash"
     await rpm_waiter.check_and_wait(

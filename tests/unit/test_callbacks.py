@@ -10,8 +10,15 @@ from webhook_agent.callbacks import (
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
+    get_model_tpm_limit,
     on_tool_error_callback,
 )
+
+
+def test_get_model_tpm_limit() -> None:
+    assert get_model_tpm_limit("gemma-4-31b-it", "free") == 15000
+    assert get_model_tpm_limit("gemini-2.5-flash", "free") == 1000000
+    assert get_model_tpm_limit("gemini-2.5-flash", "paid") == 4000000
 
 
 @pytest.mark.anyio
