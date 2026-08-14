@@ -77,6 +77,7 @@ def resolve_merge_conflicts(
     head_branch: str,
     base_branch: str,
     genai_client: Client | None = None,
+    model_name: str | None = None,
     repo_root: str | Path = ".",
 ) -> dict[str, Any]:
     """Surgically resolves merge conflicts inside an ISOLATED Git Worktree
@@ -196,6 +197,7 @@ def resolve_merge_conflicts(
                             file_path=rel_file,
                             file_content=raw_content,
                             genai_client=genai_client,
+                            model_name=model_name,
                         )
                         file_path.write_text(resolved_content, encoding="utf-8")
                         resolved_files.append(rel_file)

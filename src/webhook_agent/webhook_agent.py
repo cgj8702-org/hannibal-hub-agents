@@ -1097,6 +1097,43 @@ def update_branch_from_base(ctx: Context, pr_number: int) -> str:
         )
 
 
+def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
+    """Surgically resolve git merge conflicts in a pull request using an isolated Git worktree.
+
+    Uses an ephemeral Git Worktree, Gemini generative code block synthesis,
+    ruff checking, and pytest verification before pushing. Call this tool
+    when a user comments `/resolve` or asks to resolve merge conflicts on a PR.
+
+    Args:
+        pr_number: Pull request number.
+
+    Returns:
+        A string describing the conflict resolution status and files modified.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        genai_client = get_shared_genai_client()
+        active_model = ctx.state.get("active_model") or get_active_model()
+        res = resolve_merge_conflicts(
+            pr_number=pr_number,
+            head_branch=pr.head.ref,
+            base_branch=pr.base.ref,
+            genai_client=genai_client,
+            model_name=active_model,
+        )
+        if res.get("success"):
+            detail = res.get("detail", "")
+            return (
+                f"Successfully resolved merge conflicts for PR #{pr_number}: {detail}"
+            )
+        return f"Could not resolve merge conflicts for PR #{pr_number}: {res.get('detail')}"
+    except Exception as e:  # noqa: BLE001
+        return f"Error resolving merge conflicts for PR #{pr_number}: {e}"
+
+
 def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     """Merge a pull request with safety checks.
 
@@ -1510,6 +1547,7 @@ class WebhookAgent:
                 add_comment,
                 open_pr,
                 update_branch_from_base,
+                resolve_pr_conflicts,
                 merge_pr,
                 review,
                 get_current_time,
@@ -1788,10 +1826,12 @@ class WebhookAgent:
                 ).get("number")
 
             if pr_number:
+                selected_model = _select_model_for_event(event_data)
                 logger.info(
-                    "⚡ Programmatic Command Router: Intercepted /resolve for PR #%d (trace: %s)",
+                    "⚡ Programmatic Command Router: Intercepted /resolve for PR #%d (trace: %s, model: %s)",
                     pr_number,
                     trace_id[-4:],
+                    selected_model,
                 )
                 try:
                     repo = gh_client.get_repo(repo_full_name)
@@ -1802,6 +1842,7 @@ class WebhookAgent:
                         head_branch=pr.head.ref,
                         base_branch=pr.base.ref,
                         genai_client=genai_client,
+                        model_name=selected_model,
                     )
                     status_detail = res.get("detail", "")
                     if res.get("success"):
