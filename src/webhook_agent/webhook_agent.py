@@ -174,9 +174,18 @@ def get_shared_genai_client() -> object | None:
 logger = logging.getLogger("webhook_agent")
 
 
-def get_active_model() -> str:
-    """Return default active model name for the agent."""
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+def get_active_model(event_data: dict[str, Any] | None = None) -> str:
+    """Return default active model name for the agent, using dynamic model routing and depletion registry."""
+    if event_data is not None:
+        return _select_model_for_event(event_data)
+    chain = get_model_chain()
+    if chain:
+        return chain[0]
+    active_tier = _resolve_tier()
+    default_primary = (
+        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+    )
+    return os.getenv("GEMMA_MODEL", default_primary)
 
 
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
@@ -444,13 +453,14 @@ def get_max_input_tokens() -> int:
 
 
 def count_tokens_exact(
-    contents: str | list[Any], model_name: str = "gemini-3.5-flash-lite"
+    contents: str | list[Any], model_name: str | None = None
 ) -> int | None:
     """Count input tokens using Google GenAI SDK's client.models.count_tokens().
 
     Returns exact token count from the API if credentials are configured,
     or None if credentials fail or method is unavailable.
     """
+    target_model = model_name or get_active_model()
     try:
         client = get_shared_genai_client()
         if client is None:
@@ -461,7 +471,7 @@ def count_tokens_exact(
         # bound to transports created on the background loop thanks to
         # constructing the client there.
         res = client.models.count_tokens(
-            model=model_name,
+            model=target_model,
             contents=contents if isinstance(contents, list) else [contents],
         )
         return getattr(res, "total_tokens", None)
@@ -473,7 +483,7 @@ def count_tokens_exact(
 def _truncate_text_to_token_limit(
     text: str,
     max_tokens: int | None = None,
-    model_name: str = "gemma-4-31b-it",
+    model_name: str | None = None,
     label: str = "Input",
 ) -> str:
     """Truncate input text to guarantee it stays strictly under max_tokens limit.
@@ -484,11 +494,13 @@ def _truncate_text_to_token_limit(
     if not text:
         return text
 
+    target_model = model_name or get_active_model()
+
     if max_tokens is None:
         max_tokens = get_max_input_tokens()
 
     # Step 1: Try exact token count via google.genai API
-    exact_count = count_tokens_exact(text, model_name=model_name)
+    exact_count = count_tokens_exact(text, model_name=target_model)
 
     if exact_count is not None:
         if exact_count <= max_tokens:
@@ -501,7 +513,7 @@ def _truncate_text_to_token_limit(
             target_ratio = (max_tokens - 300) / current_tokens
             new_length = max(100, int(len(current_text) * target_ratio))
             current_text = current_text[:new_length]
-            new_count = count_tokens_exact(current_text, model_name=model_name)
+            new_count = count_tokens_exact(current_text, model_name=target_model)
             if new_count is None or new_count >= current_tokens:
                 current_text = current_text[: int(len(current_text) * 0.8)]
                 current_tokens = int(current_tokens * 0.8)
@@ -1400,7 +1412,7 @@ def get_current_time(ctx: Context) -> dict[str, str]:
 # Sub-agent for Google Search grounding without breaking AFC for root tools
 search_sub_agent = Agent(
     name="search_agent",
-    model=os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite"),
+    model=os.environ.get("GEMINI_SEARCH_MODEL", get_active_model()),
     instruction="You are a technical search specialist. Search the web for documentation, CVEs, syntax issues, and library details.",
     tools=[google_search],
 )
