@@ -431,6 +431,11 @@ def _load_code_review_template() -> str:
     return _load_template("code_review_template.md")
 
 
+def _load_sync_review_template() -> str:
+    """Load the synchronization review template from the templates directory."""
+    return _load_template("sync_review_template.md")
+
+
 # Bot identity — used for writeback policy
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
@@ -1206,28 +1211,38 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
 
 
 def _parse_scorecard_scores(body: str) -> list[int]:
-    """Extract numeric scores from the scorecard table in a review body.
+    """Extract individual category scores from a review body's scorecard.
 
-    Looks for the pattern '|  N  |' where N is 1-5 in the scorecard rows.
+    Supports both Callout list format ('* **Category:** N/5') and table format ('| **Category** | N |').
     Returns a list of parsed integer scores, or empty list if none found.
     """
     import re
 
     scores: list[int] = []
-    for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
+    # Match callout list format: * **Code Correctness:** 5/5
+    for match in re.finditer(r"\*\s*\*\*[^*]+\*\*\s*:\s*(\d)(?:/5)?", body):
         score = int(match.group(1))
         if 1 <= score <= 5:
             scores.append(score)
+
+    if not scores:
+        # Fallback to table format: | **Code Correctness** | 5 |
+        for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
+            score = int(match.group(1))
+            if 1 <= score <= 5:
+                scores.append(score)
     return scores
 
 
 def _parse_confidence(body: str) -> int | None:
     """Extract the confidence self-assessment score from a review body.
 
-    Looks for 'My Confidence:' followed by a number 1-5.
+    Looks for 'Confidence:' followed by a number 1-5 or N/5.
     Returns the score or None if not found.
     """
-    match = re.search(r"\*\*My Confidence:\*\*\s*(\d)", body)
+    import re
+
+    match = re.search(r"\*\*(?:My\s+)?Confidence:\*\*\s*(\d)", body)
     if match:
         val = int(match.group(1))
         if 1 <= val <= 5:
@@ -1427,10 +1442,11 @@ search_tool = AgentTool(search_sub_agent)
 # Load templates once at module load time
 _PR_TEMPLATE = _load_pr_template()
 _CODE_REVIEW_TEMPLATE = _load_code_review_template()
+_SYNC_REVIEW_TEMPLATE = _load_sync_review_template()
 
 SYSTEM_INSTRUCTION = """You are a Senior Autonomous Engineer and Code Auditor for the Hannibal Hub ecosystem.
 
-Your core mission is to protect repository hygiene, audit code changes with clinical precision, and generate pristine, actionable technical feedback.
+Your core mission is to protect repository hygiene, audit code changes with clinical precision, and generate pristine, actionable technical feedback. Zero sycophancy or generic cheerleading is permitted.
 
 ### Reasoning & Grounding Principles
 
@@ -1463,12 +1479,13 @@ These rules override your judgment. Apply them mechanically based on your scorec
 - Your confidence level is 3 or below -> event MUST be COMMENT (never APPROVE when uncertain)
 - All categories 3+ AND average >= 3.5 AND confidence >= 4 -> event MAY be APPROVE
 
-### Critical Thinking Requirements
+### Critical Thinking & Anti-Sycophancy Requirements
 
-- Finding zero issues is suspicious. If a PR changes more than 10 lines and you have no suggestions, re-read the diff more carefully.
+- **NO SYCOPHANCY / NO CHEERLEADING**: Do NOT use performative praise or generic cheerleading like "Splendid refactoring!", "Exemplary implementation!", or "Rock-solid PR!". State objective technical facts only.
+- **MANDATORY RISK & EDGE-CASE ANALYSIS**: Finding zero risks or edge cases is UNACCEPTABLE. Every review MUST include Section 4: Mandatory Risk & Edge-Case Analysis highlighting at least one potential failure mode, unhandled edge case, rate limit, timeout risk, or non-UTF8 input boundary — even for approved PRs.
 - Every review MUST include at least ONE specific, actionable suggestion — even for excellent code (naming improvements, documentation gaps, test ideas, edge cases).
-- Never say code is "rock-solid" or "verified" without citing specific evidence for each claim.
-- Do not summarize what the code does back to the author — they already know. Focus on what could go WRONG.
+- Never say code is "verified" without citing specific evidence from the diff for each claim.
+- Do not summarize what the code does back to the author — focus on what could go WRONG.
 - If the PR is large (>500 lines changed), recommend splitting it and note this in your review.
 
 ### Common Issues to Watch For
