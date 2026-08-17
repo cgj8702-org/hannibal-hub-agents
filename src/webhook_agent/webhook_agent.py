@@ -1151,6 +1151,32 @@ def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
         return f"Error resolving merge conflicts for PR #{pr_number}: {e}"
 
 
+def mark_ready_for_review(ctx: Context, pr_number: int) -> str:
+    """Mark a draft pull request as ready for review.
+
+    Args:
+        pr_number: Pull request number to mark ready for review.
+
+    Returns:
+        A string describing the result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        if not getattr(pr, "draft", False):
+            return f"PR #{pr_number} is already ready for review (not a draft)."
+
+        success = pr.mark_ready_for_review()
+        if success is False:
+            return f"Failed to mark PR #{pr_number} ready for review."
+        return f"Successfully marked PR #{pr_number} as ready for review."
+    except Exception as e:  # noqa: BLE001
+        return f"Error marking PR #{pr_number} ready for review: {e}"
+
+
 def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     """Merge a pull request with safety checks.
 
@@ -1166,6 +1192,13 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
     try:
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
+
+        # Safety Check 0: Draft PR check
+        if getattr(pr, "draft", False):
+            return (
+                f"Error: Cannot merge PR #{pr_number} because it is currently a draft. "
+                "Call mark_ready_for_review first or mark it ready for review on GitHub."
+            )
 
         # Safety Check 1: Mergeability & conflicts
         if pr.mergeable is False:
@@ -1585,6 +1618,7 @@ class WebhookAgent:
                 open_pr,
                 update_branch_from_base,
                 resolve_pr_conflicts,
+                mark_ready_for_review,
                 merge_pr,
                 review,
                 get_current_time,

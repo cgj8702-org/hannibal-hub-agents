@@ -359,8 +359,8 @@ class TestTokenTruncation:
 
 
 class TestToolRegistration:
-    def test_agent_has_exactly_13_tools(self):
-        """WebhookAgent should register 11 API primitives + 2 utility tools."""
+    def test_agent_has_exactly_14_tools(self):
+        """WebhookAgent should register 12 API primitives + 2 utility tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -368,10 +368,10 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._agent.tools
         ]
-        assert len(tool_names) == 13
+        assert len(tool_names) == 14
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 11 API primitives + get_current_time + search_agent."""
+        """Tool names should match the 12 API primitives + get_current_time + search_agent."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -390,6 +390,7 @@ class TestToolRegistration:
                 "open_pr",
                 "update_branch_from_base",
                 "resolve_pr_conflicts",
+                "mark_ready_for_review",
                 "merge_pr",
                 "review",
                 "get_current_time",
@@ -728,3 +729,54 @@ class TestProgrammaticResolveCommandRouter:
             assert "Resolved conflicts in 2 files" in results[0].detail
             assert mock_resolve.call_count == 1
             mock_pr.create_issue_comment.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: mark_ready_for_review & merge_pr draft safety check
+# ---------------------------------------------------------------------------
+
+
+class TestMarkReadyForReview:
+    def test_mark_ready_for_review_success(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.webhook_agent import mark_ready_for_review
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+        mock_pr = MagicMock()
+        mock_pr.draft = True
+        mock_pr.mark_ready_for_review.return_value = True
+        ctx.state["gh_client"].get_repo.return_value.get_pull.return_value = mock_pr
+
+        res = mark_ready_for_review(ctx, 193)
+        assert "Successfully marked PR #193 as ready for review" in res
+        mock_pr.mark_ready_for_review.assert_called_once()
+
+    def test_mark_ready_for_review_already_ready(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.webhook_agent import mark_ready_for_review
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+        mock_pr = MagicMock()
+        mock_pr.draft = False
+        ctx.state["gh_client"].get_repo.return_value.get_pull.return_value = mock_pr
+
+        res = mark_ready_for_review(ctx, 193)
+        assert "PR #193 is already ready for review" in res
+
+
+class TestMergePrDraftSafetyCheck:
+    def test_merge_pr_blocks_draft(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.webhook_agent import merge_pr
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+        mock_pr = MagicMock()
+        mock_pr.draft = True
+        ctx.state["gh_client"].get_repo.return_value.get_pull.return_value = mock_pr
+
+        res = merge_pr(ctx, 193)
+        assert "Error: Cannot merge PR #193 because it is currently a draft" in res
+        assert mock_pr.merge.call_count == 0
