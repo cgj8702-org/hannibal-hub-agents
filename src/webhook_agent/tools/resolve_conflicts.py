@@ -234,6 +234,14 @@ def resolve_merge_conflicts(
         resolved_files = []
         if genai_client is None:
             try:
+                from ..webhook_agent import get_shared_genai_client
+
+                genai_client = get_shared_genai_client()
+            except Exception:
+                pass
+
+        if genai_client is None:
+            try:
                 from logic.rate_limiter import get_active_api_key
             except ImportError:
                 from src.logic.rate_limiter import get_active_api_key
@@ -270,12 +278,17 @@ def resolve_merge_conflicts(
             "Running verification gate (linter & tests) inside isolated worktree..."
         )
 
+        test_env = git_env.copy()
+        if "WEBHOOK_FREE_KEY" not in test_env and "WEBHOOK_PAID_KEY" not in test_env:
+            test_env["WEBHOOK_FREE_KEY"] = "test_key"
+
         # Run ruff check if present
         ruff_res = subprocess.run(
             ["uv", "run", "ruff", "check", "src/"],
             cwd=str(worktree_path),
             capture_output=True,
             text=True,
+            env=test_env,
         )
         if ruff_res.returncode != 0:
             logger.warning(
@@ -290,6 +303,7 @@ def resolve_merge_conflicts(
             cwd=str(worktree_path),
             capture_output=True,
             text=True,
+            env=test_env,
         )
         if pytest_res.returncode != 0:
             logger.error(
