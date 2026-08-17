@@ -238,7 +238,14 @@ def resolve_merge_conflicts(
 
                 genai_client = get_shared_genai_client()
             except Exception:
-                pass
+                try:
+                    from src.webhook_agent.webhook_agent import (
+                        get_shared_genai_client,
+                    )
+
+                    genai_client = get_shared_genai_client()
+                except Exception:
+                    pass
 
         if genai_client is None:
             try:
