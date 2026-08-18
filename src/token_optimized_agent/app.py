@@ -5,22 +5,24 @@ from google.adk.apps.app import EventsCompactionConfig
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 
-try:
-    from logic.model_factory import get_adk_model
-except ImportError:
-    from src.logic.model_factory import get_adk_model
-
 from src.token_optimized_agent.agent import root_agent
 from src.token_optimized_agent.callbacks import MessagePruningPlugin
 
 
 def build_token_optimized_app() -> App:
     """Construct the token_optimized ADK App instance dynamically."""
+    from logic.analytics import CloudLoggingAnalyticsPlugin
+    from logic.model_factory import get_adk_model
+
     summarizer_llm = get_adk_model(model_name="gemini-3.6-flash")
+
     return App(
         name="token_optimized_app",
         root_agent=root_agent,
-        plugins=[MessagePruningPlugin(max_history_events=20)],
+        plugins=[
+            MessagePruningPlugin(max_history_events=20),
+            CloudLoggingAnalyticsPlugin(),
+        ],
         events_compaction_config=EventsCompactionConfig(
             compaction_interval=15,
             overlap_size=2,
