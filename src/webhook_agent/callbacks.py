@@ -97,17 +97,6 @@ async def before_model_callback(
         except Exception:
             pass
 
-    max_tpm = get_model_tpm_limit(target_model, active_tier)
-    if exact_tokens > max_tpm:
-        logger.warning(
-            "TPM truncation triggered for model %s (%s tier): %d tokens > max %d",
-            target_model,
-            active_tier,
-            exact_tokens,
-            max_tpm,
-        )
-        exact_tokens = int(max_tpm * 0.95)
-
     target_model = getattr(llm_request, "model", None) or "gemini-2.5-flash"
     await rpm_waiter.check_and_wait(
         model=target_model,
@@ -135,28 +124,12 @@ async def after_model_callback(
 async def before_tool_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext
 ) -> dict[str, Any] | None:
-    """Validate and sanitize tool arguments before execution, enforcing 1 mutating action per turn."""
+    """Validate and sanitize tool arguments before execution."""
     if "pr_number" in args and isinstance(args["pr_number"], str):
         try:
             args["pr_number"] = int(args["pr_number"])
         except ValueError:
             pass
-
-    # Enforce strict 1-tool-per-turn execution for mutating tools
-    if tool.name in MUTATING_TOOLS:
-        if tool_context.state.get("mutating_tool_executed_in_this_turn"):
-            logger.warning(
-                "Strict Single-Tool Guardrail: Suppressed parallel mutating tool call '%s' in same turn",
-                tool.name,
-            )
-            return {
-                "success": False,
-                "detail": (
-                    f"Blocked parallel mutating tool execution for '{tool.name}'. "
-                    "Only 1 mutating action per turn is permitted."
-                ),
-            }
-        tool_context.state["mutating_tool_executed_in_this_turn"] = True
 
     return None
 

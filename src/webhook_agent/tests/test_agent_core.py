@@ -298,41 +298,17 @@ class TestTokenTruncation:
         short_text = "Hello world"
         assert _truncate_text_to_token_limit(short_text, max_tokens=100) == short_text
 
-    def test_truncate_text_over_limit_fallback_appends_warning(self):
+    def test_truncate_text_preserves_full_text(self):
         from webhook_agent.webhook_agent import _truncate_text_to_token_limit
 
-        long_text = "A" * 200
-        truncated = _truncate_text_to_token_limit(
+        long_text = "A" * 200000
+        result = _truncate_text_to_token_limit(
             long_text, max_tokens=10, label="Test payload"
         )
-        assert "truncated" in truncated
-        assert "to stay within 10 token limit" in truncated
+        assert result == long_text
+        assert "truncated" not in result
 
-    def test_count_tokens_exact_mocked(self, monkeypatch):
-        from unittest.mock import MagicMock, patch
-
-        from webhook_agent.webhook_agent import _truncate_text_to_token_limit
-
-        long_text = "Code line\n" * 1000
-
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.total_tokens = 20000
-
-        mock_response_2 = MagicMock()
-        mock_response_2.total_tokens = 14000
-        mock_client.models.count_tokens.side_effect = [mock_response, mock_response_2]
-
-        with patch(
-            "webhook_agent.webhook_agent.get_shared_genai_client",
-            return_value=mock_client,
-        ):
-            truncated = _truncate_text_to_token_limit(
-                long_text, max_tokens=15000, label="Exact limit test"
-            )
-            assert "reduced to 14000 tokens" in truncated
-
-    def test_build_user_message_truncates_large_pr_diff(self):
+    def test_build_user_message_preserves_pr_diff(self):
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -349,8 +325,7 @@ class TestTokenTruncation:
         }
         msg = agent._build_user_message(event_data)
         text = msg.parts[0].text
-        assert len(text) < 60000  # Truncated
-        assert "token limit" in text
+        assert "D" * 60000 in text
 
 
 # ---------------------------------------------------------------------------

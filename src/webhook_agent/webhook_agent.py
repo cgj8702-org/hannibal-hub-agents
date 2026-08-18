@@ -435,21 +435,12 @@ def get_max_input_tokens() -> int:
 def count_tokens_exact(
     contents: str | list[Any], model_name: str | None = None
 ) -> int | None:
-    """Count input tokens using Google GenAI SDK's client.models.count_tokens().
-
-    Returns exact token count from the API if credentials are configured,
-    or None if credentials fail or method is unavailable.
-    """
+    """Count input tokens using Google GenAI SDK's client.models.count_tokens()."""
     target_model = model_name or get_active_model()
     try:
         client = get_shared_genai_client()
         if client is None:
             return None
-
-        # The Client.models.count_tokens may be sync; call directly. If the
-        # underlying client exposes an async API, those calls will still be
-        # bound to transports created on the background loop thanks to
-        # constructing the client there.
         res = client.models.count_tokens(
             model=target_model,
             contents=contents if isinstance(contents, list) else [contents],
@@ -466,59 +457,8 @@ def _truncate_text_to_token_limit(
     model_name: str | None = None,
     label: str = "Input",
 ) -> str:
-    """Truncate input text to guarantee it stays strictly under max_tokens limit.
-
-    Uses google.genai client.models.count_tokens() for exact measurement when available,
-    falling back to character estimation (~3.5 chars/token).
-    """
-    if not text:
-        return text
-
-    target_model = model_name or get_active_model()
-
-    if max_tokens is None:
-        max_tokens = get_max_input_tokens()
-
-    # Step 1: Try exact token count via google.genai API
-    exact_count = count_tokens_exact(text, model_name=target_model)
-
-    if exact_count is not None:
-        if exact_count <= max_tokens:
-            return text
-
-        # Oversized payload: iteratively truncate to fit exact token limit
-        current_text = text
-        current_tokens = exact_count
-        while current_tokens > max_tokens and len(current_text) > 100:
-            target_ratio = (max_tokens - 300) / current_tokens
-            new_length = max(100, int(len(current_text) * target_ratio))
-            current_text = current_text[:new_length]
-            new_count = count_tokens_exact(current_text, model_name=target_model)
-            if new_count is None or new_count >= current_tokens:
-                current_text = current_text[: int(len(current_text) * 0.8)]
-                current_tokens = int(current_tokens * 0.8)
-            else:
-                current_tokens = new_count
-
-        omitted_chars = len(text) - len(current_text)
-        return (
-            f"{current_text}\n\n"
-            f"[⚠️ {label} truncated: reduced to {current_tokens} tokens "
-            f"(omitted {omitted_chars} characters) to stay within {max_tokens} token limit]"
-        )
-
-    # Step 2: Fallback character estimation if API is offline/unauthenticated
-    max_chars = max_tokens * 3  # Conservative limit
-    if len(text) <= max_chars:
-        return text
-
-    truncated = text[:max_chars]
-    omitted = len(text) - max_chars
-    return (
-        f"{truncated}\n\n"
-        f"[⚠️ {label} truncated: omitted {omitted} characters (~{omitted // 4} tokens) "
-        f"to stay within {max_tokens} token limit]"
-    )
+    """Preserve full text payload without truncation."""
+    return text
 
 
 # ---------------------------------------------------------------------------
