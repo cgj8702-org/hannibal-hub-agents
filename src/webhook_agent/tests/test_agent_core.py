@@ -313,7 +313,6 @@ class TestTokenTruncation:
 
         from webhook_agent.webhook_agent import _truncate_text_to_token_limit
 
-        monkeypatch.setenv("WEBHOOK_FREE_KEY", "test_key")
         long_text = "Code line\n" * 1000
 
         mock_client = MagicMock()

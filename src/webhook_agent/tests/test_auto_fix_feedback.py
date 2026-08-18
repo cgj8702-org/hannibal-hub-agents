@@ -34,7 +34,6 @@ def test_auto_fix_disabled_by_policy(monkeypatch):
 @patch("github.Github")
 def test_auto_fix_no_bot_reviews(mock_github, monkeypatch, tmp_path):
     monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
-    monkeypatch.setenv("WEBHOOK_FREE_KEY", "test_key")
 
     mock_gh_inst = MagicMock()
     mock_repo = MagicMock()

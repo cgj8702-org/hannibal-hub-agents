@@ -91,10 +91,9 @@ def auto_fix_pr_feedback(
     git_env["GIT_AUTHOR_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
 
     test_env = git_env.copy()
-    if "WEBHOOK_FREE_KEY" not in test_env:
-        test_env["WEBHOOK_FREE_KEY"] = os.getenv(
-            "WEBHOOK_FREE_KEY", "dummy-key-for-dev"
-        )
+    key = os.getenv("WEBHOOK_FREE_KEY") or os.getenv("FEATURE_AGENT_FREE_KEY") or ""
+    if key:
+        test_env["WEBHOOK_FREE_KEY"] = key
 
     try:
         # 1. Fetch remote branch details

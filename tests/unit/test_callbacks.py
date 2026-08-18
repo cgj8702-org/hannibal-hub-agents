@@ -34,7 +34,6 @@ async def test_before_agent_callback() -> None:
 
 @pytest.mark.anyio
 async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WEBHOOK_FREE_KEY", "fk_test_123")
     ctx = MagicMock()
     ctx.state = {"active_tier": "free"}
     ctx.agent.model = "gemini-2.5-flash"
