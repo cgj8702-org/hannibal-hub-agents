@@ -335,23 +335,41 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
 
     Non-Negotiable Sync Verdict Rules:
     - ANY unresolved finding -> REQUEST_CHANGES
-    - ANY new finding -> REQUEST_CHANGES
+    - ANY critical / blocking new finding -> REQUEST_CHANGES
     - Confidence < 4 -> COMMENT
-    - All items RESOLVED, 0 new findings, confidence >= 4 -> APPROVE
+    - All items RESOLVED, 0 blocking new findings, confidence >= 4 -> APPROVE
     """
     unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
-    if unresolved or len(review.new_findings) > 0:
+    blocking_new_findings = [
+        f
+        for f in review.new_findings
+        if any(
+            k in f.description.lower()
+            for k in (
+                "critical",
+                "security vulnerability",
+                "breaking",
+                "blocker",
+                "high severity",
+            )
+        )
+    ]
+
+    if unresolved or blocking_new_findings:
         logger.info(
-            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, new_findings=%d)",
+            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, blocking_new=%d)",
             len(unresolved),
-            len(review.new_findings),
+            len(blocking_new_findings),
         )
         return "REQUEST_CHANGES"
 
     if review.confidence < 4:
         return "COMMENT"
 
-    logger.info("✅ Sync verdict: APPROVE (all items RESOLVED)")
+    logger.info(
+        "✅ Sync verdict: APPROVE (all items RESOLVED, %d non-blocking notes)",
+        len(review.new_findings),
+    )
     return "APPROVE"
 
 
