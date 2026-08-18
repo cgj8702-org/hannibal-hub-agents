@@ -206,14 +206,14 @@ class TestWebhookAgentModelChain:
         """get_model_chain should order models by capacity without duplicates and omit 3.6 on Free Tier."""
         from webhook_agent.webhook_agent import get_model_chain
 
-        monkeypatch.setenv("HANNIBAL_TIER", "free")
+        monkeypatch.setenv("WEBHOOK_TIER", "free")
         free_chain = get_model_chain()
         assert len(free_chain) == len(set(free_chain))
         assert "gemini-3.5-flash-lite" in free_chain
         assert "gemini-3.6-flash" not in free_chain
         assert "gemma-4-26b" in free_chain
 
-        monkeypatch.setenv("HANNIBAL_TIER", "paid")
+        monkeypatch.setenv("WEBHOOK_TIER", "paid")
         paid_chain = get_model_chain()
         assert "gemini-3.6-flash" in paid_chain
 
@@ -677,13 +677,13 @@ class TestTokenLimits:
     def test_get_max_input_tokens_paid_tier(self, monkeypatch):
         from webhook_agent.webhook_agent import get_max_input_tokens
 
-        monkeypatch.setenv("HANNIBAL_TIER", "paid")
+        monkeypatch.setenv("WEBHOOK_TIER", "paid")
         assert get_max_input_tokens() == 35000
 
     def test_get_max_input_tokens_free_tier(self, monkeypatch):
         from webhook_agent.webhook_agent import get_max_input_tokens
 
-        monkeypatch.setenv("HANNIBAL_TIER", "free")
+        monkeypatch.setenv("WEBHOOK_TIER", "free")
         assert get_max_input_tokens() == 3500
 
 
