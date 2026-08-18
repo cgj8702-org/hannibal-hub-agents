@@ -143,7 +143,7 @@ def get_feature_agent_key() -> str:
             return (
                 os.getenv("GEMINI_API_KEY")
                 or os.getenv("GOOGLE_API_KEY")
-                or "pytest_feature_key"
+                or "pytest_autokey"
             )
         raise RuntimeError(
             "CRITICAL ISOLATION ERROR: Missing required secret 'FEATURE_AGENT_FREE_KEY'. "
