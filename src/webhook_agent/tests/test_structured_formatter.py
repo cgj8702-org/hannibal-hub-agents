@@ -212,3 +212,51 @@ def test_calculate_sync_verdict_blocking_new_finding():
     )
     verdict = calculate_sync_verdict(sync_resp)
     assert verdict == "REQUEST_CHANGES"
+
+
+def test_parse_text_review_to_dict():
+    """Verify that parse_text_review_to_dict correctly extracts structured data from loose text reviews."""
+    from webhook_agent.formatter import parse_text_review_to_dict
+
+    text_review = """# Code Review Report
+
+### 1. Executive Summary
+* **Goal of the PR:** Add logging telemetry and update configuration logic.
+
+### 2. Scorecard Breakdown
+* **Code Correctness:** 4/5 — Correct logic with global project assignment.
+* **Security & Privacy:** 4/5 — Default fallback is acceptable.
+* **Performance & Scale:** 5/5 — Fast initialization.
+* **Readability & Style:** 4/5 — Clean code.
+* **Test Coverage:** 2/5 — Lacks unit test coverage for new helper function.
+
+### 4. Mandatory Risk & Edge-Case Analysis
+* **Potential Edge Case / Risk:** Concurrency race condition on global assignment.
+* **Recommended Safeguard:** Use thread locking or singleton pattern.
+
+### 5. Key Issues & Action Items
+#### 🔴 Critical
+* `src/webhook_agent/formatter.py`: Missing test coverage for parse_text_review_to_dict.
+
+#### 🟡 Minor / Refactoring
+* `src/webhook_agent/webhook_agent.py`: Consider moving fallback constant.
+
+Confidence: 4/5
+"""
+    data = parse_text_review_to_dict(text_review)
+    assert (
+        data["executive_summary"]
+        == "Add logging telemetry and update configuration logic."
+    )
+    assert data["scorecard"]["correctness"] == 4
+    assert data["scorecard"]["test_coverage"] == 2
+    assert len(data["risks_and_edge_cases"]) >= 1
+    assert (
+        data["risks_and_edge_cases"][0]["risk"]
+        == "Concurrency race condition on global assignment."
+    )
+    assert len(data["critical_issues"]) >= 1
+    assert "src/webhook_agent/formatter.py" in data["critical_issues"][0]["path"]
+    assert "Missing test coverage" in data["critical_issues"][0]["description"]
+    assert len(data["minor_suggestions"]) >= 1
+    assert "src/webhook_agent/webhook_agent.py" in data["minor_suggestions"][0]["path"]
