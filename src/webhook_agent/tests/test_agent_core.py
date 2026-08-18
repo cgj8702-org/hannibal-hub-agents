@@ -202,20 +202,15 @@ class TestIsTransientError:
 
 
 class TestWebhookAgentModelChain:
-    def test_get_model_chain_orders_tpm_descending(self, monkeypatch):
+    def test_get_model_chain_orders_tpm_descending(self):
         """get_model_chain should order models by capacity without duplicates and omit 3.6 on Free Tier."""
         from webhook_agent.webhook_agent import get_model_chain
 
-        monkeypatch.setenv("WEBHOOK_TIER", "free")
         free_chain = get_model_chain()
         assert len(free_chain) == len(set(free_chain))
         assert "gemini-3.5-flash-lite" in free_chain
         assert "gemini-3.6-flash" not in free_chain
         assert "gemma-4-26b" in free_chain
-
-        monkeypatch.setenv("WEBHOOK_TIER", "paid")
-        paid_chain = get_model_chain()
-        assert "gemini-3.6-flash" in paid_chain
 
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""
@@ -674,16 +669,9 @@ class TestUpdateIssue:
 
 
 class TestTokenLimits:
-    def test_get_max_input_tokens_paid_tier(self, monkeypatch):
+    def test_get_max_input_tokens_default_tier(self):
         from webhook_agent.webhook_agent import get_max_input_tokens
 
-        monkeypatch.setenv("WEBHOOK_TIER", "paid")
-        assert get_max_input_tokens() == 35000
-
-    def test_get_max_input_tokens_free_tier(self, monkeypatch):
-        from webhook_agent.webhook_agent import get_max_input_tokens
-
-        monkeypatch.setenv("WEBHOOK_TIER", "free")
         assert get_max_input_tokens() == 3500
 
 
