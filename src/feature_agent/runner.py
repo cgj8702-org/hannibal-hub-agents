@@ -18,7 +18,6 @@ from pathlib import Path
 from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.genai.errors import APIError
 
 from feature_agent.agent import build_feature_app, get_feature_agent_key
 from feature_agent.firestore_checkpoints import firestore_checkpoint_registry
@@ -232,12 +231,33 @@ class FeatureTaskRunner:
                 f"Opened Pull Request: {pr.html_url}"
             )
 
-        except APIError as exc:
+        except Exception as exc:
             err_msg = str(exc)
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg.upper():
+            err_code = getattr(exc, "code", None)
+            is_429 = (
+                err_code == 429
+                or "429" in err_msg
+                or "resource_exhausted" in err_msg.lower()
+            )
+
+            if is_429:
+                from logic.rate_limiter import extract_rate_limit_details
+
+                limit_details = extract_rate_limit_details(exc)
+                cooldown_secs = (
+                    limit_details.get("retry_after_seconds")
+                    or 86400.0  # Default to 24h for RPD
+                )
+                quota_limit = limit_details.get("quota_limit") or "UnknownQuotaLimit"
+                quota_val = limit_details.get("quota_value") or "unknown"
+
                 logger.warning(
-                    "🔴 429 Quota Exhausted on FEATURE_AGENT_FREE_KEY for Issue #%d. Checkpointing to Firestore.",
+                    "🔴 429 Quota Exhausted on FEATURE_AGENT_FREE_KEY for Issue #%d. "
+                    "Quota: %s (%s) | Cooldown: %.1fs | Checkpointing to Firestore.",
                     issue_number,
+                    quota_limit,
+                    quota_val,
+                    cooldown_secs,
                 )
 
                 subprocess.run(
@@ -265,16 +285,14 @@ class FeatureTaskRunner:
                     session_id=session_id,
                     status="quota_paused",
                     last_completed_step="quota_depletion_checkpoint",
-                    error_msg=err_msg,
+                    error_msg=f"{err_msg} [Quota: {quota_limit}={quota_val}, Cooldown: {cooldown_secs}s]",
                 )
 
                 return (
-                    f"FEATURE_AGENT_FREE_KEY hit daily 429 quota exhaustion during Issue #{issue_number}. "
-                    f"WIP progress committed to branch '{branch_name}' and state checkpointed to Firestore."
+                    f"FEATURE_AGENT_FREE_KEY hit 429 quota limit '{quota_limit}' (cooldown: {cooldown_secs:.1f}s) "
+                    f"during Issue #{issue_number}. WIP progress committed to branch '{branch_name}' and state checkpointed to Firestore."
                 )
-            raise
 
-        except Exception as exc:
             logger.error("Auto-implement failed for Issue #%d: %s", issue_number, exc)
             firestore_checkpoint_registry.save_checkpoint(
                 issue_number=issue_number,

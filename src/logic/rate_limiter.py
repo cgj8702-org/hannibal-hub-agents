@@ -362,3 +362,71 @@ class RPMWaiter:
 
 
 rpm_waiter = RPMWaiter()
+
+
+def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
+    """Extract exact rate limit, quota, cooldown, and retry details from ADK/Google GenAI exceptions.
+
+    Unmasks nested `google.genai.errors.ClientError` attached to ADK `_ResourceExhaustedError`.
+    """
+    details: dict[str, Any] = {
+        "code": getattr(exc, "code", 429),
+        "message": str(exc),
+        "quota_limit": None,
+        "quota_value": None,
+        "retry_after_seconds": None,
+        "reason": None,
+        "headers": {},
+    }
+
+    # 1. Target underlying cause if ADK wrapped ClientError in _ResourceExhaustedError
+    target = getattr(exc, "__cause__", exc) or exc
+
+    # 2. Inspect raw RPC details (QuotaFailure, RetryInfo, ErrorInfo)
+    raw_details = getattr(target, "response_json", None) or getattr(
+        target, "details", None
+    )
+    if isinstance(raw_details, list):
+        for item in raw_details:
+            if isinstance(item, dict):
+                # QuotaFailure metadata
+                if "metadata" in item and isinstance(item["metadata"], dict):
+                    meta = item["metadata"]
+                    if "quota_limit" in meta:
+                        details["quota_limit"] = meta.get("quota_limit")
+                    if "quota_limit_value" in meta:
+                        details["quota_value"] = meta.get("quota_limit_value")
+
+                # ErrorInfo reason
+                if "reason" in item:
+                    details["reason"] = item.get("reason")
+
+                # RetryInfo cooldown delay (e.g. "60s" or 60.0)
+                if "retryDelay" in item or "retry_delay" in item:
+                    delay = item.get("retryDelay") or item.get("retry_delay")
+                    if isinstance(delay, str) and delay.endswith("s"):
+                        try:
+                            details["retry_after_seconds"] = float(delay[:-1])
+                        except ValueError:
+                            pass
+                    elif isinstance(delay, (int, float)):
+                        details["retry_after_seconds"] = float(delay)
+
+    # 3. Inspect HTTP response headers (e.g. Retry-After, x-ratelimit-reset)
+    response = getattr(target, "response", None)
+    if response and hasattr(response, "headers"):
+        headers = dict(response.headers)
+        details["headers"] = headers
+
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        if retry_after:
+            try:
+                details["retry_after_seconds"] = float(retry_after)
+            except ValueError:
+                pass
+
+        limit_req = headers.get("x-ratelimit-limit-requests")
+        if limit_req:
+            details["quota_value"] = limit_req
+
+    return details

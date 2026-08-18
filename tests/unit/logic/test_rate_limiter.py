@@ -74,3 +74,38 @@ async def test_record_actual_tokens(mock_registry: Path) -> None:
     await waiter.record_actual_tokens(model="gemini-3.5-flash-lite", actual_tokens=80)
     assert waiter.token_histories["gemini-3.5-flash-lite"][0][1] == 80
     assert waiter.token_histories["gemini-3.5-flash-lite"][0][2]
+
+
+def test_extract_rate_limit_details_from_adk_error() -> None:
+    from google.adk.models.google_llm import _ResourceExhaustedError
+    from google.genai.errors import ClientError
+    from logic.rate_limiter import extract_rate_limit_details
+
+    mock_details = [
+        {
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            "reason": "RATE_LIMIT_EXCEEDED",
+            "domain": "googleapis.com",
+            "metadata": {
+                "quota_limit": "GenerateContentRequestsPerMinutePerProjectPerRegion",
+                "quota_limit_value": "15",
+            },
+        },
+        {
+            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+            "retryDelay": "45.5s",
+        },
+    ]
+
+    ce = ClientError(code=429, response_json=mock_details)
+    adk_error = _ResourceExhaustedError(ce)
+
+    extracted = extract_rate_limit_details(adk_error)
+    assert extracted["code"] == 429
+    assert (
+        extracted["quota_limit"]
+        == "GenerateContentRequestsPerMinutePerProjectPerRegion"
+    )
+    assert extracted["quota_value"] == "15"
+    assert extracted["retry_after_seconds"] == 45.5
+    assert extracted["reason"] == "RATE_LIMIT_EXCEEDED"
