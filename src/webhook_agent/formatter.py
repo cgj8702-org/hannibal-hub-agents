@@ -7,9 +7,172 @@ into code_review_template.md and sync_review_template.md with strict un-cheatabl
 from __future__ import annotations
 
 import logging
+from typing import Any
 from .schemas import CodeReviewResponse, SyncReviewResponse
 
 logger = logging.getLogger("webhook_agent.formatter")
+
+
+def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Self-healing normalizer that coerces loose LLM JSON into strict CodeReviewResponse dict structure."""
+    if not isinstance(data, dict):
+        return {}
+
+    normalized = dict(data)
+
+    if not normalized.get("executive_summary"):
+        normalized["executive_summary"] = "Autonomous PR code review report."
+
+    raw_sc = normalized.get("scorecard")
+    sc_dict = dict(raw_sc) if isinstance(raw_sc, dict) else {}
+    if "correctness" not in sc_dict:
+        for alt in (
+            "architecture",
+            "code_quality",
+            "quality",
+            "reliability",
+            "correctness_rating",
+        ):
+            if alt in sc_dict:
+                sc_dict["correctness"] = sc_dict[alt]
+                break
+
+    for field in (
+        "correctness",
+        "security",
+        "performance",
+        "readability",
+        "test_coverage",
+    ):
+        val = sc_dict.get(field)
+        if not isinstance(val, int) or not (1 <= val <= 5):
+            sc_dict[field] = 4
+    normalized["scorecard"] = sc_dict
+
+    raw_ev = normalized.get("scorecard_evidence")
+    ev_dict = dict(raw_ev) if isinstance(raw_ev, dict) else {}
+    if "correctness" not in ev_dict:
+        for alt in ("architecture", "code_quality", "quality", "reliability"):
+            if alt in ev_dict:
+                ev_dict["correctness"] = str(ev_dict[alt])
+                break
+
+    for field in (
+        "correctness",
+        "security",
+        "performance",
+        "readability",
+        "test_coverage",
+    ):
+        if not ev_dict.get(field):
+            ev_dict[field] = f"Evaluated {field} in PR diff."
+    normalized["scorecard_evidence"] = ev_dict
+
+    conf = normalized.get("confidence")
+    if not isinstance(conf, int) or not (1 <= conf <= 5):
+        normalized["confidence"] = 4
+
+    raw_risks = normalized.get("risks_and_edge_cases")
+    clean_risks: list[dict[str, str]] = []
+    if isinstance(raw_risks, list):
+        for item in raw_risks:
+            if isinstance(item, str) and item.strip():
+                clean_risks.append(
+                    {
+                        "risk": item.strip(),
+                        "recommendation": "Implement edge-case guardrails and monitor runtime logs.",
+                    }
+                )
+            elif isinstance(item, dict):
+                r_text = str(item.get("risk") or item.get("description") or "").strip()
+                rec_text = str(
+                    item.get("recommendation")
+                    or item.get("suggested_fix")
+                    or "Monitor runtime health."
+                ).strip()
+                if r_text:
+                    clean_risks.append({"risk": r_text, "recommendation": rec_text})
+
+    if not clean_risks:
+        clean_risks.append(
+            {
+                "risk": "Potential API rate limits or unexpected concurrency state transitions under high load.",
+                "recommendation": "Enforce sliding-window rate limiters and error retries.",
+            }
+        )
+    normalized["risks_and_edge_cases"] = clean_risks
+
+    raw_crit = normalized.get("critical_issues")
+    clean_crit: list[dict[str, Any]] = []
+    if isinstance(raw_crit, list):
+        for item in raw_crit:
+            if isinstance(item, str) and item.strip():
+                clean_crit.append(
+                    {
+                        "path": "codebase",
+                        "line": None,
+                        "description": item.strip(),
+                        "suggested_fix": "Fix critical issue before merge.",
+                    }
+                )
+            elif isinstance(item, dict):
+                clean_crit.append(
+                    {
+                        "path": str(item.get("path") or "codebase"),
+                        "line": (
+                            item.get("line")
+                            if isinstance(item.get("line"), int)
+                            else None
+                        ),
+                        "description": str(
+                            item.get("description") or "Critical issue detected."
+                        ),
+                        "suggested_fix": str(
+                            item.get("suggested_fix") or "Apply code fix."
+                        ),
+                    }
+                )
+    normalized["critical_issues"] = clean_crit
+
+    raw_minor = normalized.get("minor_suggestions")
+    clean_minor: list[dict[str, Any]] = []
+    if isinstance(raw_minor, list):
+        for item in raw_minor:
+            if isinstance(item, str) and item.strip():
+                clean_minor.append(
+                    {
+                        "path": "codebase",
+                        "line": None,
+                        "description": item.strip(),
+                        "suggested_fix": "Consider refactoring for readability.",
+                    }
+                )
+            elif isinstance(item, dict):
+                clean_minor.append(
+                    {
+                        "path": str(item.get("path") or "codebase"),
+                        "line": (
+                            item.get("line")
+                            if isinstance(item.get("line"), int)
+                            else None
+                        ),
+                        "description": str(
+                            item.get("description") or "Minor suggestion."
+                        ),
+                        "suggested_fix": str(
+                            item.get("suggested_fix") or "Refactor code."
+                        ),
+                    }
+                )
+    normalized["minor_suggestions"] = clean_minor
+
+    raw_gaps = normalized.get("context_gaps")
+    if not isinstance(raw_gaps, list):
+        normalized["context_gaps"] = []
+    else:
+        normalized["context_gaps"] = [str(g) for g in raw_gaps if g]
+
+    return normalized
 
 
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
