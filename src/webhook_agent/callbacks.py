@@ -30,6 +30,7 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     """Pre-populate session state with active tier and runtime context before agent execution."""
     active_tier = _resolve_tier()
     callback_context.state["active_tier"] = active_tier
+    callback_context.state["review_submitted_in_this_turn"] = False
     logger.debug(
         "before_agent_callback: initialized active_tier=%s in state", active_tier
     )

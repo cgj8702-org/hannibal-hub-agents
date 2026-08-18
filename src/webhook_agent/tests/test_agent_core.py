@@ -781,6 +781,9 @@ def test_add_comment_blocked_after_review():
     from webhook_agent.webhook_agent import add_comment
 
     ctx = MagicMock()
-    ctx.state = {"review_submitted_193": True}
+    ctx.state = {"review_submitted_in_this_turn": True}
     res = add_comment(ctx, issue_number=193, body="Extra summary comment")
-    assert "Skipped: Formal code review report already submitted for #193" in res
+    assert (
+        "Skipped: Formal code review report already submitted for #193 in this turn"
+        in res
+    )
