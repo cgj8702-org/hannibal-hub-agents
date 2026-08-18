@@ -18,6 +18,7 @@ Please follow these protocols to ensure team coordination remains professional, 
   - **Webhook Paid Project (`cgj8702-webhook-agent`):** Service account (`webhook-agent-sa@cgj8702-webhook-agent.iam.gserviceaccount.com`), PubSub queue, and API quota for paid-tier PR review webhooks (`WEBHOOK_PAID_KEY`).
   - **Feature Agent Project (`gen-lang-client-0613181237`):** API quota for autonomous feature developer engine (`FEATURE_AGENT_FREE_KEY` / `FEATURE_AGENT_PROJECT`).
   - **Secret Resolution Rule:** The compute VM host (`chatbot-project-hannibal`) is completely separate from the 3 Gemini API developer projects. Do NOT attempt to fetch Gemini API keys from GCE VM Instance Metadata server. Environment variables (`.envrc` / Secret Manager) are the sole authoritative source of truth.
+* **Git Commit Author Identity:** Interactive pair programming commits MUST be authored as machine user `cgj8702-agents <cgj8702-agents@users.noreply.github.com>`. `hannibal-hub-agents[bot]` is reserved exclusively for autonomous background workers running on the VM. This prevents the Webhook Agent's bot-loop filter from ignoring PR commits.
 
 When executing terminal commands and scripts, follow these protocols to ensure reliable asynchronous coordination:
 
