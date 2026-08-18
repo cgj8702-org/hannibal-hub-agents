@@ -12,6 +12,12 @@ Please follow these protocols to ensure team coordination remains professional, 
 * **Linting Compliance:** Execute the **`scripts/ruff-all.sh`** bash script for linting and formatting validation prior to task completion.
 * **Precision Editing:** Default to targeted surgical edits over complete file rewrites.
 * **Rollback Strategy:** Every automated deployment, data mutation, or complex file manipulation MUST include a deterministic rollback protocol to recover from partial failures.
+* **GCP Multi-Project Topology & Secret Resolution Protocol:**
+  - **Compute Host (VM):** Dedicated compute server running Python worker processes.
+  - **Webhook Free Project (`gen-lang-client-0615466973`):** API quota for free-tier PR review webhooks (`WEBHOOK_FREE_KEY`).
+  - **Webhook Paid Project (`cgj8702-webhook-agent`):** API quota for paid-tier PR review webhooks (`WEBHOOK_PAID_KEY`) and PubSub queue.
+  - **Feature Agent Project (`gen-lang-client-0613181237`):** API quota for autonomous feature developer engine (`FEATURE_AGENT_FREE_KEY` / `FEATURE_AGENT_PROJECT`).
+  - **Secret Resolution Rule:** The compute VM host is completely separate from the Gemini API developer projects. Do NOT attempt to fetch Gemini API keys from GCE VM Instance Metadata server. Environment variables (`.envrc` / Secret Manager) are the sole authoritative source of truth.
 
 When executing terminal commands and scripts, follow these protocols to ensure reliable asynchronous coordination:
 
