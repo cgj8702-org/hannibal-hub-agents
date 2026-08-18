@@ -13,6 +13,17 @@ from .schemas import CodeReviewResponse, SyncReviewResponse
 logger = logging.getLogger("webhook_agent.formatter")
 
 
+BLOCKING_SYNC_KEYWORDS: tuple[str, ...] = (
+    "critical",
+    "security vulnerability",
+    "breaking",
+    "blocker",
+    "high severity",
+    "security flaw",
+    "major issue",
+)
+
+
 def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Self-healing normalizer that coerces loose LLM JSON into strict CodeReviewResponse dict structure."""
     if not isinstance(data, dict):
@@ -81,7 +92,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 clean_risks.append(
                     {
                         "risk": r_text,
-                        "recommendation": f"Verify behavior for '{r_text[:70]}' under production concurrency and load.",
+                        "recommendation": f"Monitor and verify behavior for '{r_text}' under production conditions.",
                     }
                 )
             elif isinstance(item, dict):
@@ -89,7 +100,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 rec_text = str(
                     item.get("recommendation")
                     or item.get("suggested_fix")
-                    or f"Monitor and guard '{r_text[:70]}' in runtime environments."
+                    or f"Monitor and guard '{r_text}' in runtime environments."
                 ).strip()
                 if r_text:
                     clean_risks.append({"risk": r_text, "recommendation": rec_text})
@@ -119,7 +130,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             "path": "codebase",
                             "line": None,
                             "description": desc,
-                            "suggested_fix": f"Resolve issue '{desc[:60]}' prior to merging PR.",
+                            "suggested_fix": f"Resolve issue '{desc}' prior to merging PR.",
                         }
                     )
             elif isinstance(item, dict):
@@ -140,8 +151,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                                 else None
                             ),
                             "description": desc,
-                            "suggested_fix": fix
-                            or f"Apply targeted fix for '{desc[:60]}'.",
+                            "suggested_fix": fix or f"Apply targeted fix for '{desc}'.",
                         }
                     )
     normalized["critical_issues"] = clean_crit
@@ -335,23 +345,32 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
 
     Non-Negotiable Sync Verdict Rules:
     - ANY unresolved finding -> REQUEST_CHANGES
-    - ANY new finding -> REQUEST_CHANGES
+    - ANY critical / blocking new finding -> REQUEST_CHANGES
     - Confidence < 4 -> COMMENT
-    - All items RESOLVED, 0 new findings, confidence >= 4 -> APPROVE
+    - All items RESOLVED, 0 blocking new findings, confidence >= 4 -> APPROVE
     """
     unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
-    if unresolved or len(review.new_findings) > 0:
+    blocking_new_findings = [
+        f
+        for f in review.new_findings
+        if any(k in f.description.lower() for k in BLOCKING_SYNC_KEYWORDS)
+    ]
+
+    if unresolved or blocking_new_findings:
         logger.info(
-            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, new_findings=%d)",
+            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, blocking_new=%d)",
             len(unresolved),
-            len(review.new_findings),
+            len(blocking_new_findings),
         )
         return "REQUEST_CHANGES"
 
     if review.confidence < 4:
         return "COMMENT"
 
-    logger.info("✅ Sync verdict: APPROVE (all items RESOLVED)")
+    logger.info(
+        "✅ Sync verdict: APPROVE (all items RESOLVED, %d non-blocking notes)",
+        len(review.new_findings),
+    )
     return "APPROVE"
 
 

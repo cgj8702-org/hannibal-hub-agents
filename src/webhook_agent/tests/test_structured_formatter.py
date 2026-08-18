@@ -182,8 +182,33 @@ def test_enforce_verdict_with_loose_sync_review_json():
       "confidence": 5
     }"""
     rendered_md, verdict = _enforce_verdict(loose_sync_json, "APPROVE")
-    assert verdict == "REQUEST_CHANGES"
+    assert verdict == "APPROVE"
     assert "# Pull Request Synchronization Review Update" in rendered_md
     assert "Asset Path Resolution Mismatch" in rendered_md
     assert "✅ **[RESOLVED]**" in rendered_md
     assert "[MAINTAINABILITY] Committing tokenizer asset bloats history." in rendered_md
+
+
+def test_calculate_sync_verdict_blocking_new_finding():
+    """Verify that a critical/blocking new finding forces REQUEST_CHANGES in sync reviews."""
+    sync_resp = SyncReviewResponse(
+        summary="PR update introduced a critical security issue.",
+        resolutions=[
+            SyncResolutionItem(
+                item_description="Previous minor issue fixed.",
+                status="RESOLVED",
+                evidence="Fixed in L20",
+            )
+        ],
+        new_findings=[
+            IssueItem(
+                path="src/auth.py",
+                line=12,
+                description="[CRITICAL] Security vulnerability: Token validation bypassed.",
+                suggested_fix="Restore token validation check.",
+            )
+        ],
+        confidence=5,
+    )
+    verdict = calculate_sync_verdict(sync_resp)
+    assert verdict == "REQUEST_CHANGES"
