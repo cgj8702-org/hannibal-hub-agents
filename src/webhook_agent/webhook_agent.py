@@ -1753,9 +1753,8 @@ class WebhookAgent:
                     f"Before SHA: {before_sha}\n"
                     f"Head SHA: {head_sha}\n"
                     f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
-                    f"This is NOT a duplicate delivery. You MUST call get_commit_diff('{before_sha}', '{head_sha}') "
-                    f"or get_issue({pr_num}, include_diff=True) to review the newly pushed changes and "
-                    f"submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                    f"Review the pre-fetched incremental commit diff and full PR diff below to evaluate "
+                    f"the changes in turn 1 and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
                 )
         elif canonical.startswith("pull_request_review_comment."):
             comment = raw.get("comment", {})
@@ -1768,9 +1767,15 @@ class WebhookAgent:
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
             parts.append(f"Review: {(review.get('body') or '')[:500]}")
 
-        # Include PR diff if available
+        # Include pre-fetched commit diff (incremental changes) if available
+        if "commit_diff" in raw:
+            parts.append(
+                f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}"
+            )
+
+        # Include PR diff (full accumulated state) if available
         if "pr_diff" in raw:
-            parts.append(f"\nPR Diff:\n{raw['pr_diff']}")
+            parts.append(f"\nFull PR Diff (Accumulated State):\n{raw['pr_diff']}")
 
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(
