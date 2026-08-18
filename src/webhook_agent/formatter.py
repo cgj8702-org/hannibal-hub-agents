@@ -330,6 +330,136 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
     return "APPROVE"
 
 
+def parse_text_review_to_dict(body: str) -> dict[str, Any]:
+    """Parse loose Markdown text review body into structured dictionary for CodeReviewResponse."""
+    import re
+
+    data: dict[str, Any] = {}
+
+    # Executive Summary
+    summary_match = re.search(r"Goal of the PR:\s*([^\n]+)", body, re.IGNORECASE)
+    if summary_match:
+        data["executive_summary"] = summary_match.group(1).strip()
+    else:
+        lines = [
+            line.strip()
+            for line in body.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        data["executive_summary"] = (
+            lines[0] if lines else "Autonomous PR code review report."
+        )
+
+    # Scorecard & Evidence
+    scorecard: dict[str, int] = {}
+    evidence: dict[str, str] = {}
+
+    categories = {
+        "correctness": r"(?:code correctness|correctness)",
+        "security": r"(?:security & privacy|security)",
+        "performance": r"(?:performance & scale|performance)",
+        "readability": r"(?:readability & style|readability)",
+        "test_coverage": r"(?:test coverage|testing|tests)",
+    }
+
+    for cat_key, cat_pattern in categories.items():
+        match = re.search(
+            rf"(?:\*|\||-)\s*\*\*?{cat_pattern}\*\*?\s*(?::|\|)?\s*(\d)(?:/5)?\s*(?:—|\||-)?\s*([^\n|]*)",
+            body,
+            re.IGNORECASE,
+        )
+        if match:
+            scorecard[cat_key] = int(match.group(1))
+            ev_text = match.group(2).strip()
+            if ev_text:
+                evidence[cat_key] = ev_text
+
+    data["scorecard"] = scorecard
+    data["scorecard_evidence"] = evidence
+
+    # Confidence
+    conf_match = re.search(r"Confidence:\s*(\d)/5", body, re.IGNORECASE)
+    if conf_match:
+        data["confidence"] = int(conf_match.group(1))
+
+    # Risks and edge cases
+    risks: list[dict[str, str]] = []
+    risk_matches = re.findall(
+        r"Potential Edge Case / Risk:\s*([^\n]+)(?:\n\s*\*?\s*Recommended Safeguard:\s*([^\n]+))?",
+        body,
+        re.IGNORECASE,
+    )
+    for r_text, s_text in risk_matches:
+        if r_text.strip():
+            risks.append(
+                {
+                    "risk": r_text.strip(),
+                    "recommendation": (
+                        s_text.strip()
+                        if s_text
+                        else f"Monitor and verify '{r_text.strip()}' under production conditions."
+                    ),
+                }
+            )
+
+    if not risks:
+        if "Mandatory Risk" in body or "Edge-Case Analysis" in body:
+            risk_section = (
+                body.split("Mandatory Risk")[1] if "Mandatory Risk" in body else ""
+            )
+            for line in risk_section.splitlines()[:5]:
+                line_clean = line.strip().lstrip("*-•").strip()
+                if (
+                    line_clean
+                    and not line_clean.startswith("#")
+                    and len(line_clean) > 10
+                ):
+                    risks.append(
+                        {
+                            "risk": line_clean,
+                            "recommendation": "Monitor and verify behavior under production conditions.",
+                        }
+                    )
+
+    data["risks_and_edge_cases"] = risks
+
+    # Critical issues and minor suggestions
+    critical_issues: list[dict[str, Any]] = []
+    minor_suggestions: list[dict[str, Any]] = []
+
+    current_section = None
+    for line in body.splitlines():
+        line_s = line.strip()
+        if "Critical" in line_s:
+            current_section = "critical"
+            continue
+        elif "Minor" in line_s or "Refactoring" in line_s or "Suggestion" in line_s:
+            current_section = "minor"
+            continue
+
+        if line_s.startswith(("*", "-", "•")) and ":" in line_s:
+            parts = line_s.lstrip("*-•").strip().split(":", 1)
+            path_part = parts[0].strip("`* ")
+            desc_part = parts[1].strip() if len(parts) > 1 else ""
+            item_dict = {
+                "path": path_part
+                if "/" in path_part or "." in path_part
+                else "codebase",
+                "line": None,
+                "description": desc_part or line_s,
+                "suggested_fix": f"Address '{desc_part or line_s}' prior to merging.",
+            }
+            if current_section == "critical":
+                critical_issues.append(item_dict)
+            elif current_section == "minor":
+                minor_suggestions.append(item_dict)
+
+    data["critical_issues"] = critical_issues
+    data["minor_suggestions"] = minor_suggestions
+
+    return data
+
+
 def calculate_sync_verdict(review: SyncReviewResponse) -> str:
     """Calculate sync re-review verdict mechanically from resolutions & new findings.
 
