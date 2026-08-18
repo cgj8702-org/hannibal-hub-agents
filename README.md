@@ -76,14 +76,18 @@ flowchart TD
 
 ## ⚡ High-Efficiency Token Optimization & Programmatic Features
 
-The project includes built-in strategies to maximize context efficiency and eliminate unnecessary LLM calls:
+The project includes built-in strategies to maximize context efficiency, eliminate unnecessary LLM calls, and execute 1-turn webhook responses:
 
-1. **Programmatic 👀 Reaction**: Immediately adds an `eyes` reaction to user comments upon receiving webhooks in `processor.py` (0 token cost).
-2. **Context Compaction (`EventsCompactionConfig`)**: Automatically summarizes long multi-turn session event histories using Gemini AI Studio models.
-3. **Context Caching (`ContextCacheConfig`)**: Caches static system prompts, rules, and tool schemas across requests.
-4. **Sub-Agent Isolation (`include_contents="none"` & `mode="task"`)**: Isolates complex multi-turn sub-tasks using Task Mode with Pydantic output schemas, while keeping utility helpers stateless.
-5. **Tool Payload Truncation (`after_tool_callback`)**: Truncates tool output arrays (max 5 items), long strings (max 1,000 chars), and total serialized JSON (max 4,000 chars) to prevent prompt overflow.
-6. **Off-Context Data Storage (`InMemoryArtifactService`)**: Stores large datasets and documents off-context as artifacts rather than dumping raw text into model prompts.
+1. **Tier-Aware Model Chains**: Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`). On Free Tier, it uses high-capacity models (`gemini-3.5-flash-lite` with 500 RPD and `gemma-4-31b` with 14,400 RPD) to eliminate `429 RESOURCE_EXHAUSTED` rate limit errors while preserving `gemini-3.6-flash` quota.
+2. **Autonomous `/fix` Review-Fix Tool (`auto_fix_pr_review_feedback`)**: Triggered by `/fix`, `/auto`, or `/fix-it` slash commands. Clones the PR in an isolated Git Worktree (`/tmp/worktrees/pr_X_fix/`), parses requested changes, applies surgical fixes, verifies `pytest` & `ruff-all.sh`, and pushes the resolved commit automatically.
+3. **4 Programmatic Pre-Work Pipelines (1-Turn Webhook Execution)**:
+   - **Commit Diff Pre-Fetch**: Pre-fetches commit diffs (`before_sha..head_sha`) via PyGithub comparison on `pull_request.synchronize` events.
+   - **Inline Code Context**: Pre-fetches surrounding code lines for `pull_request_review_comment` events.
+   - **Direct `/resolve` Execution**: Pre-executes merge conflict resolution in Python before LLM delegation.
+   - **Commit History & Review Tracking**: Pre-fetches commit logs for `/create` and previous bot review summaries for re-reviews.
+4. **Resolution Tracking & Re-Review Templates**: Uses `code_review_template.md` for initial PR creation and `sync_review_template.md` for PR updates to mechanically track **`[RESOLVED]`** vs **`[UNRESOLVED]`** review items across commits.
+5. **Programmatic 👀 Reaction**: Immediately adds an `eyes` reaction to user comments upon receiving webhooks in `processor.py` (0 token cost).
+6. **Context Compaction & Pruning**: Caches static system prompts and prunes redundant tool payloads (`after_tool_callback`) to prevent prompt overflow.
 
 ---
 
