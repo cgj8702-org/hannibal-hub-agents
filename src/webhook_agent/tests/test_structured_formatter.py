@@ -182,7 +182,7 @@ def test_enforce_verdict_with_loose_sync_review_json():
       "confidence": 5
     }"""
     rendered_md, verdict = _enforce_verdict(loose_sync_json, "APPROVE")
-    assert verdict == "APPROVE"
+    assert verdict == "REQUEST_CHANGES"
     assert "# Pull Request Synchronization Review Update" in rendered_md
     assert "Asset Path Resolution Mismatch" in rendered_md
     assert "✅ **[RESOLVED]**" in rendered_md
