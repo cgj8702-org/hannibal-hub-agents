@@ -251,22 +251,39 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     clean_crit: list[dict[str, Any]] = []
     if isinstance(raw_crit, list):
         for item in raw_crit:
-            if isinstance(item, dict):
-                desc = str(item.get("description") or "").strip()
-                if desc:
+            if isinstance(item, str) and item.strip():
+                desc = item.strip()
+                if desc.lower() not in ("none", "none found"):
                     clean_crit.append(
                         {
-                            "path": str(item.get("path") or "codebase"),
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Resolve issue '{desc}' in codebase.",
+                        }
+                    )
+            elif isinstance(item, dict):
+                path = str(item.get("path") or "codebase").strip()
+                desc = str(
+                    item.get("description")
+                    or item.get("title")
+                    or item.get("item_description")
+                    or f"Critical issue in {path}."
+                ).strip()
+                fix = str(
+                    item.get("suggested_fix") or f"Address '{desc}' in codebase."
+                ).strip()
+                if desc and desc.lower() not in ("none", "none found"):
+                    clean_crit.append(
+                        {
+                            "path": path,
                             "line": (
                                 item.get("line")
                                 if isinstance(item.get("line"), int)
                                 else None
                             ),
                             "description": desc,
-                            "suggested_fix": str(
-                                item.get("suggested_fix")
-                                or f"Resolve issue '{desc}' in codebase."
-                            ),
+                            "suggested_fix": fix,
                         }
                     )
 
@@ -276,53 +293,92 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     clean_minor: list[dict[str, Any]] = []
     if isinstance(raw_minor, list):
         for item in raw_minor:
-            if isinstance(item, dict):
-                desc = str(item.get("description") or "").strip()
-                if desc:
+            if isinstance(item, str) and item.strip():
+                desc = item.strip()
+                if desc.lower() not in ("none", "none found"):
                     clean_minor.append(
                         {
-                            "path": str(item.get("path") or "codebase"),
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Refactor '{desc}' for maintainability.",
+                        }
+                    )
+            elif isinstance(item, dict):
+                path = str(item.get("path") or "codebase").strip()
+                desc = str(
+                    item.get("description")
+                    or item.get("title")
+                    or item.get("item_description")
+                    or f"Minor suggestion for {path}."
+                ).strip()
+                fix = str(
+                    item.get("suggested_fix")
+                    or f"Refactor '{desc}' for maintainability."
+                ).strip()
+                if desc and desc.lower() not in ("none", "none found"):
+                    clean_minor.append(
+                        {
+                            "path": path,
                             "line": (
                                 item.get("line")
                                 if isinstance(item.get("line"), int)
                                 else None
                             ),
                             "description": desc,
-                            "suggested_fix": str(
-                                item.get("suggested_fix")
-                                or f"Refactor '{desc}' for maintainability."
-                            ),
+                            "suggested_fix": fix,
                         }
                     )
 
     # Legacy fallback: if loose JSON provided new_findings instead
     raw_new = normalized.get("new_findings")
-    if isinstance(raw_new, list):
+    if isinstance(raw_new, list) and not clean_crit and not clean_minor:
         for item in raw_new:
-            if isinstance(item, dict):
+            if isinstance(item, str) and item.strip():
+                desc = item.strip()
+                if desc.lower() not in ("none", "none found"):
+                    clean_crit.append(
+                        {
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Address '{desc}' in codebase.",
+                        }
+                    )
+            elif isinstance(item, dict):
+                path = str(item.get("path") or "codebase").strip()
+                title = str(item.get("title") or "").strip()
+                desc = str(
+                    item.get("description")
+                    or title
+                    or item.get("item_description")
+                    or f"Finding in {path}."
+                ).strip()
+                cat = str(item.get("category") or "").strip()
                 sev = str(item.get("severity") or "").upper()
-                cat = str(item.get("category") or "").upper()
-                desc = str(item.get("description") or item.get("title") or "").strip()
                 full_desc = f"[{cat}] {desc}" if cat else desc
                 fix = str(
-                    item.get("suggested_fix") or f"Address {desc} in codebase."
+                    item.get("suggested_fix") or f"Address '{desc}' in codebase."
                 ).strip()
-                issue_dict = {
-                    "path": str(item.get("path") or "codebase"),
-                    "line": (
-                        item.get("line") if isinstance(item.get("line"), int) else None
-                    ),
-                    "description": full_desc,
-                    "suggested_fix": fix,
-                }
-                if (
-                    sev in ("LOW", "INFO")
-                    or cat == "MAINTAINABILITY"
-                    or "acceptable tradeoff" in desc.lower()
-                ):
-                    clean_minor.append(issue_dict)
-                else:
-                    clean_crit.append(issue_dict)
+                if desc and desc.lower() not in ("none", "none found"):
+                    issue_dict = {
+                        "path": path,
+                        "line": (
+                            item.get("line")
+                            if isinstance(item.get("line"), int)
+                            else None
+                        ),
+                        "description": full_desc,
+                        "suggested_fix": fix,
+                    }
+                    if (
+                        sev in ("LOW", "INFO")
+                        or cat == "MAINTAINABILITY"
+                        or "acceptable tradeoff" in desc.lower()
+                    ):
+                        clean_minor.append(issue_dict)
+                    else:
+                        clean_crit.append(issue_dict)
 
     normalized["critical_issues"] = clean_crit
     normalized["minor_suggestions"] = clean_minor
@@ -370,6 +426,144 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
 
     logger.info("✅ Mechanical verdict: APPROVE (all scores >= 4, 0 critical issues)")
     return "APPROVE"
+
+
+def parse_text_review_to_dict(body: str) -> dict[str, Any]:
+    """Parse loose Markdown text review body into structured dictionary for CodeReviewResponse."""
+    import re
+
+    data: dict[str, Any] = {}
+
+    # Executive Summary
+    summary_match = re.search(r"Goal of the PR:\s*([^\n]+)", body, re.IGNORECASE)
+    if summary_match:
+        data["executive_summary"] = summary_match.group(1).strip("* -•")
+    else:
+        lines = [
+            line.strip("* -•")
+            for line in body.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        data["executive_summary"] = (
+            lines[0] if lines else "Autonomous PR code review report."
+        )
+
+    # Scorecard & Evidence
+    scorecard: dict[str, int] = {}
+    evidence: dict[str, str] = {}
+
+    categories = {
+        "correctness": r"(?:code correctness|correctness)",
+        "security": r"(?:security & privacy|security)",
+        "performance": r"(?:performance & scale|performance)",
+        "readability": r"(?:readability & style|readability)",
+        "test_coverage": r"(?:test coverage|testing|tests)",
+    }
+
+    for cat_key, cat_pattern in categories.items():
+        match = re.search(
+            rf"{cat_pattern}[^\n\d]*?(\d)(?:/5)?(?:\s*[-—|:]\s*([^\n|]*))?",
+            body,
+            re.IGNORECASE,
+        )
+        if match:
+            scorecard[cat_key] = int(match.group(1))
+            if match.group(2) and match.group(2).strip():
+                evidence[cat_key] = match.group(2).strip()
+
+    data["scorecard"] = scorecard
+    data["scorecard_evidence"] = evidence
+
+    # Confidence
+    conf_match = re.search(r"Confidence:\s*(\d)/5", body, re.IGNORECASE)
+    if conf_match:
+        data["confidence"] = int(conf_match.group(1))
+
+    # Risks and edge cases
+    risks: list[dict[str, str]] = []
+    risk_matches = re.findall(
+        r"Potential Edge Case / Risk:\s*([^\n]+)(?:\n\s*\*?\s*Recommended Safeguard:\s*([^\n]+))?",
+        body,
+        re.IGNORECASE,
+    )
+    for r_text, s_text in risk_matches:
+        clean_r = r_text.strip("* -•")
+        if clean_r:
+            risks.append(
+                {
+                    "risk": clean_r,
+                    "recommendation": (
+                        s_text.strip("* -•")
+                        if s_text
+                        else f"Monitor and verify '{clean_r}' under production conditions."
+                    ),
+                }
+            )
+
+    if not risks:
+        if "Mandatory Risk" in body or "Edge-Case Analysis" in body:
+            risk_section = (
+                body.split("Mandatory Risk")[1] if "Mandatory Risk" in body else ""
+            )
+            for line in risk_section.splitlines()[:5]:
+                line_clean = line.strip().lstrip("*-•").strip()
+                if (
+                    line_clean
+                    and not line_clean.startswith("#")
+                    and len(line_clean) > 10
+                ):
+                    risks.append(
+                        {
+                            "risk": line_clean,
+                            "recommendation": "Monitor and verify behavior under production conditions.",
+                        }
+                    )
+
+    data["risks_and_edge_cases"] = risks
+
+    # Critical issues and minor suggestions
+    critical_issues: list[dict[str, Any]] = []
+    minor_suggestions: list[dict[str, Any]] = []
+
+    current_section = None
+    for line in body.splitlines():
+        line_s = line.strip()
+        if "Critical" in line_s:
+            current_section = "critical"
+            continue
+        elif "Minor" in line_s or "Refactoring" in line_s or "Suggestion" in line_s:
+            current_section = "minor"
+            continue
+
+        if line_s.startswith(("*", "-", "•")) and ":" in line_s:
+            parts = line_s.lstrip("*-•").strip().split(":", 1)
+            raw_path = (
+                parts[0]
+                .replace("🔴", "")
+                .replace("🟡", "")
+                .replace("✅", "")
+                .strip("`* ")
+            )
+            desc_part = parts[1].strip() if len(parts) > 1 else ""
+            clean_desc = desc_part if desc_part else line_s.lstrip("*-•🔴🟡✅ ").strip()
+            if not clean_desc or clean_desc.strip("`* :") == raw_path:
+                clean_desc = f"Review finding in {raw_path}."
+
+            item_dict = {
+                "path": raw_path if "/" in raw_path or "." in raw_path else "codebase",
+                "line": None,
+                "description": clean_desc,
+                "suggested_fix": f"Address '{clean_desc}' prior to merging.",
+            }
+            if current_section == "critical":
+                critical_issues.append(item_dict)
+            elif current_section == "minor":
+                minor_suggestions.append(item_dict)
+
+    data["critical_issues"] = critical_issues
+    data["minor_suggestions"] = minor_suggestions
+
+    return data
 
 
 def calculate_sync_verdict(review: SyncReviewResponse) -> str:

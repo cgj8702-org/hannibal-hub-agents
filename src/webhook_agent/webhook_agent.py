@@ -48,6 +48,7 @@ from .formatter import (
     calculate_sync_verdict,
     normalize_code_review_dict,
     normalize_sync_review_dict,
+    parse_text_review_to_dict,
     render_code_review_markdown,
     render_sync_review_markdown,
 )
@@ -1356,6 +1357,18 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
             enforced_event = "REQUEST_CHANGES"
             override_reasons.append(
                 f"average score {avg_score:.1f} is below 3.5 threshold"
+            )
+
+        # Re-render loose Markdown text review using strict GFM callouts template
+        try:
+            parsed_dict = parse_text_review_to_dict(body)
+            normalized_dict = normalize_code_review_dict(parsed_dict)
+            cr_obj = CodeReviewResponse.model_validate(normalized_dict)
+            rendered_gfm = render_code_review_markdown(cr_obj, enforced_event)
+            return rendered_gfm, enforced_event
+        except Exception as parse_err:
+            logger.warning(
+                "Could not convert text review to GFM template: %s", parse_err
             )
 
     if confidence is not None and confidence <= 3 and original_event == "APPROVE":
