@@ -414,7 +414,7 @@ def render_code_review_markdown(
         for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
             critical_lines.append(
-                f"* **{loc}**: {issue.description}\n  * *Suggested Fix*: `{issue.suggested_fix}`"
+                f"* {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
             )
     else:
         critical_lines.append("* *None found.*")
@@ -428,7 +428,7 @@ def render_code_review_markdown(
                 else f"`{suggestion.path}`"
             )
             minor_lines.append(
-                f"* **{loc}**: {suggestion.description}\n  * *Suggested Fix*: `{suggestion.suggested_fix}`"
+                f"* {loc}: {suggestion.description}\n  * *Suggested Fix*: {suggestion.suggested_fix}"
             )
     else:
         minor_lines.append("* *None found.*")
@@ -510,7 +510,7 @@ def render_sync_review_markdown(
         for issue in review.new_findings:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
             new_lines.append(
-                f"* 🔴 **{loc}**: {issue.description}\n  * *Suggested Fix*: `{issue.suggested_fix}`"
+                f"* 🔴 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
             )
     else:
         new_lines.append("* *None.*")
