@@ -230,7 +230,7 @@ def _preexecute_resolve_command(
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
 
-        from webhook_agent.tools.resolve_conflicts import (
+        from .tools.resolve_conflicts import (
             resolve_merge_conflicts,
         )
 

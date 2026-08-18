@@ -7,7 +7,7 @@ into code_review_template.md and sync_review_template.md with strict un-cheatabl
 from __future__ import annotations
 
 import logging
-from webhook_agent.schemas import CodeReviewResponse, SyncReviewResponse
+from .schemas import CodeReviewResponse, SyncReviewResponse
 
 logger = logging.getLogger("webhook_agent.formatter")
 
