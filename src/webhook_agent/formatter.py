@@ -81,7 +81,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 clean_risks.append(
                     {
                         "risk": r_text,
-                        "recommendation": f"Verify behavior for '{r_text[:70]}' under production concurrency and load.",
+                        "recommendation": f"Monitor and verify behavior for '{r_text}' under production conditions.",
                     }
                 )
             elif isinstance(item, dict):
@@ -89,7 +89,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 rec_text = str(
                     item.get("recommendation")
                     or item.get("suggested_fix")
-                    or f"Monitor and guard '{r_text[:70]}' in runtime environments."
+                    or f"Monitor and guard '{r_text}' in runtime environments."
                 ).strip()
                 if r_text:
                     clean_risks.append({"risk": r_text, "recommendation": rec_text})
@@ -119,7 +119,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             "path": "codebase",
                             "line": None,
                             "description": desc,
-                            "suggested_fix": f"Resolve issue '{desc[:60]}' prior to merging PR.",
+                            "suggested_fix": f"Resolve issue '{desc}' prior to merging PR.",
                         }
                     )
             elif isinstance(item, dict):
@@ -140,8 +140,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                                 else None
                             ),
                             "description": desc,
-                            "suggested_fix": fix
-                            or f"Apply targeted fix for '{desc[:60]}'.",
+                            "suggested_fix": fix or f"Apply targeted fix for '{desc}'.",
                         }
                     )
     normalized["critical_issues"] = clean_crit
@@ -246,33 +245,16 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 )
     normalized["resolutions"] = clean_res
 
-    raw_new = normalized.get("new_findings")
-    clean_new: list[dict[str, Any]] = []
-    if isinstance(raw_new, list):
-        for item in raw_new:
-            if isinstance(item, str) and item.strip():
-                desc = item.strip()
-                if desc.lower() not in ("none", "none found"):
-                    clean_new.append(
-                        {
-                            "path": "codebase",
-                            "line": None,
-                            "description": desc,
-                            "suggested_fix": f"Review finding '{desc[:60]}' in codebase.",
-                        }
-                    )
-            elif isinstance(item, dict):
-                title = str(item.get("title") or "").strip()
-                desc = str(
-                    item.get("description") or title or "New finding in PR update."
-                ).strip()
-                cat = str(item.get("category") or "").strip()
-                full_desc = f"[{cat}] {desc}" if cat else desc
-                fix = str(
-                    item.get("suggested_fix") or f"Address {desc[:60]} in codebase."
-                ).strip()
-                if desc and desc.lower() not in ("none", "none found"):
-                    clean_new.append(
+    raw_crit = normalized.get("critical_issues") or normalized.get(
+        "new_critical_issues"
+    )
+    clean_crit: list[dict[str, Any]] = []
+    if isinstance(raw_crit, list):
+        for item in raw_crit:
+            if isinstance(item, dict):
+                desc = str(item.get("description") or "").strip()
+                if desc:
+                    clean_crit.append(
                         {
                             "path": str(item.get("path") or "codebase"),
                             "line": (
@@ -280,11 +262,71 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                                 if isinstance(item.get("line"), int)
                                 else None
                             ),
-                            "description": full_desc,
-                            "suggested_fix": fix,
+                            "description": desc,
+                            "suggested_fix": str(
+                                item.get("suggested_fix")
+                                or f"Resolve issue '{desc}' in codebase."
+                            ),
                         }
                     )
-    normalized["new_findings"] = clean_new
+
+    raw_minor = normalized.get("minor_suggestions") or normalized.get(
+        "new_minor_suggestions"
+    )
+    clean_minor: list[dict[str, Any]] = []
+    if isinstance(raw_minor, list):
+        for item in raw_minor:
+            if isinstance(item, dict):
+                desc = str(item.get("description") or "").strip()
+                if desc:
+                    clean_minor.append(
+                        {
+                            "path": str(item.get("path") or "codebase"),
+                            "line": (
+                                item.get("line")
+                                if isinstance(item.get("line"), int)
+                                else None
+                            ),
+                            "description": desc,
+                            "suggested_fix": str(
+                                item.get("suggested_fix")
+                                or f"Refactor '{desc}' for maintainability."
+                            ),
+                        }
+                    )
+
+    # Legacy fallback: if loose JSON provided new_findings instead
+    raw_new = normalized.get("new_findings")
+    if isinstance(raw_new, list):
+        for item in raw_new:
+            if isinstance(item, dict):
+                sev = str(item.get("severity") or "").upper()
+                cat = str(item.get("category") or "").upper()
+                desc = str(item.get("description") or item.get("title") or "").strip()
+                full_desc = f"[{cat}] {desc}" if cat else desc
+                fix = str(
+                    item.get("suggested_fix") or f"Address {desc} in codebase."
+                ).strip()
+                issue_dict = {
+                    "path": str(item.get("path") or "codebase"),
+                    "line": (
+                        item.get("line") if isinstance(item.get("line"), int) else None
+                    ),
+                    "description": full_desc,
+                    "suggested_fix": fix,
+                }
+                if (
+                    sev in ("LOW", "INFO")
+                    or cat == "MAINTAINABILITY"
+                    or "acceptable tradeoff" in desc.lower()
+                ):
+                    clean_minor.append(issue_dict)
+                else:
+                    clean_crit.append(issue_dict)
+
+    normalized["critical_issues"] = clean_crit
+    normalized["minor_suggestions"] = clean_minor
+    normalized["new_findings"] = clean_crit + clean_minor
 
     conf = normalized.get("confidence")
     if not isinstance(conf, int) or not (1 <= conf <= 5):
@@ -461,27 +503,32 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
 
 
 def calculate_sync_verdict(review: SyncReviewResponse) -> str:
-    """Calculate sync re-review verdict mechanically from resolutions & new findings.
+    """Calculate sync re-review verdict mechanically from resolutions & structured new issues.
 
     Non-Negotiable Sync Verdict Rules:
     - ANY unresolved finding -> REQUEST_CHANGES
-    - ANY new finding -> REQUEST_CHANGES
+    - ANY critical issue -> REQUEST_CHANGES
     - Confidence < 4 -> COMMENT
-    - All items RESOLVED, 0 new findings, confidence >= 4 -> APPROVE
+    - All items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
     """
     unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
-    if unresolved or len(review.new_findings) > 0:
+    has_critical = len(review.critical_issues) > 0
+
+    if unresolved or has_critical:
         logger.info(
-            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, new_findings=%d)",
+            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, critical=%d)",
             len(unresolved),
-            len(review.new_findings),
+            len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
 
     if review.confidence < 4:
         return "COMMENT"
 
-    logger.info("✅ Sync verdict: APPROVE (all items RESOLVED)")
+    logger.info(
+        "✅ Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",
+        len(review.minor_suggestions),
+    )
     return "APPROVE"
 
 
@@ -515,7 +562,7 @@ def render_code_review_markdown(
         for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
             critical_lines.append(
-                f"* **{loc}**: {issue.description}\n  * *Suggested Fix*: `{issue.suggested_fix}`"
+                f"* {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
             )
     else:
         critical_lines.append("* *None found.*")
@@ -529,7 +576,7 @@ def render_code_review_markdown(
                 else f"`{suggestion.path}`"
             )
             minor_lines.append(
-                f"* **{loc}**: {suggestion.description}\n  * *Suggested Fix*: `{suggestion.suggested_fix}`"
+                f"* {loc}: {suggestion.description}\n  * *Suggested Fix*: {suggestion.suggested_fix}"
             )
     else:
         minor_lines.append("* *None found.*")
@@ -606,15 +653,25 @@ def render_sync_review_markdown(
             f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
         )
 
-    new_lines: list[str] = []
-    if review.new_findings:
-        for issue in review.new_findings:
+    crit_lines: list[str] = []
+    if review.critical_issues:
+        for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            new_lines.append(
-                f"* 🔴 **{loc}**: {issue.description}\n  * *Suggested Fix*: `{issue.suggested_fix}`"
+            crit_lines.append(
+                f"* 🔴 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
             )
     else:
-        new_lines.append("* *None.*")
+        crit_lines.append("* *None found.*")
+
+    minor_lines: list[str] = []
+    if review.minor_suggestions:
+        for issue in review.minor_suggestions:
+            loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
+            minor_lines.append(
+                f"* 🟡 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
+            )
+    else:
+        minor_lines.append("* *None found.*")
 
     return f"""# Pull Request Synchronization Review Update
 
@@ -633,7 +690,11 @@ def render_sync_review_markdown(
 
 ### 3. New Findings Introduced in Update
 
-{chr(10).join(new_lines)}
+#### 🔴 Critical (Must Fix Before Merge)
+{chr(10).join(crit_lines)}
+
+#### 🟡 Minor / Refactoring (Actionable Suggestions)
+{chr(10).join(minor_lines)}
 
 ---
 

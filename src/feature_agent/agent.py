@@ -325,10 +325,15 @@ def build_feature_app() -> App:
         model_name="gemini-3.5-flash-lite",
         api_key=api_key,
     )
+    from logic.analytics import CloudLoggingAnalyticsPlugin
+
     return App(
         name="feature_developer_app",
         root_agent=agent,
-        plugins=[GuardrailsPlugin(max_repeated_failures=3)],
+        plugins=[
+            GuardrailsPlugin(max_repeated_failures=3),
+            CloudLoggingAnalyticsPlugin(),
+        ],
         context_cache_config=ContextCacheConfig(ttl_seconds=3600),
         events_compaction_config=EventsCompactionConfig(
             compaction_interval=15,
