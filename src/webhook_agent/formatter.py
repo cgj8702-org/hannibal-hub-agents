@@ -77,10 +77,11 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw_risks, list):
         for item in raw_risks:
             if isinstance(item, str) and item.strip():
+                r_text = item.strip()
                 clean_risks.append(
                     {
-                        "risk": item.strip(),
-                        "recommendation": "Implement edge-case guardrails and monitor runtime logs.",
+                        "risk": r_text,
+                        "recommendation": f"Verify behavior for '{r_text[:70]}' under production concurrency and load.",
                     }
                 )
             elif isinstance(item, dict):
@@ -88,7 +89,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 rec_text = str(
                     item.get("recommendation")
                     or item.get("suggested_fix")
-                    or "Monitor runtime health."
+                    or f"Monitor and guard '{r_text[:70]}' in runtime environments."
                 ).strip()
                 if r_text:
                     clean_risks.append({"risk": r_text, "recommendation": rec_text})
@@ -96,8 +97,8 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if not clean_risks:
         clean_risks.append(
             {
-                "risk": "Potential API rate limits or unexpected concurrency state transitions under high load.",
-                "recommendation": "Enforce sliding-window rate limiters and error retries.",
+                "risk": "Potential API quota consumption bursts or async state race conditions during concurrent PR sync events.",
+                "recommendation": "Enforce sliding-window rate limiting and verify exponential backoff retries.",
             }
         )
     normalized["risks_and_edge_cases"] = clean_risks
@@ -107,31 +108,42 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw_crit, list):
         for item in raw_crit:
             if isinstance(item, str) and item.strip():
-                clean_crit.append(
-                    {
-                        "path": "codebase",
-                        "line": None,
-                        "description": item.strip(),
-                        "suggested_fix": "Fix critical issue before merge.",
-                    }
-                )
+                desc = item.strip()
+                if desc.lower() not in (
+                    "none",
+                    "none found",
+                    "critical issue detected.",
+                ):
+                    clean_crit.append(
+                        {
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Resolve issue '{desc[:60]}' prior to merging PR.",
+                        }
+                    )
             elif isinstance(item, dict):
-                clean_crit.append(
-                    {
-                        "path": str(item.get("path") or "codebase"),
-                        "line": (
-                            item.get("line")
-                            if isinstance(item.get("line"), int)
-                            else None
-                        ),
-                        "description": str(
-                            item.get("description") or "Critical issue detected."
-                        ),
-                        "suggested_fix": str(
-                            item.get("suggested_fix") or "Apply code fix."
-                        ),
-                    }
-                )
+                desc = str(item.get("description") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip()
+                path_val = str(item.get("path") or "codebase").strip()
+                if desc and desc.lower() not in (
+                    "none",
+                    "none found",
+                    "critical issue detected.",
+                ):
+                    clean_crit.append(
+                        {
+                            "path": path_val,
+                            "line": (
+                                item.get("line")
+                                if isinstance(item.get("line"), int)
+                                else None
+                            ),
+                            "description": desc,
+                            "suggested_fix": fix
+                            or f"Apply targeted fix for '{desc[:60]}'.",
+                        }
+                    )
     normalized["critical_issues"] = clean_crit
 
     raw_minor = normalized.get("minor_suggestions")
@@ -139,31 +151,44 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw_minor, list):
         for item in raw_minor:
             if isinstance(item, str) and item.strip():
-                clean_minor.append(
-                    {
-                        "path": "codebase",
-                        "line": None,
-                        "description": item.strip(),
-                        "suggested_fix": "Consider refactoring for readability.",
-                    }
-                )
+                desc = item.strip()
+                if desc.lower() not in (
+                    "none",
+                    "none found",
+                    "minor suggestion.",
+                    "minor suggestion",
+                ):
+                    clean_minor.append(
+                        {
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Consider refactoring or adding test coverage for '{desc[:60]}'.",
+                        }
+                    )
             elif isinstance(item, dict):
-                clean_minor.append(
-                    {
-                        "path": str(item.get("path") or "codebase"),
-                        "line": (
-                            item.get("line")
-                            if isinstance(item.get("line"), int)
-                            else None
-                        ),
-                        "description": str(
-                            item.get("description") or "Minor suggestion."
-                        ),
-                        "suggested_fix": str(
-                            item.get("suggested_fix") or "Refactor code."
-                        ),
-                    }
-                )
+                desc = str(item.get("description") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip()
+                path_val = str(item.get("path") or "codebase").strip()
+                if desc and desc.lower() not in (
+                    "none",
+                    "none found",
+                    "minor suggestion.",
+                    "minor suggestion",
+                ):
+                    clean_minor.append(
+                        {
+                            "path": path_val,
+                            "line": (
+                                item.get("line")
+                                if isinstance(item.get("line"), int)
+                                else None
+                            ),
+                            "description": desc,
+                            "suggested_fix": fix
+                            or f"Refactor '{desc[:60]}' for maintainability.",
+                        }
+                    )
     normalized["minor_suggestions"] = clean_minor
 
     raw_gaps = normalized.get("context_gaps")
@@ -171,6 +196,100 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
         normalized["context_gaps"] = []
     else:
         normalized["context_gaps"] = [str(g) for g in raw_gaps if g]
+
+    return normalized
+
+
+def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Self-healing normalizer that coerces loose LLM sync review JSON into strict SyncReviewResponse dict structure."""
+    if not isinstance(data, dict):
+        return {}
+
+    normalized = dict(data)
+    if not normalized.get("summary"):
+        normalized["summary"] = "Pull request synchronization review update."
+
+    raw_res = normalized.get("resolutions")
+    clean_res: list[dict[str, str]] = []
+    if isinstance(raw_res, list):
+        for item in raw_res:
+            if isinstance(item, str) and item.strip():
+                clean_res.append(
+                    {
+                        "item_description": item.strip(),
+                        "status": "RESOLVED",
+                        "evidence": "Verified in incremental commit diff.",
+                    }
+                )
+            elif isinstance(item, dict):
+                desc = str(
+                    item.get("item_description")
+                    or item.get("issue")
+                    or item.get("description")
+                    or item.get("title")
+                    or "Review finding resolution"
+                ).strip()
+                status = str(item.get("status") or "RESOLVED").strip().upper()
+                if status not in ("RESOLVED", "UNRESOLVED"):
+                    status = "RESOLVED"
+                ev = str(
+                    item.get("evidence")
+                    or item.get("details")
+                    or "Verified in commit diff."
+                ).strip()
+                clean_res.append(
+                    {
+                        "item_description": desc,
+                        "status": status,
+                        "evidence": ev,
+                    }
+                )
+    normalized["resolutions"] = clean_res
+
+    raw_new = normalized.get("new_findings")
+    clean_new: list[dict[str, Any]] = []
+    if isinstance(raw_new, list):
+        for item in raw_new:
+            if isinstance(item, str) and item.strip():
+                desc = item.strip()
+                if desc.lower() not in ("none", "none found"):
+                    clean_new.append(
+                        {
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Review finding '{desc[:60]}' in codebase.",
+                        }
+                    )
+            elif isinstance(item, dict):
+                title = str(item.get("title") or "").strip()
+                desc = str(
+                    item.get("description") or title or "New finding in PR update."
+                ).strip()
+                cat = str(item.get("category") or "").strip()
+                full_desc = f"[{cat}] {desc}" if cat else desc
+                fix = str(
+                    item.get("suggested_fix") or f"Address {desc[:60]} in codebase."
+                ).strip()
+                if desc and desc.lower() not in ("none", "none found"):
+                    clean_new.append(
+                        {
+                            "path": str(item.get("path") or "codebase"),
+                            "line": (
+                                item.get("line")
+                                if isinstance(item.get("line"), int)
+                                else None
+                            ),
+                            "description": full_desc,
+                            "suggested_fix": fix,
+                        }
+                    )
+    normalized["new_findings"] = clean_new
+
+    conf = normalized.get("confidence")
+    if not isinstance(conf, int) or not (1 <= conf <= 5):
+        normalized["confidence"] = 5
+    normalized["confidence"] = conf
 
     return normalized
 

@@ -22,7 +22,27 @@ pytestmark = [pytest.mark.unit, pytest.mark.feature_agent]
 def test_feature_developer_agent_construction():
     agent = build_feature_developer_agent()
     assert agent.name == "feature_developer_agent"
-    assert len(getattr(agent, "sub_agents", [])) == 4
+    sub_agents = getattr(agent, "sub_agents", [])
+    assert len(sub_agents) == 4
+
+    planner = sub_agents[0]
+    assert planner.name == "planner_agent"
+    assert getattr(planner, "mode", None) == "task"
+    assert getattr(planner, "disallow_transfer_to_parent", False) is True
+
+    developer = sub_agents[1]
+    assert developer.name == "developer_agent"
+    assert getattr(developer, "mode", None) == "task"
+
+    verification_loop = sub_agents[2]
+    loop_subs = getattr(verification_loop, "sub_agents", [])
+    evaluator = loop_subs[0]
+    assert evaluator.name == "evaluator_agent"
+    assert getattr(evaluator, "mode", None) == "task"
+
+    pr_composer = sub_agents[3]
+    assert pr_composer.name == "pr_composer_agent"
+    assert getattr(pr_composer, "mode", None) == "task"
 
 
 def test_get_feature_agent_key_isolation(monkeypatch):

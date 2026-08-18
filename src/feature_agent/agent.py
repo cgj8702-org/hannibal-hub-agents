@@ -49,7 +49,29 @@ from feature_agent.tools import (
 logger = logging.getLogger("feature_agent.agent")
 
 
-# --- Item 3: Pydantic Feedback Output Schema ---
+# --- Task Output Schemas for ADK 2.0 Task Delegation ---
+class PlanOutput(BaseModel):
+    """Structured output schema from planner_agent."""
+
+    plan_summary: str = Field(description="High-level summary of proposed code edits.")
+    target_files: list[str] = Field(
+        description="List of file paths targeted for modification."
+    )
+    steps: list[str] = Field(description="Sequential implementation steps.")
+
+
+class DeveloperOutput(BaseModel):
+    """Structured output schema from developer_agent."""
+
+    edits_summary: str = Field(
+        description="Summary of surgical file replacements applied."
+    )
+    modified_files: list[str] = Field(description="List of modified file paths.")
+    status: Literal["completed", "partial", "failed"] = Field(
+        description="Status of development edits."
+    )
+
+
 class Feedback(BaseModel):
     """Evaluation result schema for verifying code quality and unit test status."""
 
@@ -62,6 +84,27 @@ class Feedback(BaseModel):
     follow_up_actions: list[str] | None = Field(
         default=None,
         description="Specific repair actions required to fix failing tests.",
+    )
+
+
+class DebugOutput(BaseModel):
+    """Structured output schema from debugger_agent."""
+
+    fixes_applied: list[str] = Field(
+        description="Summary of code fixes applied to resolve test/linter failures."
+    )
+    status: Literal["fixed", "pending"] = Field(description="Debug repair status.")
+
+
+class PRComposerOutput(BaseModel):
+    """Structured output schema from pr_composer_agent."""
+
+    commit_message: str = Field(
+        description="Git commit message formatted with Conventional Commits."
+    )
+    branch_name: str = Field(description="Target git branch name.")
+    status: Literal["committed", "pushed", "failed"] = Field(
+        description="Git operation status."
     )
 
 
@@ -177,6 +220,8 @@ def build_feature_developer_agent() -> BaseAgent:
     planner_agent = LlmAgent(
         name="planner_agent",
         model=model_client,
+        mode="task",
+        output_schema=PlanOutput,
         description="Analyzes specifications and uses thinking budget to draft surgical edit plans.",
         instruction="Search the codebase, locate target files, and plan surgical replacements.",
         planner=BuiltInPlanner(
@@ -189,17 +234,23 @@ def build_feature_developer_agent() -> BaseAgent:
         before_model_callback=redact_artifact_urls_callback,
         after_agent_callback=auto_capture_callback,
         tools=[search_codebase, view_file, search_memory_bank],
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         output_key="feature_plan",
     )
 
     developer_agent = LlmAgent(
         name="developer_agent",
         model=model_client,
+        mode="task",
+        output_schema=DeveloperOutput,
         description="Applies surgical file replacements inside the isolated Git Worktree.",
         instruction="Execute planned line replacements using replace_file_content.",
         before_tool_callback=exfil_guard,
         after_agent_callback=auto_capture_callback,
         tools=[replace_file_content, view_file],
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         output_key="code_edits",
     )
 
@@ -207,6 +258,7 @@ def build_feature_developer_agent() -> BaseAgent:
     evaluator_agent = LlmAgent(
         name="evaluator_agent",
         model=model_client,
+        mode="task",
         description="Runs pytest and linter to evaluate feature code quality.",
         instruction="Run pytest and linter. Grade 'pass' if 100% clean, otherwise grade 'fail'.",
         before_tool_callback=policies_guard,
@@ -220,10 +272,14 @@ def build_feature_developer_agent() -> BaseAgent:
     debugger_agent = LlmAgent(
         name="debugger_agent",
         model=model_client,
+        mode="task",
+        output_schema=DebugOutput,
         description="Fixes failing test assertions and linter errors.",
         instruction="Review failure feedback and apply targeted code fixes.",
         before_tool_callback=permission_guard,
         tools=[replace_file_content, run_pytest],
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         output_key="debug_edits",
     )
 
@@ -240,9 +296,13 @@ def build_feature_developer_agent() -> BaseAgent:
     pr_composer_agent = LlmAgent(
         name="pr_composer_agent",
         model=model_client,
+        mode="task",
+        output_schema=PRComposerOutput,
         description="Commits verified work and pushes branch to origin.",
         instruction="Call commit_and_push to record the verified feature branch.",
         tools=[commit_and_push],
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         output_key="final_commit",
     )
 
