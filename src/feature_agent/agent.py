@@ -130,10 +130,32 @@ def redact_artifact_urls_callback(
         logger.debug("Artifact URL redaction skipped: %s", exc)
 
 
+def _get_gce_metadata_attribute(attr_name: str) -> str | None:
+    """Fetch attribute from GCE VM Instance Metadata server with 1s timeout."""
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"http://metadata.google.internal/computeMetadata/v1/instance/attributes/{attr_name}",
+            headers={"Metadata-Flavor": "Google"},
+        )
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            val = resp.read().decode("utf-8").strip()
+            if val:
+                return val
+    except Exception:
+        pass
+    return None
+
+
 def get_feature_agent_key() -> str:
     """Retrieve dedicated FEATURE_AGENT_FREE_KEY for strict GCP project & quota isolation."""
     key = (
-        os.getenv("FEATURE_AGENT_FREE_KEY") or os.getenv("FEATURE_AGENT_PAID_KEY") or ""
+        os.getenv("FEATURE_AGENT_FREE_KEY")
+        or os.getenv("FEATURE_AGENT_PAID_KEY")
+        or _get_gce_metadata_attribute("FEATURE_AGENT_FREE_KEY")
+        or _get_gce_metadata_attribute("FEATURE_AGENT_PAID_KEY")
+        or ""
     ).strip()
     if not key:
         if "PYTEST_CURRENT_TEST" in os.environ:
@@ -157,6 +179,7 @@ def build_feature_developer_agent() -> BaseAgent:
     _gcp_project = (
         os.getenv("FEATURE_AGENT_GCP_PROJECT")
         or os.getenv("FEATURE_AGENT_PROJECT")
+        or _get_gce_metadata_attribute("FEATURE_AGENT_PROJECT")
         or "cgj8702-feature-agent"
     )
 
