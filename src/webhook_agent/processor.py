@@ -164,31 +164,171 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             canonical == "pull_request.synchronize"
             or raw.get("action") == "synchronize"
         ):
-            before_sha = raw.get("before", "")
-            head_sha = (raw.get("pull_request") or {}).get("head", {}).get("sha", "")
-            if before_sha and head_sha and before_sha != head_sha:
-                try:
-                    comparison = repo.compare(before_sha, head_sha)
-                    commit_diff_lines: list[str] = []
-                    for f in comparison.files:
-                        patch = f.patch or "No patch available (binary/renamed/empty)."
-                        commit_diff_lines.append(
-                            f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
-                        )
-                    if commit_diff_lines:
-                        raw["commit_diff"] = "\n".join(commit_diff_lines)
-                        logger.info(
-                            "Pre-fetched commit diff (%s..%s, %d files) for 1-turn synchronize review",
-                            before_sha[:7],
-                            head_sha[:7],
-                            len(commit_diff_lines),
-                        )
-                except Exception as comp_exc:
-                    logger.warning(
-                        "Could not pre-fetch commit comparison: %s", comp_exc
-                    )
+            _prefetch_previous_bot_reviews(gh, repo_name, payload)
+
+        _prefetch_inline_comment_context(gh, repo_name, payload)
+        _preexecute_resolve_command(gh, repo_name, payload)
+        _prefetch_commit_history(gh, repo_name, payload)
+
     except Exception as exc:
         logger.warning("Could not pre-fetch PR diff: %s", exc)
+
+
+def _prefetch_inline_comment_context(
+    gh: Github, repo_name: str, payload: dict[str, Any]
+) -> None:
+    """Pre-fetch code context snippet for inline review comment events."""
+    try:
+        canonical = payload.get("canonical", "")
+        raw = payload.get("raw_payload")
+        if (
+            not isinstance(raw, dict)
+            or not canonical.startswith("pull_request_review_comment.")
+            or "inline_code_context" in raw
+        ):
+            return
+
+        comment = raw.get("comment", {})
+        path = comment.get("path")
+        diff_hunk = comment.get("diff_hunk")
+        line = comment.get("line") or comment.get("original_line")
+
+        if path and (diff_hunk or line):
+            raw["inline_code_context"] = (
+                f"File: {path} (Line {line})\nDiff Hunk Snippet:\n{diff_hunk or 'N/A'}"
+            )
+            logger.info("Pre-fetched inline comment code context for %s:%s", path, line)
+    except Exception as exc:
+        logger.warning("Could not pre-fetch inline comment context: %s", exc)
+
+
+def _preexecute_resolve_command(
+    gh: Github, repo_name: str, payload: dict[str, Any]
+) -> None:
+    """Pre-execute conflict resolution programmatically on /resolve command."""
+    try:
+        raw = payload.get("raw_payload")
+        if not isinstance(raw, dict) or "conflict_resolution_result" in raw:
+            return
+
+        comment_body = ""
+        if "comment" in raw and isinstance(raw["comment"], dict):
+            comment_body = raw["comment"].get("body") or ""
+
+        if "/resolve" not in comment_body:
+            return
+
+        pr_number = None
+        if "issue" in raw and isinstance(raw["issue"], dict):
+            pr_number = raw["issue"].get("number")
+        elif "pull_request" in raw and isinstance(raw["pull_request"], dict):
+            pr_number = raw["pull_request"].get("number")
+
+        if not pr_number:
+            return
+
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        from webhook_agent.tools.resolve_conflicts import (
+            resolve_merge_conflicts,
+        )
+
+        res = resolve_merge_conflicts(
+            pr_number=pr_number,
+            head_branch=pr.head.ref,
+            base_branch=pr.base.ref,
+        )
+        raw["conflict_resolution_result"] = res
+        logger.info(
+            "Pre-executed /resolve command for PR #%d (Success: %s)",
+            pr_number,
+            res.get("success"),
+        )
+    except Exception as exc:
+        logger.warning("Could not pre-execute /resolve command: %s", exc)
+
+
+def _prefetch_commit_history(
+    gh: Github, repo_name: str, payload: dict[str, Any]
+) -> None:
+    """Pre-fetch commit history log summary for /create command."""
+    try:
+        raw = payload.get("raw_payload")
+        if not isinstance(raw, dict) or "commit_history_summary" in raw:
+            return
+
+        body = ""
+        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
+            body = raw["pull_request"].get("body") or ""
+        elif "comment" in raw and isinstance(raw["comment"], dict):
+            body = raw["comment"].get("body") or ""
+
+        if "/create" not in body:
+            return
+
+        pr_number = (raw.get("pull_request") or raw.get("issue") or {}).get("number")
+        if not pr_number:
+            return
+
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        commit_summaries: list[str] = []
+        for c in pr.get_commits():
+            msg = (
+                c.commit.message.splitlines()[0]
+                if c.commit and c.commit.message
+                else "No message"
+            )
+            sha = c.sha[:7] if c.sha else "N/A"
+            author = c.author.login if c.author else "Unknown"
+            commit_summaries.append(f"- `{sha}` ({author}): {msg}")
+
+        if commit_summaries:
+            raw["commit_history_summary"] = "\n".join(commit_summaries[:10])
+            logger.info(
+                "Pre-fetched commit history summary (%d commits) for /create PR #%d",
+                len(commit_summaries),
+                pr_number,
+            )
+    except Exception as exc:
+        logger.warning("Could not pre-fetch commit history for /create: %s", exc)
+
+
+def _prefetch_previous_bot_reviews(
+    gh: Github, repo_name: str, payload: dict[str, Any]
+) -> None:
+    """Pre-fetch previous reviews posted by hannibal-hub-agents[bot]."""
+    try:
+        raw = payload.get("raw_payload")
+        if not isinstance(raw, dict) or "previous_bot_reviews" in raw:
+            return
+
+        pr_number = (raw.get("pull_request") or raw.get("issue") or {}).get("number")
+        if not pr_number:
+            return
+
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        bot_reviews: list[str] = []
+        for r in pr.get_reviews():
+            login = (getattr(r.user, "login", "") or "").lower()
+            if "hannibal-hub-agents" in login or (login and login.endswith("[bot]")):
+                state = getattr(r, "state", "COMMENT")
+                body_snippet = (r.body or "")[:300].replace("\n", " ")
+                bot_reviews.append(f"- State: {state} | Body: {body_snippet}")
+
+        if bot_reviews:
+            raw["previous_bot_reviews"] = "\n".join(bot_reviews[-3:])
+            logger.info(
+                "Pre-fetched previous bot reviews (%d reviews) for PR #%d",
+                len(bot_reviews),
+                pr_number,
+            )
+    except Exception as exc:
+        logger.warning("Could not pre-fetch previous bot reviews: %s", exc)
 
 
 class WebhookProcessor:

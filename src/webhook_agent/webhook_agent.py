@@ -1158,11 +1158,32 @@ def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
         if res.get("success"):
             detail = res.get("detail", "")
             return (
-                f"Successfully resolved merge conflicts for PR #{pr_number}: {detail}"
+                f"Successfully resolved merge conflicts on PR #{pr_number} "
+                f"({pr.head.ref} -> {pr.base.ref}): {detail}"
             )
-        return f"Could not resolve merge conflicts for PR #{pr_number}: {res.get('detail')}"
+        return (
+            f"Could not resolve merge conflicts on PR #{pr_number}: {res.get('error')}"
+        )
     except Exception as e:  # noqa: BLE001
-        return f"Error resolving merge conflicts for PR #{pr_number}: {e}"
+        return f"Error resolving merge conflicts on PR #{pr_number}: {e}"
+
+
+def auto_fix_pr_review_feedback(ctx: Context, pr_number: int) -> str:
+    """Autonomously resolve code review feedback for a PR in an isolated Git Worktree.
+
+    Checks policy rules, parses requested changes, applies fixes, verifies tests,
+    and commits/pushes the changes to origin. Call this tool when a user comments `/fix`,
+    `/auto`, or `/fix-it` on a pull request.
+
+    Args:
+        pr_number: Pull request number.
+
+    Returns:
+        A string describing the resolution status.
+    """
+    from webhook_agent.tools.auto_fix_feedback import auto_fix_pr_feedback
+
+    return auto_fix_pr_feedback(ctx=ctx, pr_number=pr_number)
 
 
 def mark_ready_for_review(ctx: Context, pr_number: int) -> str:
@@ -1520,10 +1541,17 @@ You are a SENIOR ENGINEER performing code reviews, not a cheerleader. Your job i
 ### Review Procedure
 
 When reviewing a PR, you MUST:
-1. Analyze every changed file systematically for correctness, security, performance, readability, and test coverage.
-2. Structure your review body using the Code Review Template below.
-3. Fill in ALL scorecard categories with honest scores and cite specific evidence from the diff.
-4. Determine the verdict MECHANICALLY from the scorecard (see Verdict Rules).
+1. **For Initial PR Creation (`pull_request.opened` or `/review`)**:
+   - Analyze every changed file systematically for correctness, security, performance, readability, and test coverage.
+   - Structure your review body using the Full Code Review Template (`code_review_template.md`).
+   - Fill in ALL scorecard categories with honest scores and cite specific evidence from the diff.
+   - Determine the verdict MECHANICALLY from the scorecard (see Verdict Rules).
+
+2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
+   - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
+   - Structure your review body using the Synchronization Review Update Template (`sync_review_template.md`).
+   - Mark every previously requested issue as ✅ **[RESOLVED]** or 🔴 **[UNRESOLVED]** with line citations.
+   - Transition the overall verdict (e.g., `REQUEST_CHANGES` ➔ `APPROVE` if all items are resolved and tests pass).
 
 ### Verdict Rules (Non-Negotiable)
 
@@ -1632,6 +1660,7 @@ class WebhookAgent:
                 open_pr,
                 update_branch_from_base,
                 resolve_pr_conflicts,
+                auto_fix_pr_review_feedback,
                 mark_ready_for_review,
                 merge_pr,
                 review,
@@ -1776,6 +1805,33 @@ class WebhookAgent:
         # Include PR diff (full accumulated state) if available
         if "pr_diff" in raw:
             parts.append(f"\nFull PR Diff (Accumulated State):\n{raw['pr_diff']}")
+
+        # Include pre-fetched inline comment code context if available
+        if "inline_code_context" in raw:
+            parts.append(
+                f"\nPre-Fetched Inline Code Context:\n{raw['inline_code_context']}"
+            )
+
+        # Include pre-executed conflict resolution result if available
+        if "conflict_resolution_result" in raw:
+            res = raw["conflict_resolution_result"]
+            parts.append(
+                f"\nPre-Executed Conflict Resolution Result:\n"
+                f"Status: {'Success' if res.get('success') else 'Failed'}\n"
+                f"Detail: {res.get('detail') or res.get('error') or 'N/A'}"
+            )
+
+        # Include pre-fetched commit history summary if available
+        if "commit_history_summary" in raw:
+            parts.append(
+                f"\nPre-Fetched Commit History Summary:\n{raw['commit_history_summary']}"
+            )
+
+        # Include pre-fetched previous bot reviews if available
+        if "previous_bot_reviews" in raw:
+            parts.append(
+                f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}"
+            )
 
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(

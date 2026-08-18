@@ -607,3 +607,79 @@ class TestAddEyesReaction:
         mock_repo.get_pull.assert_called_once_with(15)
         mock_pr.get_review_comment.assert_called_once_with(202)
         mock_comment.create_reaction.assert_called_once_with("eyes")
+
+
+class TestPreworkPipelines:
+    def test_prefetch_inline_comment_context(self):
+        from webhook_agent.processor import _prefetch_inline_comment_context
+
+        payload = {
+            "canonical": "pull_request_review_comment.created",
+            "raw_payload": {
+                "comment": {
+                    "path": "src/main.py",
+                    "line": 42,
+                    "diff_hunk": "@@ -40,5 +40,5 @@\n-old\n+new",
+                }
+            },
+        }
+
+        _prefetch_inline_comment_context(None, "owner/repo", payload)
+        assert "inline_code_context" in payload["raw_payload"]
+        assert (
+            "File: src/main.py (Line 42)"
+            in payload["raw_payload"]["inline_code_context"]
+        )
+
+    def test_prefetch_commit_history(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _prefetch_commit_history
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = mock_repo.get_pull.return_value
+
+        mock_commit = MagicMock()
+        mock_commit.commit.message = "feat: initial commit"
+        mock_commit.sha = "abc123456"
+        mock_commit.author.login = "developer"
+        mock_pr.get_commits.return_value = [mock_commit]
+
+        payload = {
+            "canonical": "issue_comment.created",
+            "raw_payload": {
+                "issue": {"number": 10},
+                "comment": {"body": "Please /create PR description"},
+            },
+        }
+
+        _prefetch_commit_history(mock_gh, "owner/repo", payload)
+        assert "commit_history_summary" in payload["raw_payload"]
+        assert "abc1234" in payload["raw_payload"]["commit_history_summary"]
+        assert "developer" in payload["raw_payload"]["commit_history_summary"]
+
+    def test_prefetch_previous_bot_reviews(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _prefetch_previous_bot_reviews
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = mock_repo.get_pull.return_value
+
+        mock_review = MagicMock()
+        mock_review.user.login = "hannibal-hub-agents[bot]"
+        mock_review.state = "REQUEST_CHANGES"
+        mock_review.body = "Please fix missing null check on line 42"
+        mock_pr.get_reviews.return_value = [mock_review]
+
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "raw_payload": {
+                "pull_request": {"number": 15},
+            },
+        }
+
+        _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
+        assert "previous_bot_reviews" in payload["raw_payload"]
+        assert "REQUEST_CHANGES" in payload["raw_payload"]["previous_bot_reviews"]
+        assert "missing null check" in payload["raw_payload"]["previous_bot_reviews"]
