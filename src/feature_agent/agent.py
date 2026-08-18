@@ -21,10 +21,14 @@ from google.adk.apps import App
 from google.adk.apps.app import EventsCompactionConfig, ResumabilityConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.events import Event, EventActions
-from google.adk.models import Gemini
 from google.adk.planners import BuiltInPlanner
 from google.genai import types
 from pydantic import BaseModel, Field
+
+try:
+    from logic.model_factory import get_adk_model
+except ImportError:
+    from src.logic.model_factory import get_adk_model
 
 from feature_agent.guardrails import exfil_guard, permission_guard, policies_guard
 from feature_agent.memory import (
@@ -165,9 +169,9 @@ def build_feature_developer_agent() -> BaseAgent:
         or DEFAULT_FEATURE_AGENT_PROJECT
     )
 
-    model_client = Gemini(
-        model=model_name,
-        client_kwargs={"api_key": api_key},
+    model_client = get_adk_model(
+        model_name=model_name,
+        api_key=api_key,
     )
 
     planner_agent = LlmAgent(
@@ -257,9 +261,9 @@ def build_feature_app() -> App:
     """Construct the full ADK App with plugins, caching, compaction, and resumability."""
     agent = build_feature_developer_agent()
     api_key = get_feature_agent_key()
-    summarizer_client = Gemini(
-        model="gemini-3.5-flash-lite",
-        client_kwargs={"api_key": api_key},
+    summarizer_client = get_adk_model(
+        model_name="gemini-3.5-flash-lite",
+        api_key=api_key,
     )
     return App(
         name="feature_developer_app",

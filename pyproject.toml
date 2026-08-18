@@ -44,9 +44,9 @@ markers = [
     "pubsub: Tests for Pub/Sub push event handlers.",
 ]
 filterwarnings = [
-    "ignore::DeprecationWarning:google.adk.*",
-    "ignore:.*BaseAgentConfig is deprecated.*:DeprecationWarning",
     "ignore:.*EventsCompactionConfig.*:UserWarning",
     "ignore:.*FeatureName.AGENT_CONFIG is enabled.*:UserWarning",
+    "ignore:.*LoopAgent is deprecated in favor of Workflow.*:DeprecationWarning",
+    "ignore:.*SequentialAgent is deprecated in favor of Workflow.*:DeprecationWarning",
 ]
 

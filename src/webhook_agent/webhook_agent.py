@@ -18,7 +18,6 @@ import os
 import re
 import threading
 import time
-from collections.abc import AsyncGenerator
 from concurrent.futures import CancelledError
 from datetime import UTC, datetime
 from typing import Any
@@ -81,12 +80,22 @@ try:
         get_active_api_key,
         rpm_waiter,
     )
+    from logic.model_factory import RateLimitedGemini, get_adk_model
 except ImportError:
     from src.logic.rate_limiter import (
         _resolve_tier,
         get_active_api_key,
         rpm_waiter,
     )
+    from src.logic.model_factory import RateLimitedGemini, get_adk_model
+
+__all__ = [
+    "RateLimitedGemini",
+    "WebhookAgent",
+    "calculate_verdict",
+    "get_active_model",
+    "get_adk_model",
+]
 
 # Persistent background event loop used to run ADK coroutines safely from
 # synchronous callers. Using a single long-lived loop prevents repeatedly
@@ -278,53 +287,7 @@ def _truncate_input_for_tier(
     return text[: max_chars - len(truncated_msg)] + truncated_msg
 
 
-class RateLimitedGemini(Gemini):
-    """Production-grade Rate-Limited Gemini wrapper for ADK agent using proper active model, tier, and key."""
-
-    async def generate_content_async(
-        self, llm_request: Any, stream: bool = False
-    ) -> AsyncGenerator[Any, None]:
-        model_name = getattr(
-            llm_request, "model", getattr(self, "model", get_active_model())
-        )
-        active_tier = _resolve_tier()
-        estimated_tokens = 0
-
-        try:
-            if self.api_client:
-                ct_resp = await self.api_client.aio.models.count_tokens(
-                    model=model_name,
-                    contents=llm_request.contents,
-                )
-                if ct_resp and ct_resp.total_tokens:
-                    estimated_tokens = int(ct_resp.total_tokens)
-        except Exception as exc:
-            logger.debug(
-                "Free count_tokens API call skipped on model '%s': %s", model_name, exc
-            )
-
-        if estimated_tokens <= 0:
-            contents_str = str(getattr(llm_request, "contents", ""))
-            estimated_tokens = max(1, len(contents_str) // 4)
-
-        try:
-            await rpm_waiter.check_and_wait(
-                model=model_name,
-                estimated_tokens=estimated_tokens,
-                tier=active_tier,
-            )
-        except Exception as exc:
-            logger.warning(
-                "RPM/TPM pre-flight check error on model '%s' (tier '%s'): %s",
-                model_name,
-                active_tier,
-                exc,
-            )
-
-        async for response in super().generate_content_async(
-            llm_request, stream=stream
-        ):
-            yield response
+# RateLimitedGemini is imported from logic.model_factory above
 
 
 # ---------------------------------------------------------------------------
@@ -1709,9 +1672,9 @@ class WebhookAgent:
                 next_model,
             )
             self._current_model_name = next_model
-            self._agent.model = Gemini(
-                model=next_model,
-                client_kwargs={"api_key": get_active_api_key()},
+            self._agent.model = get_adk_model(
+                model_name=next_model,
+                api_key=get_active_api_key(),
             )
             return next_model
         return None
@@ -2102,9 +2065,9 @@ class WebhookAgent:
                 trace_id[-4:],
             )
             self._current_model_name = selected_model
-            self._agent.model = Gemini(
-                model=selected_model,
-                client_kwargs={"api_key": get_active_api_key()},
+            self._agent.model = get_adk_model(
+                model_name=selected_model,
+                api_key=get_active_api_key(),
             )
 
         # Run the agent asynchronously with retry and fallback support

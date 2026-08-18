@@ -4,12 +4,16 @@ from google.adk.apps import App
 from google.adk.apps.app import EventsCompactionConfig
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
-from google.adk.models import Gemini
+
+try:
+    from logic.model_factory import get_adk_model
+except ImportError:
+    from src.logic.model_factory import get_adk_model
 
 from src.token_optimized_agent.agent import root_agent
 from src.token_optimized_agent.callbacks import MessagePruningPlugin
 
-summarizer_llm = Gemini(model="gemini-3.6-flash")
+summarizer_llm = get_adk_model(model_name="gemini-3.6-flash")
 
 app = App(
     name="token_optimized_app",
