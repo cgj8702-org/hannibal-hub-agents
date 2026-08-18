@@ -20,7 +20,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.errors import APIError
 
-from feature_agent.agent import feature_app, get_feature_agent_key
+from feature_agent.agent import build_feature_app, get_feature_agent_key
 from feature_agent.firestore_checkpoints import firestore_checkpoint_registry
 
 logger = logging.getLogger("feature_agent.runner")
@@ -33,11 +33,18 @@ class FeatureTaskRunner:
         self.repo_path = Path(repo_root).resolve()
         self.session_service = InMemorySessionService()
         self.memory_service = InMemoryMemoryService()
-        self.runner = Runner(
-            app=feature_app,
-            session_service=self.session_service,
-            memory_service=self.memory_service,
-        )
+        self._runner = None
+
+    @property
+    def runner(self) -> Runner:
+        """Lazily initialize ADK Runner when needed."""
+        if self._runner is None:
+            self._runner = Runner(
+                app=build_feature_app(),
+                session_service=self.session_service,
+                memory_service=self.memory_service,
+            )
+        return self._runner
 
     def execute_task(
         self,

@@ -131,11 +131,23 @@ def redact_artifact_urls_callback(
 
 
 def get_feature_agent_key() -> str:
-    """Retrieve FEATURE_AGENT_FREE_KEY for quota isolation."""
-    key = os.getenv("FEATURE_AGENT_FREE_KEY") or os.getenv("WEBHOOK_FREE_KEY", "")
+    """Retrieve dedicated FEATURE_AGENT_FREE_KEY for strict GCP project & quota isolation."""
+    from logic.secret_manager import resolve_secret
+
+    key = (
+        resolve_secret("FEATURE_AGENT_FREE_KEY")
+        or resolve_secret("FEATURE_AGENT_PAID_KEY")
+    ).strip()
     if not key:
-        logger.warning(
-            "No FEATURE_AGENT_FREE_KEY or WEBHOOK_FREE_KEY found in environment."
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return (
+                os.getenv("GEMINI_API_KEY")
+                or os.getenv("GOOGLE_API_KEY")
+                or "pytest_autokey"
+            )
+        raise RuntimeError(
+            "CRITICAL ISOLATION ERROR: Missing required secret 'FEATURE_AGENT_FREE_KEY'. "
+            "Feature Agent must run on its own isolated GCP project and API key."
         )
     return key
 
@@ -143,8 +155,15 @@ def get_feature_agent_key() -> str:
 # --- Item 1: Multi-Agent Pipeline Construction ---
 def build_feature_developer_agent() -> BaseAgent:
     """Construct the full 4-stage SequentialAgent + LoopAgent pipeline."""
+    from logic.constants import DEFAULT_FEATURE_AGENT_PROJECT
+
     api_key = get_feature_agent_key()
     model_name = os.getenv("FEATURE_AGENT_MODEL", "gemini-3.5-flash-lite")
+    _gcp_project = (
+        os.getenv("FEATURE_AGENT_GCP_PROJECT")
+        or os.getenv("FEATURE_AGENT_PROJECT")
+        or DEFAULT_FEATURE_AGENT_PROJECT
+    )
 
     model_client = Gemini(
         model=model_name,
@@ -234,25 +253,25 @@ def build_feature_developer_agent() -> BaseAgent:
     )
 
 
-feature_developer_agent = build_feature_developer_agent()
-
-# --- Item 8 & Item 15 & Item 17: App Configuration ---
-summarizer_client = Gemini(
-    model="gemini-3.5-flash-lite",
-    client_kwargs={"api_key": get_feature_agent_key()},
-)
-
-feature_app = App(
-    name="feature_developer_app",
-    root_agent=feature_developer_agent,
-    plugins=[GuardrailsPlugin(max_repeated_failures=3)],
-    context_cache_config=ContextCacheConfig(ttl_seconds=3600),
-    events_compaction_config=EventsCompactionConfig(
-        compaction_interval=15,
-        overlap_size=2,
-        summarizer=LlmEventSummarizer(llm=summarizer_client),
-        token_threshold=750_000,
-        event_retention_size=20,
-    ),
-    resumability_config=ResumabilityConfig(is_resumable=True),
-)
+def build_feature_app() -> App:
+    """Construct the full ADK App with plugins, caching, compaction, and resumability."""
+    agent = build_feature_developer_agent()
+    api_key = get_feature_agent_key()
+    summarizer_client = Gemini(
+        model="gemini-3.5-flash-lite",
+        client_kwargs={"api_key": api_key},
+    )
+    return App(
+        name="feature_developer_app",
+        root_agent=agent,
+        plugins=[GuardrailsPlugin(max_repeated_failures=3)],
+        context_cache_config=ContextCacheConfig(ttl_seconds=3600),
+        events_compaction_config=EventsCompactionConfig(
+            compaction_interval=15,
+            overlap_size=2,
+            summarizer=LlmEventSummarizer(llm=summarizer_client),
+            token_threshold=750_000,
+            event_retention_size=20,
+        ),
+        resumability_config=ResumabilityConfig(is_resumable=True),
+    )

@@ -25,6 +25,21 @@ def test_feature_developer_agent_construction():
     assert len(getattr(agent, "sub_agents", [])) == 4
 
 
+def test_get_feature_agent_key_isolation(monkeypatch):
+    from feature_agent.agent import get_feature_agent_key
+
+    monkeypatch.setenv("FEATURE_AGENT_FREE_KEY", "isolated-feature-key-789")
+    monkeypatch.setenv("WEBHOOK_FREE_KEY", "webhook-key-123")
+    key = get_feature_agent_key()
+    assert key == "isolated-feature-key-789"
+
+    monkeypatch.delenv("FEATURE_AGENT_FREE_KEY", raising=False)
+    monkeypatch.delenv("FEATURE_AGENT_PAID_KEY", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    with pytest.raises(RuntimeError, match="CRITICAL ISOLATION ERROR"):
+        get_feature_agent_key()
+
+
 def test_firestore_checkpoint_registry_save_and_get():
     registry = FirestoreFeatureCheckpointRegistry(
         collection_name="test_feature_checkpoints"
