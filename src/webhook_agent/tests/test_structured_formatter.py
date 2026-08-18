@@ -158,3 +158,32 @@ def test_enforce_verdict_with_loose_schema_drift_json():
     assert "# Code Review Report" in rendered_md
     assert "Code Correctness:** 5/5" in rendered_md
     assert "Circular import risk" in rendered_md
+
+
+def test_enforce_verdict_with_loose_sync_review_json():
+    """Verify self-healing normalizer recovers from SyncReviewResponse schema drift (issue key instead of item_description)."""
+    loose_sync_json = """{
+      "summary": "The author successfully resolved the previous review feedback by adding robust fallback path resolution.",
+      "resolutions": [
+        {
+          "issue": "Asset Path Resolution Mismatch between FS.DATA and src/hannibal/assets",
+          "status": "RESOLVED",
+          "evidence": "Added importlib.resources.files fallback."
+        }
+      ],
+      "new_findings": [
+        {
+          "severity": "LOW",
+          "category": "MAINTAINABILITY",
+          "title": "Repository Size Impact",
+          "description": "Committing tokenizer asset bloats history."
+        }
+      ],
+      "confidence": 5
+    }"""
+    rendered_md, verdict = _enforce_verdict(loose_sync_json, "APPROVE")
+    assert verdict == "REQUEST_CHANGES"
+    assert "# Pull Request Synchronization Review Update" in rendered_md
+    assert "Asset Path Resolution Mismatch" in rendered_md
+    assert "✅ **[RESOLVED]**" in rendered_md
+    assert "[MAINTAINABILITY] Committing tokenizer asset bloats history." in rendered_md

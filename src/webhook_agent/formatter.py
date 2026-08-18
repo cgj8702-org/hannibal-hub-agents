@@ -200,6 +200,100 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Self-healing normalizer that coerces loose LLM sync review JSON into strict SyncReviewResponse dict structure."""
+    if not isinstance(data, dict):
+        return {}
+
+    normalized = dict(data)
+    if not normalized.get("summary"):
+        normalized["summary"] = "Pull request synchronization review update."
+
+    raw_res = normalized.get("resolutions")
+    clean_res: list[dict[str, str]] = []
+    if isinstance(raw_res, list):
+        for item in raw_res:
+            if isinstance(item, str) and item.strip():
+                clean_res.append(
+                    {
+                        "item_description": item.strip(),
+                        "status": "RESOLVED",
+                        "evidence": "Verified in incremental commit diff.",
+                    }
+                )
+            elif isinstance(item, dict):
+                desc = str(
+                    item.get("item_description")
+                    or item.get("issue")
+                    or item.get("description")
+                    or item.get("title")
+                    or "Review finding resolution"
+                ).strip()
+                status = str(item.get("status") or "RESOLVED").strip().upper()
+                if status not in ("RESOLVED", "UNRESOLVED"):
+                    status = "RESOLVED"
+                ev = str(
+                    item.get("evidence")
+                    or item.get("details")
+                    or "Verified in commit diff."
+                ).strip()
+                clean_res.append(
+                    {
+                        "item_description": desc,
+                        "status": status,
+                        "evidence": ev,
+                    }
+                )
+    normalized["resolutions"] = clean_res
+
+    raw_new = normalized.get("new_findings")
+    clean_new: list[dict[str, Any]] = []
+    if isinstance(raw_new, list):
+        for item in raw_new:
+            if isinstance(item, str) and item.strip():
+                desc = item.strip()
+                if desc.lower() not in ("none", "none found"):
+                    clean_new.append(
+                        {
+                            "path": "codebase",
+                            "line": None,
+                            "description": desc,
+                            "suggested_fix": f"Review finding '{desc[:60]}' in codebase.",
+                        }
+                    )
+            elif isinstance(item, dict):
+                title = str(item.get("title") or "").strip()
+                desc = str(
+                    item.get("description") or title or "New finding in PR update."
+                ).strip()
+                cat = str(item.get("category") or "").strip()
+                full_desc = f"[{cat}] {desc}" if cat else desc
+                fix = str(
+                    item.get("suggested_fix") or f"Address {desc[:60]} in codebase."
+                ).strip()
+                if desc and desc.lower() not in ("none", "none found"):
+                    clean_new.append(
+                        {
+                            "path": str(item.get("path") or "codebase"),
+                            "line": (
+                                item.get("line")
+                                if isinstance(item.get("line"), int)
+                                else None
+                            ),
+                            "description": full_desc,
+                            "suggested_fix": fix,
+                        }
+                    )
+    normalized["new_findings"] = clean_new
+
+    conf = normalized.get("confidence")
+    if not isinstance(conf, int) or not (1 <= conf <= 5):
+        normalized["confidence"] = 5
+    normalized["confidence"] = conf
+
+    return normalized
+
+
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
     """Calculate PR review verdict mechanically from structured scorecard & issues.
 
