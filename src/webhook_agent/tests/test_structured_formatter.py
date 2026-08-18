@@ -200,11 +200,11 @@ def test_calculate_sync_verdict_blocking_new_finding():
                 evidence="Fixed in L20",
             )
         ],
-        new_findings=[
+        new_critical_issues=[
             IssueItem(
                 path="src/auth.py",
                 line=12,
-                description="[CRITICAL] Security vulnerability: Token validation bypassed.",
+                description="Security vulnerability: Token validation bypassed.",
                 suggested_fix="Restore token validation check.",
             )
         ],
