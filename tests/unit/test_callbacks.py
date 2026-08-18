@@ -84,3 +84,23 @@ async def test_on_tool_error_callback() -> None:
     assert res is not None
     assert res["success"] is False
     assert ctx.state.get("trigger_worktree_conflict_resolution") is True
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_single_mutating_tool_guardrail() -> None:
+    tool = MagicMock()
+    tool.name = "review"
+    args = {}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    res1 = await before_tool_callback(tool, args, ctx)
+    assert res1 is None
+    assert ctx.state.get("mutating_tool_executed_in_this_turn") is True
+
+    tool2 = MagicMock()
+    tool2.name = "add_comment"
+    res2 = await before_tool_callback(tool2, args, ctx)
+    assert res2 is not None
+    assert res2["success"] is False
+    assert "Blocked parallel mutating tool execution" in res2["detail"]
