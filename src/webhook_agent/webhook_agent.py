@@ -80,6 +80,7 @@ def calculate_verdict(scores: dict[str, int], confidence: int) -> str:
 try:
     from logic.rate_limiter import (
         _resolve_tier,
+        extract_rate_limit_details,
         get_active_api_key,
         rpm_waiter,
     )
@@ -87,6 +88,7 @@ try:
 except ImportError:
     from src.logic.rate_limiter import (
         _resolve_tier,
+        extract_rate_limit_details,
         get_active_api_key,
         rpm_waiter,
     )
@@ -2233,13 +2235,18 @@ class WebhookAgent:
                 except Exception as e:
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
+                        rate_details = extract_rate_limit_details(e)
                         self._advance_model_chain(error=e)
                         logger.warning(
-                            "Transient error on attempt %d/%d (trace: %s): %s. Active model is now: %s",
+                            "Transient error on attempt %d/%d (trace: %s): %s. Quota: %s (%s) | Cooldown: %ss | Reason: %s. Active model is now: %s",
                             attempt + 1,
                             _MAX_RETRIES,
                             trace_id[-4:],
                             e,
+                            rate_details.get("quota_limit") or "Unknown",
+                            rate_details.get("quota_value") or "Unknown",
+                            rate_details.get("retry_after_seconds") or 0,
+                            rate_details.get("reason") or "Unknown",
                             self._current_model_name,
                         )
                         continue

@@ -68,18 +68,26 @@ class FirestoreDepletedModelRegistry:
         self, model_name: str, error: Exception | None = None, key_alias: str = ""
     ) -> None:
         """Mark a model (and optional key alias) as depleted across memory and Firestore."""
+        from logic.rate_limiter import extract_rate_limit_details
+
         cooldown = self.default_cooldown
         metric_type = "DEFAULT (1h)"
 
         if error is not None:
-            err_str = str(error).lower()
-            if "perday" in err_str or "dayperproject" in err_str:
+            details = extract_rate_limit_details(error)
+            retry_after = details.get("retry_after_seconds")
+            quota_limit = details.get("quota_limit") or ""
+
+            if isinstance(retry_after, (int, float)) and retry_after > 0:
+                cooldown = float(retry_after)
+                metric_type = f"EXACT ({cooldown:.1f}s)"
+            elif "perday" in quota_limit.lower() or "perday" in str(error).lower():
                 cooldown = 86400.0  # 24 Hours for RPD daily limit
                 metric_type = "RPD (24h)"
             elif (
-                "perminute" in err_str
-                or "minuteperproject" in err_str
-                or "tokensperminute" in err_str
+                "perminute" in quota_limit.lower()
+                or "perminute" in str(error).lower()
+                or "tokensperminute" in str(error).lower()
             ):
                 cooldown = 60.0  # 60 Seconds for RPM/TPM minute limit
                 metric_type = "RPM/TPM (60s)"
