@@ -314,7 +314,8 @@ def _prefetch_previous_bot_reviews(
 
         bot_reviews: list[str] = []
         for r in pr.get_reviews():
-            if getattr(r.user, "login", "") == "hannibal-hub-agents[bot]":
+            login = (getattr(r.user, "login", "") or "").lower()
+            if "hannibal-hub-agents" in login or (login and login.endswith("[bot]")):
                 state = getattr(r, "state", "COMMENT")
                 body_snippet = (r.body or "")[:300].replace("\n", " ")
                 bot_reviews.append(f"- State: {state} | Body: {body_snippet}")

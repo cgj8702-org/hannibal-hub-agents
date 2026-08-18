@@ -136,7 +136,8 @@ def auto_fix_pr_feedback(
         bot_reviews = [
             rv
             for rv in pr.get_reviews()
-            if getattr(rv.user, "login", "") == "hannibal-hub-agents[bot]"
+            if "hannibal-hub-agents" in (getattr(rv.user, "login", "") or "").lower()
+            or (getattr(rv.user, "login", "") or "").lower().endswith("[bot]")
         ]
         if not bot_reviews:
             return f"No prior reviews found from @hannibal-hub-agents[bot] on PR #{pr_number}."
