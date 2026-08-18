@@ -660,7 +660,9 @@ def get_model_chain() -> list[str]:
     seen: set[str] = set()
     deduped = [m for m in chain if not (m in seen or seen.add(m))]
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
-    return available if available else deduped
+    final_chain = available if available else deduped
+    logger.debug("Resolved %s model chain: %s", active_tier, final_chain)
+    return final_chain
 
 
 def _select_model_for_event(event_data: dict[str, Any]) -> str:
