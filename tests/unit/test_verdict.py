@@ -1,8 +1,9 @@
 """Unit tests for mathematical PR review verdict calculator."""
 
-from __future__ import annotations
-
+import pytest
 from webhook_agent.webhook_agent import calculate_verdict
+
+pytestmark = pytest.mark.unit
 
 
 def test_calculate_verdict_low_score_triggers_request_changes() -> None:

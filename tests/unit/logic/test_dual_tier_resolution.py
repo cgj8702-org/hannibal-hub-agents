@@ -6,6 +6,8 @@ from src.logic.rate_limiter import (
     get_allowed_models,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_resolve_webhook_api_key_free(monkeypatch):
     monkeypatch.setenv("WEBHOOK_TIER", "free")

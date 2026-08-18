@@ -1,11 +1,12 @@
-"""Unit tests for auto_fix_pr_feedback tool."""
-
+import pytest
 from unittest.mock import MagicMock, patch
 from google.adk.agents.context import Context
 from webhook_agent.tools.auto_fix_feedback import (
     auto_fix_pr_feedback,
     parse_review_feedback_items,
 )
+
+pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
 
 
 def test_parse_review_feedback_items():

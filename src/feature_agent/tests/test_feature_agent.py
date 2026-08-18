@@ -16,6 +16,8 @@ from feature_agent.plugins import GuardrailsPlugin
 from feature_agent.runner import FeatureTaskRunner
 from feature_agent.tools import resolve_in_window
 
+pytestmark = [pytest.mark.unit, pytest.mark.feature_agent]
+
 
 def test_feature_developer_agent_construction():
     agent = build_feature_developer_agent()

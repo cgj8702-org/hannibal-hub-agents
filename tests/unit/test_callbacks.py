@@ -14,6 +14,8 @@ from webhook_agent.callbacks import (
     on_tool_error_callback,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_get_model_tpm_limit() -> None:
     assert get_model_tpm_limit("gemma-4-31b-it", "free") == 15000

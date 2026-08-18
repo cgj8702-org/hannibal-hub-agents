@@ -7,6 +7,8 @@ from src.token_optimized_agent.callbacks import (
     MessagePruningPlugin,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.anyio
 async def test_truncate_tool_response_callback_arrays():
