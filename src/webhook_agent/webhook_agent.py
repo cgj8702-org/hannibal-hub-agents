@@ -623,28 +623,40 @@ except ImportError:
 
 
 def get_model_chain() -> list[str]:
-    """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
+    """Build ordered list of fallback models sorted by capacity and tier.
 
     Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
 
-    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.5-flash-lite on Free, gemini-3.6-flash on Paid)
-    Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
-    Tier 2 (2,000,000 TPM / 10k RPD): gemini-3.6-flash
-    Tier 3 (1,000,000 TPM / 10k RPD): gemini-2.5-flash
-    Tier 4 (16,000 TPM / 14.4k RPD): gemma-4-26b
+    Free Tier Chain:
+        1. gemini-3.5-flash-lite (500 RPD / 250k TPM)
+        2. gemini-3.1-flash-lite (500 RPD / 250k TPM)
+        3. gemma-4-31b (14,400 RPD / 16k TPM)
+        4. gemma-4-26b (14,400 RPD / 16k TPM)
+
+    Paid Tier Chain:
+        1. gemini-3.6-flash (10,000 RPD / 2M TPM)
+        2. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
+        3. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
     """
     active_tier = _resolve_tier()
-    default_primary = (
-        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
-    )
+    if active_tier == "paid":
+        default_primary = "gemini-3.6-flash"
+        default_chain = [
+            default_primary,
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+        ]
+    else:
+        default_primary = "gemini-3.5-flash-lite"
+        default_chain = [
+            default_primary,
+            "gemini-3.1-flash-lite",
+            "gemma-4-31b",
+            "gemma-4-26b",
+        ]
+
     primary = os.environ.get("GEMMA_MODEL", default_primary)
-    chain = [
-        primary,
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-2.5-flash",
-        "gemma-4-26b",
-    ]
+    chain = [primary] + [m for m in default_chain if m != primary]
     seen: set[str] = set()
     deduped = [m for m in chain if not (m in seen or seen.add(m))]
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)

@@ -202,15 +202,20 @@ class TestIsTransientError:
 
 
 class TestWebhookAgentModelChain:
-    def test_get_model_chain_orders_tpm_descending(self):
-        """get_model_chain should order models by TPM descending without duplicates."""
+    def test_get_model_chain_orders_tpm_descending(self, monkeypatch):
+        """get_model_chain should order models by capacity without duplicates and omit 3.6 on Free Tier."""
         from webhook_agent.webhook_agent import get_model_chain
 
-        chain = get_model_chain()
-        assert len(chain) == len(set(chain))
-        assert "gemini-3.5-flash-lite" in chain
-        assert "gemini-3.6-flash" in chain
-        assert "gemma-4-26b" in chain
+        monkeypatch.setenv("HANNIBAL_TIER", "free")
+        free_chain = get_model_chain()
+        assert len(free_chain) == len(set(free_chain))
+        assert "gemini-3.5-flash-lite" in free_chain
+        assert "gemini-3.6-flash" not in free_chain
+        assert "gemma-4-26b" in free_chain
+
+        monkeypatch.setenv("HANNIBAL_TIER", "paid")
+        paid_chain = get_model_chain()
+        assert "gemini-3.6-flash" in paid_chain
 
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""
