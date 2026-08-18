@@ -100,18 +100,20 @@ def get_allowed_models(tier: str | None = None) -> list[str]:
 def resolve_webhook_api_key() -> tuple[str, str, str]:
     """Resolve the webhook API key strictly from WEBHOOK_FREE_KEY or WEBHOOK_PAID_KEY based on tier.
 
-    Strictly fast-fails if the key for the active tier is missing or empty.
+    Uses Secret Manager fallback if env var is missing or empty.
     Returns:
         (api_key, key_source, resolved_tier)
     """
+    from logic.secret_manager import resolve_secret
+
     tier = _resolve_tier()
     if tier == "paid":
-        paid_key = (os.getenv("WEBHOOK_PAID_KEY") or "").strip()
+        paid_key = resolve_secret("WEBHOOK_PAID_KEY")
         if not paid_key or paid_key.lower() in ("dummy", "dummy-key-for-dev", "none"):
             raise RuntimeError("CRITICAL: Missing required secret 'WEBHOOK_PAID_KEY'")
         return (paid_key, "WEBHOOK_PAID_KEY", "paid")
 
-    free_key = (os.getenv("WEBHOOK_FREE_KEY") or "").strip()
+    free_key = resolve_secret("WEBHOOK_FREE_KEY")
     if not free_key or free_key.lower() in ("dummy", "dummy-key-for-dev", "none"):
         if "PYTEST_CURRENT_TEST" in os.environ:
             pytest_key = (

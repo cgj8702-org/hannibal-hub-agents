@@ -62,10 +62,12 @@ def publish_dead_letter(
 
 def setup_cloud_logging() -> None:
     """Initialize Google Cloud Logging handler if available."""
+    from logic.constants import DEFAULT_PUBSUB_PROJECT
+
     try:
         import google.cloud.logging
 
-        project_id = os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
+        project_id = os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
         client = google.cloud.logging.Client(project=project_id)
         client.setup_logging()
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
@@ -77,17 +79,18 @@ def setup_cloud_logging() -> None:
 # Main entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
-    setup_cloud_logging()
-    os.environ.get("PUBSUB_PROJECT", "cgj8702-webhook-agent")
-    subscription = os.environ.get("PUBSUB_SUBSCRIPTION")
-    dead_letter_topic = os.environ.get("PUBSUB_DEAD_LETTER_TOPIC")
+    from logic.constants import (
+        DEFAULT_PUBSUB_DEAD_LETTER_TOPIC,
+        DEFAULT_PUBSUB_PROJECT,
+        DEFAULT_PUBSUB_SUBSCRIPTION,
+    )
 
-    if not subscription:
-        print(
-            "PUBSUB_SUBSCRIPTION must be set to the full subscription path",
-            file=sys.stderr,
-        )
-        return 2
+    setup_cloud_logging()
+    os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
+    subscription = os.environ.get("PUBSUB_SUBSCRIPTION", DEFAULT_PUBSUB_SUBSCRIPTION)
+    dead_letter_topic = os.environ.get(
+        "PUBSUB_DEAD_LETTER_TOPIC", DEFAULT_PUBSUB_DEAD_LETTER_TOPIC
+    )
 
     try:
         # We instantiate the processor here to validate environment variables early

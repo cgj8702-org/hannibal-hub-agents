@@ -402,8 +402,15 @@ class WebhookProcessor:
         # Load essential GitHub credentials from the environment.
         # Empty env vars (e.g. from a failed secret resolution) are treated as
         # unset so the worker fails with a clear error instead of int('') crashing.
-        self.app_id = _env_int("GITHUB_APP_ID", 4133145)
-        self.installation_id = _env_int("GITHUB_INSTALLATION_ID", 150411146)
+        from logic.constants import (
+            DEFAULT_GITHUB_APP_ID,
+            DEFAULT_GITHUB_INSTALLATION_ID,
+        )
+
+        self.app_id = _env_int("GITHUB_APP_ID", int(DEFAULT_GITHUB_APP_ID))
+        self.installation_id = _env_int(
+            "GITHUB_INSTALLATION_ID", int(DEFAULT_GITHUB_INSTALLATION_ID)
+        )
         self.private_key_path = os.getenv(
             "GITHUB_PRIVATE_KEY_PATH", "/tmp/keys/github-app-private-key.pem"
         )

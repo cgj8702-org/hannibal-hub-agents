@@ -132,8 +132,11 @@ def redact_artifact_urls_callback(
 
 def get_feature_agent_key() -> str:
     """Retrieve dedicated FEATURE_AGENT_FREE_KEY for strict GCP project & quota isolation."""
+    from logic.secret_manager import resolve_secret
+
     key = (
-        os.getenv("FEATURE_AGENT_FREE_KEY") or os.getenv("FEATURE_AGENT_PAID_KEY") or ""
+        resolve_secret("FEATURE_AGENT_FREE_KEY")
+        or resolve_secret("FEATURE_AGENT_PAID_KEY")
     ).strip()
     if not key:
         if "PYTEST_CURRENT_TEST" in os.environ:
@@ -152,12 +155,14 @@ def get_feature_agent_key() -> str:
 # --- Item 1: Multi-Agent Pipeline Construction ---
 def build_feature_developer_agent() -> BaseAgent:
     """Construct the full 4-stage SequentialAgent + LoopAgent pipeline."""
+    from logic.constants import DEFAULT_FEATURE_AGENT_PROJECT
+
     api_key = get_feature_agent_key()
     model_name = os.getenv("FEATURE_AGENT_MODEL", "gemini-3.5-flash-lite")
     _gcp_project = (
         os.getenv("FEATURE_AGENT_GCP_PROJECT")
         or os.getenv("FEATURE_AGENT_PROJECT")
-        or "gen-lang-client-0613181237"
+        or DEFAULT_FEATURE_AGENT_PROJECT
     )
 
     model_client = Gemini(
