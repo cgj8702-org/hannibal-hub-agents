@@ -97,11 +97,10 @@ def run_pytest(ctx: Context) -> str:
     """Run pytest suite inside the active sandbox worktree."""
     wt = get_worktree_path(ctx)
     env = os.environ.copy()
-    key = os.getenv("FEATURE_AGENT_FREE_KEY") or os.getenv(
-        "WEBHOOK_FREE_KEY", "dummy-key-for-dev"
-    )
-    env["WEBHOOK_FREE_KEY"] = key
-    env["FEATURE_AGENT_FREE_KEY"] = key
+    key = os.getenv("FEATURE_AGENT_FREE_KEY") or os.getenv("WEBHOOK_FREE_KEY") or ""
+    if key:
+        env["WEBHOOK_FREE_KEY"] = key
+        env["FEATURE_AGENT_FREE_KEY"] = key
 
     try:
         res = subprocess.run(

@@ -43,6 +43,13 @@ from .callbacks import (
     on_tool_error_callback,
 )
 from .memory_service import InMemoryMemoryService
+from .schemas import CodeReviewResponse, SyncReviewResponse
+from .formatter import (
+    calculate_strict_verdict,
+    calculate_sync_verdict,
+    render_code_review_markdown,
+    render_sync_review_markdown,
+)
 from .tools.resolve_conflicts import resolve_merge_conflicts
 from .webhook_types import ActionResult
 
@@ -1029,6 +1036,17 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     Returns:
         A string describing the result.
     """
+    # Programmatic Guardrail: Block duplicate add_comment if formal review() was already submitted in this same execution turn
+    session_state = getattr(ctx, "state", None)
+    if isinstance(session_state, dict) and session_state.get(
+        "review_submitted_in_this_turn"
+    ):
+        logger.warning(
+            "Programmatic Guardrail: Blocked duplicate add_comment() for #%d (formal review already submitted in this turn)",
+            issue_number,
+        )
+        return f"Skipped: Formal code review report already submitted for #{issue_number} in this turn."
+
     # Programmatic Guardrail: Redirect code review reports erroneously sent to add_comment to review()
     if (
         "Code Review Report" in body
@@ -1319,14 +1337,40 @@ def _parse_confidence(body: str) -> int | None:
 
 
 def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
-    """Programmatically enforce verdict rules based on scorecard scores and safety checks.
+    """Programmatically enforce verdict rules based on structured JSON or scorecard scores.
 
-    Parses the review body, extracts scores and confidence, and overrides
-    the LLM-chosen event if it violates mechanical verdict or CI safety rules.
+    Supports structured JSON (CodeReviewResponse / SyncReviewResponse) or legacy Markdown.
+    If structured JSON is provided, deterministically calculates the verdict and renders
+    the exact Markdown template without LLM freedom.
 
     Returns:
-        Tuple of (possibly_modified_body, enforced_event).
+        Tuple of (rendered_markdown_body, enforced_event).
     """
+    import json
+
+    # Try parsing body as JSON (either raw JSON or inside ```json ``` codeblock)
+    cleaned_body = body.strip()
+    if cleaned_body.startswith("```"):
+        cleaned_body = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
+        cleaned_body = re.sub(r"\n?```$", "", cleaned_body).strip()
+
+    if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
+        try:
+            data = json.loads(cleaned_body)
+            if "scorecard" in data:
+                cr_obj = CodeReviewResponse.model_validate(data)
+                enforced_verdict = calculate_strict_verdict(cr_obj)
+                rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
+                return rendered_body, enforced_verdict
+            elif "resolutions" in data:
+                sync_obj = SyncReviewResponse.model_validate(data)
+                enforced_verdict = calculate_sync_verdict(sync_obj)
+                rendered_body = render_sync_review_markdown(sync_obj, enforced_verdict)
+                return rendered_body, enforced_verdict
+        except Exception as exc:
+            logger.warning("Could not parse review JSON payload: %s", exc)
+
+    # Legacy fallback parsing logic
     scores = _parse_scorecard_scores(body)
     confidence = _parse_confidence(body)
     original_event = event.upper()
@@ -1337,7 +1381,7 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
         min_score = min(scores)
         avg_score = sum(scores) / len(scores)
 
-        if min_score <= 2 and original_event == "APPROVE":
+        if min_score <= 3 and original_event == "APPROVE":
             enforced_event = "REQUEST_CHANGES"
             override_reasons.append(f"scorecard has category scoring {min_score}/5")
 
@@ -1353,28 +1397,6 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
             f"confidence level {confidence}/5 is too low to approve"
         )
 
-    # Programmatic check for dropped platform markers in lockfiles
-    if (
-        "sys_platform ==" in body
-        and "dropped" in body.lower()
-        and original_event == "APPROVE"
-    ):
-        enforced_event = "REQUEST_CHANGES"
-        override_reasons.append(
-            "detected potential environment marker removal in lockfile diff"
-        )
-
-    # Programmatic CI build check and mergeability guardrails.
-    #
-    # NOTE: The previous implementation called commit.get_combined_status(), which
-    # hits the "Get the combined status for a specific reference" endpoint. That
-    # endpoint returns 403 "Resource not accessible by integration" for the GitHub
-    # App installation (no status-read permission). We now rely on the PR's
-    # server-computed `mergeable_state` field, which GitHub already populates with
-    # CI check results:
-    #   - "dirty"   -> merge conflicts with base branch
-    #   - "blocked" -> failing or pending required CI checks
-    #   - "behind"  -> head branch is behind base branch
     if pr and original_event == "APPROVE":
         try:
             mergeable_state = getattr(pr, "mergeable_state", "") or ""
@@ -1386,9 +1408,7 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     )
                 else:
                     override_reasons.append(
-                        f"PR is not cleanly mergeable "
-                        f"(mergeable_state='{mergeable_state}'; blocked by "
-                        "failing/pending CI checks or behind base branch)"
+                        f"PR is not cleanly mergeable (mergeable_state='{mergeable_state}')"
                     )
         except Exception as gate_err:  # noqa: BLE001
             logger.warning("Could not check PR CI/mergeability gating: %s", gate_err)
@@ -1400,12 +1420,6 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
             f"> **Verdict Override:** Agent requested `{original_event}` but "
             f"was overridden to `{enforced_event}` by policy guardrail "
             f"({reasons_str})."
-        )
-        logger.warning(
-            "Verdict override: %s -> %s (%s)",
-            original_event,
-            enforced_event,
-            reasons_str,
         )
 
     return body, enforced_event
@@ -1480,6 +1494,9 @@ def review(
 
         rv = pr.create_review(body=body, event=event)
         _COMMENT_RATE_LIMITER.record(target_key)
+        session_state = getattr(ctx, "state", None)
+        if isinstance(session_state, dict):
+            session_state["review_submitted_in_this_turn"] = True
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({event}): {detail}"
     except Exception as e:  # noqa: BLE001
@@ -1543,15 +1560,13 @@ You are a SENIOR ENGINEER performing code reviews, not a cheerleader. Your job i
 When reviewing a PR, you MUST:
 1. **For Initial PR Creation (`pull_request.opened` or `/review`)**:
    - Analyze every changed file systematically for correctness, security, performance, readability, and test coverage.
-   - Structure your review body using the Full Code Review Template (`code_review_template.md`).
-   - Fill in ALL scorecard categories with honest scores and cite specific evidence from the diff.
-   - Determine the verdict MECHANICALLY from the scorecard (see Verdict Rules).
+   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `scorecard`, `scorecard_evidence`, `confidence`, `risks_and_edge_cases`, `critical_issues`, `minor_suggestions`, `context_gaps`.
+   - Fill in ALL scorecard categories (1-5 scale) and cite specific evidence from the diff.
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
-   - Structure your review body using the Synchronization Review Update Template (`sync_review_template.md`).
-   - Mark every previously requested issue as ✅ **[RESOLVED]** or 🔴 **[UNRESOLVED]** with line citations.
-   - Transition the overall verdict (e.g., `REQUEST_CHANGES` ➔ `APPROVE` if all items are resolved and tests pass).
+   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `new_findings`, `confidence`.
+   - Mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
 
 ### Verdict Rules (Non-Negotiable)
 

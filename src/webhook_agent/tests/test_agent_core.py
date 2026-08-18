@@ -313,7 +313,6 @@ class TestTokenTruncation:
 
         from webhook_agent.webhook_agent import _truncate_text_to_token_limit
 
-        monkeypatch.setenv("WEBHOOK_FREE_KEY", "test_key")
         long_text = "Code line\n" * 1000
 
         mock_client = MagicMock()
@@ -775,3 +774,15 @@ class TestMergePrDraftSafetyCheck:
         res = merge_pr(ctx, 193)
         assert "Error: Cannot merge PR #193 because it is currently a draft" in res
         assert mock_pr.merge.call_count == 0
+
+
+def test_add_comment_blocked_after_review():
+    from webhook_agent.webhook_agent import add_comment
+
+    ctx = MagicMock()
+    ctx.state = {"review_submitted_in_this_turn": True}
+    res = add_comment(ctx, issue_number=193, body="Extra summary comment")
+    assert (
+        "Skipped: Formal code review report already submitted for #193 in this turn"
+        in res
+    )

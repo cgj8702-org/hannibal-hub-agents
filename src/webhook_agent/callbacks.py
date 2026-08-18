@@ -26,10 +26,25 @@ except ImportError:
 logger = logging.getLogger("webhook_agent.callbacks")
 
 
+MUTATING_TOOLS: set[str] = {
+    "review",
+    "add_comment",
+    "merge_pr",
+    "open_pr",
+    "update_issue",
+    "update_branch_from_base",
+    "resolve_pr_conflicts",
+    "auto_fix_pr_review_feedback",
+    "mark_ready_for_review",
+}
+
+
 async def before_agent_callback(callback_context: CallbackContext) -> None:
     """Pre-populate session state with active tier and runtime context before agent execution."""
     active_tier = _resolve_tier()
     callback_context.state["active_tier"] = active_tier
+    callback_context.state["review_submitted_in_this_turn"] = False
+    callback_context.state["mutating_tool_executed_in_this_turn"] = False
     logger.debug(
         "before_agent_callback: initialized active_tier=%s in state", active_tier
     )
@@ -120,12 +135,29 @@ async def after_model_callback(
 async def before_tool_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext
 ) -> dict[str, Any] | None:
-    """Validate and sanitize tool arguments before execution."""
+    """Validate and sanitize tool arguments before execution, enforcing 1 mutating action per turn."""
     if "pr_number" in args and isinstance(args["pr_number"], str):
         try:
             args["pr_number"] = int(args["pr_number"])
         except ValueError:
             pass
+
+    # Enforce strict 1-tool-per-turn execution for mutating tools
+    if tool.name in MUTATING_TOOLS:
+        if tool_context.state.get("mutating_tool_executed_in_this_turn"):
+            logger.warning(
+                "Strict Single-Tool Guardrail: Suppressed parallel mutating tool call '%s' in same turn",
+                tool.name,
+            )
+            return {
+                "success": False,
+                "detail": (
+                    f"Blocked parallel mutating tool execution for '{tool.name}'. "
+                    "Only 1 mutating action per turn is permitted."
+                ),
+            }
+        tool_context.state["mutating_tool_executed_in_this_turn"] = True
+
     return None
 
 
