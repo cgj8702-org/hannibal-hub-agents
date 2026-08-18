@@ -623,32 +623,46 @@ except ImportError:
 
 
 def get_model_chain() -> list[str]:
-    """Build ordered list of fallback models sorted by TPM (Tokens/Min) descending.
+    """Build ordered list of fallback models sorted by capacity and tier.
 
     Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
 
-    Tier 0 (Configured Primary): GEMMA_MODEL env var (defaults to gemini-3.5-flash-lite on Free, gemini-3.6-flash on Paid)
-    Tier 1 (4,000,000 TPM / 150k RPD): gemini-3.5-flash-lite
-    Tier 2 (2,000,000 TPM / 10k RPD): gemini-3.6-flash
-    Tier 3 (1,000,000 TPM / 10k RPD): gemini-2.5-flash
-    Tier 4 (16,000 TPM / 14.4k RPD): gemma-4-26b
+    Free Tier Chain:
+        1. gemini-3.5-flash-lite (500 RPD / 250k TPM)
+        2. gemini-3.1-flash-lite (500 RPD / 250k TPM)
+        3. gemma-4-31b (14,400 RPD / 16k TPM)
+        4. gemma-4-26b (14,400 RPD / 16k TPM)
+
+    Paid Tier Chain:
+        1. gemini-3.6-flash (10,000 RPD / 2M TPM)
+        2. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
+        3. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
     """
     active_tier = _resolve_tier()
-    default_primary = (
-        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
-    )
+    if active_tier == "paid":
+        default_primary = "gemini-3.6-flash"
+        default_chain = [
+            default_primary,
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+        ]
+    else:
+        default_primary = "gemini-3.5-flash-lite"
+        default_chain = [
+            default_primary,
+            "gemini-3.1-flash-lite",
+            "gemma-4-31b",
+            "gemma-4-26b",
+        ]
+
     primary = os.environ.get("GEMMA_MODEL", default_primary)
-    chain = [
-        primary,
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-2.5-flash",
-        "gemma-4-26b",
-    ]
+    chain = [primary] + [m for m in default_chain if m != primary]
     seen: set[str] = set()
     deduped = [m for m in chain if not (m in seen or seen.add(m))]
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
-    return available if available else deduped
+    final_chain = available if available else deduped
+    logger.debug("Resolved %s model chain: %s", active_tier, final_chain)
+    return final_chain
 
 
 def _select_model_for_event(event_data: dict[str, Any]) -> str:
@@ -1739,9 +1753,8 @@ class WebhookAgent:
                     f"Before SHA: {before_sha}\n"
                     f"Head SHA: {head_sha}\n"
                     f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
-                    f"This is NOT a duplicate delivery. You MUST call get_commit_diff('{before_sha}', '{head_sha}') "
-                    f"or get_issue({pr_num}, include_diff=True) to review the newly pushed changes and "
-                    f"submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                    f"Review the pre-fetched incremental commit diff and full PR diff below to evaluate "
+                    f"the changes in turn 1 and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
                 )
         elif canonical.startswith("pull_request_review_comment."):
             comment = raw.get("comment", {})
@@ -1754,9 +1767,15 @@ class WebhookAgent:
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
             parts.append(f"Review: {(review.get('body') or '')[:500]}")
 
-        # Include PR diff if available
+        # Include pre-fetched commit diff (incremental changes) if available
+        if "commit_diff" in raw:
+            parts.append(
+                f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}"
+            )
+
+        # Include PR diff (full accumulated state) if available
         if "pr_diff" in raw:
-            parts.append(f"\nPR Diff:\n{raw['pr_diff']}")
+            parts.append(f"\nFull PR Diff (Accumulated State):\n{raw['pr_diff']}")
 
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(

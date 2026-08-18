@@ -23,7 +23,7 @@ def mock_registry(tmp_path: Path) -> Path:
 
 
 def test_tier_resolution_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HANNIBAL_TIER", raising=False)
+    monkeypatch.delenv("WEBHOOK_TIER", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("FREE_KEY", raising=False)
@@ -32,14 +32,10 @@ def test_tier_resolution_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
     # Default fallback when no env vars set -> free
     assert _resolve_tier() == "free"
 
-    # Explicit WEBHOOK_TIER / HANNIBAL_TIER overrides
+    # Explicit WEBHOOK_TIER overrides
     monkeypatch.setenv("WEBHOOK_TIER", "paid")
     assert _resolve_tier() == "paid"
     monkeypatch.delenv("WEBHOOK_TIER")
-
-    monkeypatch.setenv("HANNIBAL_TIER", "paid")
-    assert _resolve_tier() == "paid"
-    monkeypatch.delenv("HANNIBAL_TIER")
 
 
 @pytest.mark.anyio

@@ -163,12 +163,12 @@ def _resolve_tier() -> str:
     """Resolve active tier for Webhook Agent (strictly defaulting to 'free').
 
     Resolution cascade:
-    1. Explicit env override: WEBHOOK_TIER or HANNIBAL_TIER ("free" or "paid").
+    1. Explicit env override: WEBHOOK_TIER ("free" or "paid").
     2. GCE VM Instance Metadata: instance/attributes/WEBHOOK_TIER.
     3. Dynamic Firestore config: system_config/runtime -> WEBHOOK_TIER.
     4. Strict default: "free".
     """
-    env_tier = (os.getenv("WEBHOOK_TIER") or os.getenv("HANNIBAL_TIER", "")).lower()
+    env_tier = (os.getenv("WEBHOOK_TIER") or "").lower()
     if env_tier in ("free", "paid"):
         return env_tier
 

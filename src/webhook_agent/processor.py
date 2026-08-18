@@ -159,6 +159,34 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
                 pr_number,
                 len(diff_lines),
             )
+
+        if (
+            canonical == "pull_request.synchronize"
+            or raw.get("action") == "synchronize"
+        ):
+            before_sha = raw.get("before", "")
+            head_sha = (raw.get("pull_request") or {}).get("head", {}).get("sha", "")
+            if before_sha and head_sha and before_sha != head_sha:
+                try:
+                    comparison = repo.compare(before_sha, head_sha)
+                    commit_diff_lines: list[str] = []
+                    for f in comparison.files:
+                        patch = f.patch or "No patch available (binary/renamed/empty)."
+                        commit_diff_lines.append(
+                            f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
+                        )
+                    if commit_diff_lines:
+                        raw["commit_diff"] = "\n".join(commit_diff_lines)
+                        logger.info(
+                            "Pre-fetched commit diff (%s..%s, %d files) for 1-turn synchronize review",
+                            before_sha[:7],
+                            head_sha[:7],
+                            len(commit_diff_lines),
+                        )
+                except Exception as comp_exc:
+                    logger.warning(
+                        "Could not pre-fetch commit comparison: %s", comp_exc
+                    )
     except Exception as exc:
         logger.warning("Could not pre-fetch PR diff: %s", exc)
 
