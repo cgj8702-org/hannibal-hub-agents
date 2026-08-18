@@ -13,11 +13,11 @@ Please follow these protocols to ensure team coordination remains professional, 
 * **Precision Editing:** Default to targeted surgical edits over complete file rewrites.
 * **Rollback Strategy:** Every automated deployment, data mutation, or complex file manipulation MUST include a deterministic rollback protocol to recover from partial failures.
 * **GCP Multi-Project Topology & Secret Resolution Protocol:**
-  - **Compute Host (VM):** Dedicated compute server running Python worker processes.
+  - **Compute Host (VM):** GCE VM instance `hannibal-hub-free` (`us-east1-d`) hosted on GCP project **`chatbot-project-hannibal`**. Runs `systemctl --user restart hannibal-webhook-agent`.
   - **Webhook Free Project (`gen-lang-client-0615466973`):** API quota for free-tier PR review webhooks (`WEBHOOK_FREE_KEY`).
-  - **Webhook Paid Project (`cgj8702-webhook-agent`):** API quota for paid-tier PR review webhooks (`WEBHOOK_PAID_KEY`) and PubSub queue.
+  - **Webhook Paid Project (`cgj8702-webhook-agent`):** Service account (`webhook-agent-sa@cgj8702-webhook-agent.iam.gserviceaccount.com`), PubSub queue, and API quota for paid-tier PR review webhooks (`WEBHOOK_PAID_KEY`).
   - **Feature Agent Project (`gen-lang-client-0613181237`):** API quota for autonomous feature developer engine (`FEATURE_AGENT_FREE_KEY` / `FEATURE_AGENT_PROJECT`).
-  - **Secret Resolution Rule:** The compute VM host is completely separate from the Gemini API developer projects. Do NOT attempt to fetch Gemini API keys from GCE VM Instance Metadata server. Environment variables (`.envrc` / Secret Manager) are the sole authoritative source of truth.
+  - **Secret Resolution Rule:** The compute VM host (`chatbot-project-hannibal`) is completely separate from the 3 Gemini API developer projects. Do NOT attempt to fetch Gemini API keys from GCE VM Instance Metadata server. Environment variables (`.envrc` / Secret Manager) are the sole authoritative source of truth.
 
 When executing terminal commands and scripts, follow these protocols to ensure reliable asynchronous coordination:
 
