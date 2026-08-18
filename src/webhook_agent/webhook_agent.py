@@ -46,6 +46,7 @@ from .schemas import CodeReviewResponse, SyncReviewResponse
 from .formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
+    normalize_code_review_dict,
     render_code_review_markdown,
     render_sync_review_markdown,
 )
@@ -1321,7 +1322,8 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
         try:
             data = json.loads(cleaned_body)
             if "scorecard" in data:
-                cr_obj = CodeReviewResponse.model_validate(data)
+                normalized_data = normalize_code_review_dict(data)
+                cr_obj = CodeReviewResponse.model_validate(normalized_data)
                 enforced_verdict = calculate_strict_verdict(cr_obj)
                 rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
                 return rendered_body, enforced_verdict

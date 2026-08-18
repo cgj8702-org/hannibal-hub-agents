@@ -121,3 +121,40 @@ def test_sync_review_rendering():
     md = render_sync_review_markdown(sync_resp, verdict)
     assert "# Pull Request Synchronization Review Update" in md
     assert "✅ **[RESOLVED]**" in md
+
+
+def test_enforce_verdict_with_loose_schema_drift_json():
+    """Verify self-healing normalizer recovers from LLM schema drift (strings instead of RiskItems, architecture instead of correctness)."""
+    loose_json = """{
+      "executive_summary": "Pull Request #81 centralizes Google ADK Gemini model instantiations.",
+      "scorecard": {
+        "architecture": 5,
+        "security": 4,
+        "performance": 4,
+        "reliability": 4,
+        "readability": 5,
+        "test_coverage": 4
+      },
+      "scorecard_evidence": {
+        "architecture": "Successfully extracts RateLimitedGemini",
+        "security": "API keys preserved",
+        "performance": "Maintains token estimation",
+        "reliability": "Clean fallback imports",
+        "readability": "Well-documented functions",
+        "test_coverage": "Includes unit tests"
+      },
+      "confidence": 5,
+      "risks_and_edge_cases": [
+        "Circular import risk: RateLimitedGemini imports get_active_model lazily"
+      ],
+      "critical_issues": [],
+      "minor_suggestions": [
+        "Consider adding a unit test"
+      ],
+      "context_gaps": []
+    }"""
+    rendered_md, verdict = _enforce_verdict(loose_json, "APPROVE")
+    assert verdict == "APPROVE"
+    assert "# Code Review Report" in rendered_md
+    assert "Code Correctness:** 5/5" in rendered_md
+    assert "Circular import risk" in rendered_md
