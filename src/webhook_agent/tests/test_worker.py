@@ -13,6 +13,9 @@ os.environ.setdefault("GITHUB_INSTALLATION_ID", "67890")
 os.environ.setdefault("GITHUB_PRIVATE_KEY_PATH", "/dev/null")
 
 from webhook_agent.processor import WebhookProcessor
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.pubsub]
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import time
+import pytest
 from unittest.mock import MagicMock
 
 from logic.firestore_registry import FirestoreDepletedModelRegistry
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.firestore]
 
 
 def test_firestore_registry_local_memory_fallback():

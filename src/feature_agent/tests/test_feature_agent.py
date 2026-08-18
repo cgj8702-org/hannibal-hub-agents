@@ -1,21 +1,28 @@
 """Unit tests for standalone feature_agent package."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from google.adk.agents.context import Context
+import pytest
 
 from feature_agent.agent import build_feature_developer_agent
+from feature_agent.delegate import ask_parent
+from feature_agent.environment import LocalEnvironment
 from feature_agent.firestore_checkpoints import (
     FirestoreFeatureCheckpointRegistry,
 )
+from feature_agent.guardrails import exfil_guard, permission_guard, policies_guard
+from feature_agent.plugins import GuardrailsPlugin
 from feature_agent.runner import FeatureTaskRunner
-from feature_agent.tools import get_worktree_path, view_file
+from feature_agent.tools import resolve_in_window
+
+pytestmark = [pytest.mark.unit, pytest.mark.feature_agent]
 
 
 def test_feature_developer_agent_construction():
     agent = build_feature_developer_agent()
     assert agent.name == "feature_developer_agent"
-    assert len(agent.tools) >= 5
+    assert len(getattr(agent, "sub_agents", [])) == 4
 
 
 def test_firestore_checkpoint_registry_save_and_get():
@@ -60,14 +67,55 @@ def test_feature_task_runner_quota_paused(monkeypatch):
                 assert "Issue #77" in res
 
 
-def test_feature_tools_get_worktree_path():
-    ctx = MagicMock(spec=Context)
-    ctx.state = {"worktree_path": "/tmp/nonexistent_wt_path"}
-    path = get_worktree_path(ctx)
-    assert path.exists()
+def test_feature_tools_resolve_in_window_valid():
+    wt = Path(".").resolve()
+    resolved = resolve_in_window("pyproject.toml", wt)
+    assert resolved.exists()
 
 
-def test_feature_tools_view_file_nonexistent():
-    ctx = MagicMock(spec=Context)
-    res = view_file(ctx, "nonexistent_file_12345.txt")
-    assert "does not exist" in res
+def test_feature_tools_resolve_in_window_traversal_blocked():
+    wt = Path(".").resolve()
+    with pytest.raises(PermissionError, match="Path traversal blocked"):
+        resolve_in_window("../../etc/passwd", wt)
+
+
+def test_guardrails_exfil_guard():
+    res = exfil_guard(
+        MagicMock(), {"url": "http://169.254.169.254/latest"}, MagicMock()
+    )
+    assert res is not None and "strictly prohibited" in res["error"]
+
+
+def test_guardrails_permission_guard_substitution():
+    res = permission_guard(MagicMock(), {"cmd": "echo `id`"}, MagicMock())
+    assert res is not None and "Command substitution" in res["error"]
+
+
+def test_guardrails_policies_guard_force_push():
+    res = policies_guard("commit_and_push", {"arg": "git push --force"}, MagicMock())
+    assert res is not None and "Force pushing" in res["error"]
+
+
+def test_plugins_repeated_failure_guard():
+    plugin = GuardrailsPlugin(max_repeated_failures=2)
+    ctx = MagicMock()
+    ctx.state = {}
+
+    plugin.after_tool_callback("run_pytest", {}, ctx, "🔴 FAILED test_foo")
+    plugin.after_tool_callback("run_pytest", {}, ctx, "🔴 FAILED test_foo")
+
+    assert ctx.state.get("halt_reason") == "repeated_failure:run_pytest"
+
+
+def test_delegate_ask_parent_tool():
+    ctx = MagicMock()
+    ctx.state = {}
+    res = ask_parent(ctx, "Should we use PostgreSQL or Firestore?")
+    assert "Question escalated" in res
+    assert ctx.state["last_parent_question"] == "Should we use PostgreSQL or Firestore?"
+
+
+def test_local_environment_resolve():
+    env = LocalEnvironment(".")
+    resolved = env.resolve_path("pyproject.toml")
+    assert resolved.exists()

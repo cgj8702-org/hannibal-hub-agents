@@ -1,7 +1,6 @@
 """Tests for agent_core.py — focusing on AgentCore delegation and trace ID generation."""
 
-from __future__ import annotations
-
+import pytest
 from unittest.mock import MagicMock
 
 from webhook_agent.agent_core import (
@@ -9,6 +8,8 @@ from webhook_agent.agent_core import (
     generate_trace_id,
 )
 from webhook_agent.webhook_types import ActionResult
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 # ---------------------------------------------------------------------------
 # Tests: generate_trace_id

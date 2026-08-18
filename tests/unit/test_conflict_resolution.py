@@ -1,13 +1,14 @@
 """Unit tests for isolated Git Worktree conflict resolution module."""
 
-from __future__ import annotations
-
+import pytest
 from unittest.mock import MagicMock
 
 from webhook_agent.tools.resolve_conflicts import (
     _synthesize_conflict_resolution,
     resolve_merge_conflicts,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_synthesize_conflict_resolution_no_markers() -> None:

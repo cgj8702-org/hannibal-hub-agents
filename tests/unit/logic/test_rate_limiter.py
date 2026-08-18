@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from logic.rate_limiter import RPMWaiter, _resolve_tier
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_registry(tmp_path: Path) -> Path:

@@ -31,6 +31,18 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
+addopts = "--strict-markers"
+markers = [
+    "unit: Fast isolated unit tests with mocked dependencies.",
+    "integration: Component integration tests using local worktrees or CLI tools.",
+    "slow: Heavy multi-turn or resource-intensive tests.",
+    "e2e: Live end-to-end tests against GitHub APIs or GCP Firestore.",
+    "feature_agent: Tests specific to the Autonomous Feature Developer.",
+    "webhook_agent: Tests specific to the Webhook Receiver Agent.",
+    "guardrails: Tests for safety plugins and security guardrails.",
+    "firestore: Tests for Firestore checkpoint registries.",
+    "pubsub: Tests for Pub/Sub push event handlers.",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:google.adk.*",
     "ignore:.*BaseAgentConfig is deprecated.*:DeprecationWarning",
