@@ -331,6 +331,55 @@ def _prefetch_previous_bot_reviews(
         logger.warning("Could not pre-fetch previous bot reviews: %s", exc)
 
 
+def _preexecute_implement_command(
+    gh: Github, repo_name: str, payload: dict[str, Any]
+) -> None:
+    """Pre-process /implement or /feature commands on Issues and Issue comments."""
+    try:
+        raw = payload.get("raw_payload")
+        if not isinstance(raw, dict) or "implement_instruction" in raw:
+            return
+
+        body = ""
+        issue_num = None
+        if "issue" in raw and isinstance(raw["issue"], dict):
+            issue_num = raw["issue"].get("number")
+            body = raw["issue"].get("body") or ""
+
+        if "comment" in raw and isinstance(raw["comment"], dict):
+            body = raw["comment"].get("body") or ""
+
+        if not body:
+            return
+
+        body_lower = body.lower()
+        if "/implement" not in body_lower and "/feature" not in body_lower:
+            return
+
+        if not issue_num:
+            return
+
+        # Extract instruction after command
+        instruction = body
+        for cmd in ("/implement", "/feature"):
+            if cmd in body_lower:
+                idx = body_lower.find(cmd)
+                instruction = body[idx + len(cmd) :].strip()
+                break
+
+        if not instruction:
+            instruction = (raw.get("issue") or {}).get("title") or "Implement feature"
+
+        raw["implement_instruction"] = f"Issue #{issue_num}: {instruction}"
+        logger.info(
+            "Pre-processed /implement command for Issue #%d: '%s'",
+            issue_num,
+            instruction[:40],
+        )
+    except Exception as exc:
+        logger.warning("Could not pre-process /implement command: %s", exc)
+
+
 class WebhookProcessor:
     """Handles inbound webhook events.
 
@@ -514,6 +563,11 @@ class WebhookProcessor:
         if not dry_run:
             _add_eyes_reaction(gh, repo_name, payload)
             _prefetch_pr_diff(gh, repo_name, payload)
+            _prefetch_inline_comment_context(gh, repo_name, payload)
+            _preexecute_resolve_command(gh, repo_name, payload)
+            _prefetch_commit_history(gh, repo_name, payload)
+            _prefetch_previous_bot_reviews(gh, repo_name, payload)
+            _preexecute_implement_command(gh, repo_name, payload)
 
         results = agent.run(payload, repo_name, gh_client=gh)
         if results:
