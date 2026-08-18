@@ -154,7 +154,11 @@ def build_feature_developer_agent() -> BaseAgent:
     """Construct the full 4-stage SequentialAgent + LoopAgent pipeline."""
     api_key = get_feature_agent_key()
     model_name = os.getenv("FEATURE_AGENT_MODEL", "gemini-3.5-flash-lite")
-    _gcp_project = os.getenv("FEATURE_AGENT_GCP_PROJECT", "cgj8702-feature-agent")
+    _gcp_project = (
+        os.getenv("FEATURE_AGENT_GCP_PROJECT")
+        or os.getenv("FEATURE_AGENT_PROJECT")
+        or "cgj8702-feature-agent"
+    )
 
     model_client = Gemini(
         model=model_name,
