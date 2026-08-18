@@ -1036,6 +1036,19 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     Returns:
         A string describing the result.
     """
+    # Programmatic Guardrail: Block duplicate add_comment if formal review() was already submitted in this session
+    session_state = getattr(ctx, "state", None)
+    if isinstance(session_state, dict) and session_state.get(
+        f"review_submitted_{issue_number}"
+    ):
+        logger.warning(
+            "Programmatic Guardrail: Blocked duplicate add_comment() for #%d (formal review already submitted)",
+            issue_number,
+        )
+        return (
+            f"Skipped: Formal code review report already submitted for #{issue_number}."
+        )
+
     # Programmatic Guardrail: Redirect code review reports erroneously sent to add_comment to review()
     if (
         "Code Review Report" in body
@@ -1483,6 +1496,9 @@ def review(
 
         rv = pr.create_review(body=body, event=event)
         _COMMENT_RATE_LIMITER.record(target_key)
+        session_state = getattr(ctx, "state", None)
+        if isinstance(session_state, dict):
+            session_state[f"review_submitted_{pr_number}"] = True
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({event}): {detail}"
     except Exception as e:  # noqa: BLE001

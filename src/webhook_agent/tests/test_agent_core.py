@@ -775,3 +775,12 @@ class TestMergePrDraftSafetyCheck:
         res = merge_pr(ctx, 193)
         assert "Error: Cannot merge PR #193 because it is currently a draft" in res
         assert mock_pr.merge.call_count == 0
+
+
+def test_add_comment_blocked_after_review():
+    from webhook_agent.webhook_agent import add_comment
+
+    ctx = MagicMock()
+    ctx.state = {"review_submitted_193": True}
+    res = add_comment(ctx, issue_number=193, body="Extra summary comment")
+    assert "Skipped: Formal code review report already submitted for #193" in res
