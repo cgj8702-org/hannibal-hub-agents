@@ -359,8 +359,8 @@ class TestTokenTruncation:
 
 
 class TestToolRegistration:
-    def test_agent_has_exactly_14_tools(self):
-        """WebhookAgent should register 12 API primitives + 2 utility tools."""
+    def test_agent_has_exactly_15_tools(self):
+        """WebhookAgent should register 13 API primitives + 2 utility tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -368,10 +368,10 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._agent.tools
         ]
-        assert len(tool_names) == 14
+        assert len(tool_names) == 15
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 12 API primitives + get_current_time + search_agent."""
+        """Tool names should match the 13 API primitives + get_current_time + search_agent."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -390,6 +390,7 @@ class TestToolRegistration:
                 "open_pr",
                 "update_branch_from_base",
                 "resolve_pr_conflicts",
+                "auto_fix_pr_review_feedback",
                 "mark_ready_for_review",
                 "merge_pr",
                 "review",
