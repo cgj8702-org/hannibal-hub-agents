@@ -25,6 +25,17 @@ def get_worktree_path(ctx: Context) -> Path:
     return Path(".").resolve()
 
 
+def resolve_in_window(file_path: str, worktree_path: Path) -> Path:
+    """Workspace Focus Lens: Enforce path boundary protection to prevent traversal."""
+    resolved = (worktree_path / file_path).resolve()
+    wt_str = str(worktree_path.resolve())
+    if not str(resolved).startswith(wt_str):
+        raise PermissionError(
+            f"Path traversal blocked: '{file_path}' resolves outside target workspace window '{wt_str}'"
+        )
+    return resolved
+
+
 def search_codebase(ctx: Context, query: str) -> str:
     """Search the codebase for a text or symbol pattern using ripgrep or git grep."""
     wt = get_worktree_path(ctx)
