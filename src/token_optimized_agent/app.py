@@ -13,20 +13,26 @@ except ImportError:
 from src.token_optimized_agent.agent import root_agent
 from src.token_optimized_agent.callbacks import MessagePruningPlugin
 
-summarizer_llm = get_adk_model(model_name="gemini-3.6-flash")
 
-app = App(
-    name="token_optimized_app",
-    root_agent=root_agent,
-    plugins=[MessagePruningPlugin(max_history_events=20)],
-    events_compaction_config=EventsCompactionConfig(
-        compaction_interval=15,
-        overlap_size=2,
-        summarizer=LlmEventSummarizer(llm=summarizer_llm),
-    ),
-    context_cache_config=ContextCacheConfig(
-        min_tokens=2048,
-        ttl_seconds=1800,
-        cache_intervals=5,
-    ),
-)
+def build_token_optimized_app() -> App:
+    """Construct the token_optimized ADK App instance dynamically."""
+    summarizer_llm = get_adk_model(model_name="gemini-3.6-flash")
+    return App(
+        name="token_optimized_app",
+        root_agent=root_agent,
+        plugins=[MessagePruningPlugin(max_history_events=20)],
+        events_compaction_config=EventsCompactionConfig(
+            compaction_interval=15,
+            overlap_size=2,
+            summarizer=LlmEventSummarizer(llm=summarizer_llm),
+        ),
+        context_cache_config=ContextCacheConfig(
+            min_tokens=2048,
+            ttl_seconds=1800,
+            cache_intervals=5,
+        ),
+    )
+
+
+# Helper factory for constructing the token_optimized ADK App
+__all__ = ["build_token_optimized_app"]
