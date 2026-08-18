@@ -245,7 +245,9 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 )
     normalized["resolutions"] = clean_res
 
-    raw_crit = normalized.get("new_critical_issues")
+    raw_crit = normalized.get("critical_issues") or normalized.get(
+        "new_critical_issues"
+    )
     clean_crit: list[dict[str, Any]] = []
     if isinstance(raw_crit, list):
         for item in raw_crit:
@@ -268,7 +270,9 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         }
                     )
 
-    raw_minor = normalized.get("new_minor_suggestions")
+    raw_minor = normalized.get("minor_suggestions") or normalized.get(
+        "new_minor_suggestions"
+    )
     clean_minor: list[dict[str, Any]] = []
     if isinstance(raw_minor, list):
         for item in raw_minor:
@@ -320,8 +324,8 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 else:
                     clean_crit.append(issue_dict)
 
-    normalized["new_critical_issues"] = clean_crit
-    normalized["new_minor_suggestions"] = clean_minor
+    normalized["critical_issues"] = clean_crit
+    normalized["minor_suggestions"] = clean_minor
     normalized["new_findings"] = clean_crit + clean_minor
 
     conf = normalized.get("confidence")
@@ -373,18 +377,18 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
 
     Non-Negotiable Sync Verdict Rules:
     - ANY unresolved finding -> REQUEST_CHANGES
-    - ANY new critical issue -> REQUEST_CHANGES
+    - ANY critical issue -> REQUEST_CHANGES
     - Confidence < 4 -> COMMENT
-    - All items RESOLVED, 0 new critical issues, confidence >= 4 -> APPROVE
+    - All items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
     """
     unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
-    has_critical = len(review.new_critical_issues) > 0
+    has_critical = len(review.critical_issues) > 0
 
     if unresolved or has_critical:
         logger.info(
-            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, new_critical=%d)",
+            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, critical=%d)",
             len(unresolved),
-            len(review.new_critical_issues),
+            len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
 
@@ -393,7 +397,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
 
     logger.info(
         "✅ Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",
-        len(review.new_minor_suggestions),
+        len(review.minor_suggestions),
     )
     return "APPROVE"
 
@@ -520,8 +524,8 @@ def render_sync_review_markdown(
         )
 
     crit_lines: list[str] = []
-    if review.new_critical_issues:
-        for issue in review.new_critical_issues:
+    if review.critical_issues:
+        for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
             crit_lines.append(
                 f"* 🔴 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
@@ -530,8 +534,8 @@ def render_sync_review_markdown(
         crit_lines.append("* *None found.*")
 
     minor_lines: list[str] = []
-    if review.new_minor_suggestions:
-        for issue in review.new_minor_suggestions:
+    if review.minor_suggestions:
+        for issue in review.minor_suggestions:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
             minor_lines.append(
                 f"* 🟡 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"

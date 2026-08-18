@@ -190,7 +190,7 @@ def test_enforce_verdict_with_loose_sync_review_json():
 
 
 def test_calculate_sync_verdict_blocking_new_finding():
-    """Verify that a critical/blocking new finding forces REQUEST_CHANGES in sync reviews."""
+    """Verify that a critical/blocking issue forces REQUEST_CHANGES in sync reviews."""
     sync_resp = SyncReviewResponse(
         summary="PR update introduced a critical security issue.",
         resolutions=[
@@ -200,7 +200,7 @@ def test_calculate_sync_verdict_blocking_new_finding():
                 evidence="Fixed in L20",
             )
         ],
-        new_critical_issues=[
+        critical_issues=[
             IssueItem(
                 path="src/auth.py",
                 line=12,

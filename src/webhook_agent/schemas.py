@@ -119,17 +119,13 @@ class SyncReviewResponse(BaseModel):
     resolutions: list[SyncResolutionItem] = Field(
         description="Resolution status for all previously requested findings"
     )
-    new_critical_issues: list[IssueItem] = Field(
+    critical_issues: list[IssueItem] = Field(
         default_factory=list,
-        description="New critical or blocking issues introduced in this update",
+        description="Critical or blocking issues introduced in this update",
     )
-    new_minor_suggestions: list[IssueItem] = Field(
+    minor_suggestions: list[IssueItem] = Field(
         default_factory=list,
-        description="New non-blocking minor suggestions or maintainability notes introduced in this update",
-    )
-    new_findings: list[IssueItem] = Field(
-        default_factory=list,
-        description="Legacy field for backward compatibility with initial sync review schema",
+        description="Non-blocking minor suggestions or maintainability notes introduced in this update",
     )
     confidence: int = Field(
         ge=1, le=5, description="Auditor confidence rating from 1 to 5"
