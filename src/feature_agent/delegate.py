@@ -21,7 +21,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
 
-from feature_agent.agent import feature_app
+from feature_agent.agent import build_feature_app
 
 logger = logging.getLogger("feature_agent.delegate")
 
@@ -150,7 +150,7 @@ async def run_child_delegate(
     memory_service = InMemoryMemoryService()
 
     runner = Runner(
-        app=feature_app,
+        app=build_feature_app(),
         session_service=session_service,
         memory_service=memory_service,
     )
