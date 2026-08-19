@@ -1,13 +1,15 @@
 """Unit tests for CloudLoggingAnalyticsPlugin."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 from src.logic.analytics import CloudLoggingAnalyticsPlugin
 
 pytestmark = [pytest.mark.unit]
 
 
-def test_cloud_logging_analytics_plugin_callbacks():
+@pytest.mark.unit
+def test_cloud_logging_analytics_plugin_callbacks() -> None:
     plugin = CloudLoggingAnalyticsPlugin()
     mock_agent = MagicMock()
     mock_agent.name = "test_agent"
@@ -26,7 +28,8 @@ def test_cloud_logging_analytics_plugin_callbacks():
         assert kwargs["extra"]["adk_metrics"]["agent_name"] == "test_agent"
 
 
-def test_cloud_logging_analytics_model_and_tool_callbacks():
+@pytest.mark.unit
+def test_cloud_logging_analytics_model_and_tool_callbacks() -> None:
     plugin = CloudLoggingAnalyticsPlugin()
     mock_context = MagicMock()
 

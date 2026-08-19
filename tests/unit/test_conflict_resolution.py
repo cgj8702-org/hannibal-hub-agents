@@ -1,16 +1,18 @@
 """Unit tests for isolated Git Worktree conflict resolution module."""
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 from webhook_agent.tools.resolve_conflicts import (
     _synthesize_conflict_resolution,
     resolve_merge_conflicts,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 def test_synthesize_conflict_resolution_no_markers() -> None:
     content = "def foo():\n    return 'bar'\n"
     mock_client = MagicMock()
@@ -19,6 +21,8 @@ def test_synthesize_conflict_resolution_no_markers() -> None:
     mock_client.models.generate_content.assert_not_called()
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 def test_synthesize_conflict_resolution_with_markers() -> None:
     content = (
         "<<<<<<< HEAD\n"
@@ -39,6 +43,8 @@ def test_synthesize_conflict_resolution_with_markers() -> None:
     mock_client.models.generate_content.assert_called_once()
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 def test_resolve_merge_conflicts_failure_handling(tmp_path) -> None:
     # Testing graceful failure handling on invalid repo path
     res = resolve_merge_conflicts(
