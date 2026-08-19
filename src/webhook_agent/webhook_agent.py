@@ -1444,9 +1444,10 @@ def get_current_time(ctx: Context) -> dict[str, str]:
 
 
 # Sub-agent for Google Search grounding without breaking AFC for root tools
+# Note: google_search tools in ADK are strictly supported on Gemini models (gemini-3.5-flash-lite).
 search_sub_agent = Agent(
     name="search_agent",
-    model=os.environ.get("GEMINI_SEARCH_MODEL", get_active_model()),
+    model=os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite"),
     instruction="You are a technical search specialist. Search the web for documentation, CVEs, syntax issues, and library details.",
     tools=[google_search],
 )
@@ -1673,6 +1674,15 @@ class WebhookAgent:
             self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
+            search_model_name = (
+                next_model
+                if "gemini" in next_model.lower()
+                else os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite")
+            )
+            search_sub_agent.model = get_adk_model(
+                model_name=search_model_name,
+                api_key=get_active_api_key(),
+            )
             return next_model
         return None
 
@@ -2069,6 +2079,15 @@ class WebhookAgent:
             self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
+            search_model_name = (
+                selected_model
+                if "gemini" in selected_model.lower()
+                else os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite")
+            )
+            search_sub_agent.model = get_adk_model(
+                model_name=search_model_name,
+                api_key=get_active_api_key(),
+            )
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []

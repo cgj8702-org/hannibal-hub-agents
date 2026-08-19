@@ -115,3 +115,35 @@ async def test_before_tool_callback_allow_multiple_mutating_tools() -> None:
     tool2.name = "add_comment"
     res2 = await before_tool_callback(tool2, args, ctx)
     assert res2 is None
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_on_tool_error_callback_rate_limit() -> None:
+    tool = MagicMock()
+    tool.name = "read_file"
+    args = {"path": "main.py"}
+    ctx = MagicMock()
+
+    err = Exception("429 RESOURCE_EXHAUSTED")
+    res = await on_tool_error_callback(tool, args, ctx, err)
+    assert res is not None
+    assert res["success"] is False
+    assert "temporary limit or error" in res["detail"]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_on_tool_error_callback_search_agent() -> None:
+    tool = MagicMock()
+    tool.name = "search_agent"
+    args = {"query": "python docs"}
+    ctx = MagicMock()
+
+    err = Exception("Search connection timeout")
+    res = await on_tool_error_callback(tool, args, ctx, err)
+    assert res is not None
+    assert res["success"] is False
+    assert "search_agent" in res["detail"]
