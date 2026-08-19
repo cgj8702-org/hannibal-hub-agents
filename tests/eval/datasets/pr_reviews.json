@@ -1,0 +1,18 @@
+[
+  {
+    "id": "clean_docs_pr_001",
+    "description": "Clean documentation update to README.md",
+    "pr_type": "dev_docs",
+    "diff_sample": "diff --git a/README.md b/README.md\nindex 123..456 100644\n--- a/README.md\n+++ b/README.md\n@@ -10,3 +10,3 @@\n-Old docs line\n+Updated documentation line with improved guidance\n",
+    "expected_verdict": "APPROVE",
+    "expected_risks_count": 0
+  },
+  {
+    "id": "concurrency_bug_pr_002",
+    "description": "PR introducing unhandled async race condition in session state",
+    "pr_type": "core_backend",
+    "diff_sample": "diff --git a/src/logic/state.py b/src/logic/state.py\nindex 111..222 100644\n--- a/src/logic/state.py\n+++ b/src/logic/state.py\n@@ -45,5 +45,5 @@\n async def update_state(key, val):\n-    async with lock:\n-        state[key] = val\n+    state[key] = val\n",
+    "expected_verdict": "REQUEST_CHANGES",
+    "expected_risks_count": 1
+  }
+]

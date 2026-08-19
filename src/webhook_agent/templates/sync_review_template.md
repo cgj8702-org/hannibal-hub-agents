@@ -11,19 +11,20 @@
 
 > [!NOTE]
 > **Verification Status of Previously Requested Changes**
-> * ✅ **[RESOLVED]** `[file:line]`: [Description of fixed issue]
+> * ✅ **[RESOLVED]** `[file:line]`: [Description of fixed issue verified in diff]
 > * 🔴 **[UNRESOLVED]** `[file:line]`: [Description of remaining issue]
 
 ---
 
-### 3. Mandatory Risk & Edge-Case Verification
+### 3. Updated Risk & Edge-Case Verification
 
 > [!IMPORTANT]
-> * **Updated Risk / Edge-Case:** [Identify any new or verified edge cases in the updated files]
-> * **Safeguard Verification:** [Verified safeguard in commit patch]
+> * **New / Verified Risks:** [Identify any new edge cases or verified safeguards in the updated commit patch]
+> * **Safeguard Verification:** [Verified safeguard status]
 
 ---
 
 ### 4. Final Verdict Transition
 
 * **Previous Verdict:** `[REQUEST_CHANGES | COMMENT]` ➔ **Updated Verdict:** `[APPROVE | REQUEST_CHANGES | COMMENT]`
+* **Confidence Rating:** `[0.0-5.0]/5.0`

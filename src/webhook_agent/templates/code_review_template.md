@@ -1,54 +1,45 @@
-# Code Review Report
+# 🛡️ Code Review Report
 
 ### 1. Executive Summary
 
-* **Goal of the PR:** [Brief description of what this PR aims to achieve]
-* **Verdict Justification:** [1-2 direct sentences explaining WHY you chose the verdict]
+* **PR Scope:** `[dev_docs | minor_fix | core_backend]`
+* **Verdict Justification:** [1-2 direct sentences explaining the architectural intent and verdict rationale]
 
 ---
 
-### 2. Scorecard Summary
+### 2. Verdict Determination
 
-> [!NOTE]
-> **Scorecard Breakdown (1-5 Scale)**
-> * **Code Correctness:** [Score]/5 — [Specific Evidence from diff]
-> * **Security & Privacy:** [Score]/5 — [Specific Evidence from diff]
-> * **Performance & Scale:** [Score]/5 — [Specific Evidence from diff]
-> * **Readability & Style:** [Score]/5 — [Specific Evidence from diff]
-> * **Test Coverage:** [Score]/5 — [Specific Evidence from diff]
-> * **Average Score:** [Calculated Average]/5 | **Confidence:** [1-5]/5
+* **Overall Verdict:** `[APPROVE | REQUEST_CHANGES | COMMENT]`
+* **Confidence Rating:** `[0.0-5.0]/5.0`
 
 ---
 
-### 3. Verdict Determination
+### 3. Critical Blocking Issues (Must Fix Before Merge)
 
-* **Overall Verdict:** [APPROVE | REQUEST_CHANGES | COMMENT]
+> [!CAUTION]
+> *Issues that block deployment, introduce bugs, cause race conditions, or break API contracts.*
+
+* **[File:Line Citation]**: `[file_path]:[line_range]`
+* **Failure Mechanism**: [Clinical explanation of the flaw and edge case]
+* **Remediation**:
+```python
+# Concrete, actionable code fix snippet
+```
 
 ---
 
-### 4. Mandatory Risk & Edge-Case Analysis
+### 4. Diff-Anchored Risk & Edge-Case Analysis
 
 > [!IMPORTANT]
-> *Finding zero risks or edge cases is unacceptable. Every review MUST highlight at least ONE potential failure mode, concurrency boundary, memory limit, or unhandled edge case — even for approved PRs.*
+> *High-signal analysis of potential failure modes, rate limits, concurrency boundaries, memory usage, or security considerations.*
 
-* **Potential Edge Case / Risk:** [Identify a specific edge case or risk factor, e.g., rate limits, unhandled exceptions, non-UTF8 input, missing timeouts, or concurrent execution boundaries]
-* **Recommended Safeguard:** [Propose how to mitigate or monitor this risk]
-
----
-
-### 5. Key Issues & Action Items
-
-#### 🔴 Critical (Must Fix Before Merge)
-*Issues that block deployment, introduce bugs, or cause security vulnerabilities.*
-* *[None if no critical issues found, or list issue title with File/Line and suggested fix]*
-
-#### 🟡 Minor / Refactoring (Actionable Suggestions)
-*Non-blocking suggestions to improve code quality, maintainability, or performance.*
-* *[Provide at least one actionable, objective suggestion for improvement]*
+* **[Category]**: `[concurrency | memory | security | breaking_change]`
+* **Impact**: [Specific operational risk and edge case]
+* **Recommended Safeguard**: [Recommended code mitigation or safeguard]
 
 ---
 
-### 6. Confidence Self-Assessment
+### 5. Actionable Maintainability & Code Quality Notes
 
-* **My Confidence:** [1-5]
-* **Context Gaps:** [List any missing context or state None if fully understood]
+* **[File:Line Citation]**: `[file_path]:[line_range]`
+* **Suggestion**: [Actionable suggestion to improve readability, performance, or test coverage]

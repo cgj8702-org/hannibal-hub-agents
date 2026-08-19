@@ -1,76 +1,80 @@
-# ADK 429 Rate Limit & Cooldown Details Extraction
+# 🏛️ Implementation Plan: High-Trust, Deep Architectural Code Review & Output System
 
-This implementation plan details how to intercept, extract, and log rich 429 rate limit, quota, and cooldown details from ADK (`google.adk.models.GoogleLLM` / `_ResourceExhaustedError`) across the Hannibal Hub Agents codebase.
+Redesign the Webhook Auditor agent's output and template system in `hannibal-hub-agents` to deliver **deeply reasoned, highly trustworthy, and evidence-grounded code reviews**. This eliminates generic cheerleading, enforces strict AST diff line-anchoring, leverages Gemini Thinking Mode for thorough architectural auditing, and structures reviews into clear, high-signal Markdown.
 
 ---
 
-## User Review Required
+## 🍵 User Review Required
 
 > [!IMPORTANT]
-> **No Breaking Changes**: This enhancement is strictly additive and non-breaking. It unmasks the underlying `google.genai.errors.ClientError` nested within ADK's `_ResourceExhaustedError.__cause__` and `response_json`/`response.headers`.
+> **High-Trust Review Principle**: Reviews MUST be grounded strictly in empirical diff evidence. Every cited finding MUST include exact file paths, line citations (`L45-L50`), specific failure mechanisms, and concrete remediation code snippets.
+
+> [!TIP]
+> **Anti-Sycophancy & High Signal**: Generic praise ("Great refactoring!", "Rock-solid PR!") is strictly prohibited. The auditor output focuses purely on objective technical analysis, edge cases, and actionable code improvements.
 
 ---
 
-## Open Questions
+## ❓ Open Questions
 
-None. The exception structure of ADK 2.0 `_ResourceExhaustedError` and `ClientError` has been verified via scratch validation.
-
----
-
-## Proposed Changes
-
-### Core Logic & Utilities
-
-#### [MODIFY] [rate_limiter.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/logic/rate_limiter.py)
-
-- Add `extract_rate_limit_details(exc: Exception) -> dict[str, Any]` helper function.
-- Inspect `exc.__cause__`, `exc.response_json`, `exc.details`, and `exc.response.headers`.
-- Extract:
-  - `quota_limit` (e.g. `GenerateContentRequestsPerMinutePerProjectPerRegion`)
-  - `quota_value` (e.g. `15`)
-  - `retry_after_seconds` (from RPC `retryDelay` / `retry_delay` or HTTP `Retry-After` / `x-ratelimit-reset-requests`)
-  - `reason` (e.g. `RATE_LIMIT_EXCEEDED`)
-  - Full HTTP header dictionary for clinical telemetry logging.
+None. The proposed structure optimizes review trust, depth, and clarity across all PR scopes.
 
 ---
 
-### Webhook Agent Integration
+## 🛠️ Proposed Changes
+
+### High-Trust Audit Instructions & Rubric
 
 #### [MODIFY] [webhook_agent.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/webhook_agent.py)
 
-- Intercept `_ResourceExhaustedError` / 429 exceptions during PR code review executions.
-- Parse structured rate limit details via `extract_rate_limit_details(exc)`.
-- Log clinical warning telemetry containing exact quota name, limit, and cooldown delay.
-- Inform fallback model selection or retry backoff queues with exact `retry_after_seconds`.
+- Refine system instructions for `code_auditor` sub-agent:
+  - Enforce 4 mandatory audit dimensions:
+    1. **Logic & Boundaries**: Off-by-one errors, null/None dereferences, unhandled exceptions, resource leaks.
+    2. **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
+    3. **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
+    4. **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
+  - Require explicit evidence-based justification for every verdict determination.
 
 ---
 
-### Feature Agent Integration
+### High-Signal Output Templates (`src/webhook_agent/templates/`)
 
-#### [MODIFY] [runner.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/feature_agent/runner.py)
+#### [MODIFY] [code_review_template.md](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/templates/code_review_template.md)
 
-- Intercept 429 errors during autonomous feature agent task executions.
-- Extract `retry_after_seconds` and sleep precisely for the returned cooldown duration before retrying model requests.
+- Redesign initial code review format for maximum readability and trust:
+  - **Verdict Header**: Verdict (`APPROVE`, `REQUEST_CHANGES`, `COMMENT`), Auditor Confidence (`0.0-5.0`), PR Scope (`dev_docs`, `minor_fix`, `core_backend`).
+  - **Executive Summary**: 1-2 sentences on architectural intent and verdict rationale.
+  - **Critical Blocking Issues**: 🔴 Mandatory file:line citation, failure mechanism, and code remediation block for any `REQUEST_CHANGES` verdict.
+  - **Diff-Anchored Risk Analysis**: 🟡 Edge cases, concurrency boundaries, or security considerations with line ranges.
+  - **Minor Maintainability Notes**: Actionable refactoring suggestions.
+
+#### [MODIFY] [sync_review_template.md](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/templates/sync_review_template.md)
+
+- Redesign incremental re-review (`synchronize`) template:
+  - **Commit Delta Summary**: `before_sha` ➔ `head_sha` incremental changes.
+  - **Resolution Tracker**: Item-by-item verification (`RESOLVED` / `UNRESOLVED`) with line citations.
+  - **Verdict Transition**: Clear transition status (`REQUEST_CHANGES` ➔ `APPROVE`).
 
 ---
 
-### Unit Testing
+### Structured Formatting & Line-Anchored Poster
 
-#### [MODIFY] [test_rate_limiter.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/tests/unit/logic/test_rate_limiter.py)
+#### [MODIFY] [comment_poster.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/comment_poster.py)
 
-- Add unit test `test_extract_rate_limit_details_from_adk_error()` to verify parsing of:
-  - ADK `_ResourceExhaustedError` with nested `ClientError`
-  - `QuotaFailure`, `RetryInfo`, and `ErrorInfo` RPC structures
-  - HTTP `Retry-After` and `x-ratelimit` headers.
+- Update `render_review_markdown` to generate the new high-trust Markdown review layout.
+- Ensure all line references are verified against diff hunk headers using `verify_line_reference`.
+
+#### [MODIFY] [formatter.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/formatter.py)
+
+- Harmonize markdown rendering methods to produce the updated high-trust review format across all webhook events.
 
 ---
 
-## Verification Plan
+## 🧪 Verification Plan
 
 ### Automated Tests
-- Execute `./scripts/ruff-all.sh` to ensure 100% linting compliance.
-- Execute `uv run python -m pytest tests/unit/logic/test_rate_limiter.py` to verify unit test coverage.
-- Execute full test suite `uv run python -m pytest` (155+ tests passing).
+- Run `./scripts/ruff-all.sh` to ensure zero linter errors.
+- Run `uv run python -m pytest tests/unit/` to verify unit test suite pass rate.
+- Add unit tests in `tests/unit/webhook_agent/test_output_system.py` verifying high-trust markdown structure generation.
 
 ### Manual Verification
-- Execute scratch verification script to validate extraction against synthetic ADK `_ResourceExhaustedError` instances.
+- Render synthetic `AuditVerdict` payloads and inspect generated Markdown outputs to verify formatting elegance, line citation clarity, and technical depth.
