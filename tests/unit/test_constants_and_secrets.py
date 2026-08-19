@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from logic.constants import (
     DEFAULT_FEATURE_AGENT_PROJECT,
     DEFAULT_GITHUB_APP_ID,
@@ -18,6 +17,7 @@ from logic.secret_manager import resolve_secret
 pytestmark = [pytest.mark.unit]
 
 
+@pytest.mark.unit
 def test_constants_defaults() -> None:
     assert DEFAULT_GITHUB_APP_ID == "4133145"
     assert DEFAULT_GITHUB_INSTALLATION_ID == "150411146"
@@ -28,12 +28,14 @@ def test_constants_defaults() -> None:
     assert DEFAULT_FEATURE_AGENT_PROJECT == "gen-lang-client-0613181237"
 
 
+@pytest.mark.unit
 def test_resolve_secret_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FEATURE_AGENT_FREE_KEY", "resolved_from_environment")
     key = resolve_secret("FEATURE_AGENT_FREE_KEY")
     assert key == "resolved_from_environment"
 
 
+@pytest.mark.unit
 def test_resolve_secret_fallback_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WEBHOOK_FREE_KEY", raising=False)
 

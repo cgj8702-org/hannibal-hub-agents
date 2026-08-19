@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from webhook_agent.audit_schema import AuditVerdict, RiskItem
 from webhook_agent.comment_poster import (
     prepare_review_payload,
@@ -10,8 +11,12 @@ from webhook_agent.comment_poster import (
 from webhook_agent.diff_tools import get_pr_diff_file_map, verify_line_reference
 from webhook_agent.sanitizer_plugin import sanitize_markdown_text
 
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.guardrails]
 
-def test_audit_schema_clean_pr():
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_audit_schema_clean_pr() -> None:
     verdict = AuditVerdict(
         verdict="APPROVE",
         confidence=5.0,
@@ -23,7 +28,10 @@ def test_audit_schema_clean_pr():
     assert verdict.risks == []
 
 
-def test_sanitizer_plugin_prompt_leakage_and_secrets():
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.guardrails
+def test_sanitizer_plugin_prompt_leakage_and_secrets() -> None:
     raw_text = "> [!IMPORTANT] Finding zero risks...\nAPI Key: AIzaSy123456789012345678901234567890123"
     sanitized = sanitize_markdown_text(raw_text)
     assert "[!IMPORTANT] Finding zero risks" not in sanitized
@@ -31,7 +39,9 @@ def test_sanitizer_plugin_prompt_leakage_and_secrets():
     assert "[REDACTED_SECRET]" in sanitized
 
 
-def test_diff_tools_line_verification():
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_diff_tools_line_verification() -> None:
     sample_diff = (
         "diff --git a/src/main.py b/src/main.py\n"
         "index 100..200 100644\n"
@@ -45,12 +55,13 @@ def test_diff_tools_line_verification():
     summary = get_pr_diff_file_map(sample_diff)
     assert "src/main.py" in summary["modified_files"]
 
-    # Line 10 is an added line (+) in sample_diff
     assert verify_line_reference(sample_diff, "src/main.py", 10) is True
     assert verify_line_reference(sample_diff, "src/main.py", 99) is False
 
 
-def test_comment_poster_out_of_diff_pruning():
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_comment_poster_out_of_diff_pruning() -> None:
     sample_diff = (
         "diff --git a/src/main.py b/src/main.py\n"
         "index 100..200 100644\n"

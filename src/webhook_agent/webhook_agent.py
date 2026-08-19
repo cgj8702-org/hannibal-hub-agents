@@ -1582,7 +1582,7 @@ class WebhookAgent:
             model=self._current_model_name,
             client_kwargs={"api_key": get_active_api_key()},
         )
-        sanitizer_plugin = PromptSanitizerPlugin()
+        PromptSanitizerPlugin()
 
         self._pr_router = LlmAgent(
             name="pr_router",
@@ -1602,6 +1602,10 @@ class WebhookAgent:
                     thinking_budget=-1,
                 )
             ),
+            before_model_callback=before_model_callback,
+            after_model_callback=after_model_callback,
+            before_tool_callback=before_tool_callback,
+            on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
                 write_file,
@@ -1634,12 +1638,7 @@ class WebhookAgent:
         self._agent = SequentialAgent(
             name="webhook_agent",
             sub_agents=[self._pr_router, self._code_auditor, self._verdict_agent],
-            plugins=[sanitizer_plugin],
             before_agent_callback=before_agent_callback,
-            before_model_callback=before_model_callback,
-            after_model_callback=after_model_callback,
-            before_tool_callback=before_tool_callback,
-            on_tool_error_callback=on_tool_error_callback,
         )
 
         # Create the runner

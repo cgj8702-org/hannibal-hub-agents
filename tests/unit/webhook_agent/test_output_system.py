@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
 from webhook_agent.audit_schema import AuditVerdict, RiskItem
 from webhook_agent.comment_poster import render_review_markdown
 
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
-def test_dev_docs_minimal_scope_rendering():
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_dev_docs_minimal_scope_rendering() -> None:
     verdict = AuditVerdict(
         verdict="APPROVE",
         confidence=5.0,
@@ -21,7 +26,9 @@ def test_dev_docs_minimal_scope_rendering():
     assert "> [!CAUTION]" not in rendered
 
 
-def test_core_backend_deep_audit_rendering():
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_core_backend_deep_audit_rendering() -> None:
     risk = RiskItem(
         category="concurrency",
         file="src/logic/state.py",

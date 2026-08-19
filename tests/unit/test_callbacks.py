@@ -14,15 +14,19 @@ from webhook_agent.callbacks import (
     on_tool_error_callback,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 def test_get_model_tpm_limit() -> None:
     assert get_model_tpm_limit("gemma-4-31b-it", "free") == 15000
     assert get_model_tpm_limit("gemini-2.5-flash", "free") == 1000000
     assert get_model_tpm_limit("gemini-2.5-flash", "paid") == 4000000
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_agent_callback() -> None:
     ctx = MagicMock()
@@ -32,6 +36,8 @@ async def test_before_agent_callback() -> None:
     assert ctx.state["active_tier"] in ("free", "paid")
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = MagicMock()
@@ -47,6 +53,8 @@ async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "prompt_tokens" in ctx.state
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_after_model_callback() -> None:
     ctx = MagicMock()
@@ -60,6 +68,8 @@ async def test_after_model_callback() -> None:
     assert ctx.state.get("total_tokens") == 125
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_sanitization() -> None:
     tool = MagicMock()
@@ -71,6 +81,8 @@ async def test_before_tool_callback_sanitization() -> None:
     assert args["pr_number"] == 42
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_on_tool_error_callback() -> None:
     tool = MagicMock()
@@ -86,6 +98,8 @@ async def test_on_tool_error_callback() -> None:
     assert ctx.state.get("trigger_worktree_conflict_resolution") is True
 
 
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_allow_multiple_mutating_tools() -> None:
     tool = MagicMock()

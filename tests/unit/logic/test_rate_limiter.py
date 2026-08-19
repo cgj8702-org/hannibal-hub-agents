@@ -1,10 +1,11 @@
 """Unit tests for RPMWaiter rate limiter in hannibal-hub-agents."""
 
 from pathlib import Path
+
 import pytest
 from logic.rate_limiter import RPMWaiter, _resolve_tier
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit]
 
 
 @pytest.fixture
@@ -24,6 +25,7 @@ def mock_registry(tmp_path: Path) -> Path:
     return reg_file
 
 
+@pytest.mark.unit
 def test_tier_resolution_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WEBHOOK_TIER", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -40,6 +42,7 @@ def test_tier_resolution_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WEBHOOK_TIER")
 
 
+@pytest.mark.unit
 @pytest.mark.anyio
 async def test_zero_quota_fast_fail(mock_registry: Path) -> None:
     waiter = RPMWaiter(registry_path=mock_registry)
@@ -47,6 +50,7 @@ async def test_zero_quota_fast_fail(mock_registry: Path) -> None:
         await waiter.check_and_wait(model="gemini-2.0-flash", tier="free")
 
 
+@pytest.mark.unit
 @pytest.mark.anyio
 async def test_rpm_burst_pacing(mock_registry: Path) -> None:
     curr_time = 100.0
@@ -62,6 +66,7 @@ async def test_rpm_burst_pacing(mock_registry: Path) -> None:
     assert len(waiter.histories["gemini-3.5-flash-lite"]) == 2
 
 
+@pytest.mark.unit
 @pytest.mark.anyio
 async def test_record_actual_tokens(mock_registry: Path) -> None:
     waiter = RPMWaiter(registry_path=mock_registry)
@@ -76,6 +81,7 @@ async def test_record_actual_tokens(mock_registry: Path) -> None:
     assert waiter.token_histories["gemini-3.5-flash-lite"][0][2]
 
 
+@pytest.mark.unit
 def test_extract_rate_limit_details_from_adk_error() -> None:
     from google.adk.models.google_llm import _ResourceExhaustedError
     from google.genai.errors import ClientError
