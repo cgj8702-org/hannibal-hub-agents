@@ -111,13 +111,29 @@ async def before_model_callback(
 async def after_model_callback(
     callback_context: CallbackContext, llm_response: LlmResponse
 ) -> LlmResponse | None:
-    """Record token usage metadata after Gemini responds."""
+    """Record token usage metadata and sanitize hallucinated tool prefixes after Gemini responds."""
     if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
         total_tokens = getattr(
             llm_response.usage_metadata, "total_token_count", 0
         ) or getattr(llm_response.usage_metadata, "total_tokens", 0)
         callback_context.state["total_tokens"] = total_tokens
         logger.debug("after_model_callback: recorded total_tokens=%d", total_tokens)
+
+    # Sanitize hallucinated 'github:' tool prefixes from LLM response before ADK tool lookup
+    if hasattr(llm_response, "content") and llm_response.content:
+        parts = getattr(llm_response.content, "parts", None) or []
+        for part in parts:
+            func_call = getattr(part, "function_call", None)
+            if func_call:
+                name = getattr(func_call, "name", "") or ""
+                if name.startswith("github:"):
+                    clean_name = name.removeprefix("github:")
+                    logger.info(
+                        "Sanitized hallucinated tool prefix: '%s' -> '%s'",
+                        name,
+                        clean_name,
+                    )
+                    func_call.name = clean_name
     return None
 
 
