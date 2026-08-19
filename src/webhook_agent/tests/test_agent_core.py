@@ -223,7 +223,7 @@ class TestWebhookAgentModelChain:
         next_model = agent._advance_model_chain()
         assert next_model is not None
         assert agent._current_model_name == next_model
-        assert agent._agent.model.model == next_model
+        assert agent._code_auditor.model.model == next_model
         assert agent._current_model_name != initial_model
 
 
@@ -334,25 +334,25 @@ class TestTokenTruncation:
 
 
 class TestToolRegistration:
-    def test_agent_has_exactly_15_tools(self):
-        """WebhookAgent should register 13 API primitives + 2 utility tools."""
+    def test_agent_has_exactly_17_tools(self):
+        """WebhookAgent code_auditor should register 13 API primitives + 4 utility tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t)))
-            for t in agent._agent.tools
+            for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 15
+        assert len(tool_names) == 17
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 13 API primitives + get_current_time + search_agent."""
+        """Tool names should match the 13 API primitives + get_current_time + search_agent + diff tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = sorted(
             getattr(t, "name", getattr(t, "__name__", str(t)))
-            for t in agent._agent.tools
+            for t in agent._code_auditor.tools
         )
         expected = sorted(
             [
@@ -371,6 +371,8 @@ class TestToolRegistration:
                 "review",
                 "get_current_time",
                 "search_agent",
+                "get_pr_diff_file_map",
+                "verify_line_reference",
             ]
         )
         assert tool_names == expected
@@ -382,7 +384,7 @@ class TestToolRegistration:
         agent = WebhookAgent(dry_run=True)
         tool_names = {
             getattr(t, "name", getattr(t, "__name__", str(t)))
-            for t in agent._agent.tools
+            for t in agent._code_auditor.tools
         }
         removed = {
             "add_label",
