@@ -23,9 +23,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from github import Github
-from google.adk.agents import Agent
+from google.adk.agents import Agent, LlmAgent, SequentialAgent
 from google.adk.agents.context import Context
 from google.adk.models import Gemini
+from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import google_search
@@ -33,6 +34,7 @@ from google.adk.tools.agent_tool import AgentTool
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
+from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
 from .callbacks import (
     after_model_callback,
@@ -41,7 +43,9 @@ from .callbacks import (
     before_tool_callback,
     on_tool_error_callback,
 )
+from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .memory_service import InMemoryMemoryService
+from .sanitizer_plugin import PromptSanitizerPlugin
 from .schemas import CodeReviewResponse, SyncReviewResponse
 from .formatter import (
     calculate_strict_verdict,
@@ -1573,20 +1577,31 @@ class WebhookAgent:
         # Ensure API key is resolved and propagated to env vars before model init
         get_active_api_key()
 
-        # Create the ADK agent with all tools and callbacks
-        self._agent = Agent(
-            name="webhook_agent",
-            model=Gemini(
-                model=self._current_model_name,
-                client_kwargs={"api_key": get_active_api_key()},
-            ),
+        # Model instance for pipeline sub-agents
+        model_instance = Gemini(
+            model=self._current_model_name,
+            client_kwargs={"api_key": get_active_api_key()},
+        )
+        sanitizer_plugin = PromptSanitizerPlugin()
+
+        self._pr_router = LlmAgent(
+            name="pr_router",
+            model=model_instance,
+            description="Inspects modified files and classifies PR scope (dev_docs, minor_fix, core_backend).",
+            instruction="Analyze the PR diff and modified file list. Classify scope into dev_docs, minor_fix, or core_backend.",
+        )
+
+        self._code_auditor = LlmAgent(
+            name="code_auditor",
+            model=model_instance,
+            description="Conducts AST diff-grounded risk audit using Gemini Thinking Mode.",
             instruction=SYSTEM_INSTRUCTION,
-            output_key="code_review",
-            before_agent_callback=before_agent_callback,
-            before_model_callback=before_model_callback,
-            after_model_callback=after_model_callback,
-            before_tool_callback=before_tool_callback,
-            on_tool_error_callback=on_tool_error_callback,
+            planner=BuiltInPlanner(
+                thinking_config=genai_types.ThinkingConfig(
+                    include_thoughts=True,
+                    thinking_budget=-1,
+                )
+            ),
             tools=[
                 read_file,
                 write_file,
@@ -1603,7 +1618,28 @@ class WebhookAgent:
                 review,
                 get_current_time,
                 search_tool,
+                get_pr_diff_file_map_tool,
+                verify_line_reference_tool,
             ],
+        )
+
+        self._verdict_agent = LlmAgent(
+            name="verdict_agent",
+            model=model_instance,
+            description="Produces structured AuditVerdict JSON output.",
+            instruction="Synthesize audit findings into an AuditVerdict structured JSON payload. Clean dev/docs PRs return risks: [].",
+            output_schema=AuditVerdict,
+        )
+
+        self._agent = SequentialAgent(
+            name="webhook_agent",
+            sub_agents=[self._pr_router, self._code_auditor, self._verdict_agent],
+            plugins=[sanitizer_plugin],
+            before_agent_callback=before_agent_callback,
+            before_model_callback=before_model_callback,
+            after_model_callback=after_model_callback,
+            before_tool_callback=before_tool_callback,
+            on_tool_error_callback=on_tool_error_callback,
         )
 
         # Create the runner

@@ -1,0 +1,17 @@
+eval_name: pr_auditor_evaluation
+description: Continuous quality evaluation suite for Webhook Auditor PR reviews.
+
+dataset_path: tests/eval/datasets/pr_reviews.json
+
+metrics:
+  - name: zero_hallucinated_risks
+    description: Measures whether clean dev/docs PRs return risks as an empty list [].
+    threshold: 1.0
+
+  - name: diff_grounding_accuracy
+    description: Verifies that cited risk line numbers exist within modified diff hunks.
+    threshold: 0.95
+
+  - name: prompt_purity
+    description: Ensures zero system instructions or meta-prompts leak into GitHub comments.
+    threshold: 1.0
