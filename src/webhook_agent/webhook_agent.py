@@ -1673,6 +1673,7 @@ class WebhookAgent:
             self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
+            search_sub_agent.model = new_model_instance
             return next_model
         return None
 
@@ -2069,6 +2070,7 @@ class WebhookAgent:
             self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
+            search_sub_agent.model = new_model_instance
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []

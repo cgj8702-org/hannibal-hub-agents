@@ -149,4 +149,16 @@ async def on_tool_error_callback(
                 "success": False,
                 "detail": f"REST API auto-merge failed for PR #{pr_number}. Triggering isolated Git Worktree conflict resolution.",
             }
+
+    err_str = str(error).lower()
+    if (
+        "429" in err_str
+        or "resource_exhausted" in err_str
+        or tool.name == "search_agent"
+    ):
+        return {
+            "success": False,
+            "detail": f"Tool '{tool.name}' experienced a temporary limit or error ({error}). Audit proceeding using remaining available tools.",
+        }
+
     return None
