@@ -962,6 +962,7 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     # Programmatic Guardrail: Redirect code review reports erroneously sent to add_comment to review()
     if (
         "Code Review Report" in body
+        or "Audit Report" in body
         or "| Category" in body
         or "**Scorecard**" in body
         or "## 4. Verdict Determination" in body

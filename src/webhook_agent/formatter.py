@@ -604,7 +604,6 @@ def render_code_review_markdown(
         verdict = calculate_strict_verdict(review)
 
     sc = review.scorecard
-    ev = review.scorecard_evidence
     avg_score = (
         sc.correctness
         + sc.security
@@ -647,44 +646,27 @@ def render_code_review_markdown(
 
     gaps_str = ", ".join(review.context_gaps) if review.context_gaps else "None"
 
-    return f"""# Code Review Report
+    verdict_badge = f"`{verdict}`" if verdict else "`COMMENT`"
+    return f"""# 🛡️ Hannibal Hub Audit Report: {verdict_badge}
 
 ### 1. Executive Summary
 
-* **Goal of the PR:** {review.executive_summary}
-* **Verdict Justification:** {verdict} verdict calculated mechanically (Average Score: {avg_score:.1f}/5).
+* **Confidence Rating:** `{review.confidence}/5.0`
+* **Quality Scorecard Average:** `{avg_score:.1f}/5.0` (`Correctness: {sc.correctness}/5`, `Security: {sc.security}/5`, `Performance: {sc.performance}/5`, `Readability: {sc.readability}/5`, `Tests: {sc.test_coverage}/5`)
+* **Verdict Justification:** {review.executive_summary}
 
 ---
 
-### 2. Scorecard Summary
-
-> [!NOTE]
-> **Scorecard Breakdown (1-5 Scale)**
-> * **Code Correctness:** {sc.correctness}/5 — {ev.correctness}
-> * **Security & Privacy:** {sc.security}/5 — {ev.security}
-> * **Performance & Scale:** {sc.performance}/5 — {ev.performance}
-> * **Readability & Style:** {sc.readability}/5 — {ev.readability}
-> * **Test Coverage:** {sc.test_coverage}/5 — {ev.test_coverage}
-> * **Average Score:** {avg_score:.1f}/5 | **Confidence:** {review.confidence}/5
-
----
-
-### 3. Verdict Determination
-
-* **Overall Verdict:** {verdict}
-
----
-
-### 4. Mandatory Risk & Edge-Case Analysis
+### 2. Mandatory Risk & Edge-Case Analysis
 
 > [!IMPORTANT]
-> *Finding zero risks or edge cases is unacceptable. Every review MUST highlight at least ONE potential failure mode, concurrency boundary, memory limit, or unhandled edge case — even for approved PRs.*
+> *Every review highlights potential failure modes, concurrency boundaries, memory limits, or unhandled edge cases.*
 
 {risk_block}
 
 ---
 
-### 5. Key Issues & Action Items
+### 3. Key Issues & Action Items
 
 #### 🔴 Critical (Must Fix Before Merge)
 *Issues that block deployment, introduce bugs, or cause security vulnerabilities.*
@@ -696,9 +678,9 @@ def render_code_review_markdown(
 
 ---
 
-### 6. Confidence Self-Assessment
-
-* **My Confidence:** {review.confidence}/5
+### 4. Verification Protocol
+* **Line-Anchored Grounding:** All citations verified against modified diff hunks.
+* **Anti-Sycophancy Standard:** Objective technical feedback only.
 * **Context Gaps:** {gaps_str}
 """
 

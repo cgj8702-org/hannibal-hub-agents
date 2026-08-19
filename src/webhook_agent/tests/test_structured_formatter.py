@@ -80,18 +80,17 @@ def test_calculate_strict_verdict_low_confidence(valid_code_review_pass):
 
 def test_render_code_review_markdown(valid_code_review_pass):
     md = render_code_review_markdown(valid_code_review_pass)
-    assert "# Code Review Report" in md
-    assert "### 2. Scorecard Summary" in md
-    assert "Code Correctness:** 5/5" in md
-    assert "Test Coverage:** 4/5" in md
-    assert "Overall Verdict:** APPROVE" in md
+    assert "# 🛡️ Hannibal Hub Audit Report: `APPROVE`" in md
+    assert "Quality Scorecard Average:** `4.6/5.0`" in md
+    assert "Correctness: 5/5" in md
+    assert "Tests: 4/5" in md
 
 
 def test_enforce_verdict_with_raw_json(valid_code_review_pass):
     json_str = valid_code_review_pass.model_dump_json()
     rendered_md, verdict = _enforce_verdict(json_str, "APPROVE")
     assert verdict == "APPROVE"
-    assert "# Code Review Report" in rendered_md
+    assert "Hannibal Hub Audit Report" in rendered_md
 
 
 def test_enforce_verdict_with_codeblock_json(valid_code_review_pass):
@@ -99,7 +98,7 @@ def test_enforce_verdict_with_codeblock_json(valid_code_review_pass):
     json_str = f"```json\n{valid_code_review_pass.model_dump_json()}\n```"
     rendered_md, verdict = _enforce_verdict(json_str, "APPROVE")
     assert verdict == "REQUEST_CHANGES"
-    assert "Overall Verdict:** REQUEST_CHANGES" in rendered_md
+    assert "# 🛡️ Hannibal Hub Audit Report: `REQUEST_CHANGES`" in rendered_md
 
 
 def test_sync_review_rendering():
@@ -155,8 +154,8 @@ def test_enforce_verdict_with_loose_schema_drift_json():
     }"""
     rendered_md, verdict = _enforce_verdict(loose_json, "APPROVE")
     assert verdict == "APPROVE"
-    assert "# Code Review Report" in rendered_md
-    assert "Code Correctness:** 5/5" in rendered_md
+    assert "Hannibal Hub Audit Report" in rendered_md
+    assert "Correctness: 5/5" in rendered_md
     assert "Circular import risk" in rendered_md
 
 
