@@ -1,117 +1,80 @@
-# 🏛️ Implementation Plan: Refactoring Webhook Auditor with Google ADK Primitives & ADK-Samples SDLC Agents
+# 🏛️ Implementation Plan: High-Trust, Deep Architectural Code Review & Output System
 
-Refactor the Webhook Auditor agent (`hannibal-hub-agents`) from a single-prompt monolithic review listener into a **modular, multi-agent ADK pipeline** grounded in software development agent patterns from `adk-samples` (`llm-auditor`, `sdlc-technical-designer`, `sdlc-task-planner`, `software-bug-assistant`, `safety-plugins`, and `post_review_comments.py`). 
-
-This eliminates prompt leakage, prevents forced risk hallucinations on clean PRs, enforces diff-grounded AST risk auditing, adds line-anchor validation, enables Gemini Thinking Mode for deep code reasoning, adds cross-session repository memory, and establishes continuous evaluation via `agents-cli eval`.
+Redesign the Webhook Auditor agent's output and template system in `hannibal-hub-agents` to deliver **deeply reasoned, highly trustworthy, and evidence-grounded code reviews**. This eliminates generic cheerleading, enforces strict AST diff line-anchoring, leverages Gemini Thinking Mode for thorough architectural auditing, and structures reviews into clear, high-signal Markdown.
 
 ---
 
 ## 🍵 User Review Required
 
 > [!IMPORTANT]
-> **Non-Breaking API Contract**: This refactor maintains full backward compatibility with existing GitHub webhook payloads and output formats while upgrading the internal agent execution engine to Google ADK primitives.
+> **High-Trust Review Principle**: Reviews MUST be grounded strictly in empirical diff evidence. Every cited finding MUST include exact file paths, line citations (`L45-L50`), specific failure mechanisms, and concrete remediation code snippets.
 
 > [!TIP]
-> **Zero Forced Risk Hallucinations**: By leveraging Pydantic structured output (`output_schema`), clean dev/docs PRs can now return `risks: []` without violating system instructions.
-
-> [!NOTE]
-> **ADK-Samples Integration**: Adapts patterns directly from `adk-samples` SDLC agents:
-> 1. **`llm-auditor`**: Multi-agent `SequentialAgent` sub-agent pipeline.
-> 2. **`sdlc-technical-designer`**: `BuiltInPlanner` with `ThinkingConfig(include_thoughts=True, thinking_budget=-1)` for deep code analysis.
-> 3. **`post_review_comments.py`**: Diff line-anchoring validation to prune out-of-diff comments before atomic GitHub review posting.
-> 4. **`safety-plugins`**: `AgentAsAJudge` guardrail plugin to verify comment tone and prevent secret leaks.
-> 5. **`cross-session-memory`**: Session state tracking for repository context and past PR review history.
+> **Anti-Sycophancy & High Signal**: Generic praise ("Great refactoring!", "Rock-solid PR!") is strictly prohibited. The auditor output focuses purely on objective technical analysis, edge cases, and actionable code improvements.
 
 ---
 
 ## ❓ Open Questions
 
-None. The proposed ADK primitives (`SequentialAgent`, `output_schema`, `BasePlugin`, `agents-cli eval`) and `adk-samples` software dev agent patterns match the existing Google ADK setup in `hannibal-hub-agents`.
+None. The proposed structure optimizes review trust, depth, and clarity across all PR scopes.
 
 ---
 
 ## 🛠️ Proposed Changes
 
-### Core Agent Architecture & Pipeline
-
-#### [NEW] [audit_schema.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/audit_schema.py)
-
-- Define Pydantic models for structured output:
-  - `RiskItem`: `category` (concurrency, memory, security, breaking_change, none), `file`, `line_range`, `description`, `remediation`.
-  - `AuditVerdict`: `verdict` (APPROVE, REQUEST_CHANGES, COMMENT), `confidence` (0.0–5.0), `pr_type` (dev_docs, minor_fix, core_backend), `summary`, `risks` (List[RiskItem] defaulting to `[]`).
+### High-Trust Audit Instructions & Rubric
 
 #### [MODIFY] [webhook_agent.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/webhook_agent.py)
 
-- Replace single LLM prompt call with an ADK `SequentialAgent` pipeline (modeled after `adk-samples/python/agents/llm-auditor` and `sdlc-technical-designer`):
-  1. `pr_router` agent: Inspects modified file paths and classifies PR scope (`dev_docs`, `minor_fix`, `core_backend`).
-  2. `code_auditor` agent: Equipped with `BuiltInPlanner` thinking mode (`thinking_budget=-1`), executing diff-grounded AST and risk analysis (fast-pathed for pure dev/docs PRs).
-  3. `verdict_agent`: Enforces `output_schema=AuditVerdict` to generate structured JSON verdict in a single model turn.
+- Refine system instructions for `code_auditor` sub-agent:
+  - Enforce 4 mandatory audit dimensions:
+    1. **Logic & Boundaries**: Off-by-one errors, null/None dereferences, unhandled exceptions, resource leaks.
+    2. **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
+    3. **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
+    4. **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
+  - Require explicit evidence-based justification for every verdict determination.
 
 ---
 
-### Sanitization & Safety Guardrails (Inspired by `safety-plugins`)
+### High-Signal Output Templates (`src/webhook_agent/templates/`)
 
-#### [NEW] [sanitizer_plugin.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/sanitizer_plugin.py)
+#### [MODIFY] [code_review_template.md](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/templates/code_review_template.md)
 
-- Implement `PromptSanitizerPlugin(BasePlugin)` extending `after_model_callback`.
-- Intercept and strip meta-prompt blockquotes or system instruction text (e.g. `Finding zero risks...`, `> [!IMPORTANT]`) before rendering the final GitHub PR comment.
-- Add PII/Secret leakage guardrails to ensure API keys or connection strings are never echoed into PR comments.
+- Redesign initial code review format for maximum readability and trust:
+  - **Verdict Header**: Verdict (`APPROVE`, `REQUEST_CHANGES`, `COMMENT`), Auditor Confidence (`0.0-5.0`), PR Scope (`dev_docs`, `minor_fix`, `core_backend`).
+  - **Executive Summary**: 1-2 sentences on architectural intent and verdict rationale.
+  - **Critical Blocking Issues**: 🔴 Mandatory file:line citation, failure mechanism, and code remediation block for any `REQUEST_CHANGES` verdict.
+  - **Diff-Anchored Risk Analysis**: 🟡 Edge cases, concurrency boundaries, or security considerations with line ranges.
+  - **Minor Maintainability Notes**: Actionable refactoring suggestions.
 
----
+#### [MODIFY] [sync_review_template.md](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/templates/sync_review_template.md)
 
-### Diff-Grounding, Line Anchoring & Posting (Inspired by `adk-samples`)
-
-#### [MODIFY] [diff_tools.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/diff_tools.py)
-
-- Add FunctionTools:
-  - `get_pr_diff_file_map`: Returns AST changes per file.
-  - `verify_line_reference`: Validates that cited risk lines exist within modified diff chunks.
-
-#### [NEW] [comment_poster.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/comment_poster.py)
-
-- Implement review comment poster with line-anchoring validation (adapted from `adk-samples/.github/scripts/post_review_comments.py`):
-  - Parse `AuditVerdict` JSON findings.
-  - Recompute line-position anchors against the PR diff hunk header to verify cited lines exist in modified chunks.
-  - Prune invalid/unanchorable line comments individually so an LLM line hallucination never causes GitHub to reject the entire PR review payload.
-  - Post formatted review payload via GitHub API in a single atomic request (eliminating high-token tool loop round-trips).
+- Redesign incremental re-review (`synchronize`) template:
+  - **Commit Delta Summary**: `before_sha` ➔ `head_sha` incremental changes.
+  - **Resolution Tracker**: Item-by-item verification (`RESOLVED` / `UNRESOLVED`) with line citations.
+  - **Verdict Transition**: Clear transition status (`REQUEST_CHANGES` ➔ `APPROVE`).
 
 ---
 
-### Repository Memory & Context Persistence (Phase 2 Upgrade)
+### Structured Formatting & Line-Anchored Poster
 
-#### [NEW] [repo_memory.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/repo_memory.py)
+#### [MODIFY] [comment_poster.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/comment_poster.py)
 
-- Implement cross-session memory service using ADK `FirestoreMemoryService` / session state (modeled after `adk-samples/core/python/cross-session-memory`):
-  - Stores past PR review verdicts, architectural patterns, and recurring anti-patterns per repository.
-  - Enables the agent to reference historical PR context when reviewing new code changes.
+- Update `render_review_markdown` to generate the new high-trust Markdown review layout.
+- Ensure all line references are verified against diff hunk headers using `verify_line_reference`.
 
----
+#### [MODIFY] [formatter.py](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/src/webhook_agent/formatter.py)
 
-### Observability & Logging Architecture
-
-- Use standard **GCP Cloud Logging / Structured JSON Logging** (via Python's `logging` module and `google-cloud-logging`) for lightweight, zero-dependency telemetry (token counts, execution latency, and trace context) without requiring BigQuery or external database setup.
-
----
-
-### Quality Evaluation Suite
-
-#### [NEW] [tests/eval/eval_config.yaml](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/tests/eval/eval_config.yaml)
-
-- Configure `agents-cli eval` metrics (`zero_hallucinated_risks`, `diff_grounding_accuracy`, `prompt_purity`).
-
-#### [NEW] [tests/eval/datasets/pr_reviews.json](file:///home/carly/coding/synced-repos-cgj8702/hannibal/hannibal-hub-agents/tests/eval/datasets/pr_reviews.json)
-
-- Create evaluation dataset containing historical clean PR diffs (expecting `risks: []`) and buggy PR diffs (expecting targeted `REQUEST_CHANGES`).
+- Harmonize markdown rendering methods to produce the updated high-trust review format across all webhook events.
 
 ---
 
 ## 🧪 Verification Plan
 
 ### Automated Tests
-- Run `./scripts/ruff-all.sh` to ensure zero linter errors across all modified and new files.
+- Run `./scripts/ruff-all.sh` to ensure zero linter errors.
 - Run `uv run python -m pytest tests/unit/` to verify unit test suite pass rate.
-- Run `agents-cli eval run` to evaluate the new pipeline against historical PR datasets.
+- Add unit tests in `tests/unit/webhook_agent/test_output_system.py` verifying high-trust markdown structure generation.
 
 ### Manual Verification
-- Trigger local webhook event with synthetic dev/docs PR diff ➔ Confirm GitHub comment output is clean, has zero prompt leakage, and contains `risks: []`.
-- Test comment payload poster with synthetic out-of-diff line numbers ➔ Verify poster safely prunes invalid anchors without failing overall review payload.
+- Render synthetic `AuditVerdict` payloads and inspect generated Markdown outputs to verify formatting elegance, line citation clarity, and technical depth.

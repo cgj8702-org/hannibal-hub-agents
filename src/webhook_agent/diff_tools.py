@@ -1,4 +1,7 @@
-"""Diff-grounding and AST line verification FunctionTools for Webhook Agent."""
+"""Diff-grounding and AST line verification FunctionTools for Webhook Agent.
+
+Includes diff hunk anchor extraction logic adapted directly from adk-samples/.github/scripts/post_review_comments.py.
+"""
 
 from __future__ import annotations
 
@@ -7,60 +10,76 @@ from typing import Any
 
 from google.adk.tools import FunctionTool
 
+HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
-def parse_unified_diff(diff_text: str) -> dict[str, list[dict[str, Any]]]:
-    """Parse a unified git diff text into a file map of modified hunks and line ranges."""
-    file_map: dict[str, list[dict[str, Any]]] = {}
-    if not diff_text:
-        return file_map
 
-    current_file: str | None = None
-    file_diff_pattern = re.compile(r"^diff --git a/(.*?) b/(.*)")
-    hunk_pattern = re.compile(r"^@@ -\d+,\d+ \+(\d+),(\d+) @@")
+def _strip_diff_prefix(path: str) -> str:
+    """Drop git's `a/`/`b/` diff prefix from a path."""
+    if path.startswith(("a/", "b/")):
+        return path[2:]
+    return path
 
-    for line in diff_text.splitlines():
-        match_file = file_diff_pattern.match(line)
-        if match_file:
-            current_file = match_file.group(2)
-            file_map[current_file] = []
+
+def added_line_anchors(diff: str) -> dict[str, set[int]]:
+    """Map each path to the new-file line numbers this diff adds or modifies.
+
+    Adapted directly from adk-samples/.github/scripts/post_review_comments.py.
+    """
+    anchors: dict[str, set[int]] = {}
+    path: str | None = None
+    new_line = 0
+    old_remaining = 0
+    new_remaining = 0
+
+    for row in diff.splitlines():
+        if old_remaining <= 0 and new_remaining <= 0:
+            if row.startswith("+++ "):
+                target = row[4:].strip()
+                path = None if target == "/dev/null" else _strip_diff_prefix(target)
+                continue
+            header = HUNK_HEADER.match(row)
+            if header:
+                old_remaining = int(header.group(2) or 1)
+                new_line = int(header.group(3))
+                new_remaining = int(header.group(4) or 1)
             continue
 
-        if current_file and line.startswith("@@"):
-            match_hunk = hunk_pattern.match(line)
-            if match_hunk:
-                start_line = int(match_hunk.group(1))
-                line_count = int(match_hunk.group(2))
-                end_line = start_line + max(0, line_count - 1)
-                file_map[current_file].append(
-                    {
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "hunk_header": line,
-                    }
-                )
+        if row.startswith("\\"):
+            continue
+        if row.startswith("+"):
+            if path is not None:
+                anchors.setdefault(path, set()).add(new_line)
+            new_line += 1
+            new_remaining -= 1
+        elif row.startswith("-"):
+            old_remaining -= 1
+        else:
+            new_line += 1
+            new_remaining -= 1
+            old_remaining -= 1
 
-    return file_map
+    return anchors
 
 
 def get_pr_diff_file_map(diff_text: str) -> dict[str, Any]:
     """Return file paths, modified hunk line ranges, and line counts from unified diff text."""
-    parsed = parse_unified_diff(diff_text)
+    anchors = added_line_anchors(diff_text)
     summary: dict[str, Any] = {
-        "modified_files": list(parsed.keys()),
-        "file_hunks": parsed,
+        "modified_files": list(anchors.keys()),
+        "anchors": {k: sorted(list(v)) for k, v in anchors.items()},
     }
     return summary
 
 
 def verify_line_reference(diff_text: str, file_path: str, line_number: int) -> bool:
     """Verify if a cited line number falls within any modified diff hunk for the given file."""
-    parsed = parse_unified_diff(diff_text)
-    if file_path not in parsed:
-        return False
+    stripped_path = _strip_diff_prefix(file_path)
+    anchors = added_line_anchors(diff_text)
 
-    for hunk in parsed[file_path]:
-        if hunk["start_line"] <= line_number <= hunk["end_line"]:
-            return True
+    if file_path in anchors and line_number in anchors[file_path]:
+        return True
+    if stripped_path in anchors and line_number in anchors[stripped_path]:
+        return True
 
     return False
 
