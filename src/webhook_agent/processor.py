@@ -61,6 +61,10 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
     try:
         canonical = payload.get("canonical", "")
         raw = payload.get("raw_payload", {})
+        action = payload.get("action") or raw.get("action")
+        if action == "deleted" or canonical.endswith(".deleted"):
+            return
+
         repo = gh.get_repo(repo_name)
 
         if canonical.startswith("issue_comment."):
@@ -491,6 +495,16 @@ class WebhookProcessor:
             return False
 
         action = ev.get("action")
+        if action == "deleted":
+            event_name = ev.get("event_name")
+            if event_name in (
+                "issue_comment",
+                "pull_request_review_comment",
+                "pull_request",
+                "issue",
+            ):
+                return False
+
         if action == "edited":
             sender_login = (ev.get("sender") or {}).get("login", "")
             raw = ev.get("raw_payload") or {}

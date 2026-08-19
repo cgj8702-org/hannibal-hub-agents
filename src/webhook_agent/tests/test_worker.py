@@ -280,6 +280,11 @@ class TestShouldProcessEvent:
         ev["raw_payload"]["comment"]["body"] = "@dependabot recreate"
         assert self.processor.should_process_event(ev) is False
 
+    def test_suppress_deleted_comment(self):
+        """Deleted comment events should be suppressed from processing."""
+        ev = _make_normalized("issue_comment", action="deleted")
+        assert self.processor.should_process_event(ev) is False
+
     def test_pull_request_review_submitted_suppressed(self):
         """pull_request_review submissions are suppressed to prevent self-review feedback loops."""
         ev = _make_normalized(
@@ -610,6 +615,24 @@ class TestAddEyesReaction:
         mock_repo.get_pull.assert_called_once_with(15)
         mock_pr.get_review_comment.assert_called_once_with(202)
         mock_comment.create_reaction.assert_called_once_with("eyes")
+
+    def test_ignores_deleted_comment_events(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _add_eyes_reaction
+
+        mock_gh = MagicMock()
+        payload = {
+            "canonical": "issue_comment.deleted",
+            "action": "deleted",
+            "raw_payload": {
+                "action": "deleted",
+                "issue": {"number": 42},
+                "comment": {"id": 101},
+            },
+        }
+
+        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        mock_gh.get_repo.assert_not_called()
 
 
 class TestPreworkPipelines:
