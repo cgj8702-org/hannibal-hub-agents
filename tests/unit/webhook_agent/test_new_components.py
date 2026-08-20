@@ -101,4 +101,4 @@ def test_comment_poster_out_of_diff_pruning() -> None:
     )
     payload = prepare_review_payload(verdict, sample_diff)
     assert payload["event"] == "REQUEST_CHANGES"
-    assert "Hannibal Hub Audit Report" in payload["body"]
+    assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in payload["body"]

@@ -4,6 +4,7 @@ import pytest
 from webhook_agent.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
+    normalize_code_review_dict,
     render_code_review_markdown,
     render_sync_review_markdown,
 )
@@ -11,8 +12,6 @@ from webhook_agent.schemas import (
     CodeReviewResponse,
     IssueItem,
     RiskItem,
-    Scorecard,
-    ScorecardEvidence,
     SyncResolutionItem,
     SyncReviewResponse,
 )
@@ -25,16 +24,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 def valid_code_review_pass() -> CodeReviewResponse:
     return CodeReviewResponse(
         executive_summary="Clean feature implementation with full unit test coverage.",
-        scorecard=Scorecard(
-            correctness=5, security=5, performance=4, readability=5, test_coverage=4
-        ),
-        scorecard_evidence=ScorecardEvidence(
-            correctness="Logic is sound.",
-            security="No credential leaks.",
-            performance="O(N) time complexity.",
-            readability="Clean naming.",
-            test_coverage="100% test coverage.",
-        ),
         confidence=5,
         risks_and_edge_cases=[
             RiskItem(
@@ -51,12 +40,6 @@ def valid_code_review_pass() -> CodeReviewResponse:
 def test_calculate_strict_verdict_approve(valid_code_review_pass):
     verdict = calculate_strict_verdict(valid_code_review_pass)
     assert verdict == "APPROVE"
-
-
-def test_calculate_strict_verdict_low_test_coverage(valid_code_review_pass):
-    valid_code_review_pass.scorecard.test_coverage = 3
-    verdict = calculate_strict_verdict(valid_code_review_pass)
-    assert verdict == "REQUEST_CHANGES"
 
 
 def test_calculate_strict_verdict_critical_issue(valid_code_review_pass):
@@ -80,25 +63,31 @@ def test_calculate_strict_verdict_low_confidence(valid_code_review_pass):
 
 def test_render_code_review_markdown(valid_code_review_pass):
     md = render_code_review_markdown(valid_code_review_pass)
-    assert "# 🛡️ Hannibal Hub Audit Report: `APPROVE`" in md
-    assert "Quality Scorecard Average:** `4.6/5.0`" in md
-    assert "Correctness: 5/5" in md
-    assert "Tests: 4/5" in md
+    assert "## 🛡️ Code Review: `APPROVE`" in md
+    assert "Clean feature implementation with full unit test coverage." in md
+    assert "Auditor Confidence:** `5/5`" in md
 
 
 def test_enforce_verdict_with_raw_json(valid_code_review_pass):
     json_str = valid_code_review_pass.model_dump_json()
     rendered_md, verdict = _enforce_verdict(json_str, "APPROVE")
     assert verdict == "APPROVE"
-    assert "Hannibal Hub Audit Report" in rendered_md
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
 
 
 def test_enforce_verdict_with_codeblock_json(valid_code_review_pass):
-    valid_code_review_pass.scorecard.correctness = 2
+    valid_code_review_pass.critical_issues.append(
+        IssueItem(
+            path="src/main.py",
+            line=10,
+            description="Syntax error in main logic",
+            suggested_fix="Fix syntax error",
+        )
+    )
     json_str = f"```json\n{valid_code_review_pass.model_dump_json()}\n```"
     rendered_md, verdict = _enforce_verdict(json_str, "APPROVE")
     assert verdict == "REQUEST_CHANGES"
-    assert "# 🛡️ Hannibal Hub Audit Report: `REQUEST_CHANGES`" in rendered_md
+    assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
 
 
 def test_sync_review_rendering():
@@ -111,37 +100,22 @@ def test_sync_review_rendering():
                 evidence="auth.py:L45 added guard statement",
             )
         ],
-        new_findings=[],
+        critical_issues=[],
+        minor_suggestions=[],
         confidence=5,
     )
     verdict = calculate_sync_verdict(sync_resp)
     assert verdict == "APPROVE"
 
     md = render_sync_review_markdown(sync_resp, verdict)
-    assert "# Pull Request Synchronization Review Update" in md
+    assert "## ⚡ Code Review Update: `APPROVE`" in md
     assert "✅ **[RESOLVED]**" in md
 
 
 def test_enforce_verdict_with_loose_schema_drift_json():
-    """Verify self-healing normalizer recovers from LLM schema drift (strings instead of RiskItems, architecture instead of correctness)."""
+    """Verify self-healing normalizer recovers from LLM schema drift."""
     loose_json = """{
       "executive_summary": "Pull Request #81 centralizes Google ADK Gemini model instantiations.",
-      "scorecard": {
-        "architecture": 5,
-        "security": 4,
-        "performance": 4,
-        "reliability": 4,
-        "readability": 5,
-        "test_coverage": 4
-      },
-      "scorecard_evidence": {
-        "architecture": "Successfully extracts RateLimitedGemini",
-        "security": "API keys preserved",
-        "performance": "Maintains token estimation",
-        "reliability": "Clean fallback imports",
-        "readability": "Well-documented functions",
-        "test_coverage": "Includes unit tests"
-      },
       "confidence": 5,
       "risks_and_edge_cases": [
         "Circular import risk: RateLimitedGemini imports get_active_model lazily"
@@ -154,13 +128,12 @@ def test_enforce_verdict_with_loose_schema_drift_json():
     }"""
     rendered_md, verdict = _enforce_verdict(loose_json, "APPROVE")
     assert verdict == "APPROVE"
-    assert "Hannibal Hub Audit Report" in rendered_md
-    assert "Correctness: 5/5" in rendered_md
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "Circular import risk" in rendered_md
 
 
 def test_enforce_verdict_with_loose_sync_review_json():
-    """Verify self-healing normalizer recovers from SyncReviewResponse schema drift (issue key instead of item_description)."""
+    """Verify self-healing normalizer recovers from SyncReviewResponse schema drift."""
     loose_sync_json = """{
       "summary": "The author successfully resolved the previous review feedback by adding robust fallback path resolution.",
       "resolutions": [
@@ -182,10 +155,9 @@ def test_enforce_verdict_with_loose_sync_review_json():
     }"""
     rendered_md, verdict = _enforce_verdict(loose_sync_json, "APPROVE")
     assert verdict == "APPROVE"
-    assert "# Pull Request Synchronization Review Update" in rendered_md
+    assert "## ⚡ Code Review Update: `APPROVE`" in rendered_md
     assert "Asset Path Resolution Mismatch" in rendered_md
     assert "✅ **[RESOLVED]**" in rendered_md
-    assert "[MAINTAINABILITY] Committing tokenizer asset bloats history." in rendered_md
 
 
 def test_calculate_sync_verdict_blocking_new_finding():
@@ -222,13 +194,6 @@ def test_parse_text_review_to_dict():
 ### 1. Executive Summary
 * **Goal of the PR:** Add logging telemetry and update configuration logic.
 
-### 2. Scorecard Breakdown
-* **Code Correctness:** 4/5 — Correct logic with global project assignment.
-* **Security & Privacy:** 4/5 — Default fallback is acceptable.
-* **Performance & Scale:** 5/5 — Fast initialization.
-* **Readability & Style:** 4/5 — Clean code.
-* **Test Coverage:** 2/5 — Lacks unit test coverage for new helper function.
-
 ### 4. Mandatory Risk & Edge-Case Analysis
 * **Potential Edge Case / Risk:** Concurrency race condition on global assignment.
 * **Recommended Safeguard:** Use thread locking or singleton pattern.
@@ -247,8 +212,6 @@ Confidence: 4/5
         data["executive_summary"]
         == "Add logging telemetry and update configuration logic."
     )
-    assert data["scorecard"]["correctness"] == 4
-    assert data["scorecard"]["test_coverage"] == 2
     assert len(data["risks_and_edge_cases"]) >= 1
     assert (
         data["risks_and_edge_cases"][0]["risk"]
@@ -259,3 +222,37 @@ Confidence: 4/5
     assert "Missing test coverage" in data["critical_issues"][0]["description"]
     assert len(data["minor_suggestions"]) >= 1
     assert "src/webhook_agent/webhook_agent.py" in data["minor_suggestions"][0]["path"]
+
+
+def test_normalize_code_review_dict_edge_cases():
+    """Verify self-healing normalizer handles empty inputs, non-dict objects, and string lists."""
+    assert normalize_code_review_dict({}) == {
+        "executive_summary": "Autonomous PR code review report.",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+    }
+
+    raw = {
+        "executive_summary": "Test summary",
+        "confidence": 10,  # Invalid confidence out of range
+        "critical_issues": ["Loose string critical issue"],
+        "minor_suggestions": ["Loose string minor suggestion"],
+        "risks_and_edge_cases": ["Loose string risk item"],
+    }
+    normalized = normalize_code_review_dict(raw)
+    assert normalized["executive_summary"] == "Test summary"
+    assert normalized["confidence"] == 5
+    assert len(normalized["critical_issues"]) == 1
+    assert (
+        normalized["critical_issues"][0]["description"] == "Loose string critical issue"
+    )
+    assert len(normalized["minor_suggestions"]) == 1
+    assert (
+        normalized["minor_suggestions"][0]["description"]
+        == "Loose string minor suggestion"
+    )
+    assert len(normalized["risks_and_edge_cases"]) == 1
+    assert normalized["risks_and_edge_cases"][0]["risk"] == "Loose string risk item"

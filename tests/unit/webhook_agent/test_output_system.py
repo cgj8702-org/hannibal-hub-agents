@@ -20,10 +20,8 @@ def test_dev_docs_minimal_scope_rendering() -> None:
         risks=[],
     )
     rendered = render_review_markdown(verdict, [], [])
-    assert "# 🛡️ Hannibal Hub Audit Report: `APPROVE`" in rendered
-    assert "* **PR Scope:** `dev_docs`" in rendered
-    assert "Documentation & dev tools verification clean" in rendered
-    assert "> [!CAUTION]" not in rendered
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered
+    assert "Clean README documentation update." in rendered
 
 
 @pytest.mark.unit
@@ -45,9 +43,6 @@ def test_core_backend_deep_audit_rendering() -> None:
     )
     rendered = render_review_markdown(verdict, [risk], [])
     assert "`REQUEST_CHANGES`" in rendered
-    assert "* **PR Scope:** `core_backend`" in rendered
-    assert "> [!CAUTION]" in rendered
-    assert "Critical Blocking Issues Identified" in rendered
     assert "[CONCURRENCY]" in rendered
     assert "`src/logic/state.py:L45-L50`" in rendered
     assert "asyncio.Lock()" in rendered

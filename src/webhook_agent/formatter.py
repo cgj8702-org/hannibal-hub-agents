@@ -1,12 +1,13 @@
 """Deterministic Markdown template renderer and strict mechanical verdict calculator.
 
-Eliminates LLM template hallucination by injecting validated Pydantic JSON fields directly
-into code_review_template.md and sync_review_template.md with strict un-cheatable math.
+Injects validated Pydantic JSON fields directly into code_review_template.md
+and sync_review_template.md with strict un-cheatable mechanical rules.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from .schemas import CodeReviewResponse, SyncReviewResponse
@@ -24,54 +25,9 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if not normalized.get("executive_summary"):
         normalized["executive_summary"] = "Autonomous PR code review report."
 
-    raw_sc = normalized.get("scorecard")
-    sc_dict = dict(raw_sc) if isinstance(raw_sc, dict) else {}
-    if "correctness" not in sc_dict:
-        for alt in (
-            "architecture",
-            "code_quality",
-            "quality",
-            "reliability",
-            "correctness_rating",
-        ):
-            if alt in sc_dict:
-                sc_dict["correctness"] = sc_dict[alt]
-                break
-
-    for field in (
-        "correctness",
-        "security",
-        "performance",
-        "readability",
-        "test_coverage",
-    ):
-        val = sc_dict.get(field)
-        if not isinstance(val, int) or not (1 <= val <= 5):
-            sc_dict[field] = 4
-    normalized["scorecard"] = sc_dict
-
-    raw_ev = normalized.get("scorecard_evidence")
-    ev_dict = dict(raw_ev) if isinstance(raw_ev, dict) else {}
-    if "correctness" not in ev_dict:
-        for alt in ("architecture", "code_quality", "quality", "reliability"):
-            if alt in ev_dict:
-                ev_dict["correctness"] = str(ev_dict[alt])
-                break
-
-    for field in (
-        "correctness",
-        "security",
-        "performance",
-        "readability",
-        "test_coverage",
-    ):
-        if not ev_dict.get(field):
-            ev_dict[field] = f"Evaluated {field} in PR diff."
-    normalized["scorecard_evidence"] = ev_dict
-
     conf = normalized.get("confidence")
     if not isinstance(conf, int) or not (1 <= conf <= 5):
-        normalized["confidence"] = 4
+        normalized["confidence"] = 5
 
     raw_risks = normalized.get("risks_and_edge_cases")
     clean_risks: list[dict[str, str]] = []
@@ -92,7 +48,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 clean_risks.append(
                     {
                         "risk": r_text,
-                        "recommendation": "",
+                        "recommendation": "Monitor and verify behavior under production conditions.",
                     }
                 )
             elif isinstance(item, dict):
@@ -111,7 +67,13 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     item.get("recommendation") or item.get("suggested_fix") or ""
                 ).strip()
                 if r_text:
-                    clean_risks.append({"risk": r_text, "recommendation": rec_text})
+                    clean_risks.append(
+                        {
+                            "risk": r_text,
+                            "recommendation": rec_text
+                            or "Monitor and verify behavior under production conditions.",
+                        }
+                    )
 
     normalized["risks_and_edge_cases"] = clean_risks
 
@@ -342,7 +304,6 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         }
                     )
 
-    # Legacy fallback: if loose JSON provided new_findings instead
     raw_new = normalized.get("new_findings")
     if isinstance(raw_new, list) and not clean_crit and not clean_minor:
         for item in raw_new:
@@ -394,7 +355,6 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
     normalized["critical_issues"] = clean_crit
     normalized["minor_suggestions"] = clean_minor
-    normalized["new_findings"] = clean_crit + clean_minor
 
     conf = normalized.get("confidence")
     if not isinstance(conf, int) or not (1 <= conf <= 5):
@@ -405,48 +365,64 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
-    """Calculate PR review verdict mechanically from structured scorecard & issues.
+    """Calculate PR review verdict mechanically from structured issues and confidence.
 
-    Non-Negotiable Verdict Rules:
-    - ANY score <= 3 (e.g. Test Coverage = 3) -> REQUEST_CHANGES
+    Rules:
     - ANY critical issue -> REQUEST_CHANGES
     - Confidence < 4 -> COMMENT
-    - All scores >= 4, 0 critical issues, confidence >= 4 -> APPROVE
+    - 0 critical issues, confidence >= 4 -> APPROVE
     """
-    sc = review.scorecard
-    min_score = min(
-        sc.correctness,
-        sc.security,
-        sc.performance,
-        sc.readability,
-        sc.test_coverage,
-    )
-
-    if min_score <= 3 or len(review.critical_issues) > 0:
+    if len(review.critical_issues) > 0:
         logger.info(
-            "🔒 Mechanical verdict: REQUEST_CHANGES (min_score=%d, critical_issues=%d)",
-            min_score,
+            "Mechanical verdict: REQUEST_CHANGES (critical_issues=%d)",
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
 
     if review.confidence < 4:
         logger.info(
-            "🔒 Mechanical verdict: COMMENT (confidence=%d < 4)", review.confidence
+            "Mechanical verdict: COMMENT (confidence=%d < 4)", review.confidence
         )
         return "COMMENT"
 
-    logger.info("✅ Mechanical verdict: APPROVE (all scores >= 4, 0 critical issues)")
+    logger.info("Mechanical verdict: APPROVE (0 critical issues, confidence >= 4)")
+    return "APPROVE"
+
+
+def calculate_sync_verdict(review: SyncReviewResponse) -> str:
+    """Calculate sync re-review verdict mechanically from resolutions and new issues.
+
+    Rules:
+    - ANY unresolved finding -> REQUEST_CHANGES
+    - ANY critical issue -> REQUEST_CHANGES
+    - Confidence < 4 -> COMMENT
+    - All items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
+    """
+    unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
+    has_critical = len(review.critical_issues) > 0
+
+    if unresolved or has_critical:
+        logger.info(
+            "Sync verdict: REQUEST_CHANGES (unresolved=%d, critical=%d)",
+            len(unresolved),
+            len(review.critical_issues),
+        )
+        return "REQUEST_CHANGES"
+
+    if review.confidence < 4:
+        return "COMMENT"
+
+    logger.info(
+        "Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",
+        len(review.minor_suggestions),
+    )
     return "APPROVE"
 
 
 def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     """Parse loose Markdown text review body into structured dictionary for CodeReviewResponse."""
-    import re
-
     data: dict[str, Any] = {}
 
-    # Executive Summary
     summary_match = re.search(r"Goal of the PR:\s*([^\n]+)", body, re.IGNORECASE)
     if summary_match:
         data["executive_summary"] = summary_match.group(1).strip("* -•")
@@ -460,38 +436,10 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             lines[0] if lines else "Autonomous PR code review report."
         )
 
-    # Scorecard & Evidence
-    scorecard: dict[str, int] = {}
-    evidence: dict[str, str] = {}
-
-    categories = {
-        "correctness": r"(?:code correctness|correctness)",
-        "security": r"(?:security & privacy|security)",
-        "performance": r"(?:performance & scale|performance)",
-        "readability": r"(?:readability & style|readability)",
-        "test_coverage": r"(?:test coverage|testing|tests)",
-    }
-
-    for cat_key, cat_pattern in categories.items():
-        match = re.search(
-            rf"{cat_pattern}[^\n\d]*?(\d)(?:/5)?(?:\s*[-—|:]\s*([^\n|]*))?",
-            body,
-            re.IGNORECASE,
-        )
-        if match:
-            scorecard[cat_key] = int(match.group(1))
-            if match.group(2) and match.group(2).strip():
-                evidence[cat_key] = match.group(2).strip()
-
-    data["scorecard"] = scorecard
-    data["scorecard_evidence"] = evidence
-
-    # Confidence
     conf_match = re.search(r"Confidence:\s*(\d)/5", body, re.IGNORECASE)
     if conf_match:
         data["confidence"] = int(conf_match.group(1))
 
-    # Risks and edge cases
     risks: list[dict[str, str]] = []
     risk_matches = re.findall(
         r"Potential Edge Case / Risk:\s*([^\n]+)(?:\n\s*\*?\s*Recommended Safeguard:\s*([^\n]+))?",
@@ -512,28 +460,8 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                 }
             )
 
-    if not risks:
-        if "Mandatory Risk" in body or "Edge-Case Analysis" in body:
-            risk_section = (
-                body.split("Mandatory Risk")[1] if "Mandatory Risk" in body else ""
-            )
-            for line in risk_section.splitlines()[:5]:
-                line_clean = line.strip().lstrip("*-•").strip()
-                if (
-                    line_clean
-                    and not line_clean.startswith("#")
-                    and len(line_clean) > 10
-                ):
-                    risks.append(
-                        {
-                            "risk": line_clean,
-                            "recommendation": "Monitor and verify behavior under production conditions.",
-                        }
-                    )
-
     data["risks_and_edge_cases"] = risks
 
-    # Critical issues and minor suggestions
     critical_issues: list[dict[str, Any]] = []
     minor_suggestions: list[dict[str, Any]] = []
 
@@ -578,65 +506,15 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     return data
 
 
-def calculate_sync_verdict(review: SyncReviewResponse) -> str:
-    """Calculate sync re-review verdict mechanically from resolutions & structured new issues.
-
-    Non-Negotiable Sync Verdict Rules:
-    - ANY unresolved finding -> REQUEST_CHANGES
-    - ANY critical issue -> REQUEST_CHANGES
-    - Confidence < 4 -> COMMENT
-    - All items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
-    """
-    unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
-    has_critical = len(review.critical_issues) > 0
-
-    if unresolved or has_critical:
-        logger.info(
-            "🔒 Sync verdict: REQUEST_CHANGES (unresolved=%d, critical=%d)",
-            len(unresolved),
-            len(review.critical_issues),
-        )
-        return "REQUEST_CHANGES"
-
-    if review.confidence < 4:
-        return "COMMENT"
-
-    logger.info(
-        "✅ Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",
-        len(review.minor_suggestions),
-    )
-    return "APPROVE"
-
-
 def render_code_review_markdown(
     review: CodeReviewResponse, verdict: str | None = None
 ) -> str:
-    """Render CodeReviewResponse into code_review_template.md deterministically."""
+    """Render CodeReviewResponse into clean, modern GitHub Markdown."""
     if verdict is None:
         verdict = calculate_strict_verdict(review)
 
-    sc = review.scorecard
-    avg_score = (
-        sc.correctness
-        + sc.security
-        + sc.performance
-        + sc.readability
-        + sc.test_coverage
-    ) / 5.0
+    verdict_badge = f"`{verdict}`" if verdict else "`COMMENT`"
 
-    # Section 4: Mandatory Risk & Edge-Case Analysis
-    risk_lines: list[str] = []
-    if review.risks_and_edge_cases:
-        for item in review.risks_and_edge_cases:
-            risk_lines.append(f"* **Potential Edge Case / Risk:** {item.risk}")
-            if item.recommendation:
-                risk_lines.append(f"* **Recommended Safeguard:** {item.recommendation}")
-            risk_lines.append("")
-        risk_block = "\n".join(risk_lines).strip()
-    else:
-        risk_block = "* *None identified for this PR scope.*"
-
-    # Section 5: Key Issues
     critical_lines: list[str] = []
     if review.critical_issues:
         for issue in review.critical_issues:
@@ -661,60 +539,74 @@ def render_code_review_markdown(
     else:
         minor_lines.append("* *None found.*")
 
-    gaps_str = ", ".join(review.context_gaps) if review.context_gaps else "None"
+    risk_lines: list[str] = []
+    if review.risks_and_edge_cases:
+        for item in review.risks_and_edge_cases:
+            risk_lines.append(f"* **Risk:** {item.risk}")
+            if item.recommendation:
+                risk_lines.append(f"  * *Recommendation*: {item.recommendation}")
+        risk_block = "\n".join(risk_lines).strip()
+    else:
+        risk_block = "* *None identified for this PR scope.*"
 
-    verdict_badge = f"`{verdict}`" if verdict else "`COMMENT`"
-    return f"""# 🛡️ Hannibal Hub Audit Report: {verdict_badge}
+    markdown_parts = [
+        f"## 🛡️ Code Review: {verdict_badge}",
+        "",
+        "### 1. Executive Summary",
+        "",
+        f"* **Summary & Justification:** {review.executive_summary}",
+        f"* **Auditor Confidence:** `{review.confidence}/5`",
+        "",
+        "---",
+        "",
+        "### 2. Action Items",
+        "",
+        "#### 🔴 Critical (Must Fix Before Merge)",
+        "\n".join(critical_lines),
+        "",
+        "#### 🟡 Suggestions & Maintainability",
+        "\n".join(minor_lines),
+        "",
+        "---",
+        "",
+        "### 3. Potential Risks & Edge Cases",
+        "",
+        risk_block,
+    ]
 
-### 1. Executive Summary
+    if review.context_gaps:
+        gaps_str = ", ".join(review.context_gaps)
+        markdown_parts.extend(
+            [
+                "",
+                "---",
+                "",
+                "### 4. Verification Notes",
+                f"* **Context Gaps:** {gaps_str}",
+            ]
+        )
 
-* **Confidence Rating:** `{review.confidence}/5.0`
-* **Quality Scorecard Average:** `{avg_score:.1f}/5.0` (`Correctness: {sc.correctness}/5`, `Security: {sc.security}/5`, `Performance: {sc.performance}/5`, `Readability: {sc.readability}/5`, `Tests: {sc.test_coverage}/5`)
-* **Verdict Justification:** {review.executive_summary}
-
----
-
-### 2. Mandatory Risk & Edge-Case Analysis
-
-> [!IMPORTANT]
-> *Every review highlights potential failure modes, concurrency boundaries, memory limits, or unhandled edge cases.*
-
-{risk_block}
-
----
-
-### 3. Key Issues & Action Items
-
-#### 🔴 Critical (Must Fix Before Merge)
-*Issues that block deployment, introduce bugs, or cause security vulnerabilities.*
-{chr(10).join(critical_lines)}
-
-#### 🟡 Minor / Refactoring (Actionable Suggestions)
-*Non-blocking suggestions to improve code quality, maintainability, or performance.*
-{chr(10).join(minor_lines)}
-
----
-
-### 4. Verification Protocol
-* **Line-Anchored Grounding:** All citations verified against modified diff hunks.
-* **Anti-Sycophancy Standard:** Objective technical feedback only.
-* **Context Gaps:** {gaps_str}
-"""
+    return "\n".join(markdown_parts) + "\n"
 
 
 def render_sync_review_markdown(
     review: SyncReviewResponse, verdict: str | None = None
 ) -> str:
-    """Render SyncReviewResponse into sync_review_template.md deterministically."""
+    """Render SyncReviewResponse into clean, modern GitHub Markdown."""
     if verdict is None:
         verdict = calculate_sync_verdict(review)
 
+    verdict_badge = f"`{verdict}`" if verdict else "`COMMENT`"
+
     res_lines: list[str] = []
-    for item in review.resolutions:
-        icon = "✅" if item.status == "RESOLVED" else "🔴"
-        res_lines.append(
-            f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
-        )
+    if review.resolutions:
+        for item in review.resolutions:
+            icon = "✅" if item.status == "RESOLVED" else "🔴"
+            res_lines.append(
+                f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+            )
+    else:
+        res_lines.append("* *No prior review items tracked.*")
 
     crit_lines: list[str] = []
     if review.critical_issues:
@@ -736,33 +628,26 @@ def render_sync_review_markdown(
     else:
         minor_lines.append("* *None found.*")
 
-    return f"""# Pull Request Synchronization Review Update
+    return f"""## ⚡ Code Review Update: {verdict_badge}
 
-### 1. Executive Summary
+### 1. Synchronization Summary
 
 * **Update Summary:** {review.summary}
-* **Transition Status:** Incremental commit evaluated. Overall verdict is **{verdict}**.
+* **Auditor Confidence:** `{review.confidence}/5`
 
 ---
 
-### 2. Resolution Status of Prior Review Findings
+### 2. Resolution Tracker
 
 {chr(10).join(res_lines)}
 
 ---
 
-### 3. New Findings Introduced in Update
+### 3. New Findings (Introduced in Update)
 
 #### 🔴 Critical (Must Fix Before Merge)
 {chr(10).join(crit_lines)}
 
-#### 🟡 Minor / Refactoring (Actionable Suggestions)
+#### 🟡 Suggestions & Maintainability
 {chr(10).join(minor_lines)}
-
----
-
-### 4. Final Verdict
-
-* **Overall Verdict:** {verdict}
-* **Auditor Confidence:** {review.confidence}/5
 """
