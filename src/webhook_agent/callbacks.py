@@ -39,8 +39,30 @@ MUTATING_TOOLS: set[str] = {
 }
 
 
+def _check_pr_closed_short_circuit(state: dict[str, Any]) -> None:
+    """Check if target PR is registered as closed/merged and abort agent turn immediately."""
+    repo_full_name = state.get("repo_full_name") or ""
+    pr_number = state.get("pr_number") or state.get("issue_number")
+    if repo_full_name and pr_number:
+        try:
+            from .cancellation import AbortAgentExecution, pr_closed_registry
+
+            if pr_closed_registry.is_closed(str(repo_full_name), int(pr_number)):
+                logger.warning(
+                    "🔒 Short-circuiting agent turn: PR %s#%s is marked CLOSED",
+                    repo_full_name,
+                    pr_number,
+                )
+                raise AbortAgentExecution(
+                    f"PR {repo_full_name}#{pr_number} is closed or merged. Short-circuiting execution."
+                )
+        except ImportError:
+            pass
+
+
 async def before_agent_callback(callback_context: CallbackContext) -> None:
     """Pre-populate session state with active tier and runtime context before agent execution."""
+    _check_pr_closed_short_circuit(callback_context.state)
     active_tier = _resolve_tier()
     callback_context.state["active_tier"] = active_tier
     callback_context.state["review_submitted_in_this_turn"] = False
@@ -71,6 +93,7 @@ async def before_model_callback(
     callback_context: CallbackContext, llm_request: LlmRequest
 ) -> LlmResponse | None:
     """Execute pre-flight token metering, dynamic model TPM chunking, and rate limit waiting."""
+    _check_pr_closed_short_circuit(callback_context.state)
     active_tier = callback_context.state.get("active_tier") or _resolve_tier()
     api_key = get_active_api_key()
     try:
@@ -141,6 +164,7 @@ async def before_tool_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext
 ) -> dict[str, Any] | None:
     """Validate and sanitize tool arguments before execution."""
+    _check_pr_closed_short_circuit(tool_context.state)
     if "pr_number" in args and isinstance(args["pr_number"], str):
         try:
             args["pr_number"] = int(args["pr_number"])

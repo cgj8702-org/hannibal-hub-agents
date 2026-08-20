@@ -523,6 +523,23 @@ class WebhookProcessor:
         if canonical in ("pull_request.closed", "pull_request_review.submitted") or (
             event_name == "pull_request" and action == "closed"
         ):
+            raw = ev.get("raw_payload") or {}
+            repo = raw.get("repository") or {}
+            repo_full_name = repo.get("full_name", "")
+            pr_data = raw.get("pull_request") or {}
+            pr_number = pr_data.get("number")
+            if repo_full_name and pr_number:
+                try:
+                    from .cancellation import pr_closed_registry
+
+                    pr_closed_registry.mark_closed(repo_full_name, int(pr_number))
+                except Exception as ex:
+                    logger.warning(
+                        "Failed to mark PR %s#%s closed in registry: %s",
+                        repo_full_name,
+                        pr_number,
+                        ex,
+                    )
             return False
 
         # Ignore automated CI infrastructure noise and installation lifecycle events
