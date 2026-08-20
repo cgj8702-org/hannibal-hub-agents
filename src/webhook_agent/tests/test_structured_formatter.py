@@ -293,3 +293,22 @@ def test_enforce_verdict_with_markdown_prefix_and_json_codeblock():
     assert "Missing model entries or malformed JSON" in rendered_md
     assert "Audit Dimensions Evaluation" not in rendered_md
     assert "```json" not in rendered_md
+
+
+def test_enforce_verdict_with_malformed_json_inside_codeblock():
+    """Verify _enforce_verdict safely handles invalid JSON syntax inside codeblocks and falls back cleanly."""
+    malformed_input = """# Code Review Report
+
+### 1. Executive Summary
+* **Goal of the PR:** Add logging telemetry.
+
+```json
+{
+  "executive_summary": "Malformed JSON missing closing quote,
+  "confidence": 5
+}
+```"""
+    rendered_md, verdict = _enforce_verdict(malformed_input, "APPROVE")
+    assert verdict == "APPROVE"
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
+    assert "Add logging telemetry" in rendered_md
