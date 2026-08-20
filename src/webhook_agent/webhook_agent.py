@@ -2250,6 +2250,25 @@ class WebhookAgent:
                     return  # Success - exit the retry loop
 
                 except Exception as e:
+                    if type(
+                        e
+                    ).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(
+                        type(e)
+                    ):
+                        logger.info(
+                            "🔒 Agent execution short-circuited (trace: %s): %s",
+                            trace_id[-4:],
+                            e,
+                        )
+                        results.append(
+                            ActionResult(
+                                tool="skip_closed_pr",
+                                success=True,
+                                detail=f"Execution short-circuited: {e}",
+                            )
+                        )
+                        return
+
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                         rate_details = extract_rate_limit_details(e)
