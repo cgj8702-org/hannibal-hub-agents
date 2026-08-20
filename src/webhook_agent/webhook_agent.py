@@ -950,11 +950,16 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     """
     # Programmatic Guardrail: Block duplicate add_comment if formal review() was already submitted in this same execution turn
     session_state = getattr(ctx, "state", None)
-    if isinstance(session_state, dict) and session_state.get(
-        "review_submitted_in_this_turn"
+    if (
+        isinstance(session_state, dict)
+        and session_state.get("review_submitted_in_this_turn")
+    ) or (
+        "Successfully audited Pull Request" in body
+        or "Skipped: Formal code review" in body
+        or "submitted a formal code review report" in body
     ):
         logger.warning(
-            "Programmatic Guardrail: Blocked duplicate add_comment() for #%d (formal review already submitted in this turn)",
+            "Programmatic Guardrail: Blocked duplicate add_comment() for #%d (formal review status message)",
             issue_number,
         )
         return f"Skipped: Formal code review report already submitted for #{issue_number} in this turn."

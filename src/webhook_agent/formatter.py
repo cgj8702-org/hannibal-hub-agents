@@ -78,18 +78,38 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
         for item in raw_risks:
             if isinstance(item, str) and item.strip():
                 r_text = item.strip()
+                if any(
+                    hdr in r_text.lower()
+                    for hdr in (
+                        "edge-case analysis",
+                        "mandatory risk",
+                        "section 4",
+                        "scorecard summary",
+                    )
+                ) or r_text.startswith("#"):
+                    continue
                 clean_risks.append(
                     {
                         "risk": r_text,
-                        "recommendation": f"Monitor and verify behavior for '{r_text}' under production conditions.",
+                        "recommendation": "Verify guardrails and edge-case handling under operational load.",
                     }
                 )
             elif isinstance(item, dict):
                 r_text = str(item.get("risk") or item.get("description") or "").strip()
+                if any(
+                    hdr in r_text.lower()
+                    for hdr in (
+                        "edge-case analysis",
+                        "mandatory risk",
+                        "section 4",
+                        "scorecard summary",
+                    )
+                ) or r_text.startswith("#"):
+                    continue
                 rec_text = str(
                     item.get("recommendation")
                     or item.get("suggested_fix")
-                    or f"Monitor and guard '{r_text}' in runtime environments."
+                    or "Verify guardrails and edge-case handling under operational load."
                 ).strip()
                 if r_text:
                     clean_risks.append({"risk": r_text, "recommendation": rec_text})
