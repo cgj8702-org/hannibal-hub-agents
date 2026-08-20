@@ -23,14 +23,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from github import Github
-from google.adk.agents import Agent, LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.agents.context import Context
 from google.adk.models import Gemini
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
-from google.adk.tools.agent_tool import AgentTool
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
@@ -1449,18 +1447,6 @@ def get_current_time(ctx: Context) -> dict[str, str]:
     return {"current_utc_time": datetime.now(UTC).isoformat()}
 
 
-# Sub-agent for Google Search grounding without breaking AFC for root tools
-# Note: google_search tools in ADK are strictly supported on Gemini models (gemini-3.5-flash-lite).
-search_sub_agent = Agent(
-    name="search_agent",
-    model=os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite"),
-    instruction="You are a technical search specialist. Search the web for documentation, CVEs, syntax issues, and library details.",
-    tools=[google_search],
-)
-
-search_tool = AgentTool(search_sub_agent)
-
-
 # ---------------------------------------------------------------------------
 # System instruction for the agent
 # ---------------------------------------------------------------------------
@@ -1478,7 +1464,7 @@ Your core mission is to protect repository hygiene, audit code changes with clin
 
 1. **Understand Context**: Analyze user requests, pull request diffs, and codebase structure.
 2. **Grounding Pre-Check**: Before claiming that code, teardown blocks, or unit tests are missing in a PR review:
-   - You MUST call `read_file()` or `search_agent()` to inspect target files first.
+   - You MUST call `read_file()` to inspect target files first.
    - Never suggest creating unit tests or adding cleanup logic without verifying existing tests in `tests/` or teardown blocks in target modules.
 3. **Exact Tool Names**: Call tools using their exact function names (e.g., `get_issue`, `read_file`, `add_comment`, `review`) without any `github:` prefix.
 4. **Format Results**: Structure reviews, PR descriptions, and responses in Markdown tables, code blocks, and clear sections using the required template.
@@ -1633,7 +1619,6 @@ class WebhookAgent:
                 merge_pr,
                 review,
                 get_current_time,
-                search_tool,
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,
             ],
@@ -1685,15 +1670,6 @@ class WebhookAgent:
             self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
-            search_model_name = (
-                next_model
-                if "gemini" in next_model.lower()
-                else os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite")
-            )
-            search_sub_agent.model = get_adk_model(
-                model_name=search_model_name,
-                api_key=get_active_api_key(),
-            )
             self._runner = Runner(
                 agent=self._agent,
                 app_name=self._app_name,
@@ -2096,15 +2072,6 @@ class WebhookAgent:
             self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
-            search_model_name = (
-                selected_model
-                if "gemini" in selected_model.lower()
-                else os.environ.get("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite")
-            )
-            search_sub_agent.model = get_adk_model(
-                model_name=search_model_name,
-                api_key=get_active_api_key(),
-            )
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []

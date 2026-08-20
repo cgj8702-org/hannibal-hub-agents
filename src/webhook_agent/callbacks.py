@@ -191,11 +191,7 @@ async def on_tool_error_callback(
             }
 
     err_str = str(error).lower()
-    if (
-        "429" in err_str
-        or "resource_exhausted" in err_str
-        or tool.name == "search_agent"
-    ):
+    if "429" in err_str or "resource_exhausted" in err_str:
         return {
             "success": False,
             "detail": f"Tool '{tool.name}' experienced a temporary limit or error ({error}). Audit proceeding using remaining available tools.",
