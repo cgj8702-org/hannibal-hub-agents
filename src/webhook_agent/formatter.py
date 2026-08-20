@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
 from .schemas import CodeReviewResponse, SyncReviewResponse
 
 logger = logging.getLogger("webhook_agent.formatter")
@@ -91,7 +92,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 clean_risks.append(
                     {
                         "risk": r_text,
-                        "recommendation": "Verify guardrails and edge-case handling under operational load.",
+                        "recommendation": "",
                     }
                 )
             elif isinstance(item, dict):
@@ -107,20 +108,11 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 ) or r_text.startswith("#"):
                     continue
                 rec_text = str(
-                    item.get("recommendation")
-                    or item.get("suggested_fix")
-                    or "Verify guardrails and edge-case handling under operational load."
+                    item.get("recommendation") or item.get("suggested_fix") or ""
                 ).strip()
                 if r_text:
                     clean_risks.append({"risk": r_text, "recommendation": rec_text})
 
-    if not clean_risks:
-        clean_risks.append(
-            {
-                "risk": "Potential API quota consumption bursts or async state race conditions during concurrent PR sync events.",
-                "recommendation": "Enforce sliding-window rate limiting and verify exponential backoff retries.",
-            }
-        )
     normalized["risks_and_edge_cases"] = clean_risks
 
     raw_crit = normalized.get("critical_issues")
@@ -634,10 +626,15 @@ def render_code_review_markdown(
 
     # Section 4: Mandatory Risk & Edge-Case Analysis
     risk_lines: list[str] = []
-    for item in review.risks_and_edge_cases:
-        risk_lines.append(f"* **Potential Edge Case / Risk:** {item.risk}")
-        risk_lines.append(f"* **Recommended Safeguard:** {item.recommendation}\n")
-    risk_block = "\n".join(risk_lines).strip()
+    if review.risks_and_edge_cases:
+        for item in review.risks_and_edge_cases:
+            risk_lines.append(f"* **Potential Edge Case / Risk:** {item.risk}")
+            if item.recommendation:
+                risk_lines.append(f"* **Recommended Safeguard:** {item.recommendation}")
+            risk_lines.append("")
+        risk_block = "\n".join(risk_lines).strip()
+    else:
+        risk_block = "* *None identified for this PR scope.*"
 
     # Section 5: Key Issues
     critical_lines: list[str] = []
