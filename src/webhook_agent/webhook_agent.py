@@ -1694,6 +1694,12 @@ class WebhookAgent:
                 model_name=search_model_name,
                 api_key=get_active_api_key(),
             )
+            self._runner = Runner(
+                agent=self._agent,
+                app_name=self._app_name,
+                session_service=self._session_service,
+                memory_service=self._memory_service,
+            )
             return next_model
         return None
 
@@ -2248,8 +2254,11 @@ class WebhookAgent:
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                         rate_details = extract_rate_limit_details(e)
                         self._advance_model_chain(error=e)
+                        retry_delay = min(
+                            rate_details.get("retry_after_seconds") or 2.0, 10.0
+                        )
                         logger.warning(
-                            "Transient error on attempt %d/%d (trace: %s): %s. Quota: %s (%s) | Cooldown: %ss | Reason: %s. Active model is now: %s",
+                            "Transient error on attempt %d/%d (trace: %s): %s. Quota: %s (%s) | Cooldown: %ss | Reason: %s. Active model is now: %s. Backing off for %.1fs...",
                             attempt + 1,
                             _MAX_RETRIES,
                             trace_id[-4:],
@@ -2259,7 +2268,10 @@ class WebhookAgent:
                             rate_details.get("retry_after_seconds") or 0,
                             rate_details.get("reason") or "Unknown",
                             self._current_model_name,
+                            retry_delay,
                         )
+                        if retry_delay > 0:
+                            await asyncio.sleep(retry_delay)
                         continue
                     logger.debug(
                         "Non-transient error or exhausted retries: raising exception (trace: %s)",
