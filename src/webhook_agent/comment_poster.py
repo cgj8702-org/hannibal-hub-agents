@@ -59,72 +59,34 @@ def render_review_markdown(
     top_level_summary_risks: list[RiskItem],
 ) -> str:
     """Render high-trust, scope-aware Markdown summary body for GitHub PR review."""
-    scope_badge = f"`{verdict.pr_type}`"
     verdict_badge = f"`{verdict.verdict}`"
 
     lines: list[str] = [
-        f"# 🛡️ Hannibal Hub Audit Report: {verdict_badge}",
+        f"## 🛡️ Code Review: {verdict_badge}",
         "",
         "### 1. Executive Summary",
-        f"* **PR Scope:** {scope_badge}",
-        f"* **Confidence Rating:** `{verdict.confidence}/5.0`",
-        f"* **Verdict Justification:** {verdict.summary}",
+        "",
+        f"* **Summary & Justification:** {verdict.summary}",
+        f"* **Auditor Confidence:** `{verdict.confidence}/5`",
         "",
         "---",
+        "",
+        "### 2. Potential Risks & Edge Cases",
+        "",
     ]
 
     all_risks = anchored_risks + top_level_summary_risks
 
-    # Dev/Docs scope rendering (lightweight 2-section audit)
-    if verdict.pr_type == "dev_docs":
-        lines.append("### 2. Audit Verification")
-        if all_risks:
-            for idx, risk in enumerate(all_risks, 1):
-                file_cite = f" (`{risk.file}:{risk.line_range}`)" if risk.file else ""
-                lines.append(f"{idx}. **[{risk.category.upper()}]**{file_cite}")
-                lines.append(f"   - **Issue:** {risk.description}")
-                lines.append(f"   - **Remediation:** {risk.remediation}")
-                lines.append("")
-        else:
-            lines.append(
-                "Documentation & dev tools verification clean. Zero critical issues identified."
-            )
-            lines.append("")
-        return "\n".join(lines)
-
-    # Core backend & Minor fix rendering
-    lines.extend(
-        [
-            "### 2. Mandatory Risk & Edge-Case Analysis",
-            "",
-        ]
-    )
-
-    if verdict.verdict == "REQUEST_CHANGES":
-        lines.append("> [!CAUTION]")
-        lines.append("> **Critical Blocking Issues Identified**")
-        lines.append("")
-
     if all_risks:
         for idx, risk in enumerate(all_risks, 1):
             file_cite = f" (`{risk.file}:{risk.line_range}`)" if risk.file else ""
-            lines.append(f"#### {idx}. [{risk.category.upper()}]{file_cite}")
-            lines.append(f"* **Failure Mechanism:** {risk.description}")
-            lines.append(f"* **Remediation:** {risk.remediation}")
+            lines.append(f"{idx}. **[{risk.category.upper()}]**{file_cite}")
+            lines.append(f"   - **Issue:** {risk.description}")
+            lines.append(f"   - **Remediation:** {risk.remediation}")
             lines.append("")
     else:
-        lines.append("> [!NOTE]")
-        lines.append("> Zero critical risks identified for this PR scope.")
+        lines.append("* *None identified for this PR scope.*")
         lines.append("")
-
-    lines.extend(
-        [
-            "---",
-            "### 3. Verification Protocol",
-            "* **Line-Anchored Grounding:** All citations verified against modified diff hunks.",
-            "* **Anti-Sycophancy Standard:** Objective technical feedback only.",
-        ]
-    )
 
     return "\n".join(lines)
 

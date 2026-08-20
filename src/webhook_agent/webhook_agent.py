@@ -967,12 +967,17 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
         return f"Skipped: Formal code review report already submitted for #{issue_number} in this turn."
 
     # Programmatic Guardrail: Redirect code review reports erroneously sent to add_comment to review()
+    cleaned_b = body.strip()
     if (
-        "Code Review Report" in body
+        "executive_summary" in body
+        or "critical_issues" in body
+        or "resolutions" in body
+        or "Code Review Report" in body
         or "Audit Report" in body
         or "| Category" in body
         or "**Scorecard**" in body
         or "## 4. Verdict Determination" in body
+        or (cleaned_b.startswith("{") and cleaned_b.endswith("}"))
     ):
         logger.warning(
             "Redirecting code review report from add_comment() to review() for #%d",
