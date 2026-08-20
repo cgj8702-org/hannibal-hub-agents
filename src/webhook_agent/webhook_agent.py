@@ -1299,7 +1299,17 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
         try:
             data = json.loads(cand)
             if isinstance(data, dict):
-                if (
+                if "resolutions" in data or (
+                    "summary" in data and "executive_summary" not in data
+                ):
+                    normalized_sync = normalize_sync_review_dict(data)
+                    sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+                    enforced_verdict = calculate_sync_verdict(sync_obj)
+                    rendered_body = render_sync_review_markdown(
+                        sync_obj, enforced_verdict
+                    )
+                    return rendered_body, enforced_verdict
+                elif (
                     "executive_summary" in data
                     or "critical_issues" in data
                     or "minor_suggestions" in data
@@ -1309,14 +1319,6 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     enforced_verdict = calculate_strict_verdict(cr_obj)
                     rendered_body = render_code_review_markdown(
                         cr_obj, enforced_verdict
-                    )
-                    return rendered_body, enforced_verdict
-                elif "resolutions" in data:
-                    normalized_sync = normalize_sync_review_dict(data)
-                    sync_obj = SyncReviewResponse.model_validate(normalized_sync)
-                    enforced_verdict = calculate_sync_verdict(sync_obj)
-                    rendered_body = render_sync_review_markdown(
-                        sync_obj, enforced_verdict
                     )
                     return rendered_body, enforced_verdict
         except Exception as exc:
