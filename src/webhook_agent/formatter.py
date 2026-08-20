@@ -48,7 +48,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 clean_risks.append(
                     {
                         "risk": r_text,
-                        "recommendation": "Monitor and verify behavior under production conditions.",
+                        "recommendation": "",
                     }
                 )
             elif isinstance(item, dict):
@@ -70,8 +70,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     clean_risks.append(
                         {
                             "risk": r_text,
-                            "recommendation": rec_text
-                            or "Monitor and verify behavior under production conditions.",
+                            "recommendation": rec_text,
                         }
                     )
 
@@ -93,7 +92,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             "path": "codebase",
                             "line": None,
                             "description": desc,
-                            "suggested_fix": f"Resolve issue '{desc}' prior to merging PR.",
+                            "suggested_fix": "",
                         }
                     )
             elif isinstance(item, dict):
@@ -114,7 +113,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                                 else None
                             ),
                             "description": desc,
-                            "suggested_fix": fix or f"Apply targeted fix for '{desc}'.",
+                            "suggested_fix": fix,
                         }
                     )
     normalized["critical_issues"] = clean_crit
@@ -136,7 +135,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             "path": "codebase",
                             "line": None,
                             "description": desc,
-                            "suggested_fix": f"Consider refactoring or adding test coverage for '{desc[:60]}'.",
+                            "suggested_fix": "",
                         }
                     )
             elif isinstance(item, dict):
@@ -158,8 +157,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                                 else None
                             ),
                             "description": desc,
-                            "suggested_fix": fix
-                            or f"Refactor '{desc[:60]}' for maintainability.",
+                            "suggested_fix": fix,
                         }
                     )
     normalized["minor_suggestions"] = clean_minor
@@ -519,9 +517,10 @@ def render_code_review_markdown(
     if review.critical_issues:
         for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            critical_lines.append(
-                f"* {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
-            )
+            item_str = f"* {loc}: {issue.description}"
+            if issue.suggested_fix and issue.suggested_fix.strip():
+                item_str += f"\n  * *Suggested Fix*: {issue.suggested_fix.strip()}"
+            critical_lines.append(item_str)
     else:
         critical_lines.append("* *None found.*")
 
@@ -533,9 +532,10 @@ def render_code_review_markdown(
                 if suggestion.line
                 else f"`{suggestion.path}`"
             )
-            minor_lines.append(
-                f"* {loc}: {suggestion.description}\n  * *Suggested Fix*: {suggestion.suggested_fix}"
-            )
+            item_str = f"* {loc}: {suggestion.description}"
+            if suggestion.suggested_fix and suggestion.suggested_fix.strip():
+                item_str += f"\n  * *Suggested Fix*: {suggestion.suggested_fix.strip()}"
+            minor_lines.append(item_str)
     else:
         minor_lines.append("* *None found.*")
 
@@ -543,8 +543,10 @@ def render_code_review_markdown(
     if review.risks_and_edge_cases:
         for item in review.risks_and_edge_cases:
             risk_lines.append(f"* **Risk:** {item.risk}")
-            if item.recommendation:
-                risk_lines.append(f"  * *Recommendation*: {item.recommendation}")
+            if item.recommendation and item.recommendation.strip():
+                risk_lines.append(
+                    f"  * *Recommendation*: {item.recommendation.strip()}"
+                )
         risk_block = "\n".join(risk_lines).strip()
     else:
         risk_block = "* *None identified for this PR scope.*"
@@ -612,9 +614,10 @@ def render_sync_review_markdown(
     if review.critical_issues:
         for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            crit_lines.append(
-                f"* 🔴 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
-            )
+            item_str = f"* 🔴 {loc}: {issue.description}"
+            if issue.suggested_fix and issue.suggested_fix.strip():
+                item_str += f"\n  * *Suggested Fix*: {issue.suggested_fix.strip()}"
+            crit_lines.append(item_str)
     else:
         crit_lines.append("* *None found.*")
 
@@ -622,9 +625,10 @@ def render_sync_review_markdown(
     if review.minor_suggestions:
         for issue in review.minor_suggestions:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            minor_lines.append(
-                f"* 🟡 {loc}: {issue.description}\n  * *Suggested Fix*: {issue.suggested_fix}"
-            )
+            item_str = f"* 🟡 {loc}: {issue.description}"
+            if issue.suggested_fix and issue.suggested_fix.strip():
+                item_str += f"\n  * *Suggested Fix*: {issue.suggested_fix.strip()}"
+            minor_lines.append(item_str)
     else:
         minor_lines.append("* *None found.*")
 

@@ -14,7 +14,7 @@ class RiskItem(BaseModel):
         description="Specific edge case or risk factor (e.g., rate limits, memory leaks, unhandled exceptions)"
     )
     recommendation: str = Field(
-        description="Recommended safeguard or mitigation strategy"
+        default="", description="Recommended safeguard or mitigation strategy"
     )
 
 
@@ -25,7 +25,7 @@ class IssueItem(BaseModel):
     line: int | None = Field(default=None, description="Line number if applicable")
     description: str = Field(description="Clear, clinical explanation of the issue")
     suggested_fix: str = Field(
-        description="Actionable code fix or refactoring suggestion"
+        default="", description="Actionable code fix or refactoring suggestion"
     )
 
 
