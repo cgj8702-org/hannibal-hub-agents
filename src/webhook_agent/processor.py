@@ -224,7 +224,8 @@ def _preexecute_resolve_command(
 
         pr_number = None
         if "issue" in raw and isinstance(raw["issue"], dict):
-            pr_number = raw["issue"].get("number")
+            if raw["issue"].get("pull_request"):
+                pr_number = raw["issue"].get("number")
         elif "pull_request" in raw and isinstance(raw["pull_request"], dict):
             pr_number = raw["pull_request"].get("number")
 
@@ -271,7 +272,16 @@ def _prefetch_commit_history(
         if "/create" not in body:
             return
 
-        pr_number = (raw.get("pull_request") or raw.get("issue") or {}).get("number")
+        pr_number = None
+        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
+            pr_number = raw["pull_request"].get("number")
+        elif (
+            "issue" in raw
+            and isinstance(raw["issue"], dict)
+            and raw["issue"].get("pull_request")
+        ):
+            pr_number = raw["issue"].get("number")
+
         if not pr_number:
             return
 
@@ -309,12 +319,24 @@ def _prefetch_previous_bot_reviews(
         if not isinstance(raw, dict) or "previous_bot_reviews" in raw:
             return
 
-        pr_number = (raw.get("pull_request") or raw.get("issue") or {}).get("number")
+        pr_number = None
+        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
+            pr_number = raw["pull_request"].get("number")
+        elif (
+            "issue" in raw
+            and isinstance(raw["issue"], dict)
+            and raw["issue"].get("pull_request")
+        ):
+            pr_number = raw["issue"].get("number")
+
         if not pr_number:
             return
 
         repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
+        try:
+            pr = repo.get_pull(pr_number)
+        except Exception:
+            return
 
         bot_reviews: list[str] = []
         for r in pr.get_reviews():
@@ -332,7 +354,7 @@ def _prefetch_previous_bot_reviews(
                 pr_number,
             )
     except Exception as exc:
-        logger.warning("Could not pre-fetch previous bot reviews: %s", exc)
+        logger.debug("Could not pre-fetch previous bot reviews: %s", exc)
 
 
 def _preexecute_implement_command(
