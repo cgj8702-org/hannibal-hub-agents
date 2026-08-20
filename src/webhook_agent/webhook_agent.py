@@ -58,22 +58,26 @@ from .tools.resolve_conflicts import resolve_merge_conflicts
 from .webhook_types import ActionResult
 
 
-def calculate_verdict(scores: dict[str, int], confidence: int) -> str:
-    """Calculates PR review verdict with 100% mathematical precision.
+def calculate_verdict(
+    scores: dict[str, int] | None = None,
+    confidence: int = 5,
+    has_critical: bool = False,
+) -> str:
+    """Calculates PR review verdict cleanly.
 
     Rules:
-    - If any individual score <= 2: REQUEST_CHANGES
-    - If average score < 3.5: REQUEST_CHANGES
+    - If has_critical or (scores and any(s <= 2 for s in scores.values())): REQUEST_CHANGES
     - If confidence <= 3: COMMENT
     - Otherwise: APPROVE
     """
-    if not scores:
-        return "COMMENT"
-    if any(s <= 2 for s in scores.values()):
+    if has_critical:
         return "REQUEST_CHANGES"
-    avg_score = sum(scores.values()) / len(scores)
-    if avg_score < 3.5:
-        return "REQUEST_CHANGES"
+    if scores:
+        if any(s <= 2 for s in scores.values()):
+            return "REQUEST_CHANGES"
+        avg_score = sum(scores.values()) / len(scores)
+        if avg_score < 3.5:
+            return "REQUEST_CHANGES"
     if confidence <= 3:
         return "COMMENT"
     return "APPROVE"
@@ -1273,7 +1277,11 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
         try:
             data = json.loads(cleaned_body)
-            if "scorecard" in data:
+            if (
+                "executive_summary" in data
+                or "critical_issues" in data
+                or "minor_suggestions" in data
+            ):
                 normalized_data = normalize_code_review_dict(data)
                 cr_obj = CodeReviewResponse.model_validate(normalized_data)
                 enforced_verdict = calculate_strict_verdict(cr_obj)
@@ -1484,28 +1492,25 @@ When reviewing a PR, you MUST:
      2) **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
      3) **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
      4) **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
-   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `scorecard`, `scorecard_evidence`, `confidence`, `risks_and_edge_cases`, `critical_issues`, `minor_suggestions`, `context_gaps`.
-   - Fill in ALL scorecard categories (1-5 scale) and cite specific evidence from the diff.
+   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `confidence`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `context_gaps`.
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
-   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `new_findings`, `confidence`.
+   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `confidence`.
    - Mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
 
 ### Verdict Rules (Non-Negotiable)
 
-These rules override your judgment. Apply them mechanically based on your scorecard:
-- ANY category scoring 1 (Critical) -> event MUST be REQUEST_CHANGES
-- ANY category scoring 2 (Poor) -> event MUST be REQUEST_CHANGES
-- Average score below 3.5 -> event MUST be REQUEST_CHANGES
+These rules override your judgment. Apply them mechanically based on your findings:
+- ANY critical issue -> event MUST be REQUEST_CHANGES
 - Your confidence level is 3 or below -> event MUST be COMMENT (never APPROVE when uncertain)
-- All categories 3+ AND average >= 3.5 AND confidence >= 4 -> event MAY be APPROVE
+- 0 critical issues AND confidence >= 4 -> event MAY be APPROVE
 
 ### Critical Thinking & Anti-Sycophancy Requirements
 
 - **NO SYCOPHANCY / NO CHEERLEADING**: Do NOT use performative praise or generic cheerleading like "Splendid refactoring!", "Exemplary implementation!", or "Rock-solid PR!". State objective technical facts only.
-- **MANDATORY RISK & EDGE-CASE ANALYSIS**: Finding zero risks or edge cases is UNACCEPTABLE. Every review MUST include Section 4: Mandatory Risk & Edge-Case Analysis highlighting at least one potential failure mode, unhandled edge case, rate limit, timeout risk, or non-UTF8 input boundary — even for approved PRs.
-- Every review MUST include at least ONE specific, actionable suggestion — even for excellent code (naming improvements, documentation gaps, test ideas, edge cases).
+- **HIGH-SIGNAL RISK & EDGE-CASE ANALYSIS**: Highlight genuine potential failure modes, unhandled edge cases, rate limits, timeout risks, or concurrency boundaries when present.
+- Every review should aim to include actionable, specific suggestions with file:line citations when improvements are possible.
 - Never say code is "verified" without citing specific evidence from the diff for each claim.
 - Do not summarize what the code does back to the author — focus on what could go WRONG.
 - If the PR is large (>500 lines changed), recommend splitting it and note this in your review.

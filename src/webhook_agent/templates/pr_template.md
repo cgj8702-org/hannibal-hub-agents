@@ -1,13 +1,10 @@
 ## 🗒️ Description
 
-### What
-<!-- Clear description of the changes made -->
+### Summary
+<!-- Clear description of the changes made and technical approach -->
 
-### Why
-<!-- Motivation and context for the change -->
-
-### How
-<!-- Technical approach, key implementation details -->
+### Motivation & Context
+<!-- Why is this change necessary? What problem does it solve? -->
 
 ---
 
@@ -20,31 +17,13 @@ uv sync
 uv run pytest
 ```
 
-### Test Results
-<!-- Document test coverage and results -->
+### Validation Results
+<!-- Summary of test execution and code validation -->
 
 ---
 
-## 📦 Configuration Impact
+## 🔒 Security & Policy Checklist
 
-If this PR introduces or modifies configuration:
-
-- [ ] Update README.md environment variables
-- [ ] Update pyproject.toml if adding dependencies
-- [ ] Run `uv sync` after dependency changes
-
----
-
-## 🔒 Security Checklist
-
-- [ ] No secrets or credentials hardcoded
-- [ ] HMAC signature verification logic unchanged (if applicable)
-- [ ] Authentication/authorization behavior preserved
-- [ ] Webhook payload handling validated
-
----
-
-## 🔗 Related
-
-- Closes #`_______`
-- References #`_______`
+- [ ] Secrets and credentials checked (no hardcoded keys)
+- [ ] Authentication and authorization boundaries intact
+- [ ] PR passes local linting (`./scripts/ruff-all.sh`) and tests (`pytest`)
