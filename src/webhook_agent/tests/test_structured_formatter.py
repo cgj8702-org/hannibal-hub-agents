@@ -256,3 +256,81 @@ def test_normalize_code_review_dict_edge_cases():
     )
     assert len(normalized["risks_and_edge_cases"]) == 1
     assert normalized["risks_and_edge_cases"][0]["risk"] == "Loose string risk item"
+
+
+def test_enforce_verdict_with_markdown_prefix_and_json_codeblock():
+    """Verify _enforce_verdict strips leading LLM markdown text and parses embedded JSON codeblocks."""
+    mixed_input = """# 🛡️ Hannibal Hub Code Review Report: `APPROVE`
+
+### 1. Executive Summary
+* **Goal of the PR:** Consolidate rate limits directly.
+
+```json
+{
+  "executive_summary": "Comprehensive code review of PR #208 which successfully consolidates rate limits.",
+  "confidence": 5.0,
+  "critical_issues": [],
+  "minor_suggestions": [
+    {
+      "file": "dev/model_sync.py",
+      "line": 128,
+      "suggestion": "Ensure any lingering documentation references are cleaned up."
+    }
+  ],
+  "risks_and_edge_cases": [
+    {
+      "risk": "Missing model entries or malformed JSON",
+      "recommendation": "Robust try/except block wrapping JSON loading."
+    }
+  ],
+  "context_gaps": []
+}
+```"""
+    rendered_md, verdict = _enforce_verdict(mixed_input, "APPROVE")
+    assert verdict == "APPROVE"
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
+    assert "Comprehensive code review of PR #208" in rendered_md
+    assert "Missing model entries or malformed JSON" in rendered_md
+    assert "Audit Dimensions Evaluation" not in rendered_md
+    assert "```json" not in rendered_md
+
+
+def test_enforce_verdict_with_malformed_json_inside_codeblock():
+    """Verify _enforce_verdict safely handles invalid JSON syntax inside codeblocks and falls back cleanly."""
+    malformed_input = """# Code Review Report
+
+### 1. Executive Summary
+* **Goal of the PR:** Add logging telemetry.
+
+```json
+{
+  "executive_summary": "Malformed JSON missing closing quote,
+  "confidence": 5
+}
+```"""
+    rendered_md, verdict = _enforce_verdict(malformed_input, "APPROVE")
+    assert verdict == "APPROVE"
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
+    assert "Add logging telemetry" in rendered_md
+
+
+def test_enforce_verdict_with_sync_review_containing_critical_issues_key():
+    """Verify _enforce_verdict correctly routes SyncReviewResponse JSON containing critical_issues to sync review rendering."""
+    sync_input = """{
+      "summary": "Added unit test for malformed JSON inside codeblocks.",
+      "resolutions": [
+        {
+          "item_description": "Add test case for invalid syntax inside codeblocks",
+          "status": "RESOLVED",
+          "evidence": "adf7aa9"
+        }
+      ],
+      "critical_issues": [],
+      "minor_suggestions": [],
+      "confidence": 5.0
+    }"""
+    rendered_md, verdict = _enforce_verdict(sync_input, "APPROVE")
+    assert verdict == "APPROVE"
+    assert "## ⚡ Code Review Update: `APPROVE`" in rendered_md
+    assert "Added unit test for malformed JSON inside codeblocks." in rendered_md
+    assert "Autonomous PR code review report." not in rendered_md

@@ -1262,110 +1262,82 @@ def _parse_confidence(body: str) -> int | None:
 
 
 def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
-    """Programmatically enforce verdict rules based on structured JSON or scorecard scores.
+    """Programmatically enforce verdict rules based on structured JSON or Markdown text.
 
-    Supports structured JSON (CodeReviewResponse / SyncReviewResponse) or legacy Markdown.
-    If structured JSON is provided, deterministically calculates the verdict and renders
-    the exact Markdown template without LLM freedom.
-
-    Returns:
-        Tuple of (rendered_markdown_body, enforced_event).
+    Always parses and normalizes review output into strict Pydantic models (CodeReviewResponse
+    or SyncReviewResponse) and renders clean Markdown using render_code_review_markdown or
+    render_sync_review_markdown.
     """
     import json
 
-    # Try parsing body as JSON (either raw JSON or inside ```json ``` codeblock)
     cleaned_body = body.strip()
+
+    # Step 1: Look for embedded JSON object in body (raw JSON, inside codeblocks, or surrounded by text)
+    json_candidates: list[str] = []
+
+    # Check direct string if wrapped in codeblocks
     if cleaned_body.startswith("```"):
-        cleaned_body = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
-        cleaned_body = re.sub(r"\n?```$", "", cleaned_body).strip()
+        stripped_cb = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
+        stripped_cb = re.sub(r"\n?```$", "", stripped_cb).strip()
+        json_candidates.append(stripped_cb)
 
     if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
+        json_candidates.append(cleaned_body)
+
+    # Check codeblocks anywhere in body
+    for cb_match in re.finditer(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", body):
+        json_candidates.append(cb_match.group(1))
+
+    # Check regex for any JSON object containing key schema fields
+    for json_obj_match in re.finditer(
+        r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions)\"[\s\S]*?\})",
+        body,
+    ):
+        json_candidates.append(json_obj_match.group(1))
+
+    for cand in json_candidates:
         try:
-            data = json.loads(cleaned_body)
-            if (
-                "executive_summary" in data
-                or "critical_issues" in data
-                or "minor_suggestions" in data
-            ):
-                normalized_data = normalize_code_review_dict(data)
-                cr_obj = CodeReviewResponse.model_validate(normalized_data)
-                enforced_verdict = calculate_strict_verdict(cr_obj)
-                rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
-                return rendered_body, enforced_verdict
-            elif "resolutions" in data:
-                normalized_sync = normalize_sync_review_dict(data)
-                sync_obj = SyncReviewResponse.model_validate(normalized_sync)
-                enforced_verdict = calculate_sync_verdict(sync_obj)
-                rendered_body = render_sync_review_markdown(sync_obj, enforced_verdict)
-                return rendered_body, enforced_verdict
+            data = json.loads(cand)
+            if isinstance(data, dict):
+                if "resolutions" in data or (
+                    "summary" in data and "executive_summary" not in data
+                ):
+                    normalized_sync = normalize_sync_review_dict(data)
+                    sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+                    enforced_verdict = calculate_sync_verdict(sync_obj)
+                    rendered_body = render_sync_review_markdown(
+                        sync_obj, enforced_verdict
+                    )
+                    return rendered_body, enforced_verdict
+                elif (
+                    "executive_summary" in data
+                    or "critical_issues" in data
+                    or "minor_suggestions" in data
+                ):
+                    normalized_data = normalize_code_review_dict(data)
+                    cr_obj = CodeReviewResponse.model_validate(normalized_data)
+                    enforced_verdict = calculate_strict_verdict(cr_obj)
+                    rendered_body = render_code_review_markdown(
+                        cr_obj, enforced_verdict
+                    )
+                    return rendered_body, enforced_verdict
         except Exception as exc:
-            logger.warning("Could not parse review JSON payload: %s", exc)
+            logger.debug("Candidate JSON parse attempt skipped: %s", exc)
 
-    # Legacy fallback parsing logic
-    scores = _parse_scorecard_scores(body)
-    confidence = _parse_confidence(body)
-    original_event = event.upper()
-    enforced_event = original_event
-    override_reasons: list[str] = []
-
-    if scores:
-        min_score = min(scores)
-        avg_score = sum(scores) / len(scores)
-
-        if min_score <= 3 and original_event == "APPROVE":
-            enforced_event = "REQUEST_CHANGES"
-            override_reasons.append(f"scorecard has category scoring {min_score}/5")
-
-        if avg_score < 3.5 and original_event == "APPROVE":
-            enforced_event = "REQUEST_CHANGES"
-            override_reasons.append(
-                f"average score {avg_score:.1f} is below 3.5 threshold"
-            )
-
-        # Re-render loose Markdown text review using strict GFM callouts template
-        try:
-            parsed_dict = parse_text_review_to_dict(body)
-            normalized_dict = normalize_code_review_dict(parsed_dict)
-            cr_obj = CodeReviewResponse.model_validate(normalized_dict)
-            rendered_gfm = render_code_review_markdown(cr_obj, enforced_event)
-            return rendered_gfm, enforced_event
-        except Exception as parse_err:
-            logger.warning(
-                "Could not convert text review to GFM template: %s", parse_err
-            )
-
-    if confidence is not None and confidence <= 3 and original_event == "APPROVE":
-        enforced_event = "COMMENT"
-        override_reasons.append(
-            f"confidence level {confidence}/5 is too low to approve"
+    # Step 2: Fallback text parsing if no valid JSON object was parsed
+    try:
+        parsed_dict = parse_text_review_to_dict(body)
+        normalized_dict = normalize_code_review_dict(parsed_dict)
+        cr_obj = CodeReviewResponse.model_validate(normalized_dict)
+        enforced_verdict = calculate_strict_verdict(cr_obj)
+        rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
+        return rendered_body, enforced_verdict
+    except Exception as parse_err:
+        logger.warning(
+            "Could not parse text review to CodeReviewResponse: %s", parse_err
         )
 
-    if pr and original_event == "APPROVE":
-        try:
-            mergeable_state = getattr(pr, "mergeable_state", "") or ""
-            if mergeable_state in ("dirty", "blocked", "behind"):
-                enforced_event = "REQUEST_CHANGES"
-                if mergeable_state == "dirty":
-                    override_reasons.append(
-                        "PR has unresolved merge conflicts with base branch"
-                    )
-                else:
-                    override_reasons.append(
-                        f"PR is not cleanly mergeable (mergeable_state='{mergeable_state}')"
-                    )
-        except Exception as gate_err:  # noqa: BLE001
-            logger.warning("Could not check PR CI/mergeability gating: %s", gate_err)
-
-    if override_reasons and enforced_event != original_event:
-        reasons_str = "; ".join(override_reasons)
-        body += (
-            f"\n\n---\n"
-            f"> **Verdict Override:** Agent requested `{original_event}` but "
-            f"was overridden to `{enforced_event}` by policy guardrail "
-            f"({reasons_str})."
-        )
-
-    return body, enforced_event
+    return body, event.upper()
 
 
 def review(
