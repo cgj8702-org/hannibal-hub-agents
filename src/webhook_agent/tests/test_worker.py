@@ -349,7 +349,7 @@ class TestShouldProcessEvent:
         assert _should_prefetch_diff("pull_request.closed", {}) is False
 
     def test_sanitize_pr_body(self):
-        """_sanitize_pr_body strips raw instruction headers and title format text."""
+        """_sanitize_pr_body strips raw instruction headers, title format text, and converts auto-closing keywords."""
         from webhook_agent.webhook_agent import _sanitize_pr_body
 
         raw_body = (
@@ -358,6 +358,7 @@ class TestShouldProcessEvent:
             "[type] Brief description of changes\n"
             "## 🗒️ Description\n"
             "### What\nAdded new feature\n"
+            "Closes #104\n"
         )
         sanitized = _sanitize_pr_body(raw_body)
         assert "# 🤖 Pull Request Description Template" not in sanitized
@@ -365,6 +366,8 @@ class TestShouldProcessEvent:
         assert "[type] Brief description of changes" not in sanitized
         assert "## 🗒️ Description" in sanitized
         assert "Added new feature" in sanitized
+        assert "Closes #104" not in sanitized
+        assert "Addresses #104" in sanitized
 
     def test_fetch_repo_pr_template_fallback(self):
         """_fetch_repo_pr_template returns local pr_template if remote fetch fails."""

@@ -318,9 +318,19 @@ def _load_template(filename: str) -> str:
 
 
 def _sanitize_pr_body(body: str) -> str:
-    """Programmatically strip raw template instruction headers and placeholders from PR bodies."""
+    """Programmatically strip raw template instruction headers and placeholders from PR bodies,
+    and convert auto-closing issue keywords (Closes #X) to tracking references (Addresses #X).
+    """
     if not body:
         return body
+
+    # Convert auto-closing keywords to tracking references to prevent premature issue closure
+    body = re.sub(
+        r"\b(Closes|Fixes|Resolves)\s+#(\d+)\b",
+        r"Addresses #\2",
+        body,
+        flags=re.IGNORECASE,
+    )
 
     lines = body.splitlines()
     sanitized: list[str] = []
