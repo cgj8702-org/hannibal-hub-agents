@@ -18,7 +18,7 @@ from pathlib import Path
 from google.adk.agents.context import Context
 from google.genai import Client
 
-logger = logging.getLogger("auto_fix_feedback")
+logger = logging.getLogger("webhook_agent.auto_fix")
 
 
 def _get_shared_genai_client() -> Client | None:

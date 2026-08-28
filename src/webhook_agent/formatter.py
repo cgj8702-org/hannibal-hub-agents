@@ -15,6 +15,16 @@ from .schemas import CodeReviewResponse, SyncReviewResponse
 logger = logging.getLogger("webhook_agent.formatter")
 
 
+def truncate_log_payload(val: Any, max_length: int = 300) -> str:
+    """Truncate long string representations (diffs, JSON, tool output) for clean Cloud Logging output."""
+    if val is None:
+        return ""
+    text = str(val)
+    if len(text) <= max_length:
+        return text
+    return f"{text[:max_length]}... [truncated {len(text) - max_length} chars]"
+
+
 def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Self-healing normalizer that coerces loose LLM JSON into strict CodeReviewResponse dict structure."""
     if not isinstance(data, dict):

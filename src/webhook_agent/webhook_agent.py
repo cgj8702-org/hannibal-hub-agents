@@ -55,6 +55,7 @@ from .formatter import (
     render_sync_review_markdown,
 )
 from .tools.resolve_conflicts import resolve_merge_conflicts
+from .tools.search_tool import google_search_grounding_tool
 from .webhook_types import ActionResult
 
 
@@ -198,7 +199,7 @@ def get_shared_genai_client() -> object | None:
         return None
 
 
-logger = logging.getLogger("webhook_agent")
+logger = logging.getLogger("webhook_agent.agent")
 
 
 def get_active_model(event_data: dict[str, Any] | None = None) -> str:
@@ -1603,6 +1604,7 @@ class WebhookAgent:
                 get_current_time,
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,
+                google_search_grounding_tool,
             ],
         )
 

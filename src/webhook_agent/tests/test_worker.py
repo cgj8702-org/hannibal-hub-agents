@@ -366,6 +366,37 @@ class TestShouldProcessEvent:
         assert "## 🗒️ Description" in sanitized
         assert "Added new feature" in sanitized
 
+    def test_truncate_log_payload(self):
+        """truncate_log_payload caps long payload strings for clean Cloud Logging output."""
+        from webhook_agent.formatter import truncate_log_payload
+
+        short_msg = "Short message"
+        assert truncate_log_payload(short_msg, 300) == "Short message"
+
+        long_msg = "A" * 500
+        truncated = truncate_log_payload(long_msg, 100)
+        assert len(truncated) < 500
+        assert truncated.startswith("A" * 100)
+        assert "... [truncated 400 chars]" in truncated
+
+    def test_logger_hierarchy_named_loggers(self):
+        """All webhook agent modules use unified 'webhook_agent.*' logger namespace."""
+        from webhook_agent import (
+            agent_core,
+            enqueue,
+            memory_service,
+            processor,
+            webhook_agent,
+            worker,
+        )
+
+        assert processor.logger.name == "webhook_agent.processor"
+        assert worker.logger.name == "webhook_agent.worker"
+        assert webhook_agent.logger.name == "webhook_agent.agent"
+        assert agent_core.logger.name == "webhook_agent.core"
+        assert enqueue.logger.name == "webhook_agent.enqueue"
+        assert memory_service.logger.name == "webhook_agent.memory"
+
     def test_fetch_repo_pr_template_fallback(self):
         """_fetch_repo_pr_template returns local pr_template if remote fetch fails."""
         from webhook_agent.webhook_agent import _fetch_repo_pr_template
@@ -674,7 +705,7 @@ class TestPreworkPipelines:
         payload = {
             "canonical": "issue_comment.created",
             "raw_payload": {
-                "issue": {"number": 10},
+                "issue": {"number": 10, "pull_request": {}},
                 "comment": {"body": "Please /create PR description"},
             },
         }

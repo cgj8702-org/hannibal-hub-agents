@@ -16,7 +16,7 @@ from typing import Any
 from .webhook_agent import WebhookAgent
 from .webhook_types import ActionResult
 
-logger = logging.getLogger("agent_core")
+logger = logging.getLogger("webhook_agent.core")
 
 
 def generate_trace_id() -> str:
