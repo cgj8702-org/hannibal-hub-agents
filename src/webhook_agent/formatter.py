@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any
 
-from .schemas import CodeReviewResponse, SyncReviewResponse
+from .schemas import CodeReviewResponse, SyncReviewResponse, clean_field_string
 
 logger = logging.getLogger("webhook_agent.formatter")
 
@@ -34,6 +34,11 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
     if not normalized.get("executive_summary"):
         normalized["executive_summary"] = "Autonomous PR code review report."
+    else:
+        normalized["executive_summary"] = (
+            clean_field_string(normalized["executive_summary"])
+            or "Autonomous PR code review report."
+        )
 
     conf = normalized.get("confidence")
     if not isinstance(conf, int) or not (1 <= conf <= 5):
@@ -189,6 +194,11 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(data)
     if not normalized.get("summary"):
         normalized["summary"] = "Pull request synchronization review update."
+    else:
+        normalized["summary"] = (
+            clean_field_string(normalized["summary"])
+            or "Pull request synchronization review update."
+        )
 
     raw_res = normalized.get("resolutions")
     clean_res: list[dict[str, str]] = []

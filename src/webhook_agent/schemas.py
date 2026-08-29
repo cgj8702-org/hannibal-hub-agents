@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def clean_field_string(val: Any) -> Any:
+    """Universal string sanitizer that strips any leading Markdown keys, headers, badges, or bullet prefixes."""
+    if not isinstance(val, str):
+        return val
+    s = val.strip()
+    # Strips any leading bullets (* - • #), badges (🔴🟡✅), or key labels (**Any Key Name:**)
+    cleaned = re.sub(
+        r"^(?:(?:\*|-|•|#+|🔴|🟡|✅)\s*)*(?:\*\*)?[A-Za-z0-9 &\-_/]+:\*\*?\s*",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip("* -•` ")
 
 
 class RiskItem(BaseModel):
@@ -17,6 +33,11 @@ class RiskItem(BaseModel):
         default="", description="Recommended safeguard or mitigation strategy"
     )
 
+    @field_validator("risk", "recommendation", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: Any) -> Any:
+        return clean_field_string(v)
+
 
 class IssueItem(BaseModel):
     """Actionable code issue or suggestion."""
@@ -27,6 +48,11 @@ class IssueItem(BaseModel):
     suggested_fix: str = Field(
         default="", description="Actionable code fix or refactoring suggestion"
     )
+
+    @field_validator("path", "description", "suggested_fix", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: Any) -> Any:
+        return clean_field_string(v)
 
 
 class SyncResolutionItem(BaseModel):
@@ -41,6 +67,11 @@ class SyncResolutionItem(BaseModel):
     evidence: str = Field(
         description="Line citation or diff evidence verifying resolution"
     )
+
+    @field_validator("item_description", "evidence", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: Any) -> Any:
+        return clean_field_string(v)
 
 
 class CodeReviewResponse(BaseModel):
@@ -69,6 +100,12 @@ class CodeReviewResponse(BaseModel):
         description="Missing context or empty list if fully understood",
     )
 
+    @field_validator("executive_summary", mode="before")
+    @classmethod
+    def sanitize_summary(cls, v: Any) -> Any:
+        cleaned = clean_field_string(v)
+        return cleaned if cleaned else "Autonomous PR code review report."
+
 
 class SyncReviewResponse(BaseModel):
     """Structured Pydantic model for incremental PR synchronization re-reviews."""
@@ -90,3 +127,9 @@ class SyncReviewResponse(BaseModel):
     confidence: int = Field(
         ge=1, le=5, description="Auditor confidence rating from 1 to 5"
     )
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def sanitize_summary(cls, v: Any) -> Any:
+        cleaned = clean_field_string(v)
+        return cleaned if cleaned else "Pull request synchronization review update."
