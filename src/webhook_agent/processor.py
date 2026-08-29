@@ -34,7 +34,11 @@ from .github_credential_helper import (
     save_cached_token,
 )
 
-logger = logging.getLogger("webhook_processor")
+from .formatter import (
+    truncate_log_payload,
+)
+
+logger = logging.getLogger("webhook_agent.processor")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -95,7 +99,7 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
                 issue = repo.get_issue(pr_num)
                 issue.create_reaction("eyes")
     except Exception as exc:
-        logger.warning("Failed to add eyes reaction to comment: %s", exc)
+        logger.debug("Failed to add eyes reaction to comment: %s", exc)
 
 
 def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
@@ -184,7 +188,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         _prefetch_commit_history(gh, repo_name, payload)
 
     except Exception as exc:
-        logger.warning("Could not pre-fetch PR diff: %s", exc)
+        logger.debug("Could not pre-fetch PR diff: %s", exc)
 
 
 def _prefetch_inline_comment_context(
@@ -212,7 +216,7 @@ def _prefetch_inline_comment_context(
             )
             logger.info("Pre-fetched inline comment code context for %s:%s", path, line)
     except Exception as exc:
-        logger.warning("Could not pre-fetch inline comment context: %s", exc)
+        logger.debug("Could not pre-fetch inline comment context: %s", exc)
 
 
 def _preexecute_resolve_command(
@@ -260,7 +264,7 @@ def _preexecute_resolve_command(
             res.get("success"),
         )
     except Exception as exc:
-        logger.warning("Could not pre-execute /resolve command: %s", exc)
+        logger.debug("Could not pre-execute /resolve command: %s", exc)
 
 
 def _prefetch_commit_history(
@@ -287,7 +291,7 @@ def _prefetch_commit_history(
         elif (
             "issue" in raw
             and isinstance(raw["issue"], dict)
-            and raw["issue"].get("pull_request")
+            and raw["issue"].get("pull_request") is not None
         ):
             pr_number = raw["issue"].get("number")
 
@@ -316,7 +320,7 @@ def _prefetch_commit_history(
                 pr_number,
             )
     except Exception as exc:
-        logger.warning("Could not pre-fetch commit history for /create: %s", exc)
+        logger.debug("Could not pre-fetch commit history for /create: %s", exc)
 
 
 def _prefetch_previous_bot_reviews(
@@ -334,7 +338,7 @@ def _prefetch_previous_bot_reviews(
         elif (
             "issue" in raw
             and isinstance(raw["issue"], dict)
-            and raw["issue"].get("pull_request")
+            and raw["issue"].get("pull_request") is not None
         ):
             pr_number = raw["issue"].get("number")
 
@@ -412,7 +416,7 @@ def _preexecute_implement_command(
             instruction[:40],
         )
     except Exception as exc:
-        logger.warning("Could not pre-process /implement command: %s", exc)
+        logger.debug("Could not pre-process /implement command: %s", exc)
 
 
 class WebhookProcessor:
@@ -643,7 +647,11 @@ class WebhookProcessor:
             for r in results:
                 msg = getattr(r, "detail", None) or getattr(r, "message", str(r))
                 status_symbol = "OK" if r.success else "FAIL"
-                logger.info("Agent action [%s]: %s", status_symbol, msg)
+                logger.info(
+                    "Agent action [%s]: %s",
+                    status_symbol,
+                    truncate_log_payload(msg, 300),
+                )
         else:
             logger.info(
                 "Agent completed execution with no actions taken for repo %s",

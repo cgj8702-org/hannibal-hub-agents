@@ -55,6 +55,7 @@ from .formatter import (
     render_sync_review_markdown,
 )
 from .tools.resolve_conflicts import resolve_merge_conflicts
+from .tools.search_tool import google_search_grounding_tool
 from .webhook_types import ActionResult
 
 
@@ -198,7 +199,7 @@ def get_shared_genai_client() -> object | None:
         return None
 
 
-logger = logging.getLogger("webhook_agent")
+logger = logging.getLogger("webhook_agent.agent")
 
 
 def get_active_model(event_data: dict[str, Any] | None = None) -> str:
@@ -318,9 +319,19 @@ def _load_template(filename: str) -> str:
 
 
 def _sanitize_pr_body(body: str) -> str:
-    """Programmatically strip raw template instruction headers and placeholders from PR bodies."""
+    """Programmatically strip raw template instruction headers and placeholders from PR bodies,
+    and convert auto-closing issue keywords (Closes #X) to tracking references (Addresses #X).
+    """
     if not body:
         return body
+
+    # Convert auto-closing keywords to tracking references to prevent premature issue closure
+    body = re.sub(
+        r"\b(Closes|Fixes|Resolves)\s+#(\d+)\b",
+        r"Addresses #\2",
+        body,
+        flags=re.IGNORECASE,
+    )
 
     lines = body.splitlines()
     sanitized: list[str] = []
@@ -1603,6 +1614,7 @@ class WebhookAgent:
                 get_current_time,
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,
+                google_search_grounding_tool,
             ],
         )
 

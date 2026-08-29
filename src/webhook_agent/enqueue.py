@@ -11,7 +11,7 @@ from typing import Any
 
 from google.cloud import pubsub_v1
 
-logger = logging.getLogger("webhook_enqueue")
+logger = logging.getLogger("webhook_agent.enqueue")
 
 
 def publish_webhook_message(

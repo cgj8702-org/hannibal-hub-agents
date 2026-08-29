@@ -26,7 +26,7 @@ from google.adk.memory.base_memory_service import (
 from google.adk.sessions.session import Session
 from google.genai.types import Content
 
-logger = logging.getLogger("memory_service")
+logger = logging.getLogger("webhook_agent.memory")
 
 
 class InMemoryMemoryService(BaseMemoryService):

@@ -334,3 +334,36 @@ def test_enforce_verdict_with_sync_review_containing_critical_issues_key():
     assert "## ⚡ Code Review Update: `APPROVE`" in rendered_md
     assert "Added unit test for malformed JSON inside codeblocks." in rendered_md
     assert "Autonomous PR code review report." not in rendered_md
+
+
+def test_parse_text_review_approval_bullets_not_critical():
+    """Verify Issue #110 fix: text reviews with score/approval bullets under Critical do NOT create fake critical issues or force REQUEST_CHANGES."""
+    text_review = """## 🛡️ Code Review: `REQUEST_CHANGES`
+
+### 1. Executive Summary
+
+* **Summary & Justification:** PR #104 implements comprehensive logging hygiene.
+* **Auditor Confidence:** `5/5`
+
+---
+
+### 2. Action Items
+
+#### 🔴 Critical (Must Fix Before Merge)
+* codebase: 5/5
+* codebase: APPROVE
+
+#### 🟡 Suggestions & Maintainability
+* None found.
+
+---
+
+### 3. Potential Risks & Edge Cases
+
+* None identified for this PR scope.
+"""
+    rendered_md, verdict = _enforce_verdict(text_review, "APPROVE")
+    assert verdict == "APPROVE"
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
+    assert "* *None found.*" in rendered_md
+    assert "Summary & Justification:** Summary & Justification:**" not in rendered_md

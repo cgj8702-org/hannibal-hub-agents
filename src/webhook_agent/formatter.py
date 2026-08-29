@@ -15,6 +15,16 @@ from .schemas import CodeReviewResponse, SyncReviewResponse
 logger = logging.getLogger("webhook_agent.formatter")
 
 
+def truncate_log_payload(val: Any, max_length: int = 300) -> str:
+    """Truncate long string representations (diffs, JSON, tool output) for clean Cloud Logging output."""
+    if val is None:
+        return ""
+    text = str(val)
+    if len(text) <= max_length:
+        return text
+    return f"{text[:max_length]}... [truncated {len(text) - max_length} chars]"
+
+
 def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Self-healing normalizer that coerces loose LLM JSON into strict CodeReviewResponse dict structure."""
     if not isinstance(data, dict):
@@ -414,12 +424,21 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     """Parse loose Markdown text review body into structured dictionary for CodeReviewResponse."""
     data: dict[str, Any] = {}
 
-    summary_match = re.search(r"Goal of the PR:\s*([^\n]+)", body, re.IGNORECASE)
+    summary_match = re.search(
+        r"(?:Summary & Justification|Goal of the PR):\*\*?\s*([^\n]+)",
+        body,
+        re.IGNORECASE,
+    )
     if summary_match:
-        data["executive_summary"] = summary_match.group(1).strip("* -•")
+        data["executive_summary"] = summary_match.group(1).strip("* -•` ")
     else:
         lines = [
-            line.strip("* -•")
+            re.sub(
+                r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?)\s*",
+                "",
+                line.strip("* -•` "),
+                flags=re.I,
+            )
             for line in body.splitlines()
             if line.strip() and not line.startswith("#")
         ]
@@ -427,7 +446,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             lines[0] if lines else "Autonomous PR code review report."
         )
 
-    conf_match = re.search(r"Confidence:\s*(\d)/5", body, re.IGNORECASE)
+    conf_match = re.search(r"Confidence:\s*`?(\d)`?/5", body, re.IGNORECASE)
     if conf_match:
         data["confidence"] = int(conf_match.group(1))
 
@@ -453,6 +472,41 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     minor_suggestions: list[dict[str, Any]] = []
 
     current_section = None
+    NON_ISSUE_TOKENS = {
+        "5/5",
+        "4/5",
+        "3/5",
+        "2/5",
+        "1/5",
+        "APPROVE",
+        "APPROVED",
+        "NONE",
+        "NONE FOUND",
+        "NONE IDENTIFIED",
+        "NONE FOUND.",
+        "N/A",
+        "PASSED",
+        "OK",
+        "CLEAN",
+        "SUCCESS",
+        "NO ISSUES",
+        "NO CRITICAL ISSUES",
+        "NO CRITICAL ISSUES FOUND",
+        "NONE IDENTIFIED FOR THIS PR SCOPE.",
+        "NONE IDENTIFIED FOR THIS PR SCOPE",
+    }
+    NON_ISSUE_PATHS = {
+        "CODEBASE",
+        "OVERALL",
+        "SUMMARY",
+        "AUDITOR CONFIDENCE",
+        "CONFIDENCE",
+        "RATING",
+        "SCORE",
+        "JUSTIFICATION",
+        "SUMMARY & JUSTIFICATION",
+    }
+
     for line in body.splitlines():
         line_s = line.strip()
         if "Critical" in line_s:
@@ -461,8 +515,21 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
         elif "Minor" in line_s or "Refactoring" in line_s or "Suggestion" in line_s:
             current_section = "minor"
             continue
+        elif (
+            "Potential Risk" in line_s
+            or "Edge Case" in line_s
+            or "Executive Summary" in line_s
+            or "Section" in line_s
+            or line_s.startswith("##")
+        ):
+            current_section = "other"
+            continue
 
-        if line_s.startswith(("*", "-", "•")) and ":" in line_s:
+        if (
+            current_section in ("critical", "minor")
+            and line_s.startswith(("*", "-", "•"))
+            and ":" in line_s
+        ):
             parts = line_s.lstrip("*-•").strip().split(":", 1)
             raw_path = (
                 parts[0]
@@ -473,7 +540,20 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             )
             desc_part = parts[1].strip() if len(parts) > 1 else ""
             clean_desc = desc_part if desc_part else line_s.lstrip("*-•🔴🟡✅ ").strip()
-            if not clean_desc or clean_desc.strip("`* :") == raw_path:
+
+            raw_path_norm = raw_path.strip().upper()
+            clean_desc_norm = clean_desc.strip("`* :.").upper()
+
+            if (
+                not clean_desc
+                or clean_desc.strip("`* :") == raw_path
+                or clean_desc_norm in NON_ISSUE_TOKENS
+                or raw_path_norm in NON_ISSUE_PATHS
+                or "NONE FOUND" in clean_desc_norm
+                or "NONE IDENTIFIED" in clean_desc_norm
+                or clean_desc_norm.startswith("APPROVE")
+                or clean_desc_norm.startswith("5/5")
+            ):
                 continue
 
             item_dict = {

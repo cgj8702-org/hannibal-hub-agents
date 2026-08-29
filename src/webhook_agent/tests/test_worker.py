@@ -349,7 +349,7 @@ class TestShouldProcessEvent:
         assert _should_prefetch_diff("pull_request.closed", {}) is False
 
     def test_sanitize_pr_body(self):
-        """_sanitize_pr_body strips raw instruction headers and title format text."""
+        """_sanitize_pr_body strips raw instruction headers, title format text, and converts auto-closing keywords."""
         from webhook_agent.webhook_agent import _sanitize_pr_body
 
         raw_body = (
@@ -358,6 +358,7 @@ class TestShouldProcessEvent:
             "[type] Brief description of changes\n"
             "## 🗒️ Description\n"
             "### What\nAdded new feature\n"
+            "Closes #104\n"
         )
         sanitized = _sanitize_pr_body(raw_body)
         assert "# 🤖 Pull Request Description Template" not in sanitized
@@ -365,6 +366,39 @@ class TestShouldProcessEvent:
         assert "[type] Brief description of changes" not in sanitized
         assert "## 🗒️ Description" in sanitized
         assert "Added new feature" in sanitized
+        assert "Closes #104" not in sanitized
+        assert "Addresses #104" in sanitized
+
+    def test_truncate_log_payload(self):
+        """truncate_log_payload caps long payload strings for clean Cloud Logging output."""
+        from webhook_agent.formatter import truncate_log_payload
+
+        short_msg = "Short message"
+        assert truncate_log_payload(short_msg, 300) == "Short message"
+
+        long_msg = "A" * 500
+        truncated = truncate_log_payload(long_msg, 100)
+        assert len(truncated) < 500
+        assert truncated.startswith("A" * 100)
+        assert "... [truncated 400 chars]" in truncated
+
+    def test_logger_hierarchy_named_loggers(self):
+        """All webhook agent modules use unified 'webhook_agent.*' logger namespace."""
+        from webhook_agent import (
+            agent_core,
+            enqueue,
+            memory_service,
+            processor,
+            webhook_agent,
+            worker,
+        )
+
+        assert processor.logger.name == "webhook_agent.processor"
+        assert worker.logger.name == "webhook_agent.worker"
+        assert webhook_agent.logger.name == "webhook_agent.agent"
+        assert agent_core.logger.name == "webhook_agent.core"
+        assert enqueue.logger.name == "webhook_agent.enqueue"
+        assert memory_service.logger.name == "webhook_agent.memory"
 
     def test_fetch_repo_pr_template_fallback(self):
         """_fetch_repo_pr_template returns local pr_template if remote fetch fails."""
