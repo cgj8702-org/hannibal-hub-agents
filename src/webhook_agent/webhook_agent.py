@@ -2252,15 +2252,14 @@ class WebhookAgent:
                         rate_details = extract_rate_limit_details(e)
                         self._advance_model_chain(error=e)
                         err_s = str(e).lower()
-                        is_high_demand_or_quota = (
+                        is_503_high_demand = (
                             "503" in err_s
                             or "unavailable" in err_s
                             or "high demand" in err_s
-                            or "429" in err_s
                         )
                         retry_delay = (
                             0.5
-                            if is_high_demand_or_quota
+                            if is_503_high_demand
                             else min(
                                 rate_details.get("retry_after_seconds") or 2.0, 10.0
                             )
