@@ -10,8 +10,8 @@ The Hannibal Webhook Agent utilizes a **Tier-Aware Model Chain** fallback sequen
 | :--- | :--- | :--- | :--- | :--- |
 | **Tier 0** | `gemini-3.5-flash-lite` | ⚡ **250,000** | 🚀 **500** | Primary high-volume model (zero 20 RPD cap) |
 | **Tier 1** | `gemini-3.1-flash-lite` | ⚡ **250,000** | 🚀 **500** | Secondary Flash-Lite fallback |
-| **Tier 2** | `gemma-4-31b` | 💎 **16,000** | **14,400** | Dedicated high daily request budget model |
-| **Tier 3** | `gemma-4-26b` | 💎 **16,000** | **14,400** | Ultra-high daily request budget backup |
+| **Tier 2** | `gemma-4-31b-it` | 💎 **16,000** | **14,400** | Dedicated high daily request budget model |
+| **Tier 3** | `gemma-4-26b-a4b-it` | 💎 **16,000** | **14,400** | Ultra-high daily request budget backup |
 
 ### 💳 Paid Tier Chain (Maximum Reasoning & Bandwidth)
 

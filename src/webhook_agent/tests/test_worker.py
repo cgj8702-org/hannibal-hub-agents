@@ -674,7 +674,10 @@ class TestPreworkPipelines:
         payload = {
             "canonical": "issue_comment.created",
             "raw_payload": {
-                "issue": {"number": 10},
+                "issue": {
+                    "number": 10,
+                    "pull_request": {"url": "http://example.com"},
+                },
                 "comment": {"body": "Please /create PR description"},
             },
         }

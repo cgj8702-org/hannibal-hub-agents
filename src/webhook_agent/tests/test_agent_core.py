@@ -211,7 +211,8 @@ class TestWebhookAgentModelChain:
         assert len(free_chain) == len(set(free_chain))
         assert "gemini-3.5-flash-lite" in free_chain
         assert "gemini-3.6-flash" not in free_chain
-        assert "gemma-4-26b" in free_chain
+        assert "gemma-4-31b-it" in free_chain
+        assert "gemma-4-26b-a4b-it" in free_chain
 
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""
