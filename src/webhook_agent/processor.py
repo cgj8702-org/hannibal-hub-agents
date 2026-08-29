@@ -96,7 +96,7 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
                 issue = repo.get_issue(pr_num)
                 issue.create_reaction("eyes")
     except Exception as exc:
-        logger.debug("Failed to add eyes reaction to comment: %s", exc)
+        logger.warning("Failed to add eyes reaction to comment: %s", exc)
 
 
 def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
