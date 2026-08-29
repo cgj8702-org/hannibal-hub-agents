@@ -671,9 +671,28 @@ def render_code_review_markdown(
 
 
 def render_sync_review_markdown(
-    review: SyncReviewResponse, verdict: str | None = None
+    review: SyncReviewResponse,
+    verdict: str | None = None,
+    has_prior_reviews: bool = True,
 ) -> str:
-    """Render SyncReviewResponse into clean, modern GitHub Markdown."""
+    """Render SyncReviewResponse into clean, modern GitHub Markdown.
+
+    If has_prior_reviews is False, automatically converts to initial CodeReviewResponse
+    to ensure every PR receives a '## 🛡️ Code Review' header for its first review.
+    """
+    if not has_prior_reviews:
+        cr_data = {
+            "executive_summary": review.summary or "Autonomous PR code review report.",
+            "confidence": review.confidence,
+            "critical_issues": [item.model_dump() for item in review.critical_issues],
+            "minor_suggestions": [
+                item.model_dump() for item in review.minor_suggestions
+            ],
+            "risks_and_edge_cases": [],
+        }
+        cr_obj = CodeReviewResponse.model_validate(cr_data)
+        return render_code_review_markdown(cr_obj, verdict)
+
     if verdict is None:
         verdict = calculate_sync_verdict(review)
 
