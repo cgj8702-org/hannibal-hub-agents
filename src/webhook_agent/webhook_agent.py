@@ -1320,12 +1320,12 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     if pr is not None:
         try:
             reviews = list(pr.get_reviews())
-            bot_reviews = [
-                r
-                for r in reviews
-                if "hannibal-hub-agents" in (getattr(r.user, "login", "") or "").lower()
-                or (getattr(r.user, "login", "") or "").endswith("[bot]")
-            ]
+            bot_reviews = []
+            for r in reviews:
+                u = getattr(r, "user", None)
+                login = (getattr(u, "login", "") or "").lower() if u else ""
+                if "hannibal-hub-agents" in login or login.endswith("[bot]"):
+                    bot_reviews.append(r)
             has_prior_reviews = bool(bot_reviews)
         except Exception:
             has_prior_reviews = True
