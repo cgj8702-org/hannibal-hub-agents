@@ -25,6 +25,10 @@ class TestProactiveEvaluator:
         mock_pr.number = 42
         mock_pr.mergeable = True
         mock_pr.updated_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        mock_comment = MagicMock()
+        mock_comment.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        mock_pr.get_review_comments.return_value = [mock_comment]
+        mock_pr.get_reviews.return_value = []
         mock_pr.get_issue_comments.return_value = []
         mock_pr.head.sha = "abc1234"
         mock_repo.get_commit.return_value.get_check_runs.return_value = []
@@ -46,6 +50,8 @@ class TestProactiveEvaluator:
         mock_pr.number = 99
         mock_pr.mergeable = True
         mock_pr.updated_at = datetime.now(timezone.utc)
+        mock_pr.get_review_comments.return_value = []
+        mock_pr.get_reviews.return_value = []
         mock_pr.get_issue_comments.return_value = []
 
         mock_check = MagicMock()

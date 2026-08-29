@@ -47,7 +47,9 @@ class ProactiveEvaluator:
         actions_taken: list[str] = []
 
         # 1. Check Merge Conflicts
-        if getattr(pr, "mergeable", None) is False:
+        # 1. Check Merge Conflicts
+        is_dirty = getattr(pr, "mergeable_state", None) == "dirty"
+        if getattr(pr, "mergeable", None) is False or is_dirty:
             if not self._has_recent_comment_with_text(
                 pr, "Unable to automatically resolve merge conflicts"
             ):
@@ -115,17 +117,49 @@ class ProactiveEvaluator:
         return None
 
     def _has_stale_unresolved_thread(self, pr: Any) -> bool:
-        """Checks if PR has review comments >24h old with no subsequent activity."""
-        now = datetime.now(timezone.utc)
-        last_activity = pr.updated_at
-        if not last_activity:
+        """Checks if PR has actual review comments >24h old with no subsequent activity."""
+        try:
+            get_review_comments = getattr(pr, "get_review_comments", None)
+            review_comments = (
+                list(get_review_comments()) if callable(get_review_comments) else []
+            )
+            get_reviews = getattr(pr, "get_reviews", None)
+            reviews = list(get_reviews()) if callable(get_reviews) else []
+            if not review_comments and not reviews:
+                return False
+
+            now = datetime.now(timezone.utc)
+            latest_comment_time = None
+            for c in review_comments:
+                c_time = getattr(c, "created_at", None) or getattr(
+                    c, "updated_at", None
+                )
+                if c_time:
+                    if c_time.tzinfo is None:
+                        c_time = c_time.replace(tzinfo=timezone.utc)
+                    if latest_comment_time is None or c_time > latest_comment_time:
+                        latest_comment_time = c_time
+
+            for r in reviews:
+                r_time = getattr(r, "submitted_at", None)
+                if r_time:
+                    if r_time.tzinfo is None:
+                        r_time = r_time.replace(tzinfo=timezone.utc)
+                    if latest_comment_time is None or r_time > latest_comment_time:
+                        latest_comment_time = r_time
+
+            if not latest_comment_time:
+                return False
+
+            idle_seconds = (now - latest_comment_time).total_seconds()
+            return idle_seconds > STALE_THREAD_THRESHOLD_SECONDS
+        except Exception as exc:
+            logger.debug(
+                "Could not evaluate stale threads for PR #%d: %s",
+                getattr(pr, "number", 0),
+                exc,
+            )
             return False
-
-        if last_activity.tzinfo is None:
-            last_activity = last_activity.replace(tzinfo=timezone.utc)
-
-        idle_seconds = (now - last_activity).total_seconds()
-        return idle_seconds > STALE_THREAD_THRESHOLD_SECONDS
 
     def _has_recent_comment_with_text(self, pr: Any, substring: str) -> bool:
         """Checks if a bot comment containing the substring already exists on the PR."""
