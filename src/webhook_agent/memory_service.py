@@ -13,6 +13,7 @@ The service stores:
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from collections import defaultdict
 from typing import Any, Mapping, Sequence
@@ -33,12 +34,13 @@ class InMemoryMemoryService(BaseMemoryService):
     """In-memory memory service for lightweight agent memory.
 
     Stores conversation memories as plain Python dicts. Supports filtering
-    by app_name and user_id. No persistence across restarts.
+    by app_name and user_id. No persistence across restarts. Thread-safe via lock.
     """
 
     def __init__(self) -> None:
         """Initialize the in-memory memory service."""
         self._memories: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._lock = threading.Lock()
         # Key format: "{app_name}:{user_id}"
 
     def _key(self, app_name: str, user_id: str) -> str:
@@ -61,27 +63,30 @@ class InMemoryMemoryService(BaseMemoryService):
         memories: Sequence[MemoryEntry],
         custom_metadata: Mapping[str, object] | None = None,
     ) -> None:
-        """Store memory entries in memory."""
+        """Store memory entries in memory in a thread-safe manner."""
         key = self._key(app_name, user_id)
-        for entry in memories:
-            text = self._content_to_text(entry.content)
-            if not text:
-                continue
+        with self._lock:
+            for entry in memories:
+                text = self._content_to_text(entry.content)
+                if not text:
+                    continue
 
-            mem_id = entry.id or str(uuid.uuid4())
-            metadata: dict[str, Any] = {
-                "app_name": app_name,
-                "user_id": user_id,
-                "author": entry.author or "unknown",
-                "timestamp": entry.timestamp or "",
-                "text": text,
-            }
-            if entry.custom_metadata:
-                metadata.update({k: str(v) for k, v in entry.custom_metadata.items()})
-            if custom_metadata:
-                metadata.update({k: str(v) for k, v in custom_metadata.items()})
+                mem_id = entry.id or str(uuid.uuid4())
+                metadata: dict[str, Any] = {
+                    "app_name": app_name,
+                    "user_id": user_id,
+                    "author": entry.author or "unknown",
+                    "timestamp": entry.timestamp or "",
+                    "text": text,
+                }
+                if entry.custom_metadata:
+                    metadata.update(
+                        {k: str(v) for k, v in entry.custom_metadata.items()}
+                    )
+                if custom_metadata:
+                    metadata.update({k: str(v) for k, v in custom_metadata.items()})
 
-            self._memories[key].append({"id": mem_id, "metadata": metadata})
+                self._memories[key].append({"id": mem_id, "metadata": metadata})
 
         logger.debug(
             "Stored %d memory entries for user %s in app %s",
@@ -154,7 +159,8 @@ class InMemoryMemoryService(BaseMemoryService):
         Returns up to 10 most recent matching entries.
         """
         key = self._key(app_name, user_id)
-        entries = self._memories.get(key, [])
+        with self._lock:
+            entries = list(self._memories.get(key, []))
 
         # Filter by keyword match (case-insensitive)
         query_lower = query.lower()
