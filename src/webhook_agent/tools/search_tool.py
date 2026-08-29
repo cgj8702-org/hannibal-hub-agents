@@ -59,7 +59,10 @@ def google_search_grounding_tool(ctx: Context, query: str) -> str:
         if not api_key:
             return "Error: No Gemini API key available for Google Search tool."
 
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=15000),
+        )
 
         response = client.models.generate_content(
             model="gemini-3.5-flash-lite",

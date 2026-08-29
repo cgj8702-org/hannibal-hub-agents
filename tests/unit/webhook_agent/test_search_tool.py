@@ -54,3 +54,4 @@ class TestSearchTool:
                 assert "Pytest is a testing framework for Python." in res
                 assert "[Pytest Docs](https://docs.pytest.org)" in res
                 assert ctx.state["search_count"] == 1
+                assert mock_client_cls.call_args.kwargs["http_options"].timeout == 15000
