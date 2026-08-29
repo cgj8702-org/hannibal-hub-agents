@@ -67,8 +67,14 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     callback_context.state["active_tier"] = active_tier
     callback_context.state["review_submitted_in_this_turn"] = False
     callback_context.state["mutating_tool_executed_in_this_turn"] = False
+    agent_name = getattr(
+        getattr(callback_context, "agent", None), "name", "unknown_agent"
+    )
+    logger.info("🤖 [SubAgent: %s] Starting sub-agent execution...", agent_name)
     logger.debug(
-        "before_agent_callback: initialized active_tier=%s in state", active_tier
+        "before_agent_callback: initialized active_tier=%s in state for sub-agent '%s'",
+        active_tier,
+        agent_name,
     )
 
 
