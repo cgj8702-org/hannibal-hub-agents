@@ -367,3 +367,23 @@ def test_parse_text_review_approval_bullets_not_critical():
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "* *None found.*" in rendered_md
     assert "Summary & Justification:** Summary & Justification:**" not in rendered_md
+
+
+def test_normalize_strips_redundant_summary_label_prefix():
+    from webhook_agent.formatter import (
+        normalize_code_review_dict,
+        normalize_sync_review_dict,
+    )
+
+    d1 = {
+        "executive_summary": "Update Summary:** Successfully addressed all critical review feedback."
+    }
+    norm1 = normalize_code_review_dict(d1)
+    assert (
+        norm1["executive_summary"]
+        == "Successfully addressed all critical review feedback."
+    )
+
+    d2 = {"summary": "**Update Summary:** Refactored worker background sweep."}
+    norm2 = normalize_sync_review_dict(d2)
+    assert norm2["summary"] == "Refactored worker background sweep."
