@@ -69,7 +69,7 @@ def setup_cloud_logging() -> None:
 
         project_id = os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
         client = google.cloud.logging.Client(project=project_id)
-        client.setup_logging()
+        client.setup_logging(log_level=logging.DEBUG)
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
         logger.warning("Could not initialize Google Cloud Logging handler: %s", exc)
