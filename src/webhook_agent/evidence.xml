@@ -1,0 +1,46 @@
+<evidence_suite>
+  <evidence>
+    <claim>ProactiveEvaluator background service scans open PRs every 30 minutes for stale threads, merge conflicts, and failing CI runs.</claim>
+    <target_markdown>Proactive Agent Background Loop (ProactiveEvaluator)</target_markdown>
+    <search_query>class ProactiveEvaluator</search_query>
+    <filepath>src/webhook_agent/proactive_service.py</filepath>
+    <lines>15-75</lines>
+    <code_snippet>
+class ProactiveEvaluator:
+    """Proactively evaluates open PRs for stale feedback, merge conflicts, and failing CI runs."""
+    def evaluate_open_prs(self) -> None:
+        ...
+    </code_snippet>
+    <verdict>Accurate</verdict>
+  </evidence>
+
+  <evidence>
+    <claim>5-node ADK State Graph pipeline includes ScopeRouterNode, ContextHydrationNode, StateEvaluatorNode, CodeAuditorNode, and VerdictNormalizerNode.</claim>
+    <target_markdown>5-Node ADK State Graph Workflow Engine</target_markdown>
+    <search_query>class ADKStateGraph</search_query>
+    <filepath>src/webhook_agent/state_graph.py</filepath>
+    <lines>20-140</lines>
+    <code_snippet>
+class ADKStateGraph:
+    """5-node ADK State Graph Workflow Engine."""
+    def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        ...
+    </code_snippet>
+    <verdict>Accurate</verdict>
+  </evidence>
+
+  <evidence>
+    <claim>clean_field_string(val) in schemas.py uses Pydantic field validators for markdown string sanitization.</claim>
+    <target_markdown>Universal Pydantic Field Validators for Markdown Sanitization</target_markdown>
+    <search_query>def clean_field_string</search_query>
+    <filepath>src/webhook_agent/schemas.py</filepath>
+    <lines>12-35</lines>
+    <code_snippet>
+def clean_field_string(val: str) -> str:
+    if not val:
+        return val
+    return re.sub(r"^(?:(?:\*|-|•|#+|🔴|🟡|✅)\s*)*(?:\*\*)?[A-Za-z0-9 &\-_/]+:\*\*?\s*", "", val)
+    </code_snippet>
+    <verdict>Accurate</verdict>
+  </evidence>
+</evidence_suite>
