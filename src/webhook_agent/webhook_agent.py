@@ -1988,6 +1988,16 @@ class WebhookAgent:
             comment_body = (raw["comment"].get("body") or "").strip()
 
         if "/resolve" in comment_body.lower():
+            if isinstance(raw, dict) and "conflict_resolution_result" in raw:
+                res = raw["conflict_resolution_result"]
+                return [
+                    ActionResult(
+                        tool="resolve_merge_conflicts",
+                        success=res.get("success", False),
+                        detail=res.get("detail", ""),
+                    )
+                ]
+
             pr_number = None
             if isinstance(raw, dict):
                 pr_number = (raw.get("pull_request") or {}).get("number") or (
@@ -2006,12 +2016,14 @@ class WebhookAgent:
                     repo = gh_client.get_repo(repo_full_name)
                     pr = repo.get_pull(pr_number)
                     genai_client = get_shared_genai_client()
+                    token = getattr(getattr(gh_client, "_auth", None), "token", None)
                     res = resolve_merge_conflicts(
                         pr_number=pr_number,
                         head_branch=pr.head.ref,
                         base_branch=pr.base.ref,
                         genai_client=genai_client,
                         model_name=selected_model,
+                        token=token,
                     )
                     status_detail = res.get("detail", "")
                     if res.get("success"):

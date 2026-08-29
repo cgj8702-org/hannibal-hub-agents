@@ -79,6 +79,7 @@ def resolve_merge_conflicts(
     genai_client: Client | None = None,
     model_name: str | None = None,
     repo_root: str | Path = ".",
+    token: str | None = None,
 ) -> dict[str, Any]:
     """Surgically resolves merge conflicts inside an ISOLATED Git Worktree
     for ultra-fast, zero-overhead, race-condition-free execution.
@@ -97,10 +98,13 @@ def resolve_merge_conflicts(
     )
 
     git_env = os.environ.copy()
+    git_env["GIT_TERMINAL_PROMPT"] = "0"
     git_env["GIT_COMMITTER_NAME"] = "hannibal-hub-agents[bot]"
     git_env["GIT_COMMITTER_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
     git_env["GIT_AUTHOR_NAME"] = "hannibal-hub-agents[bot]"
     git_env["GIT_AUTHOR_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
+
+    auth_token = token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
 
     try:
         # 1. Fetch remote branches
@@ -128,6 +132,27 @@ def resolve_merge_conflicts(
             capture_output=True,
             env=git_env,
         )
+
+        # Configure local git user identity and HTTP auth header inside worktree
+        if auth_token:
+            try:
+                subprocess.run(
+                    [
+                        "git",
+                        "config",
+                        "http.extraheader",
+                        f"AUTHORIZATION: bearer {auth_token}",
+                    ],
+                    cwd=str(worktree_path),
+                    check=True,
+                    capture_output=True,
+                    env=git_env,
+                )
+            except Exception as auth_err:  # noqa: BLE001
+                logger.warning(
+                    "Could not set git http.extraheader auth token in worktree: %s",
+                    type(auth_err).__name__,
+                )
 
         # Configure local git user identity inside worktree
         subprocess.run(

@@ -70,14 +70,11 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
             return
 
         if canonical.startswith("issue_comment."):
-            issue_data = raw.get("issue", {})
             comment_data = raw.get("comment", {})
-            issue_num = issue_data.get("number")
             comment_id = comment_data.get("id")
-            if issue_num and comment_id:
+            if comment_id:
                 repo = gh.get_repo(repo_name)
-                issue = repo.get_issue(issue_num)
-                comment = issue.get_comment(comment_id)
+                comment = repo.get_issue_comment(int(comment_id))
                 comment.create_reaction("eyes")
         elif canonical.startswith("pull_request_review_comment."):
             pr_data = raw.get("pull_request", {})
@@ -86,8 +83,8 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
             comment_id = comment_data.get("id")
             if pr_num and comment_id:
                 repo = gh.get_repo(repo_name)
-                pr = repo.get_pull(pr_num)
-                comment = pr.get_review_comment(comment_id)
+                pr = repo.get_pull(int(pr_num))
+                comment = pr.get_review_comment(int(comment_id))
                 comment.create_reaction("eyes")
         elif canonical in ("pull_request.opened", "pull_request.reopened") or (
             canonical.startswith("pull_request.") and action in ("opened", "reopened")
@@ -232,7 +229,7 @@ def _preexecute_resolve_command(
         if "comment" in raw and isinstance(raw["comment"], dict):
             comment_body = raw["comment"].get("body") or ""
 
-        if "/resolve" not in comment_body:
+        if "/resolve" not in comment_body.lower():
             return
 
         pr_number = None
@@ -248,6 +245,8 @@ def _preexecute_resolve_command(
         repo = gh.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
 
+        token = getattr(getattr(gh, "_auth", None), "token", None)
+
         from .tools.resolve_conflicts import (
             resolve_merge_conflicts,
         )
@@ -256,8 +255,30 @@ def _preexecute_resolve_command(
             pr_number=pr_number,
             head_branch=pr.head.ref,
             base_branch=pr.base.ref,
+            token=token,
         )
         raw["conflict_resolution_result"] = res
+        status_detail = res.get("detail", "")
+        if res.get("success"):
+            comment_text = (
+                f"I have surgically resolved the merge conflicts for PR #{pr_number} "
+                f"against `{pr.base.ref}` using an isolated Git Worktree and pushed the updated branch.\n\n"
+                f"**Detail:** {status_detail}"
+            )
+        else:
+            comment_text = (
+                f"Unable to automatically resolve merge conflicts for PR #{pr_number}.\n\n"
+                f"**Detail:** {status_detail}"
+            )
+        try:
+            pr.create_issue_comment(comment_text)
+        except Exception as comment_err:
+            logger.warning(
+                "Could not post /resolve status comment for PR #%d: %s",
+                pr_number,
+                comment_err,
+            )
+
         logger.info(
             "Pre-executed /resolve command for PR #%d (Success: %s)",
             pr_number,
