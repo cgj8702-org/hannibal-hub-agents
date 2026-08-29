@@ -34,6 +34,17 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
     if not normalized.get("executive_summary"):
         normalized["executive_summary"] = "Autonomous PR code review report."
+    else:
+        exec_sum = str(normalized["executive_summary"]).strip()
+        exec_sum = re.sub(
+            r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?|\*?\s*\*\*?Update Summary:\*\*?|Update Summary:\*\*?|\*\*Update Summary:\*\*)\s*",
+            "",
+            exec_sum,
+            flags=re.IGNORECASE,
+        ).strip("* -•` ")
+        normalized["executive_summary"] = (
+            exec_sum if exec_sum else "Autonomous PR code review report."
+        )
 
     conf = normalized.get("confidence")
     if not isinstance(conf, int) or not (1 <= conf <= 5):
@@ -189,6 +200,19 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(data)
     if not normalized.get("summary"):
         normalized["summary"] = "Pull request synchronization review update."
+    else:
+        summary_text = str(normalized["summary"]).strip()
+        summary_text = re.sub(
+            r"^(?:\*?\s*\*\*?Update Summary:\*\*?|\*?\s*\*\*?Synchronization Summary:\*\*?|Update Summary:\*\*?|\*\*Update Summary:\*\*)\s*",
+            "",
+            summary_text,
+            flags=re.IGNORECASE,
+        ).strip("* -•` ")
+        normalized["summary"] = (
+            summary_text
+            if summary_text
+            else "Pull request synchronization review update."
+        )
 
     raw_res = normalized.get("resolutions")
     clean_res: list[dict[str, str]] = []
