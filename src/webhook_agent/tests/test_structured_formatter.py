@@ -387,3 +387,22 @@ def test_normalize_strips_redundant_summary_label_prefix():
     d2 = {"summary": "**Update Summary:** Refactored worker background sweep."}
     norm2 = normalize_sync_review_dict(d2)
     assert norm2["summary"] == "Refactored worker background sweep."
+
+
+def test_render_sync_review_markdown_fallback_when_no_prior_reviews():
+    from webhook_agent.formatter import render_sync_review_markdown
+    from webhook_agent.schemas import SyncReviewResponse
+
+    sync_resp = SyncReviewResponse(
+        summary="PR update introduced changes.",
+        confidence=5,
+        resolutions=[],
+        critical_issues=[],
+        minor_suggestions=[],
+    )
+
+    rendered = render_sync_review_markdown(
+        sync_resp, verdict="APPROVE", has_prior_reviews=False
+    )
+    assert "## 🛡️ Code Review: `APPROVE`" in rendered
+    assert "## ⚡ Code Review Update:" not in rendered

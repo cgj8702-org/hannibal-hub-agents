@@ -1316,6 +1316,20 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     ):
         json_candidates.append(json_obj_match.group(1))
 
+    has_prior_reviews = True
+    if pr is not None:
+        try:
+            reviews = list(pr.get_reviews())
+            bot_reviews = []
+            for r in reviews:
+                u = getattr(r, "user", None)
+                login = (getattr(u, "login", "") or "").lower() if u else ""
+                if "hannibal-hub-agents" in login or login.endswith("[bot]"):
+                    bot_reviews.append(r)
+            has_prior_reviews = bool(bot_reviews)
+        except Exception:
+            has_prior_reviews = True
+
     for cand in json_candidates:
         try:
             data = json.loads(cand)
@@ -1327,7 +1341,7 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     rendered_body = render_sync_review_markdown(
-                        sync_obj, enforced_verdict
+                        sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
                     )
                     return rendered_body, enforced_verdict
                 elif (
