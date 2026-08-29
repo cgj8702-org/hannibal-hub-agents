@@ -33,7 +33,7 @@ if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
 
 
-logger = logging.getLogger("worker")
+logger = logging.getLogger("webhook_agent.worker")
 logging.basicConfig(
     level=logging.DEBUG,
     format="[%(asctime)s] [%(name)s] %(message)s",
