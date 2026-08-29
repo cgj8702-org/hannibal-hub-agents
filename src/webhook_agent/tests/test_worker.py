@@ -767,8 +767,8 @@ class TestPreworkPipelines:
 
         mock_review = MagicMock()
         mock_review.user.login = "hannibal-hub-agents[bot]"
-        mock_review.state = "REQUEST_CHANGES"
-        mock_review.body = "Please fix missing null check on line 42"
+        mock_review.state = "APPROVED"
+        mock_review.body = "LGTM! Ready to merge."
         mock_pr.get_reviews.return_value = [mock_review]
 
         payload = {
@@ -780,5 +780,7 @@ class TestPreworkPipelines:
 
         _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
         assert "previous_bot_reviews" in payload["raw_payload"]
-        assert "REQUEST_CHANGES" in payload["raw_payload"]["previous_bot_reviews"]
-        assert "missing null check" in payload["raw_payload"]["previous_bot_reviews"]
+        assert "DISMISSED" in payload["raw_payload"]["previous_bot_reviews"]
+        mock_review.dismiss.assert_called_once_with(
+            "Superseded by new commit push to PR branch."
+        )
