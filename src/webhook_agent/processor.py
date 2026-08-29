@@ -85,6 +85,12 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
                 pr = repo.get_pull(pr_num)
                 comment = pr.get_review_comment(comment_id)
                 comment.create_reaction("eyes")
+        elif canonical.startswith("pull_request."):
+            pr_data = raw.get("pull_request", {})
+            pr_num = pr_data.get("number")
+            if pr_num:
+                issue = repo.get_issue(pr_num)
+                issue.create_reaction("eyes")
     except Exception as exc:
         logger.warning("Failed to add eyes reaction to comment: %s", exc)
 
