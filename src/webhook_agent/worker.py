@@ -113,8 +113,27 @@ def main() -> int:
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    PROACTIVE_SWEEP_INTERVAL_SECONDS = 1800  # 30 minutes
+    last_proactive_sweep = 0.0
+
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
+        # Periodic Proactive Agent Sweep (Every 30 minutes)
+        import time
+
+        now = time.time()
+        if now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS:
+            last_proactive_sweep = now
+            try:
+                from .proactive_service import ProactiveEvaluator
+
+                evaluator = ProactiveEvaluator(
+                    processor.gh, "cgj8702-org/hannibal-hub-agents"
+                )
+                evaluator.evaluate_open_prs()
+            except Exception as exc:
+                logger.warning("Proactive background sweep skipped/failed: %s", exc)
+
         try:
             # Pull exactly one message synchronously
             response = subscriber.pull(
