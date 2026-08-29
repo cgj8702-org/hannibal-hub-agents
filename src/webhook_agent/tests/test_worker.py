@@ -650,6 +650,43 @@ class TestAddEyesReaction:
         mock_pr.get_review_comment.assert_called_once_with(202)
         mock_comment.create_reaction.assert_called_once_with("eyes")
 
+    def test_adds_reaction_to_pull_request_opened(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _add_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "raw_payload": {
+                "pull_request": {"number": 112},
+            },
+        }
+
+        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+
+        mock_repo.get_issue.assert_called_once_with(112)
+        mock_issue.create_reaction.assert_called_once_with("eyes")
+
+    def test_ignores_pull_request_synchronize_events(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _add_eyes_reaction
+
+        mock_gh = MagicMock()
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "action": "synchronize",
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {"number": 112},
+            },
+        }
+
+        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        mock_gh.get_repo.assert_not_called()
+
     def test_ignores_deleted_comment_events(self):
         from unittest.mock import MagicMock
         from webhook_agent.processor import _add_eyes_reaction
@@ -708,7 +745,10 @@ class TestPreworkPipelines:
         payload = {
             "canonical": "issue_comment.created",
             "raw_payload": {
-                "issue": {"number": 10, "pull_request": {}},
+                "issue": {
+                    "number": 10,
+                    "pull_request": {"url": "http://example.com"},
+                },
                 "comment": {"body": "Please /create PR description"},
             },
         }

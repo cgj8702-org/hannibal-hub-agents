@@ -562,8 +562,8 @@ def get_model_chain() -> list[str]:
     Free Tier Chain:
         1. gemini-3.5-flash-lite (500 RPD / 250k TPM)
         2. gemini-3.1-flash-lite (500 RPD / 250k TPM)
-        3. gemma-4-31b (14,400 RPD / 16k TPM)
-        4. gemma-4-26b (14,400 RPD / 16k TPM)
+        3. gemma-4-31b-it (14,400 RPD / 16k TPM)
+        4. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM)
 
     Paid Tier Chain:
         1. gemini-3.6-flash (10,000 RPD / 2M TPM)
@@ -583,8 +583,8 @@ def get_model_chain() -> list[str]:
         default_chain = [
             default_primary,
             "gemini-3.1-flash-lite",
-            "gemma-4-31b",
-            "gemma-4-26b",
+            "gemma-4-31b-it",
+            "gemma-4-26b-a4b-it",
         ]
 
     primary = os.environ.get("GEMMA_MODEL", default_primary)

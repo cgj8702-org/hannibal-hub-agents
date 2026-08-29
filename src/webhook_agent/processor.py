@@ -69,14 +69,13 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
         if action == "deleted" or canonical.endswith(".deleted"):
             return
 
-        repo = gh.get_repo(repo_name)
-
         if canonical.startswith("issue_comment."):
             issue_data = raw.get("issue", {})
             comment_data = raw.get("comment", {})
             issue_num = issue_data.get("number")
             comment_id = comment_data.get("id")
             if issue_num and comment_id:
+                repo = gh.get_repo(repo_name)
                 issue = repo.get_issue(issue_num)
                 comment = issue.get_comment(comment_id)
                 comment.create_reaction("eyes")
@@ -86,9 +85,19 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
             pr_num = pr_data.get("number")
             comment_id = comment_data.get("id")
             if pr_num and comment_id:
+                repo = gh.get_repo(repo_name)
                 pr = repo.get_pull(pr_num)
                 comment = pr.get_review_comment(comment_id)
                 comment.create_reaction("eyes")
+        elif canonical in ("pull_request.opened", "pull_request.reopened") or (
+            canonical.startswith("pull_request.") and action in ("opened", "reopened")
+        ):
+            pr_data = raw.get("pull_request", {})
+            pr_num = pr_data.get("number")
+            if pr_num:
+                repo = gh.get_repo(repo_name)
+                issue = repo.get_issue(pr_num)
+                issue.create_reaction("eyes")
     except Exception as exc:
         logger.debug("Failed to add eyes reaction to comment: %s", exc)
 
