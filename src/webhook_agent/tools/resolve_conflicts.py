@@ -135,17 +135,24 @@ def resolve_merge_conflicts(
 
         # Configure local git user identity and HTTP auth header inside worktree
         if auth_token:
-            subprocess.run(
-                [
-                    "git",
-                    "config",
-                    "http.extraheader",
-                    f"AUTHORIZATION: bearer {auth_token}",
-                ],
-                cwd=str(worktree_path),
-                check=True,
-                env=git_env,
-            )
+            try:
+                subprocess.run(
+                    [
+                        "git",
+                        "config",
+                        "http.extraheader",
+                        f"AUTHORIZATION: bearer {auth_token}",
+                    ],
+                    cwd=str(worktree_path),
+                    check=True,
+                    capture_output=True,
+                    env=git_env,
+                )
+            except Exception as auth_err:  # noqa: BLE001
+                logger.warning(
+                    "Could not set git http.extraheader auth token in worktree: %s",
+                    type(auth_err).__name__,
+                )
 
         # Configure local git user identity inside worktree
         subprocess.run(
