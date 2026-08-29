@@ -516,9 +516,15 @@ class DepletedModelRegistry:
                 "perminute" in err_str
                 or "minuteperproject" in err_str
                 or "tokensperminute" in err_str
+                or "429" in err_str
             ):
                 cooldown = 60.0
                 metric_type = "RPM/TPM (60s)"
+            elif (
+                "503" in err_str or "unavailable" in err_str or "high demand" in err_str
+            ):
+                cooldown = 120.0
+                metric_type = "503 HIGH DEMAND (120s)"
 
         self._depleted[norm_name] = (time.time(), cooldown)
         logger.warning(
@@ -665,9 +671,13 @@ def _is_transient_error(error: Exception) -> bool:
     err_type = type(error).__name__.lower()
     return (
         "429" in err_str
+        or "503" in err_str
+        or "unavailable" in err_str
+        or "high demand" in err_str
         or "resource_exhausted" in err_str
         or "resourceexhausted" in err_type
         or "clienterror" in err_type
+        or "servererror" in err_type
     )
 
 
@@ -1646,11 +1656,18 @@ class WebhookAgent:
         _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name, error=error)
 
         # Refresh model chain to get available non-depleted models
-        self._model_chain = get_model_chain()
+        full_chain = get_model_chain()
+        curr_norm = self._current_model_name.replace("models/", "").strip().lower()
+        available = [
+            m
+            for m in full_chain
+            if m.replace("models/", "").strip().lower() != curr_norm
+        ]
+        self._model_chain = available if available else full_chain
         self._chain_index = 0
 
         if self._model_chain:
-            next_model = self._model_chain[self._chain_index]
+            next_model = self._model_chain[0]
             logger.warning(
                 "⚠️ Cascading model chain from %s -> %s",
                 self._current_model_name,
@@ -2234,19 +2251,25 @@ class WebhookAgent:
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                         rate_details = extract_rate_limit_details(e)
                         self._advance_model_chain(error=e)
-                        retry_delay = min(
-                            rate_details.get("retry_after_seconds") or 2.0, 10.0
+                        err_s = str(e).lower()
+                        is_503_high_demand = (
+                            "503" in err_s
+                            or "unavailable" in err_s
+                            or "high demand" in err_s
+                        )
+                        retry_delay = (
+                            0.5
+                            if is_503_high_demand
+                            else min(
+                                rate_details.get("retry_after_seconds") or 2.0, 10.0
+                            )
                         )
                         logger.warning(
-                            "Transient error on attempt %d/%d (trace: %s): %s. Quota: %s (%s) | Cooldown: %ss | Reason: %s. Active model is now: %s. Backing off for %.1fs...",
+                            "Transient error on attempt %d/%d (trace: %s): %s. Active model failover -> %s (delay: %.1fs)",
                             attempt + 1,
                             _MAX_RETRIES,
                             trace_id[-4:],
                             e,
-                            rate_details.get("quota_limit") or "Unknown",
-                            rate_details.get("quota_value") or "Unknown",
-                            rate_details.get("retry_after_seconds") or 0,
-                            rate_details.get("reason") or "Unknown",
                             self._current_model_name,
                             retry_delay,
                         )

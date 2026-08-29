@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any
 
-from .schemas import CodeReviewResponse, SyncReviewResponse
+from .schemas import CodeReviewResponse, SyncReviewResponse, clean_field_string
 
 logger = logging.getLogger("webhook_agent.formatter")
 
@@ -35,15 +35,9 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if not normalized.get("executive_summary"):
         normalized["executive_summary"] = "Autonomous PR code review report."
     else:
-        exec_sum = str(normalized["executive_summary"]).strip()
-        exec_sum = re.sub(
-            r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?|\*?\s*\*\*?Update Summary:\*\*?|Update Summary:\*\*?|\*\*Update Summary:\*\*)\s*",
-            "",
-            exec_sum,
-            flags=re.IGNORECASE,
-        ).strip("* -•` ")
         normalized["executive_summary"] = (
-            exec_sum if exec_sum else "Autonomous PR code review report."
+            clean_field_string(normalized["executive_summary"])
+            or "Autonomous PR code review report."
         )
 
     conf = normalized.get("confidence")
@@ -201,17 +195,9 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if not normalized.get("summary"):
         normalized["summary"] = "Pull request synchronization review update."
     else:
-        summary_text = str(normalized["summary"]).strip()
-        summary_text = re.sub(
-            r"^(?:\*?\s*\*\*?Update Summary:\*\*?|\*?\s*\*\*?Synchronization Summary:\*\*?|Update Summary:\*\*?|\*\*Update Summary:\*\*)\s*",
-            "",
-            summary_text,
-            flags=re.IGNORECASE,
-        ).strip("* -•` ")
         normalized["summary"] = (
-            summary_text
-            if summary_text
-            else "Pull request synchronization review update."
+            clean_field_string(normalized["summary"])
+            or "Pull request synchronization review update."
         )
 
     raw_res = normalized.get("resolutions")
