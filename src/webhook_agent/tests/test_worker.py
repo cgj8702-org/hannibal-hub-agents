@@ -636,6 +636,23 @@ class TestAddEyesReaction:
         mock_repo.get_issue.assert_called_once_with(112)
         mock_issue.create_reaction.assert_called_once_with("eyes")
 
+    def test_ignores_pull_request_synchronize_events(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _add_eyes_reaction
+
+        mock_gh = MagicMock()
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "action": "synchronize",
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {"number": 112},
+            },
+        }
+
+        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        mock_gh.get_repo.assert_not_called()
+
     def test_ignores_deleted_comment_events(self):
         from unittest.mock import MagicMock
         from webhook_agent.processor import _add_eyes_reaction
