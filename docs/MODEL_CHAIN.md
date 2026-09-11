@@ -8,11 +8,12 @@ This document details the model fallback chain and comparative rate limit quotas
 
 When rate limit errors (`429 RESOURCE_EXHAUSTED`) or transient server errors occur, `WebhookAgent` automatically cascades through the following ordered model chain sorted by Tokens-Per-Minute (TPM) capacity descending:
 
-1. **Configured Primary**: `GEMMA_MODEL` (defaults to `gemini-3.6-flash`)
+1. **Configured Primary**: `GEMMA_MODEL` (defaults to `gemini-3.8-flash`)
 2. **Tier 1 (4,000,000 TPM / 150k RPD)**: `gemini-3.5-flash-lite`
-3. **Tier 2 (2,000,000 TPM / 10k RPD)**: `gemini-3.6-flash`
-4. **Tier 3 (1,000,000 TPM / 10k RPD)**: `gemini-2.5-flash`
-5. **Tier 4 (16,000 TPM / 14.4k RPD)**: `gemma-4-26b-a4b-it`
+3. **Tier 2 (4,000,000 TPM / 10k RPD)**: `gemini-3.8-flash`
+4. **Tier 3 (2,000,000 TPM / 10k RPD)**: `gemini-3.7-flash`
+5. **Tier 4 (2,000,000 TPM / 10k RPD)**: `gemini-3.6-flash`
+6. **Tier 5 (16,000 TPM / 14.4k RPD)**: `gemma-4-26b-a4b-it`
 
 ---
 
@@ -22,6 +23,8 @@ The rate limiter dynamically resolves tier via the key resolution cascade (`HANN
 
 | Model | Free Tier RPM | Free Tier TPM | Free Tier RPD | Paid Tier RPM | Paid Tier TPM | Paid Tier RPD |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `models/gemini-3.8-flash` | 5 | 250,000 | 20.0 | 1,000 | 4,000,000 | 10,000.0 |
+| `models/gemini-3.7-flash` | 5 | 250,000 | 20.0 | 1,000 | 2,000,000 | 10,000.0 |
 | `models/gemini-3.5-flash-lite` | 15 | 250,000 | 500.0 | 4,000 | 4,000,000 | 150,000.0 |
 | `models/gemini-3.6-flash` | 5 | 250,000 | 20.0 | 1,000 | 2,000,000 | 10,000.0 |
 | `models/gemini-2.5-flash` | 5 | 250,000 | 20.0 | 1,000 | 1,000,000 | 10,000.0 |

@@ -211,8 +211,21 @@ class TestWebhookAgentModelChain:
         assert len(free_chain) == len(set(free_chain))
         assert "gemini-3.5-flash-lite" in free_chain
         assert "gemini-3.6-flash" not in free_chain
+        assert "gemini-3.8-flash" not in free_chain
         assert "gemma-4-31b-it" in free_chain
         assert "gemma-4-26b-a4b-it" in free_chain
+
+    def test_get_model_chain_paid_tier_orders_gemini_38_first(self, monkeypatch):
+        """get_model_chain on Paid Tier should place gemini-3.8-flash as primary."""
+        from webhook_agent.webhook_agent import get_model_chain
+
+        monkeypatch.setenv("WEBHOOK_TIER", "paid")
+        monkeypatch.delenv("GEMMA_MODEL", raising=False)
+        paid_chain = get_model_chain()
+        assert len(paid_chain) == len(set(paid_chain))
+        assert paid_chain[0] == "gemini-3.8-flash"
+        assert "gemini-3.7-flash" in paid_chain
+        assert "gemini-3.6-flash" in paid_chain
 
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""

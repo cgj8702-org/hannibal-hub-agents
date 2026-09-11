@@ -17,9 +17,11 @@ The Hannibal Webhook Agent utilizes a **Tier-Aware Model Chain** fallback sequen
 
 | Tier | Model | TPM (Tokens/Min) | RPD (Requests/Day) | Primary Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| **Tier 0** | `gemini-3.6-flash` | 🎯 **2,000,000 (2M)** | **10,000** | High-speed balanced reasoning & tool use |
-| **Tier 1** | `gemini-3.5-flash-lite` | ⚡ **4,000,000 (4M)** | 🚀 **150,000** | Maximum token throughput & daily request ceiling |
-| **Tier 2** | `gemini-3.1-flash-lite` | ⚡ **4,000,000 (4M)** | 🚀 **150,000** | High-throughput fallback |
+| **Tier 0** | `gemini-3.8-flash` | 🎯 **4,000,000 (4M)** | **10,000** | High-speed intelligent reasoning, AST diffs & tool execution |
+| **Tier 1** | `gemini-3.7-flash` | 🎯 **2,000,000 (2M)** | **10,000** | Secondary everyday reasoning & audit fallback |
+| **Tier 2** | `gemini-3.6-flash` | 🎯 **2,000,000 (2M)** | **10,000** | Tertiary balanced reasoning fallback |
+| **Tier 3** | `gemini-3.5-flash-lite` | ⚡ **4,000,000 (4M)** | 🚀 **150,000** | Maximum token throughput & daily request ceiling |
+| **Tier 4** | `gemini-3.1-flash-lite` | ⚡ **4,000,000 (4M)** | 🚀 **150,000** | High-throughput fallback |
 
 ## 🔄 Dynamic Model Cascading
 

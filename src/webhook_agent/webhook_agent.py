@@ -211,7 +211,7 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
         return chain[0]
     active_tier = _resolve_tier()
     default_primary = (
-        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
     )
     return os.getenv("GEMMA_MODEL", default_primary)
 
@@ -579,15 +579,19 @@ def get_model_chain() -> list[str]:
         4. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM)
 
     Paid Tier Chain:
-        1. gemini-3.6-flash (10,000 RPD / 2M TPM)
-        2. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
-        3. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
+        1. gemini-3.8-flash (10,000 RPD / 4M TPM)
+        2. gemini-3.7-flash (10,000 RPD / 2M TPM)
+        3. gemini-3.6-flash (10,000 RPD / 2M TPM)
+        4. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
+        5. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
     """
     active_tier = _resolve_tier()
     if active_tier == "paid":
-        default_primary = "gemini-3.6-flash"
+        default_primary = "gemini-3.8-flash"
         default_chain = [
             default_primary,
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
         ]
@@ -613,13 +617,13 @@ def get_model_chain() -> list[str]:
 def _select_model_for_event(event_data: dict[str, Any]) -> str:
     """Select appropriate model based on event type, active tier, and content commands.
 
-    On Free Tier, defaults primary to gemini-3.5-flash-lite (500 RPD) to protect gemini-3.6-flash (20 RPD).
+    On Free Tier, defaults primary to gemini-3.5-flash-lite (500 RPD) to protect gemini-3.8-flash (20 RPD).
     Routes heavy workloads (pull_request.opened, slash commands, @mentions)
     to the primary model, and routine lifecycle events to the lightweight model.
     """
     active_tier = _resolve_tier()
     default_primary = (
-        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
     )
     primary = os.environ.get("GEMMA_MODEL", default_primary)
     lightweight = os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", "gemini-3.5-flash-lite")
