@@ -26,10 +26,11 @@ except ImportError:
 logger = logging.getLogger("rate_limit_parser")
 
 MODEL_MAPPING = {
-    "gemini 3.6 flash": "models/gemini-3.6-flash",
-    "gemini 3.5 flash lite": "models/gemini-3.5-flash-lite",
-    "gemini 3.5 flash": "models/gemini-3.5-flash",
+    "gemini 3.8 flash": "models/gemini-3.8-flash",
     "gemini 3.7 flash": "models/gemini-3.7-flash",
+    "gemini 3.6 flash": "models/gemini-3.6-flash",
+    "gemini 3.5 flash": "models/gemini-3.5-flash",
+    "gemini 3.5 flash lite": "models/gemini-3.5-flash-lite",
     "gemini 3.1 flash lite": "models/gemini-3.1-flash-lite",
     "gemini 3.1 pro": "models/gemini-3.1-pro",
     "gemini 3 flash": "models/gemini-3-flash",
@@ -211,7 +212,7 @@ def main(args_list: list[str] | None = None) -> None:
     output_path = (
         Path(args.output)
         if args.output
-        else root_dir / "src" / "assets" / "registries" / "rate_limits.json"
+        else root_dir / "assets" / "registries" / "gemini_models.json"
     )
 
     candidates: list[Path] = []
@@ -238,17 +239,39 @@ def main(args_list: list[str] | None = None) -> None:
         for model, entry in records.items():
             dual_tier_registry.setdefault(model, {})[tier] = entry
 
+    # Ensure baseline Gemma 4 limits are populated
+    for gemma_id in ("models/gemma-4-31b-it", "models/gemma-4-26b-a4b-it"):
+        if gemma_id not in dual_tier_registry:
+            dual_tier_registry[gemma_id] = {
+                "free": {"rpm": 30, "tpm": 16000, "rpd": 14400.0},
+                "paid": {"rpm": 30, "tpm": 16000, "rpd": 14400.0},
+            }
+
     if dual_tier_registry:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(dual_tier_registry, indent=4), encoding="utf-8"
-        )
-        logger.info(
-            "Saved rate limits registry to %s (Free: %s, Paid: %s)",
-            output_path,
-            free_found,
-            paid_found,
-        )
+        if output_path.name == "gemini_models.json" and output_path.exists():
+            models_json = json.loads(output_path.read_text(encoding="utf-8"))
+            for m in models_json.get("models", []):
+                mid = m.get("name")
+                if mid in dual_tier_registry:
+                    m["rate_limits"] = dual_tier_registry[mid]
+            output_path.write_text(json.dumps(models_json, indent=2), encoding="utf-8")
+            logger.info(
+                "Updated unified model registry at %s (Free: %s, Paid: %s)",
+                output_path,
+                free_found,
+                paid_found,
+            )
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(dual_tier_registry, indent=4), encoding="utf-8"
+            )
+            logger.info(
+                "Saved rate limits registry to %s (Free: %s, Paid: %s)",
+                output_path,
+                free_found,
+                paid_found,
+            )
     else:
         logger.warning("No webhook PDF rate limit data extracted.")
 

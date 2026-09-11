@@ -80,7 +80,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 1000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
     },
     {
       "name": "models/gemini-2.5-flash-lite",
@@ -98,7 +110,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 1000000.0
+        },
+        "free": {
+          "rpm": 10,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
     },
     {
       "name": "models/gemini-2.5-pro",
@@ -116,7 +140,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 150,
+          "tpm": 2000000,
+          "rpd": 1000.0
+        },
+        "free": {
+          "rpm": 0,
+          "tpm": 0,
+          "rpd": 0.0
+        }
+      }
     },
     {
       "name": "models/gemini-3-flash-preview",
@@ -152,7 +188,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 150000.0
+        },
+        "free": {
+          "rpm": 15,
+          "tpm": 250000,
+          "rpd": 500.0
+        }
+      }
     },
     {
       "name": "models/gemini-3.1-flash-lite-preview",
@@ -206,7 +254,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
     },
     {
       "name": "models/gemini-3.5-flash-lite",
@@ -224,7 +284,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 150000.0
+        },
+        "free": {
+          "rpm": 15,
+          "tpm": 250000,
+          "rpd": 500.0
+        }
+      }
     },
     {
       "name": "models/gemini-3.6-flash",
@@ -242,7 +314,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
     },
     {
       "name": "models/gemini-3.7-flash",
@@ -260,7 +344,49 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.8-flash",
+      "version": "3.8-flash-09-2026",
+      "display_name": "Gemini 3.8 Flash",
+      "description": "Gemini 3.8 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
     },
     {
       "name": "models/gemini-flash-latest",
@@ -346,7 +472,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        },
+        "paid": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        }
+      }
     },
     {
       "name": "models/gemma-4-31b-it",
@@ -362,7 +500,19 @@
       "accessible_tiers": [
         "free",
         "paid"
-      ]
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        },
+        "paid": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        }
+      }
     }
   ],
   "updated_at": "2026-08-13T22:09:23.871152+00:00"
