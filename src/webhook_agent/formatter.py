@@ -133,7 +133,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     )
             elif isinstance(item, dict):
                 desc = str(item.get("description") or "").strip()
-                fix = str(item.get("suggested_fix") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 path_val = str(item.get("path") or "codebase").strip()
                 if desc and desc.lower() not in (
                     "none",
@@ -268,7 +268,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     )
             elif isinstance(item, dict):
                 desc = str(item.get("description") or "").strip()
-                fix = str(item.get("suggested_fix") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 path_val = str(item.get("path") or "codebase").strip()
                 if desc and desc.lower() not in (
                     "none",
@@ -383,7 +383,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     or item.get("item_description")
                     or ""
                 ).strip()
-                fix = str(item.get("suggested_fix") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 if desc and desc.lower() not in ("none", "none found"):
                     clean_crit.append(
                         {
@@ -423,7 +423,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     or item.get("item_description")
                     or ""
                 ).strip()
-                fix = str(item.get("suggested_fix") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 if desc and desc.lower() not in ("none", "none found"):
                     clean_minor.append(
                         {
@@ -464,7 +464,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 cat = str(item.get("category") or "").strip()
                 sev = str(item.get("severity") or "").upper()
                 full_desc = f"[{cat}] {desc}" if cat else desc
-                fix = str(item.get("suggested_fix") or "").strip()
+                fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 if desc and desc.lower() not in ("none", "none found"):
                     issue_dict = {
                         "path": path,
@@ -562,15 +562,14 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
         )
         return "REQUEST_CHANGES"
 
-    if review.confidence < 4 or getattr(review, "verdict", None) == "COMMENT":
+    if getattr(review, "verdict", None) == "COMMENT":
         logger.info(
-            "Mechanical verdict: COMMENT (confidence=%d, explicit_verdict=%s)",
-            review.confidence,
+            "Mechanical verdict: COMMENT (explicit_verdict=%s)",
             getattr(review, "verdict", None),
         )
         return "COMMENT"
 
-    logger.info("Mechanical verdict: APPROVE (0 critical issues, confidence >= 4)")
+    logger.info("Mechanical verdict: APPROVE (0 critical issues)")
     return "APPROVE"
 
 
@@ -616,7 +615,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
         )
         return "REQUEST_CHANGES"
 
-    if review.confidence < 4 or getattr(review, "verdict", None) == "COMMENT":
+    if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
 
     logger.info(
@@ -643,7 +642,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                 r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?)\s*",
                 "",
                 line.strip("* -•` "),
-                flags=re.I,
+                flags=re.IGNORECASE,
             )
             for line in body.splitlines()
             if line.strip() and not line.startswith("#")
@@ -757,8 +756,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                 or raw_path_norm in NON_ISSUE_PATHS
                 or "NONE FOUND" in clean_desc_norm
                 or "NONE IDENTIFIED" in clean_desc_norm
-                or clean_desc_norm.startswith("APPROVE")
-                or clean_desc_norm.startswith("5/5")
+                or clean_desc_norm.startswith(("APPROVE", "5/5"))
             ):
                 continue
 
@@ -832,7 +830,6 @@ def render_code_review_markdown(
         "### 1. Executive Summary",
         "",
         f"* **Summary & Justification:** {review.executive_summary}",
-        f"* **Auditor Confidence:** `{review.confidence}/5`",
         "",
         "---",
         "",
@@ -932,7 +929,6 @@ def render_sync_review_markdown(
 ### 1. Synchronization Summary
 
 * **Update Summary:** {review.summary}
-* **Auditor Confidence:** `{review.confidence}/5`
 
 ---
 

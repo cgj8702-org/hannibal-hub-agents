@@ -49,10 +49,24 @@ class IssueItem(BaseModel):
         default="", description="Actionable code fix or refactoring suggestion"
     )
 
-    @field_validator("path", "description", "suggested_fix", mode="before")
+    @field_validator("path", "description", mode="before")
     @classmethod
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
+
+    @field_validator("suggested_fix", mode="before")
+    @classmethod
+    def sanitize_suggested_fix(cls, v: Any) -> Any:
+        if not isinstance(v, str):
+            return str(v or "")
+        s = v.strip("\r\n")
+        s = re.sub(
+            r"^(?:(?:\*|-|•)\s*)*(?:\*\*)?suggested[-_\s]*fix:\*\*?\s*",
+            "",
+            s,
+            flags=re.IGNORECASE,
+        )
+        return s.rstrip()
 
 
 class SyncResolutionItem(BaseModel):
@@ -84,8 +98,8 @@ class CodeReviewResponse(BaseModel):
         default=None,
         description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",
     )
-    confidence: int = Field(
-        ge=1, le=5, description="Auditor confidence rating from 1 to 5"
+    confidence: int | None = Field(
+        default=None, description="Optional legacy auditor confidence rating"
     )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,
@@ -132,8 +146,8 @@ class SyncReviewResponse(BaseModel):
         default_factory=list,
         description="Non-blocking minor suggestions or maintainability notes introduced in this update",
     )
-    confidence: int = Field(
-        ge=1, le=5, description="Auditor confidence rating from 1 to 5"
+    confidence: int | None = Field(
+        default=None, description="Optional legacy auditor confidence rating"
     )
 
     @field_validator("summary", mode="before")

@@ -1,6 +1,7 @@
 """Unit tests for Pydantic schemas, mechanical verdict math, and deterministic Markdown rendering."""
 
 import pytest
+
 from webhook_agent.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -55,8 +56,8 @@ def test_calculate_strict_verdict_critical_issue(valid_code_review_pass):
     assert verdict == "REQUEST_CHANGES"
 
 
-def test_calculate_strict_verdict_low_confidence(valid_code_review_pass):
-    valid_code_review_pass.confidence = 3
+def test_calculate_strict_verdict_explicit_comment(valid_code_review_pass):
+    valid_code_review_pass.verdict = "COMMENT"
     verdict = calculate_strict_verdict(valid_code_review_pass)
     assert verdict == "COMMENT"
 
@@ -65,12 +66,12 @@ def test_render_code_review_markdown(valid_code_review_pass):
     md = render_code_review_markdown(valid_code_review_pass)
     assert "## 🛡️ Code Review: `APPROVE`" in md
     assert "Clean feature implementation with full unit test coverage." in md
-    assert "Auditor Confidence:** `5/5`" in md
+    assert "Auditor Confidence" not in md
 
 
 def test_enforce_verdict_with_raw_json(valid_code_review_pass):
     json_str = valid_code_review_pass.model_dump_json()
-    rendered_md, verdict = _enforce_verdict(json_str, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_str, "APPROVE")
     assert verdict == "APPROVE"
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
 
@@ -85,7 +86,7 @@ def test_enforce_verdict_with_codeblock_json(valid_code_review_pass):
         )
     )
     json_str = f"```json\n{valid_code_review_pass.model_dump_json()}\n```"
-    rendered_md, verdict = _enforce_verdict(json_str, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_str, "APPROVE")
     assert verdict == "REQUEST_CHANGES"
     assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
 
@@ -126,7 +127,7 @@ def test_enforce_verdict_with_loose_schema_drift_json():
       ],
       "context_gaps": []
     }"""
-    rendered_md, verdict = _enforce_verdict(loose_json, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(loose_json, "APPROVE")
     assert verdict == "APPROVE"
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "Circular import risk" in rendered_md
@@ -153,7 +154,9 @@ def test_enforce_verdict_with_loose_sync_review_json():
       ],
       "confidence": 5
     }"""
-    rendered_md, verdict = _enforce_verdict(loose_sync_json, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        loose_sync_json, "APPROVE"
+    )
     assert verdict == "APPROVE"
     assert "## ⚡ Code Review Update: `APPROVE`" in rendered_md
     assert "Asset Path Resolution Mismatch" in rendered_md
@@ -286,7 +289,7 @@ def test_enforce_verdict_with_markdown_prefix_and_json_codeblock():
   "context_gaps": []
 }
 ```"""
-    rendered_md, verdict = _enforce_verdict(mixed_input, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(mixed_input, "APPROVE")
     assert verdict == "APPROVE"
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "Comprehensive code review of PR #208" in rendered_md
@@ -308,7 +311,9 @@ def test_enforce_verdict_with_malformed_json_inside_codeblock():
   "confidence": 5
 }
 ```"""
-    rendered_md, verdict = _enforce_verdict(malformed_input, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        malformed_input, "APPROVE"
+    )
     assert verdict == "APPROVE"
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "Add logging telemetry" in rendered_md
@@ -329,7 +334,7 @@ def test_enforce_verdict_with_sync_review_containing_critical_issues_key():
       "minor_suggestions": [],
       "confidence": 5.0
     }"""
-    rendered_md, verdict = _enforce_verdict(sync_input, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(sync_input, "APPROVE")
     assert verdict == "APPROVE"
     assert "## ⚡ Code Review Update: `APPROVE`" in rendered_md
     assert "Added unit test for malformed JSON inside codeblocks." in rendered_md
@@ -362,7 +367,7 @@ def test_parse_text_review_approval_bullets_not_critical():
 
 * None identified for this PR scope.
 """
-    rendered_md, verdict = _enforce_verdict(text_review, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(text_review, "APPROVE")
     assert verdict == "APPROVE"
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "* *None found.*" in rendered_md
@@ -420,7 +425,9 @@ def test_verdict_override_safety_rejects_upgrade_of_caller_request_changes():
             {"risk": "Dropping sys_platform marker breaks non-Windows platforms.", "recommendation": "Revert jinxed"}
         ]
     }"""
-    rendered_md, verdict = _enforce_verdict(json_payload, "REQUEST_CHANGES")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        json_payload, "REQUEST_CHANGES"
+    )
     assert verdict == "REQUEST_CHANGES"
     assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
     crit_section = rendered_md.split("#### 🔴 Critical")[1].split("#### 🟡")[0]
@@ -452,7 +459,7 @@ def test_verdict_override_safety_rejects_upgrade_of_titled_request_changes():
 
 * **Risk:** Dropping `sys_platform == 'win32'` forces ansicon on Linux.
 """
-    rendered_md, verdict = _enforce_verdict(text_review, "APPROVE")
+    rendered_md, verdict, _inline_comments = _enforce_verdict(text_review, "APPROVE")
     assert verdict == "REQUEST_CHANGES"
     assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
 
@@ -532,3 +539,118 @@ def test_calculate_sync_verdict_respects_explicit_verdict_and_unaddressed_summar
         minor_suggestions=[],
     )
     assert calculate_sync_verdict(sync_summary) == "REQUEST_CHANGES"
+
+
+def test_format_suggestion_body_with_code():
+    from webhook_agent.comment_poster import format_suggestion_body
+
+    body = format_suggestion_body(
+        "Use contextlib.suppress here.",
+        "with contextlib.suppress(ValueError):\n    x = int(val)",
+    )
+    assert "Use contextlib.suppress here." in body
+    assert (
+        "```suggestion\nwith contextlib.suppress(ValueError):\n    x = int(val)\n```"
+        in body
+    )
+
+
+def test_format_suggestion_body_strips_existing_fences():
+    from webhook_agent.comment_poster import format_suggestion_body
+
+    body = format_suggestion_body(
+        "Replace loop", "```python\nfor i in items:\n    pass\n```"
+    )
+    assert "```suggestion\nfor i in items:\n    pass\n```" in body
+    assert "```python" not in body
+
+
+def test_format_suggestion_body_without_code():
+    from webhook_agent.comment_poster import format_suggestion_body
+
+    body = format_suggestion_body("Consider refactoring this module.")
+    assert body == "Consider refactoring this module."
+    assert "```suggestion" not in body
+
+
+def test_build_github_review_comments_anchoring():
+    from webhook_agent.comment_poster import build_github_review_comments
+
+    diff_text = (
+        "diff --git a/src/logic.py b/src/logic.py\n"
+        "--- a/src/logic.py\n"
+        "+++ b/src/logic.py\n"
+        "@@ -10,3 +10,3 @@\n"
+        "-old_val = 1\n"
+        "+new_val = 2\n"
+        "+new_val_2 = 3\n"
+    )
+
+    issues = [
+        IssueItem(
+            path="src/logic.py",
+            line=11,
+            description="Fix value assignment",
+            suggested_fix="new_val = 42",
+        ),
+        IssueItem(
+            path="src/logic.py",
+            line=999,  # Out of diff hunk
+            description="Out of hunk issue",
+            suggested_fix="fix()",
+        ),
+        IssueItem(
+            path="src/other.py",  # Not in diff
+            line=5,
+            description="Other file issue",
+            suggested_fix="other()",
+        ),
+        IssueItem(
+            path="src/logic.py",
+            line=None,  # No line number
+            description="Missing line issue",
+            suggested_fix="no_line()",
+        ),
+    ]
+
+    comments, anchored_keys = build_github_review_comments(issues, diff_text)
+    assert len(comments) == 1
+    assert comments[0]["path"] == "src/logic.py"
+    assert comments[0]["line"] == 11
+    assert comments[0]["side"] == "RIGHT"
+    assert "```suggestion\nnew_val = 42\n```" in comments[0]["body"]
+    assert "src/logic.py:11" in anchored_keys
+
+
+def test_enforce_verdict_with_pr_generates_inline_comments():
+    from unittest.mock import MagicMock
+
+    mock_pr = MagicMock()
+    mock_file = MagicMock()
+    mock_file.filename = "src/foo.py"
+    mock_file.patch = "@@ -5,2 +5,3 @@\n def old():\n+    return 42\n"
+    mock_pr.get_files.return_value = [mock_file]
+
+    json_input = """{
+        "verdict": "REQUEST_CHANGES",
+        "executive_summary": "Bug found in foo.",
+        "critical_issues": [
+            {
+                "path": "src/foo.py",
+                "line": 6,
+                "description": "Return 100 instead",
+                "suggested_fix": "    return 100"
+            }
+        ],
+        "minor_suggestions": []
+    }"""
+    _rendered_md, verdict, inline_comments = _enforce_verdict(
+        json_input, "APPROVE", pr=mock_pr
+    )
+    assert verdict == "REQUEST_CHANGES"
+    assert len(inline_comments) == 1
+    assert inline_comments[0]["path"] == "src/foo.py"
+    assert inline_comments[0]["line"] == 6
+    assert inline_comments[0]["side"] == "RIGHT"
+    assert "```suggestion\n    return 100\n```" in inline_comments[0]["body"]
+    assert "Return 100 instead" in inline_comments[0]["body"]
