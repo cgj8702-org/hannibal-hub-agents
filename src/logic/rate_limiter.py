@@ -25,14 +25,45 @@ from typing import Any
 logger = logging.getLogger("hannibal_rate_limiter")
 
 
-def _load_rate_limits(registry_path: Path) -> dict[str, dict[str, Any]]:
-    """Dynamically load rate limits (rpm and tpm) for free and paid tiers from registry JSON."""
+def _resolve_registry_path() -> Path:
+    """Resolve the path to gemini_models.json in either assets/registries or src/assets/registries."""
+    candidates = [
+        Path(__file__).resolve().parents[1]
+        / "assets"
+        / "registries"
+        / "gemini_models.json",
+        Path(__file__).resolve().parents[2]
+        / "assets"
+        / "registries"
+        / "gemini_models.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[1]
+
+
+def _load_rate_limits(registry_path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Dynamically load rate limits (rpm and tpm) for free and paid tiers from gemini_models.json."""
+    limits_by_model: dict[str, dict[str, Any]] = {}
+    path = registry_path or _resolve_registry_path()
     try:
-        if registry_path.exists():
-            return json.loads(registry_path.read_text(encoding="utf-8"))
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "models" in data:
+                for m in data.get("models", []):
+                    if isinstance(m, dict) and "name" in m:
+                        name = m["name"]
+                        rate_limits = m.get("rate_limits", {})
+                        limits_by_model[name] = rate_limits
+                        limits_by_model[name.replace("models/", "")] = rate_limits
+            elif isinstance(data, dict):
+                for name, rate_limits in data.items():
+                    limits_by_model[name] = rate_limits
+                    limits_by_model[name.replace("models/", "")] = rate_limits
     except Exception as e:
-        logger.error("Failed to load rate_limits.json: %s", e)
-    return {}
+        logger.error("Failed to load rate limits from %s: %s", path.name, e)
+    return limits_by_model
 
 
 _CONFIG_CACHE: tuple[float, str] = (0.0, "free")
@@ -75,24 +106,33 @@ def get_allowed_models(tier: str | None = None) -> list[str]:
     resolved_tier = tier or _resolve_tier()
     allowed = set(ALWAYS_INCLUDED_MODELS)
     try:
-        registry_path = (
-            Path(__file__).resolve().parents[1]
-            / "assets"
-            / "registries"
-            / "rate_limits.json"
-        )
-        rate_limits = _load_rate_limits(registry_path)
-        for model_key, limits in rate_limits.items():
-            model_name = model_key.replace("models/", "")
-            if isinstance(limits, dict) and resolved_tier in limits:
-                tier_data = limits[resolved_tier]
-                if isinstance(tier_data, dict):
-                    rpm = tier_data.get("rpm", 0)
-                    rpd = tier_data.get("rpd", 0.0)
-                    if rpm > 0 and rpd > 0:
-                        allowed.add(model_name)
+        registry_path = _resolve_registry_path()
+        if registry_path.exists():
+            data = json.loads(registry_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "models" in data:
+                for m in data.get("models", []):
+                    if isinstance(m, dict) and "name" in m:
+                        model_name = m["name"].replace("models/", "")
+                        acc_tiers = m.get("accessible_tiers", ["free", "paid"])
+                        rate_limits = m.get("rate_limits", {})
+                        tier_data = rate_limits.get(resolved_tier, {})
+                        if isinstance(tier_data, dict):
+                            rpm = tier_data.get("rpm", 0)
+                            rpd = tier_data.get("rpd", 0.0)
+                            if resolved_tier in acc_tiers or (rpm > 0 and rpd > 0):
+                                allowed.add(model_name)
+            elif isinstance(data, dict):
+                for model_key, limits in data.items():
+                    model_name = model_key.replace("models/", "")
+                    if isinstance(limits, dict) and resolved_tier in limits:
+                        tier_data = limits[resolved_tier]
+                        if isinstance(tier_data, dict):
+                            rpm = tier_data.get("rpm", 0)
+                            rpd = tier_data.get("rpd", 0.0)
+                            if rpm > 0 and rpd > 0:
+                                allowed.add(model_name)
     except Exception as e:
-        logger.error("Failed to resolve allowed models from rate_limits.json: %s", e)
+        logger.error("Failed to resolve allowed models from gemini_models.json: %s", e)
 
     return sorted(list(allowed))
 
@@ -204,13 +244,7 @@ class RPMWaiter:
         self.token_histories: dict[str, list[Any]] = collections.defaultdict(list)
         self.lock = asyncio.Lock()
         self.clock = clock
-        # src/logic/rate_limiter.py -> src/assets/registries/rate_limits.json
-        self.registry_path = registry_path or (
-            Path(__file__).resolve().parents[1]
-            / "assets"
-            / "registries"
-            / "rate_limits.json"
-        )
+        self.registry_path = registry_path or _resolve_registry_path()
         self.model_limits = _load_rate_limits(self.registry_path)
 
     def _norm(self, model_name: str) -> str:
