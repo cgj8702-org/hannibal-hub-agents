@@ -42,9 +42,6 @@ from .callbacks import (
     on_tool_error_callback,
 )
 from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
-from .memory_service import InMemoryMemoryService
-from .sanitizer_plugin import PromptSanitizerPlugin
-from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
 from .formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -54,6 +51,9 @@ from .formatter import (
     render_code_review_markdown,
     render_sync_review_markdown,
 )
+from .memory_service import InMemoryMemoryService
+from .sanitizer_plugin import PromptSanitizerPlugin
+from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
 from .tools.resolve_conflicts import resolve_merge_conflicts
 from .tools.search_tool import google_search_grounding_tool
 from .webhook_types import ActionResult
@@ -85,21 +85,21 @@ def calculate_verdict(
 
 
 try:
+    from logic.model_factory import RateLimitedGemini, get_adk_model
     from logic.rate_limiter import (
         _resolve_tier,
         extract_rate_limit_details,
         get_active_api_key,
         rpm_waiter,
     )
-    from logic.model_factory import RateLimitedGemini, get_adk_model
 except ImportError:
+    from src.logic.model_factory import RateLimitedGemini, get_adk_model
     from src.logic.rate_limiter import (
         _resolve_tier,
         extract_rate_limit_details,
         get_active_api_key,
         rpm_waiter,
     )
-    from src.logic.model_factory import RateLimitedGemini, get_adk_model
 
 __all__ = [
     "RateLimitedGemini",
@@ -876,6 +876,34 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
     repo_name = _get_repo_full_name(ctx)
     try:
         repo = gh.get_repo(repo_name)
+
+        # Safeguard: If head_sha is a merge commit from base branch, do not pull in full base compare
+        head_commit = repo.get_commit(head_sha)
+        parents = getattr(head_commit, "parents", []) or []
+        if len(parents) >= 2:
+            commit_obj = getattr(head_commit, "commit", None)
+            msg = (getattr(commit_obj, "message", "") or "").strip()
+            first_line = msg.splitlines()[0] if msg else ""
+            if any(
+                pat in first_line.lower()
+                for pat in (
+                    "merge branch",
+                    "merge remote-tracking",
+                    "merge https://github.com/",
+                    "merge commit",
+                    "into ",
+                )
+            ):
+                logger.info(
+                    "get_commit_diff: commit %s is a branch update merge commit (%s)",
+                    head_sha[:7],
+                    first_line,
+                )
+                return (
+                    f"Commit {head_sha[:7]} is a branch update merge commit ({first_line}). "
+                    f"No new PR-specific code changes were introduced."
+                )
+
         comparison = repo.compare(base_sha, head_sha)
         diff_lines = [f"Incremental Diff ({base_sha[:7]}..{head_sha[:7]}):\n"]
         for f in comparison.files:
@@ -1595,6 +1623,7 @@ When reviewing a PR, you MUST:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
    - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `confidence`.
    - Mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
+   - Distinguish PR-authored commits from base branch merges (`Merge branch 'main' ...`). Commits originating from merging or updating from the base branch are part of the target branch and must NOT be attributed to the PR author or flagged as scope creep.
 
 ### Verdict Rules (Non-Negotiable)
 
@@ -1632,8 +1661,8 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 - Focus on **dependency security, version scope, and lockfile integrity**.
 - Do NOT perform a human architectural code review — evaluate version bumps and lockfile changes.
 - Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
-- Watch for **accidental environment marker deletions** (e.g., dropping `sys_platform == 'win32'`) or unexpected modifications to unrelated packages in the lockfile.
 - If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`, set `verdict: "REQUEST_CHANGES"`, and add a blocking entry directly under `critical_issues`. NEVER place breaking lockfile corruption solely in `risks_and_edge_cases`.
+- **Base branch syncs and merge commits**: Commits merged from the base branch (`main`) into a PR branch (e.g., via GitHub's 'Update branch' button or `git merge main`) belong to the base branch. Do NOT attribute base branch changes or merge commits to the PR author or flag them as scope violations.
 
 """
 

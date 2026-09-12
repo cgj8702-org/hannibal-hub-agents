@@ -777,3 +777,27 @@ def test_add_comment_blocked_after_review():
         "Skipped: Formal code review report already submitted for #193 in this turn"
         in res
     )
+
+
+class TestGetCommitDiffBranchUpdate:
+    def test_get_commit_diff_returns_branch_update_notice(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.webhook_agent import get_commit_diff
+
+        ctx = MagicMock()
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        ctx.state = {"gh_client": mock_gh, "repo_full_name": "owner/repo"}
+
+        mock_commit = MagicMock()
+        mock_commit.parents = [MagicMock(sha="parent1"), MagicMock(sha="parent2")]
+        mock_commit.commit.message = (
+            "Merge branch 'main' into dependabot/uv/cryptography-50.0.1"
+        )
+        mock_repo.get_commit.return_value = mock_commit
+
+        res = get_commit_diff(ctx, "base_sha", "0abebcc123")
+
+        assert "is a branch update merge commit" in res
+        assert "No new PR-specific code changes were introduced." in res
+        mock_repo.compare.assert_not_called()

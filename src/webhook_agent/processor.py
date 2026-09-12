@@ -344,6 +344,93 @@ def _prefetch_commit_history(
         logger.debug("Could not pre-fetch commit history for /create: %s", exc)
 
 
+def is_base_branch_merge_sync(
+    gh: Github, repo_name: str, payload: dict[str, Any]
+) -> bool:
+    """Check if a pull_request.synchronize event is an update from the base branch (e.g. merging main).
+
+    When a PR branch is updated with the base branch (via GitHub's 'Update branch' button
+    or `git merge main`), the head commit is a merge commit from the base branch.
+    Such events should NOT trigger automated re-reviews or dismiss existing approvals.
+    """
+    try:
+        raw = payload.get("raw_payload")
+        if not isinstance(raw, dict):
+            return False
+
+        canonical = payload.get("canonical", "")
+        action = raw.get("action")
+        if canonical != "pull_request.synchronize" and action != "synchronize":
+            return False
+
+        pr_data = raw.get("pull_request")
+        if not isinstance(pr_data, dict):
+            return False
+
+        head = pr_data.get("head") or {}
+        head_sha = head.get("sha") or raw.get("after")
+        if not head_sha:
+            return False
+
+        base = pr_data.get("base") or {}
+        base_ref = (base.get("ref") or "").lower()
+        base_sha = base.get("sha") or ""
+        head_ref = (head.get("ref") or "").lower()
+        before_sha = raw.get("before") or ""
+
+        # Fast-path: Check raw_payload commits if available
+        commits = raw.get("commits")
+        if isinstance(commits, list) and commits:
+            for c in commits:
+                if isinstance(c, dict) and c.get("id") == head_sha:
+                    msg = (c.get("message") or "").strip().lower()
+                    first_line = msg.splitlines()[0] if msg else ""
+                    if any(
+                        pat in first_line
+                        for pat in (
+                            f"merge branch '{base_ref}'",
+                            f"merge branch '{base_ref}' of",
+                            f"merge remote-tracking branch 'origin/{base_ref}'",
+                            "merge https://github.com/",
+                            f"into {head_ref}",
+                        )
+                    ):
+                        return True
+
+        repo = gh.get_repo(repo_name)
+        commit = repo.get_commit(head_sha)
+        parents = getattr(commit, "parents", []) or []
+        if len(parents) < 2:
+            return False
+
+        commit_obj = getattr(commit, "commit", None)
+        msg = (getattr(commit_obj, "message", "") or "").strip().lower()
+        first_line = msg.splitlines()[0] if msg else ""
+
+        merge_patterns = (
+            f"merge branch '{base_ref}'",
+            f"merge branch '{base_ref}' of",
+            f"merge remote-tracking branch 'origin/{base_ref}'",
+            "merge https://github.com/",
+            "merge commit",
+            f"into {head_ref}",
+        )
+        is_merge_msg = any(pat in first_line for pat in merge_patterns)
+
+        parent_shas = [p.sha for p in parents if hasattr(p, "sha")]
+        is_base_parent = base_sha in parent_shas or is_merge_msg
+
+        if is_merge_msg or (
+            is_base_parent and (not before_sha or before_sha in parent_shas)
+        ):
+            return True
+
+        return False
+    except Exception as exc:
+        logger.debug("Could not verify base branch merge sync: %s", exc)
+        return False
+
+
 def _prefetch_previous_bot_reviews(
     gh: Github, repo_name: str, payload: dict[str, Any]
 ) -> None:
@@ -351,6 +438,12 @@ def _prefetch_previous_bot_reviews(
     try:
         raw = payload.get("raw_payload")
         if not isinstance(raw, dict) or "previous_bot_reviews" in raw:
+            return
+
+        if is_base_branch_merge_sync(gh, repo_name, payload):
+            logger.info(
+                "Skipping previous bot review dismissal: synchronize is a base branch update."
+            )
             return
 
         pr_number = None
@@ -668,6 +761,22 @@ class WebhookProcessor:
             return
 
         logger.info("Agent starting execution for repo %s", repo_name)
+
+        if event_key == "pull_request.synchronize" and is_base_branch_merge_sync(
+            gh, repo_name, payload
+        ):
+            raw = payload.get("raw_payload") or {}
+            pr_data = raw.get("pull_request") or {}
+            pr_number = pr_data.get("number", "unknown")
+            base_ref = (pr_data.get("base") or {}).get("ref", "base")
+            head_sha = (pr_data.get("head") or {}).get("sha", "")[:7]
+            logger.info(
+                "Suppressed pull_request.synchronize for PR #%s: commit %s is a base branch update (merged '%s'). Skipping execution.",
+                pr_number,
+                head_sha,
+                base_ref,
+            )
+            return
 
         dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
         if not dry_run:

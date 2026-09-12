@@ -784,3 +784,195 @@ class TestPreworkPipelines:
         mock_review.dismiss.assert_called_once_with(
             "Superseded by new commit push to PR branch."
         )
+
+
+class TestBaseBranchMergeSync:
+    def test_is_base_branch_merge_sync_fast_path(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import is_base_branch_merge_sync
+
+        mock_gh = MagicMock()
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {
+                    "number": 125,
+                    "head": {
+                        "sha": "0abebcc",
+                        "ref": "dependabot/uv/cryptography-50.0.1",
+                    },
+                    "base": {"ref": "main", "sha": "36acd0e"},
+                },
+                "commits": [
+                    {
+                        "id": "0abebcc",
+                        "message": "Merge branch 'main' into dependabot/uv/cryptography-50.0.1",
+                    }
+                ],
+            },
+        }
+
+        assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is True
+        mock_gh.get_repo.assert_not_called()
+
+    def test_is_base_branch_merge_sync_api_check_two_parents(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import is_base_branch_merge_sync
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_commit = MagicMock()
+        mock_commit.parents = [MagicMock(sha="parent1"), MagicMock(sha="parent2")]
+        mock_commit.commit.message = "Merge branch 'main' into feature-branch"
+        mock_repo.get_commit.return_value = mock_commit
+
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {
+                    "number": 125,
+                    "head": {"sha": "0abebcc", "ref": "feature-branch"},
+                    "base": {"ref": "main", "sha": "36acd0e"},
+                },
+            },
+        }
+
+        assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is True
+        mock_gh.get_repo.assert_called_once_with("owner/repo")
+        mock_repo.get_commit.assert_called_once_with("0abebcc")
+
+    def test_is_base_branch_merge_sync_single_parent_returns_false(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import is_base_branch_merge_sync
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_commit = MagicMock()
+        mock_commit.parents = [MagicMock(sha="parent1")]
+        mock_commit.commit.message = "feat: add real feature work"
+        mock_repo.get_commit.return_value = mock_commit
+
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {
+                    "number": 125,
+                    "head": {"sha": "normal123", "ref": "feature-branch"},
+                    "base": {"ref": "main", "sha": "36acd0e"},
+                },
+            },
+        }
+
+        assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
+
+    def test_is_base_branch_merge_sync_non_synchronize_returns_false(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import is_base_branch_merge_sync
+
+        mock_gh = MagicMock()
+        payload = {
+            "canonical": "pull_request.opened",
+            "raw_payload": {
+                "action": "opened",
+                "pull_request": {
+                    "number": 125,
+                    "head": {"sha": "0abebcc", "ref": "feature-branch"},
+                    "base": {"ref": "main", "sha": "36acd0e"},
+                },
+            },
+        }
+
+        assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
+
+    def test_prefetch_previous_bot_reviews_preserves_approval_on_base_merge(self):
+        from unittest.mock import MagicMock
+        from webhook_agent.processor import _prefetch_previous_bot_reviews
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = mock_repo.get_pull.return_value
+
+        mock_review = MagicMock()
+        mock_review.user.login = "hannibal-hub-agents[bot]"
+        mock_review.state = "APPROVED"
+        mock_review.body = "LGTM! Ready to merge."
+        mock_pr.get_reviews.return_value = [mock_review]
+
+        payload = {
+            "canonical": "pull_request.synchronize",
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {
+                    "number": 125,
+                    "head": {
+                        "sha": "0abebcc",
+                        "ref": "dependabot/uv/cryptography-50.0.1",
+                    },
+                    "base": {"ref": "main", "sha": "36acd0e"},
+                },
+                "commits": [
+                    {
+                        "id": "0abebcc",
+                        "message": "Merge branch 'main' into dependabot/uv/cryptography-50.0.1",
+                    }
+                ],
+            },
+        }
+
+        _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
+        assert "previous_bot_reviews" not in payload["raw_payload"]
+        mock_review.dismiss.assert_not_called()
+
+    def test_process_event_suppresses_base_branch_merge_sync(self, caplog):
+        import logging
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        ev = {
+            "delivery_id": "delivery-sync-001",
+            "event_name": "pull_request",
+            "action": "synchronize",
+            "canonical": "pull_request.synchronize",
+            "sender": {"login": "human", "type": "User"},
+            "installation": {"id": 12345},
+            "repository": {"full_name": "owner/repo", "owner": {"login": "owner"}},
+            "raw_payload": {
+                "action": "synchronize",
+                "pull_request": {
+                    "number": 125,
+                    "head": {
+                        "sha": "0abebcc",
+                        "ref": "dependabot/uv/cryptography-50.0.1",
+                    },
+                    "base": {"ref": "main", "sha": "36acd0e"},
+                },
+                "commits": [
+                    {
+                        "id": "0abebcc",
+                        "message": "Merge branch 'main' into dependabot/uv/cryptography-50.0.1",
+                    }
+                ],
+            },
+        }
+
+        with (
+            patch(
+                "webhook_agent.processor.load_cached_token",
+                return_value=MagicMock(token="fake"),
+            ),
+            patch("webhook_agent.processor.Github"),
+            patch("webhook_agent.processor.AgentCore") as mock_core_cls,
+            patch("webhook_agent.processor._add_eyes_reaction") as mock_eyes,
+            caplog.at_level(logging.INFO),
+        ):
+            mock_agent = MagicMock()
+            mock_core_cls.return_value = mock_agent
+
+            processor.process_event(ev)
+
+            mock_agent.run.assert_not_called()
+            mock_eyes.assert_not_called()
+            assert "Suppressed pull_request.synchronize for PR #125" in caplog.text
