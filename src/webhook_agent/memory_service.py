@@ -16,7 +16,8 @@ import logging
 import threading
 import uuid
 from collections import defaultdict
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from google.adk.events.event import Event
 from google.adk.memory.base_memory_service import (

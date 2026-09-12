@@ -73,7 +73,7 @@ class FirestoreFeatureCheckpointRegistry:
             return
 
         doc_id = f"issue_{issue_number}"
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_utc = datetime.datetime.now(datetime.UTC)
         resume_at = now_utc + datetime.timedelta(seconds=cooldown_seconds)
 
         data = {

@@ -101,7 +101,7 @@ class FirestoreDepletedModelRegistry:
         if db is not None:
             try:
                 expire_dt = datetime.datetime.now(
-                    datetime.timezone.utc
+                    datetime.UTC
                 ) + datetime.timedelta(seconds=cooldown)
                 db.collection(self.collection_name).document(doc_id).set(
                     {
@@ -144,8 +144,8 @@ class FirestoreDepletedModelRegistry:
                     expire_at = data.get("expire_at")
                     if expire_at and isinstance(expire_at, datetime.datetime):
                         if expire_at.tzinfo is None:
-                            expire_at = expire_at.replace(tzinfo=datetime.timezone.utc)
-                        now_utc = datetime.datetime.now(datetime.timezone.utc)
+                            expire_at = expire_at.replace(tzinfo=datetime.UTC)
+                        now_utc = datetime.datetime.now(datetime.UTC)
                         if expire_at > now_utc:
                             remaining = (expire_at - now_utc).total_seconds()
                             self._local_depleted[doc_id] = (now, remaining)

@@ -14,6 +14,7 @@ Supports:
 
 import asyncio
 import collections
+import contextlib
 import json
 import logging
 import os
@@ -134,7 +135,7 @@ def get_allowed_models(tier: str | None = None) -> list[str]:
     except Exception as e:
         logger.error("Failed to resolve allowed models from gemini_models.json: %s", e)
 
-    return sorted(list(allowed))
+    return sorted(allowed)
 
 
 def resolve_webhook_api_key() -> tuple[str, str, str]:
@@ -439,10 +440,8 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
                 if "retryDelay" in item or "retry_delay" in item:
                     delay = item.get("retryDelay") or item.get("retry_delay")
                     if isinstance(delay, str) and delay.endswith("s"):
-                        try:
+                        with contextlib.suppress(ValueError):
                             details["retry_after_seconds"] = float(delay[:-1])
-                        except ValueError:
-                            pass
                     elif isinstance(delay, (int, float)):
                         details["retry_after_seconds"] = float(delay)
 
@@ -454,10 +453,8 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
 
         retry_after = headers.get("retry-after") or headers.get("Retry-After")
         if retry_after:
-            try:
+            with contextlib.suppress(ValueError):
                 details["retry_after_seconds"] = float(retry_after)
-            except ValueError:
-                pass
 
         limit_req = headers.get("x-ratelimit-limit-requests")
         if limit_req:

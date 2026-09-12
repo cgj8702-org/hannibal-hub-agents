@@ -1,7 +1,8 @@
 """Tests for agent_core.py — focusing on AgentCore delegation and trace ID generation."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from webhook_agent.agent_core import (
     AgentCore,
@@ -675,6 +676,7 @@ class TestTokenLimits:
 class TestProgrammaticResolveCommandRouter:
     def test_plan_and_execute_intercepts_resolve_command(self, monkeypatch):
         from unittest.mock import MagicMock, patch
+
         from webhook_agent.webhook_agent import WebhookAgent
 
         monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
@@ -724,6 +726,7 @@ class TestProgrammaticResolveCommandRouter:
 class TestMarkReadyForReview:
     def test_mark_ready_for_review_success(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import mark_ready_for_review
 
         ctx = MagicMock()
@@ -739,6 +742,7 @@ class TestMarkReadyForReview:
 
     def test_mark_ready_for_review_already_ready(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import mark_ready_for_review
 
         ctx = MagicMock()
@@ -754,6 +758,7 @@ class TestMarkReadyForReview:
 class TestMergePrDraftSafetyCheck:
     def test_merge_pr_blocks_draft(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import merge_pr
 
         ctx = MagicMock()
@@ -782,6 +787,7 @@ def test_add_comment_blocked_after_review():
 class TestGetCommitDiffBranchUpdate:
     def test_get_commit_diff_returns_branch_update_notice(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import get_commit_diff
 
         ctx = MagicMock()

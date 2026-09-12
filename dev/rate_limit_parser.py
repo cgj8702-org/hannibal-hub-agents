@@ -53,14 +53,14 @@ def parse_pdf_text(pdf_path: Path) -> str:
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("pdfplumber failed for %s: %s", pdf_path, e)
 
     if not text and pypdf:
         try:
             reader = pypdf.PdfReader(str(pdf_path))
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("pypdf failed for %s: %s", pdf_path, e)
 
     return text
@@ -104,9 +104,7 @@ def is_webhook_project_pdf(raw_text: str) -> bool:
         return False
 
     project_name = extract_project_name(raw_text).lower()
-    if "chatbot" in project_name and "webhook" not in project_name:
-        return False
-    return True
+    return not ("chatbot" in project_name and "webhook" not in project_name)
 
 
 def classify_pdf(raw_text: str, filename: str = "") -> str:
@@ -185,7 +183,7 @@ def parse_pdf_file(pdf_path: Path) -> tuple[str, dict[str, Any]]:
     )
 
     for match in pattern.finditer(full_text):
-        raw_name, cat, rpm_lim, tpm_lim, rpd_lim = match.groups()
+        raw_name, _cat, rpm_lim, tpm_lim, rpd_lim = match.groups()
         name_clean = raw_name.strip().lower()
         model_id = MODEL_MAPPING.get(
             name_clean, f"models/{name_clean.replace(' ', '-')}"

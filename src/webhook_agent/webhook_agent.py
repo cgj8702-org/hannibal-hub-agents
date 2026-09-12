@@ -397,7 +397,7 @@ def _fetch_repo_pr_template(
                     content_file = template_map[target_file]
                     if hasattr(content_file, "decoded_content"):
                         return content_file.decoded_content.decode("utf-8")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Could not fetch template file from map: %s", exc)
 
         candidate_paths = [
@@ -409,10 +409,10 @@ def _fetch_repo_pr_template(
                 content_file = repo.get_contents(path)
                 if hasattr(content_file, "decoded_content"):
                     return content_file.decoded_content.decode("utf-8")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("Could not fetch remote template path %s: %s", path, exc)
                 continue
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Could not fetch remote PR template for %s: %s", repo_name, exc)
 
     return _load_pr_template()
@@ -468,7 +468,7 @@ def count_tokens_exact(
             contents=contents if isinstance(contents, list) else [contents],
         )
         return getattr(res, "total_tokens", None)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("count_tokens API call skipped/unavailable: %s", exc)
         return None
 
@@ -745,7 +745,7 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
         return decoded
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error reading file: {e}"
 
 
@@ -777,21 +777,21 @@ def write_file(
         branch_created = False
         try:
             repo.get_branch(branch)
-        except Exception:  # noqa: BLE001
+        except Exception:
             sb = repo.get_branch(base)
             repo.create_git_ref(ref=f"refs/heads/{branch}", sha=sb.commit.sha)
             branch_created = True
 
         try:
             repo.create_file(file_path, message, content, branch=branch)
-        except Exception:  # noqa: BLE001
+        except Exception:
             existing = repo.get_contents(file_path, ref=branch)
             repo.update_file(file_path, message, content, existing.sha, branch=branch)
         status = f"Committed '{file_path}' to {branch}"
         if branch_created:
             status += f" (branch created from {base})"
         return status
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error writing file: {e}"
 
 
@@ -826,7 +826,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
         try:
             pr = repo.get_pull(number)
             is_pr = True
-        except Exception:  # noqa: BLE001
+        except Exception:
             is_pr = False
 
         if is_pr:
@@ -856,7 +856,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
                 parts.append(f"Body: {body_preview}")
 
         return "\n".join(parts)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error fetching issue/PR: {e}"
 
 
@@ -909,7 +909,7 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
                 f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
             )
         return "\n".join(diff_lines)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error fetching commit diff: {e}"
 
 
@@ -990,7 +990,7 @@ def update_issue(
         return (
             f"#{number}: " + "; ".join(actions) if actions else f"#{number}: no changes"
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error updating issue/PR: {e}"
 
 
@@ -1058,7 +1058,7 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
         c = issue.create_comment(body=body)
         _COMMENT_RATE_LIMITER.record(target_key)
         return f"Commented on #{issue_number}: {c.html_url}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error commenting on issue/PR: {e}"
 
 
@@ -1097,7 +1097,7 @@ def open_pr(
             base=base_branch,
         )
         return f"Opened PR #{pr.number} {pr.html_url}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error opening PR: {e}"
 
 
@@ -1122,7 +1122,7 @@ def update_branch_from_base(ctx: Context, pr_number: int) -> str:
         if updated:
             return f"Successfully updated PR #{pr_number} branch '{pr.head.ref}' with latest changes from '{pr.base.ref}'."
         return f"PR #{pr_number} branch '{pr.head.ref}' is already up to date with '{pr.base.ref}'."
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return (
             f"Error updating PR #{pr_number} branch: {e}. "
             f"If there are complex merge conflicts, notify the user that manual local rebase is required."
@@ -1165,7 +1165,7 @@ def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
         return (
             f"Could not resolve merge conflicts on PR #{pr_number}: {res.get('error')}"
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error resolving merge conflicts on PR #{pr_number}: {e}"
 
 
@@ -1209,7 +1209,7 @@ def mark_ready_for_review(ctx: Context, pr_number: int) -> str:
         if success is False:
             return f"Failed to mark PR #{pr_number} ready for review."
         return f"Successfully marked PR #{pr_number} as ready for review."
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error marking PR #{pr_number} ready for review: {e}"
 
 
@@ -1275,7 +1275,7 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
 
         res = pr.merge(merge_method=merge_method)
         return f"Merged: {res}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error merging PR: {e}"
 
 
@@ -1582,7 +1582,7 @@ def review(
                         prev_rv.id,
                         pr_number,
                     )
-                except Exception as dismiss_err:  # noqa: BLE001
+                except Exception as dismiss_err:
                     logger.warning(
                         "Could not dismiss prior bot review %s: %s",
                         prev_rv.id,
@@ -1610,7 +1610,7 @@ def review(
             session_state["review_submitted_in_this_turn"] = True
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({event}): {detail}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error submitting review: {e}"
 
 
@@ -2574,7 +2574,7 @@ class WebhookAgent:
                             pr_number,
                             enforced_event,
                         )
-                    except Exception as fallback_err:  # noqa: BLE001
+                    except Exception as fallback_err:
                         logger.warning(
                             "Programmatic fallback review submission failed: %s",
                             fallback_err,

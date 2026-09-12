@@ -1,6 +1,7 @@
 """Unit tests for mathematical PR review verdict calculator."""
 
 import pytest
+
 from webhook_agent.webhook_agent import calculate_verdict
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]

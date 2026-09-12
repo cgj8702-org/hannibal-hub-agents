@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.logic.analytics import CloudLoggingAnalyticsPlugin
 
 pytestmark = [pytest.mark.unit]

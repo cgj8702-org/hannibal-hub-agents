@@ -12,8 +12,9 @@ os.environ.setdefault("GITHUB_APP_ID", "12345")
 os.environ.setdefault("GITHUB_INSTALLATION_ID", "67890")
 os.environ.setdefault("GITHUB_PRIVATE_KEY_PATH", "/dev/null")
 
-from webhook_agent.processor import WebhookProcessor
 import pytest
+
+from webhook_agent.processor import WebhookProcessor
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.pubsub]
 
@@ -651,6 +652,7 @@ class TestAddEyesReaction:
 
     def test_adds_reaction_to_pull_request_opened(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _add_eyes_reaction
 
         mock_gh = MagicMock()
@@ -671,6 +673,7 @@ class TestAddEyesReaction:
 
     def test_ignores_pull_request_synchronize_events(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _add_eyes_reaction
 
         mock_gh = MagicMock()
@@ -688,6 +691,7 @@ class TestAddEyesReaction:
 
     def test_ignores_deleted_comment_events(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _add_eyes_reaction
 
         mock_gh = MagicMock()
@@ -729,6 +733,7 @@ class TestPreworkPipelines:
 
     def test_prefetch_commit_history(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _prefetch_commit_history
 
         mock_gh = MagicMock()
@@ -759,6 +764,7 @@ class TestPreworkPipelines:
 
     def test_prefetch_previous_bot_reviews(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _prefetch_previous_bot_reviews
 
         mock_gh = MagicMock()
@@ -789,6 +795,7 @@ class TestPreworkPipelines:
 class TestBaseBranchMergeSync:
     def test_is_base_branch_merge_sync_fast_path(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import is_base_branch_merge_sync
 
         mock_gh = MagicMock()
@@ -818,6 +825,7 @@ class TestBaseBranchMergeSync:
 
     def test_is_base_branch_merge_sync_api_check_two_parents(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import is_base_branch_merge_sync
 
         mock_gh = MagicMock()
@@ -845,6 +853,7 @@ class TestBaseBranchMergeSync:
 
     def test_is_base_branch_merge_sync_single_parent_returns_false(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import is_base_branch_merge_sync
 
         mock_gh = MagicMock()
@@ -870,6 +879,7 @@ class TestBaseBranchMergeSync:
 
     def test_is_base_branch_merge_sync_non_synchronize_returns_false(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import is_base_branch_merge_sync
 
         mock_gh = MagicMock()
@@ -889,6 +899,7 @@ class TestBaseBranchMergeSync:
 
     def test_prefetch_previous_bot_reviews_preserves_approval_on_base_merge(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.processor import _prefetch_previous_bot_reviews
 
         mock_gh = MagicMock()

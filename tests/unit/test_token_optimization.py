@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from src.token_optimized_agent.callbacks import (
     MessagePruningPlugin,
     truncate_tool_response_callback,

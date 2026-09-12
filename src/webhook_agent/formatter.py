@@ -193,37 +193,35 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 if (
                     cat in ("breaking_change", "security", "critical", "blocker")
                     or sev in ("critical", "high", "blocker")
-                ) and desc:
-                    if not any(desc in c.get("description", "") for c in clean_crit):
-                        clean_crit.append(
-                            {
-                                "path": str(item.get("path") or "codebase"),
-                                "line": (
-                                    item.get("line")
-                                    if isinstance(item.get("line"), int)
-                                    else None
-                                ),
-                                "description": desc,
-                                "suggested_fix": fix,
-                            }
-                        )
+                ) and desc and not any(desc in c.get("description", "") for c in clean_crit):
+                    clean_crit.append(
+                        {
+                            "path": str(item.get("path") or "codebase"),
+                            "line": (
+                                item.get("line")
+                                if isinstance(item.get("line"), int)
+                                else None
+                            ),
+                            "description": desc,
+                            "suggested_fix": fix,
+                        }
+                    )
 
     # Check executive summary for breaking keywords if clean_crit is still empty
     summary_lower = normalized["executive_summary"].lower()
-    if any(kw in summary_lower for kw in BREAKING_RISK_KEYWORDS):
-        if not clean_crit:
-            clean_crit.append(
-                {
-                    "path": (
-                        "uv.lock"
-                        if ("lock" in summary_lower or "marker" in summary_lower)
-                        else "codebase"
-                    ),
-                    "line": None,
-                    "description": normalized["executive_summary"],
-                    "suggested_fix": "Resolve breaking lockfile or dependency modifications.",
-                }
-            )
+    if any(kw in summary_lower for kw in BREAKING_RISK_KEYWORDS) and not clean_crit:
+        clean_crit.append(
+            {
+                "path": (
+                    "uv.lock"
+                    if ("lock" in summary_lower or "marker" in summary_lower)
+                    else "codebase"
+                ),
+                "line": None,
+                "description": normalized["executive_summary"],
+                "suggested_fix": "Resolve breaking lockfile or dependency modifications.",
+            }
+        )
 
     # Synthesize critical issue if verdict is explicitly REQUEST_CHANGES but clean_crit is empty
     if normalized.get("verdict") == "REQUEST_CHANGES" and not clean_crit:

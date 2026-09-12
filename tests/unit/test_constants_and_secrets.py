@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from logic.constants import (
     DEFAULT_FEATURE_AGENT_PROJECT,
     DEFAULT_GITHUB_APP_ID,

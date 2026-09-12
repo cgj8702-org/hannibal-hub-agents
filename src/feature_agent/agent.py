@@ -15,8 +15,8 @@ from typing import Any, Literal
 
 from google.adk.agents import BaseAgent, LlmAgent, LoopAgent, SequentialAgent
 from google.adk.agents.callback_context import CallbackContext
-from google.adk.agents.invocation_context import InvocationContext
 from google.adk.agents.context_cache_config import ContextCacheConfig
+from google.adk.agents.invocation_context import InvocationContext
 from google.adk.apps import App
 from google.adk.apps.app import EventsCompactionConfig, ResumabilityConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
@@ -117,7 +117,7 @@ class EscalationChecker(BaseAgent):
 
     async def _run_async_impl(
         self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event, None]:
+    ) -> AsyncGenerator[Event]:
         evaluation_result = ctx.session.state.get("feature_evaluation")
         if evaluation_result and evaluation_result.get("grade") == "pass":
             logger.info(
@@ -139,7 +139,7 @@ def reminder_injection_callback(
 ) -> None:
     """Inject volatile date/status tail as a trailing <system-reminder> Content."""
     try:
-        now_str = datetime.datetime.now(datetime.timezone.utc).strftime(
+        now_str = datetime.datetime.now(datetime.UTC).strftime(
             "%Y-%m-%d %H:%M:%S UTC"
         )
         halt_reason = callback_context.state.get("halt_reason", "")

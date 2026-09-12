@@ -70,8 +70,8 @@ class FeatureTaskRunner:
             resume_at = existing.get("resume_at")
             if resume_at and isinstance(resume_at, datetime.datetime):
                 if resume_at.tzinfo is None:
-                    resume_at = resume_at.replace(tzinfo=datetime.timezone.utc)
-                now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    resume_at = resume_at.replace(tzinfo=datetime.UTC)
+                now_utc = datetime.datetime.now(datetime.UTC)
                 if resume_at > now_utc:
                     remaining = int((resume_at - now_utc).total_seconds())
                     return (

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+
 from webhook_agent.callbacks import (
     after_model_callback,
     before_agent_callback,

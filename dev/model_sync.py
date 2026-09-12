@@ -117,10 +117,10 @@ async def fetch_model_registry() -> bool:
                             "accessible_tiers": [],
                         }
                     models_by_name[name]["accessible_tiers"].append(tier)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             LOGGER.error(f"Error listing models for tier '{tier}': {e}")
 
-    models = sorted(list(models_by_name.values()), key=lambda m: m["name"])
+    models = sorted(models_by_name.values(), key=lambda m: m["name"])
 
     # Ensure target directory exists
     target_dir = os.path.dirname(TARGET_REGISTRY)
@@ -131,7 +131,7 @@ async def fetch_model_registry() -> bool:
         try:
 
             def _read_file(path: str) -> str:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     return f.read()
 
             contents = await asyncio.to_thread(_read_file, TARGET_REGISTRY)

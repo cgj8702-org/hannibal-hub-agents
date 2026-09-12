@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 from webhook_agent.proactive_service import ProactiveEvaluator
@@ -24,9 +24,9 @@ class TestProactiveEvaluator:
         mock_pr = MagicMock()
         mock_pr.number = 42
         mock_pr.mergeable = True
-        mock_pr.updated_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        mock_pr.updated_at = datetime.now(UTC) - timedelta(hours=25)
         mock_comment = MagicMock()
-        mock_comment.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        mock_comment.created_at = datetime.now(UTC) - timedelta(hours=25)
         mock_pr.get_review_comments.return_value = [mock_comment]
         mock_pr.get_reviews.return_value = []
         mock_pr.get_issue_comments.return_value = []
@@ -49,7 +49,7 @@ class TestProactiveEvaluator:
         mock_pr = MagicMock()
         mock_pr.number = 99
         mock_pr.mergeable = True
-        mock_pr.updated_at = datetime.now(timezone.utc)
+        mock_pr.updated_at = datetime.now(UTC)
         mock_pr.get_review_comments.return_value = []
         mock_pr.get_reviews.return_value = []
         mock_pr.get_issue_comments.return_value = []

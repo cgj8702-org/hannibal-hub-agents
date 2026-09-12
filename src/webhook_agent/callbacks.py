@@ -10,6 +10,7 @@ Provides native ADK lifecycle callbacks for:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -172,10 +173,8 @@ async def before_tool_callback(
     """Validate and sanitize tool arguments before execution."""
     _check_pr_closed_short_circuit(tool_context.state)
     if "pr_number" in args and isinstance(args["pr_number"], str):
-        try:
+        with contextlib.suppress(ValueError):
             args["pr_number"] = int(args["pr_number"])
-        except ValueError:
-            pass
 
     return None
 

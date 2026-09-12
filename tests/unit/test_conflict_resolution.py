@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from webhook_agent.tools.resolve_conflicts import (
     _synthesize_conflict_resolution,
     resolve_merge_conflicts,

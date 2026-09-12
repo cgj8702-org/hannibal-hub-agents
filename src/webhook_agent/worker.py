@@ -95,8 +95,7 @@ def main() -> int:
     try:
         # We instantiate the processor here to validate environment variables early
         processor = WebhookProcessor()
-    except KeyError as e:
-        print(f"Missing environment variable: {e}", file=sys.stderr)
+    except KeyError:
         return 3
 
     subscriber = pubsub_v1.SubscriberClient()
@@ -126,6 +125,7 @@ def main() -> int:
             last_proactive_sweep = now
             try:
                 import threading
+
                 from .proactive_service import ProactiveEvaluator
 
                 target_repo = os.environ.get(

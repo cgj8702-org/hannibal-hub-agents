@@ -26,16 +26,15 @@ from github import Auth, Github
 
 from .agent_core import AgentCore
 from .bot_identity import _is_bot_event
+from .formatter import (
+    truncate_log_payload,
+)
 from .github_credential_helper import (
     generate_jwt,
     get_installation_token,
     load_cached_token,
     load_private_key,
     save_cached_token,
-)
-
-from .formatter import (
-    truncate_log_payload,
 )
 
 logger = logging.getLogger("webhook_agent.processor")
@@ -114,9 +113,7 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
     ):
         return True
 
-    if canonical.startswith("issue_comment.") or canonical.startswith(
-        "pull_request_review_comment."
-    ):
+    if canonical.startswith(("issue_comment.", "pull_request_review_comment.")):
         comment_body = (raw.get("comment", {}) or {}).get("body", "").lower()
         review_triggers = {
             "/review",
@@ -420,12 +417,7 @@ def is_base_branch_merge_sync(
         parent_shas = [p.sha for p in parents if hasattr(p, "sha")]
         is_base_parent = base_sha in parent_shas or is_merge_msg
 
-        if is_merge_msg or (
-            is_base_parent and (not before_sha or before_sha in parent_shas)
-        ):
-            return True
-
-        return False
+        return bool(is_merge_msg or (is_base_parent and (not before_sha or before_sha in parent_shas)))
     except Exception as exc:
         logger.debug("Could not verify base branch merge sync: %s", exc)
         return False
@@ -708,10 +700,7 @@ class WebhookProcessor:
             return False
 
         # Ignore automated CI infrastructure noise and installation lifecycle events
-        if event_name in ("check_suite", "check_run", "status", "installation"):
-            return False
-
-        return True
+        return event_name not in ("check_suite", "check_run", "status", "installation")
 
     def process_event(self, payload: dict[str, Any]) -> None:
         """Process a Pub/Sub payload.

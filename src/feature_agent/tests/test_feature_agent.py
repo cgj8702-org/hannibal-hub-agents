@@ -92,14 +92,12 @@ def test_feature_task_runner_quota_paused(monkeypatch):
             "status": "quota_paused",
             "resume_at": None,
         },
-    ):
-        with patch("github.Github"):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0, stdout="clean")
-                res = runner.execute_task(
-                    issue_number=77, instruction="quota pause test"
-                )
-                assert "Issue #77" in res
+    ), patch("github.Github"), patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="clean")
+        res = runner.execute_task(
+            issue_number=77, instruction="quota pause test"
+        )
+        assert "Issue #77" in res
 
 
 def test_feature_tools_resolve_in_window_valid():

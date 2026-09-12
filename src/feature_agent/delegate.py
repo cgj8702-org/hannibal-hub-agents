@@ -58,7 +58,7 @@ def ask_parent(ctx: Context, question: str) -> str:
 
 
 def _pending_from_event(event: Any) -> ChildPending | None:
-    for fc in getattr(event, "get_function_calls", lambda: [])() or []:
+    for fc in getattr(event, "get_function_calls", list)() or []:
         if getattr(fc, "name", None) == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME:
             tc = (getattr(fc, "args", {}) or {}).get("toolConfirmation", {}) or {}
             return ChildPending(

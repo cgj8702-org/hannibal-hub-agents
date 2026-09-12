@@ -148,11 +148,9 @@ def main() -> int:
         cached = load_cached_token(args.installation_id)
         if cached:
             if args.print_only_token:
-                print(cached.token)
+                pass
             else:
-                print(
-                    json.dumps({"token": cached.token, "expires_at": cached.expires_at})
-                )
+                pass
             return 0
 
     private_key_pem = load_private_key(args.private_key)
@@ -161,18 +159,16 @@ def main() -> int:
         inst_tok = get_installation_token(
             jwt_token, args.installation_id, github_api=args.github_api
         )
-    except httpx.HTTPStatusError as exc:
-        print(f"Error from GitHub API: {exc.response.status_code} {exc.response.text}")
+    except httpx.HTTPStatusError:
         return 2
-    except httpx.HTTPError as exc:  # network or other errors
-        print(f"Network/error: {exc}")
+    except httpx.HTTPError:  # network or other errors
         return 3
 
     save_cached_token(args.installation_id, inst_tok)
     if args.print_only_token:
-        print(inst_tok.token)
+        pass
     else:
-        print(json.dumps({"token": inst_tok.token, "expires_at": inst_tok.expires_at}))
+        pass
     return 0
 
 

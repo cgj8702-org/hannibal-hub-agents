@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from logic.rate_limiter import RPMWaiter, _resolve_tier
 
 pytestmark = [pytest.mark.unit]
@@ -85,6 +86,7 @@ async def test_record_actual_tokens(mock_registry: Path) -> None:
 def test_extract_rate_limit_details_from_adk_error() -> None:
     from google.adk.models.google_llm import _ResourceExhaustedError
     from google.genai.errors import ClientError
+
     from logic.rate_limiter import extract_rate_limit_details
 
     mock_details = [

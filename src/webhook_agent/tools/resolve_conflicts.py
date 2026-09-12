@@ -148,7 +148,7 @@ def resolve_merge_conflicts(
                     capture_output=True,
                     env=git_env,
                 )
-            except Exception as auth_err:  # noqa: BLE001
+            except Exception as auth_err:
                 logger.warning(
                     "Could not set git http.extraheader auth token in worktree: %s",
                     type(auth_err).__name__,

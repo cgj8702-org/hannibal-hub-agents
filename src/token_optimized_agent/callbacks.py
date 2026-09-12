@@ -1,6 +1,7 @@
 """Callbacks and plugins for pruning payload sizes and model input events."""
 
 from typing import Any
+
 from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.tools import BaseTool, ToolContext
 

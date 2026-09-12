@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import concurrent.futures
 
+import pytest
 from google.adk.memory.base_memory_service import MemoryEntry
 from google.genai.types import Content
+
 from webhook_agent.memory_service import InMemoryMemoryService
-import pytest
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 

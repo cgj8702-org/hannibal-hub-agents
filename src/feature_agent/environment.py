@@ -21,17 +21,14 @@ class Environment(abc.ABC):
     @abc.abstractmethod
     def on_host_fs(self) -> bool:
         """Returns True if tools execute directly on host filesystem."""
-        pass
 
     @abc.abstractmethod
     def refresh_auth(self) -> bool:
         """Refresh environment credentials. Returns False if environment is gone."""
-        pass
 
     @abc.abstractmethod
     def resolve_path(self, relative_path: str) -> Path:
         """Resolve a relative path inside the environment workspace."""
-        pass
 
 
 class LocalEnvironment(Environment):

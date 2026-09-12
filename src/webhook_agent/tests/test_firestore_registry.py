@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from logic.firestore_registry import FirestoreDepletedModelRegistry
 

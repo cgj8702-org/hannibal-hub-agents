@@ -2,6 +2,7 @@
 
 import pytest
 from google.adk.models import Gemini
+
 from logic.model_factory import RateLimitedGemini, get_adk_model
 
 pytestmark = [pytest.mark.unit]
