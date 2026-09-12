@@ -23,25 +23,19 @@ class CloudLoggingAnalyticsPlugin(BasePlugin):
     def __init__(self, name: str = "cloud_logging_analytics"):
         super().__init__(name=name)
 
-    def before_agent_callback(
-        self, agent: BaseAgent, callback_context: CallbackContext
-    ) -> None:
+    def before_agent_callback(self, agent: BaseAgent, callback_context: CallbackContext) -> None:
         """Record agent execution start time in callback context state."""
         try:
             callback_context.state[f"__start_time_{agent.name}"] = time.perf_counter()
         except Exception as exc:
             logger.debug("Analytics start time record skipped: %s", exc)
 
-    def after_agent_callback(
-        self, agent: BaseAgent, callback_context: CallbackContext
-    ) -> None:
+    def after_agent_callback(self, agent: BaseAgent, callback_context: CallbackContext) -> None:
         """Emit structured JSON telemetry log for agent execution completion."""
         try:
             start_time = callback_context.state.get(f"__start_time_{agent.name}")
             duration_ms = (
-                round((time.perf_counter() - start_time) * 1000, 2)
-                if start_time
-                else None
+                round((time.perf_counter() - start_time) * 1000, 2) if start_time else None
             )
 
             metrics = {
@@ -60,9 +54,7 @@ class CloudLoggingAnalyticsPlugin(BasePlugin):
         except Exception as exc:
             logger.debug("Analytics end record skipped: %s", exc)
 
-    def before_model_callback(
-        self, callback_context: CallbackContext, llm_request: Any
-    ) -> None:
+    def before_model_callback(self, callback_context: CallbackContext, llm_request: Any) -> None:
         """Track model request invocation and token estimation."""
         try:
             model_name = getattr(llm_request, "model", "unknown")

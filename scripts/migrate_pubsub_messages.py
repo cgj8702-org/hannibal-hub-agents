@@ -106,9 +106,7 @@ def migrate_messages(
             subscriber.acknowledge(
                 request={"subscription": source_subscription, "ack_ids": ack_ids_to_ack}
             )
-            print(
-                f"  Acknowledged {len(ack_ids_to_ack)} message(s) in source subscription."
-            )
+            print(f"  Acknowledged {len(ack_ids_to_ack)} message(s) in source subscription.")
 
     print(f"\nMigration complete. Total messages migrated: {total_migrated}")
     return total_migrated
@@ -120,8 +118,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--source-subscription",
-        default=os.environ.get("SOURCE_SUBSCRIPTION")
-        or os.environ.get("PUBSUB_SUBSCRIPTION"),
+        default=os.environ.get("SOURCE_SUBSCRIPTION") or os.environ.get("PUBSUB_SUBSCRIPTION"),
         help="Full path to source subscription (e.g. projects/OLD_PROJECT/subscriptions/webhook-sub)",
     )
     parser.add_argument(

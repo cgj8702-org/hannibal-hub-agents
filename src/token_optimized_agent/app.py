@@ -1,8 +1,8 @@
 """App configuration with EventsCompactionConfig, ContextCacheConfig, and MessagePruningPlugin."""
 
+from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps import App
 from google.adk.apps.app import EventsCompactionConfig
-from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 
 from src.token_optimized_agent.agent import root_agent

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from webhook_agent.formatter import (
@@ -86,9 +86,7 @@ class StateEvaluatorNode:
 class CodeAuditorNode:
     """Node 4: Prepares raw LLM audit payload structure."""
 
-    def process(
-        self, state: GraphState, llm_response_dict: dict[str, Any]
-    ) -> GraphState:
+    def process(self, state: GraphState, llm_response_dict: dict[str, Any]) -> GraphState:
         state.audit_dict = llm_response_dict
         logger.debug("Graph Node 4 [CodeAuditor]: audit payload ingested")
         return state

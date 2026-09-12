@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from github import Github, GithubException
@@ -60,28 +60,27 @@ class ProactiveEvaluator:
                 actions_taken.append("merge_conflict_detected")
 
         # 2. Check Stale Unresolved Threads (>24h)
-        if self._has_stale_unresolved_thread(pr):
-            if not self._has_recent_comment_with_text(
-                pr, "Proactive Reminder: Unresolved Feedback"
-            ):
-                try:
-                    pr.create_issue_comment(
-                        "## ⏰ Proactive Reminder: Unresolved Feedback\n\n"
-                        "This PR has unresolved review feedback that has been idle for over 24 hours. "
-                        "Please update the PR or reply to open threads when ready! 🚀\n\n"
-                        "*Posted automatically by Hannibal Hub Proactive Agent*"
-                    )
-                    logger.info(
-                        "Proactive Action: Posted stale thread reminder on PR #%d",
-                        pr_number,
-                    )
-                    actions_taken.append("stale_thread_reminder_posted")
-                except GithubException as exc:
-                    logger.warning(
-                        "Failed to post stale thread reminder on PR #%d: %s",
-                        pr_number,
-                        exc,
-                    )
+        if self._has_stale_unresolved_thread(pr) and not self._has_recent_comment_with_text(
+            pr, "Proactive Reminder: Unresolved Feedback"
+        ):
+            try:
+                pr.create_issue_comment(
+                    "## ⏰ Proactive Reminder: Unresolved Feedback\n\n"
+                    "This PR has unresolved review feedback that has been idle for over 24 hours. "
+                    "Please update the PR or reply to open threads when ready! 🚀\n\n"
+                    "*Posted automatically by Hannibal Hub Proactive Agent*"
+                )
+                logger.info(
+                    "Proactive Action: Posted stale thread reminder on PR #%d",
+                    pr_number,
+                )
+                actions_taken.append("stale_thread_reminder_posted")
+            except GithubException as exc:
+                logger.warning(
+                    "Failed to post stale thread reminder on PR #%d: %s",
+                    pr_number,
+                    exc,
+                )
 
         # 3. Check Failing CI Check Runs
         failing_checks = self._get_failing_check_runs(pr)
@@ -91,8 +90,7 @@ class ProactiveEvaluator:
             ):
                 try:
                     checks_summary = "\n".join(
-                        f"- ❌ **{c['name']}**: `{c['conclusion']}`"
-                        for c in failing_checks
+                        f"- ❌ **{c['name']}**: `{c['conclusion']}`" for c in failing_checks
                     )
                     pr.create_issue_comment(
                         f"## 🚨 Proactive Diagnostic: Failing CI Checks\n\n"
@@ -120,23 +118,19 @@ class ProactiveEvaluator:
         """Checks if PR has actual review comments >24h old with no subsequent activity."""
         try:
             get_review_comments = getattr(pr, "get_review_comments", None)
-            review_comments = (
-                list(get_review_comments()) if callable(get_review_comments) else []
-            )
+            review_comments = list(get_review_comments()) if callable(get_review_comments) else []
             get_reviews = getattr(pr, "get_reviews", None)
             reviews = list(get_reviews()) if callable(get_reviews) else []
             if not review_comments and not reviews:
                 return False
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             latest_comment_time = None
             for c in review_comments:
-                c_time = getattr(c, "created_at", None) or getattr(
-                    c, "updated_at", None
-                )
+                c_time = getattr(c, "created_at", None) or getattr(c, "updated_at", None)
                 if c_time:
                     if c_time.tzinfo is None:
-                        c_time = c_time.replace(tzinfo=timezone.utc)
+                        c_time = c_time.replace(tzinfo=UTC)
                     if latest_comment_time is None or c_time > latest_comment_time:
                         latest_comment_time = c_time
 
@@ -144,7 +138,7 @@ class ProactiveEvaluator:
                 r_time = getattr(r, "submitted_at", None)
                 if r_time:
                     if r_time.tzinfo is None:
-                        r_time = r_time.replace(tzinfo=timezone.utc)
+                        r_time = r_time.replace(tzinfo=UTC)
                     if latest_comment_time is None or r_time > latest_comment_time:
                         latest_comment_time = r_time
 

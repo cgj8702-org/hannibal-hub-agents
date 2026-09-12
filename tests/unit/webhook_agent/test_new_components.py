@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from webhook_agent.audit_schema import AuditVerdict, RiskItem
 from webhook_agent.comment_poster import (
     prepare_review_payload,
@@ -32,7 +33,9 @@ def test_audit_schema_clean_pr() -> None:
 @pytest.mark.webhook_agent
 @pytest.mark.guardrails
 def test_sanitizer_plugin_prompt_leakage_and_secrets() -> None:
-    raw_text = "> [!IMPORTANT] Finding zero risks...\nAPI Key: AIzaSy123456789012345678901234567890123"
+    raw_text = (
+        "> [!IMPORTANT] Finding zero risks...\nAPI Key: AIzaSy123456789012345678901234567890123"
+    )
     sanitized = sanitize_markdown_text(raw_text)
     assert "[!IMPORTANT] Finding zero risks" not in sanitized
     assert "AIzaSy123456789012345678901234567890123" not in sanitized

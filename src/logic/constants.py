@@ -21,12 +21,8 @@ DEFAULT_COMPUTE_HOST_PROJECT = "chatbot-project-hannibal"
 
 # --- PubSub Topic & Subscription Paths ---
 DEFAULT_PUBSUB_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks"
-DEFAULT_PUBSUB_SUBSCRIPTION = (
-    f"projects/{DEFAULT_PUBSUB_PROJECT}/subscriptions/webhooks-sub"
-)
-DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = (
-    f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks-dead-letter"
-)
+DEFAULT_PUBSUB_SUBSCRIPTION = f"projects/{DEFAULT_PUBSUB_PROJECT}/subscriptions/webhooks-sub"
+DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks-dead-letter"
 
 # --- Operational Policy Defaults ---
 DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"

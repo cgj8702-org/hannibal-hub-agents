@@ -14,6 +14,7 @@ Supports:
 
 import asyncio
 import collections
+import contextlib
 import json
 import logging
 import os
@@ -28,14 +29,8 @@ logger = logging.getLogger("hannibal_rate_limiter")
 def _resolve_registry_path() -> Path:
     """Resolve the path to gemini_models.json in either assets/registries or src/assets/registries."""
     candidates = [
-        Path(__file__).resolve().parents[1]
-        / "assets"
-        / "registries"
-        / "gemini_models.json",
-        Path(__file__).resolve().parents[2]
-        / "assets"
-        / "registries"
-        / "gemini_models.json",
+        Path(__file__).resolve().parents[1] / "assets" / "registries" / "gemini_models.json",
+        Path(__file__).resolve().parents[2] / "assets" / "registries" / "gemini_models.json",
     ]
     for p in candidates:
         if p.exists():
@@ -134,7 +129,7 @@ def get_allowed_models(tier: str | None = None) -> list[str]:
     except Exception as e:
         logger.error("Failed to resolve allowed models from gemini_models.json: %s", e)
 
-    return sorted(list(allowed))
+    return sorted(allowed)
 
 
 def resolve_webhook_api_key() -> tuple[str, str, str]:
@@ -157,9 +152,7 @@ def resolve_webhook_api_key() -> tuple[str, str, str]:
     if not free_key or free_key.lower() in ("dummy", "dummy-key-for-dev", "none"):
         if "PYTEST_CURRENT_TEST" in os.environ:
             pytest_key = (
-                os.getenv("GEMINI_API_KEY")
-                or os.getenv("GOOGLE_API_KEY")
-                or "pytest_autokey"
+                os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "pytest_autokey"
             )
             return (pytest_key, "PYTEST_ENVIRONMENT", tier)
         raise RuntimeError("CRITICAL: Missing required secret 'WEBHOOK_FREE_KEY'")
@@ -277,18 +270,14 @@ class RPMWaiter:
 
         norm_model = self._norm(model)
         full_model_key = f"models/{norm_model}"
-        model_entry = self.model_limits.get(
-            full_model_key, self.model_limits.get(norm_model, {})
-        )
+        model_entry = self.model_limits.get(full_model_key, self.model_limits.get(norm_model, {}))
         if isinstance(model_entry, dict) and tier in model_entry:
             tier_entry = model_entry[tier]
         else:
             tier_entry = model_entry if isinstance(model_entry, dict) else {}
 
         rpm_limit = (
-            rpm_override
-            if rpm_override is not None
-            else tier_entry.get("rpm", self.default_limit)
+            rpm_override if rpm_override is not None else tier_entry.get("rpm", self.default_limit)
         )
         if (
             rpm_override is None
@@ -300,9 +289,7 @@ class RPMWaiter:
                 norm_model,
                 tier,
             )
-            raise ValueError(
-                f"Model '{norm_model}' is unavailable on tier '{tier}' (0 quota)."
-            )
+            raise ValueError(f"Model '{norm_model}' is unavailable on tier '{tier}' (0 quota).")
 
         if rpm_limit <= 0:
             rpm_limit = self.default_limit
@@ -316,9 +303,7 @@ class RPMWaiter:
 
             # Prune old RPM & TPM histories
             history[:] = [t for t in history if now - t <= self.window]
-            token_history[:] = [
-                entry for entry in token_history if now - entry[0] <= self.window
-            ]
+            token_history[:] = [entry for entry in token_history if now - entry[0] <= self.window]
 
             # 1. RPM Check (bursts allowed up to limit)
             wait_rpm = 0.0
@@ -338,9 +323,7 @@ class RPMWaiter:
             if tpm_limit > 0 and estimated_tokens > 0:
                 active_tpm = sum(tok for _, tok, _ in token_history)
                 if active_tpm + estimated_tokens > tpm_limit:
-                    needed_tokens_to_expire = (
-                        active_tpm + estimated_tokens
-                    ) - tpm_limit
+                    needed_tokens_to_expire = (active_tpm + estimated_tokens) - tpm_limit
                     accumulated = 0
                     required_ts = now
                     for entry in token_history:
@@ -370,9 +353,7 @@ class RPMWaiter:
         if wait_time > 0:
             await asyncio.sleep(wait_time)
 
-    async def record_actual_tokens(
-        self, model: str = "default", actual_tokens: int = 0
-    ) -> None:
+    async def record_actual_tokens(self, model: str = "default", actual_tokens: int = 0) -> None:
         """Update or record real token usage returned in the provider API response."""
         if actual_tokens <= 0:
             return
@@ -382,9 +363,7 @@ class RPMWaiter:
             now = self.clock()
             token_history = self.token_histories[norm_model]
 
-            token_history[:] = [
-                entry for entry in token_history if now - entry[0] <= self.window
-            ]
+            token_history[:] = [entry for entry in token_history if now - entry[0] <= self.window]
 
             # Update the earliest estimated (unfinalized) token reservation
             unfinalized = next((entry for entry in token_history if not entry[2]), None)
@@ -417,9 +396,7 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
     target = getattr(exc, "__cause__", exc) or exc
 
     # 2. Inspect raw RPC details (QuotaFailure, RetryInfo, ErrorInfo)
-    raw_details = getattr(target, "response_json", None) or getattr(
-        target, "details", None
-    )
+    raw_details = getattr(target, "response_json", None) or getattr(target, "details", None)
     if isinstance(raw_details, list):
         for item in raw_details:
             if isinstance(item, dict):
@@ -439,10 +416,8 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
                 if "retryDelay" in item or "retry_delay" in item:
                     delay = item.get("retryDelay") or item.get("retry_delay")
                     if isinstance(delay, str) and delay.endswith("s"):
-                        try:
+                        with contextlib.suppress(ValueError):
                             details["retry_after_seconds"] = float(delay[:-1])
-                        except ValueError:
-                            pass
                     elif isinstance(delay, (int, float)):
                         details["retry_after_seconds"] = float(delay)
 
@@ -454,10 +429,8 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
 
         retry_after = headers.get("retry-after") or headers.get("Retry-After")
         if retry_after:
-            try:
+            with contextlib.suppress(ValueError):
                 details["retry_after_seconds"] = float(retry_after)
-            except ValueError:
-                pass
 
         limit_req = headers.get("x-ratelimit-limit-requests")
         if limit_req:

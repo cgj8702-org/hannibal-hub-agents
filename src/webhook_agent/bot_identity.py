@@ -39,10 +39,7 @@ def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
     if login.endswith("[bot]") and ("hannibal" in login or "agent" in login):
         return True
 
-    if sender_type == "Bot" and ("hannibal" in login or "agent" in login):
-        return True
-
-    return False
+    return bool(sender_type == "Bot" and ("hannibal" in login or "agent" in login))
 
 
 def _is_bot_event(normalized: dict[str, Any]) -> bool:

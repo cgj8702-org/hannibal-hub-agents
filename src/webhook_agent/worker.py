@@ -88,15 +88,12 @@ def main() -> int:
     setup_cloud_logging()
     os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
     subscription = os.environ.get("PUBSUB_SUBSCRIPTION", DEFAULT_PUBSUB_SUBSCRIPTION)
-    dead_letter_topic = os.environ.get(
-        "PUBSUB_DEAD_LETTER_TOPIC", DEFAULT_PUBSUB_DEAD_LETTER_TOPIC
-    )
+    dead_letter_topic = os.environ.get("PUBSUB_DEAD_LETTER_TOPIC", DEFAULT_PUBSUB_DEAD_LETTER_TOPIC)
 
     try:
         # We instantiate the processor here to validate environment variables early
         processor = WebhookProcessor()
-    except KeyError as e:
-        print(f"Missing environment variable: {e}", file=sys.stderr)
+    except KeyError:
         return 3
 
     subscriber = pubsub_v1.SubscriberClient()
@@ -126,11 +123,10 @@ def main() -> int:
             last_proactive_sweep = now
             try:
                 import threading
+
                 from .proactive_service import ProactiveEvaluator
 
-                target_repo = os.environ.get(
-                    "GITHUB_REPOSITORY", "cgj8702-org/hannibal-hub-agents"
-                )
+                target_repo = os.environ.get("GITHUB_REPOSITORY", "cgj8702-org/hannibal-hub-agents")
                 evaluator = ProactiveEvaluator(processor.gh, target_repo)
                 sweep_thread = threading.Thread(
                     target=evaluator.evaluate_open_prs,
@@ -174,9 +170,7 @@ def main() -> int:
             # This is a blocking call; the loop waits until it's done
             processor.process_event(payload)
 
-            subscriber.acknowledge(
-                request={"subscription": subscription_path, "ack_ids": [ack_id]}
-            )
+            subscriber.acknowledge(request={"subscription": subscription_path, "ack_ids": [ack_id]})
             logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
         except Exception:
             logger.exception(

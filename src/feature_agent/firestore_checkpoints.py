@@ -33,9 +33,10 @@ class FirestoreFeatureCheckpointRegistry:
     def _get_db(self) -> Any | None:
         if not self._initialized:
             self._initialized = True
-            if _HAS_FIRESTORE and os.getenv(
-                "ENABLE_FIRESTORE_REGISTRY", "1"
-            ).lower() in ("1", "true"):
+            if _HAS_FIRESTORE and os.getenv("ENABLE_FIRESTORE_REGISTRY", "1").lower() in (
+                "1",
+                "true",
+            ):
                 try:
                     project_id = (
                         os.getenv("FEATURE_AGENT_PROJECT")
@@ -73,7 +74,7 @@ class FirestoreFeatureCheckpointRegistry:
             return
 
         doc_id = f"issue_{issue_number}"
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_utc = datetime.datetime.now(datetime.UTC)
         resume_at = now_utc + datetime.timedelta(seconds=cooldown_seconds)
 
         data = {

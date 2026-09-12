@@ -66,7 +66,7 @@ def get_pr_diff_file_map(diff_text: str) -> dict[str, Any]:
     anchors = added_line_anchors(diff_text)
     summary: dict[str, Any] = {
         "modified_files": list(anchors.keys()),
-        "anchors": {k: sorted(list(v)) for k, v in anchors.items()},
+        "anchors": {k: sorted(v) for k, v in anchors.items()},
     }
     return summary
 
@@ -78,10 +78,7 @@ def verify_line_reference(diff_text: str, file_path: str, line_number: int) -> b
 
     if file_path in anchors and line_number in anchors[file_path]:
         return True
-    if stripped_path in anchors and line_number in anchors[stripped_path]:
-        return True
-
-    return False
+    return bool(stripped_path in anchors and line_number in anchors[stripped_path])
 
 
 get_pr_diff_file_map_tool = FunctionTool(get_pr_diff_file_map)

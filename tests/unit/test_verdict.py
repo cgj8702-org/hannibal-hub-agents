@@ -1,6 +1,7 @@
 """Unit tests for mathematical PR review verdict calculator."""
 
 import pytest
+
 from webhook_agent.webhook_agent import calculate_verdict
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -32,4 +33,3 @@ def test_calculate_verdict_has_critical_triggers_request_changes() -> None:
 def test_calculate_verdict_high_scores_and_confidence_approves() -> None:
     scores = {"correctness": 5, "readability": 4, "architecture": 4}
     assert calculate_verdict(scores) == "APPROVE"
-

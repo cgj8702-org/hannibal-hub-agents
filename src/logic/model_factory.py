@@ -34,12 +34,10 @@ class RateLimitedGemini(Gemini):
 
     async def generate_content_async(
         self, llm_request: Any, stream: bool = False
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[Any]:
         from webhook_agent.webhook_agent import get_active_model
 
-        model_name = getattr(
-            llm_request, "model", getattr(self, "model", get_active_model())
-        )
+        model_name = getattr(llm_request, "model", getattr(self, "model", get_active_model()))
         active_tier = _resolve_tier()
         estimated_tokens = 0
 
@@ -52,9 +50,7 @@ class RateLimitedGemini(Gemini):
                 if ct_resp and ct_resp.total_tokens:
                     estimated_tokens = int(ct_resp.total_tokens)
         except Exception as exc:
-            logger.debug(
-                "Free count_tokens API call skipped on model '%s': %s", model_name, exc
-            )
+            logger.debug("Free count_tokens API call skipped on model '%s': %s", model_name, exc)
 
         if estimated_tokens <= 0:
             contents_str = str(getattr(llm_request, "contents", ""))
@@ -74,9 +70,7 @@ class RateLimitedGemini(Gemini):
                 exc,
             )
 
-        async for response in super().generate_content_async(
-            llm_request, stream=stream
-        ):
+        async for response in super().generate_content_async(llm_request, stream=stream):
             yield response
 
 
@@ -102,9 +96,7 @@ def get_adk_model(
     active_tier = tier or _resolve_tier()
 
     if not model_name:
-        default_model = (
-            "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
-        )
+        default_model = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
         model_name = os.getenv("GEMMA_MODEL", default_model)
 
     resolved_api_key = api_key or get_active_api_key()

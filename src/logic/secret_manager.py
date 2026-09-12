@@ -35,9 +35,7 @@ def resolve_secret(secret_id: str, default: str = "") -> str:
         secret_val = response.payload.data.decode("utf-8").strip()
         if secret_val:
             _SECRET_CACHE[secret_id] = secret_val
-            logger.debug(
-                "Successfully resolved secret '%s' from Secret Manager", secret_id
-            )
+            logger.debug("Successfully resolved secret '%s' from Secret Manager", secret_id)
             return secret_val
     except Exception as exc:
         logger.debug("Secret Manager fallback skipped for '%s': %s", secret_id, exc)

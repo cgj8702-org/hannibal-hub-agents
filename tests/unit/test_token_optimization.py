@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from src.token_optimized_agent.callbacks import (
     MessagePruningPlugin,
     truncate_tool_response_callback,
@@ -19,9 +20,7 @@ async def test_truncate_tool_response_callback_preserves_full_payload() -> None:
     mock_context = MagicMock()
     tool_response = {"data": list(range(100)), "text": "x" * 2000}
 
-    result = await truncate_tool_response_callback(
-        mock_tool, {}, mock_context, tool_response
-    )
+    result = await truncate_tool_response_callback(mock_tool, {}, mock_context, tool_response)
 
     assert result == tool_response
     assert len(result["data"]) == 100
@@ -37,9 +36,7 @@ async def test_message_pruning_plugin() -> None:
     mock_llm_request = MagicMock()
     mock_llm_request.contents = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-    await plugin.before_model_callback(
-        callback_context=MagicMock(), llm_request=mock_llm_request
-    )
+    await plugin.before_model_callback(callback_context=MagicMock(), llm_request=mock_llm_request)
 
     assert mock_llm_request.contents == [6, 7, 8, 9, 10]
 

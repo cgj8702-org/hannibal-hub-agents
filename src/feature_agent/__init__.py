@@ -11,8 +11,8 @@ from feature_agent.firestore_checkpoints import firestore_checkpoint_registry
 from feature_agent.runner import FeatureTaskRunner
 
 __all__ = [
-    "build_feature_developer_agent",
-    "build_feature_app",
-    "firestore_checkpoint_registry",
     "FeatureTaskRunner",
+    "build_feature_app",
+    "build_feature_developer_agent",
+    "firestore_checkpoint_registry",
 ]

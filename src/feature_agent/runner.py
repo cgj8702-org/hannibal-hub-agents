@@ -58,9 +58,7 @@ class FeatureTaskRunner:
         ):
             return "Automated feature creation is disabled by policy (ALLOW_AUTOMATED_MUTATIONS=0)."
 
-        slug = (
-            re.sub(r"[^a-z0-9]+", "-", instruction.lower())[:25].strip("-") or "feature"
-        )
+        slug = re.sub(r"[^a-z0-9]+", "-", instruction.lower())[:25].strip("-") or "feature"
         branch_name = f"feat/issue-{issue_number}-auto-impl-{slug}"
         session_id = f"delegate-issue-{issue_number}"
 
@@ -70,8 +68,8 @@ class FeatureTaskRunner:
             resume_at = existing.get("resume_at")
             if resume_at and isinstance(resume_at, datetime.datetime):
                 if resume_at.tzinfo is None:
-                    resume_at = resume_at.replace(tzinfo=datetime.timezone.utc)
-                now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    resume_at = resume_at.replace(tzinfo=datetime.UTC)
+                now_utc = datetime.datetime.now(datetime.UTC)
                 if resume_at > now_utc:
                     remaining = int((resume_at - now_utc).total_seconds())
                     return (
@@ -95,13 +93,9 @@ class FeatureTaskRunner:
 
         git_env = os.environ.copy()
         git_env["GIT_COMMITTER_NAME"] = "hannibal-hub-agents[bot]"
-        git_env["GIT_COMMITTER_EMAIL"] = (
-            "hannibal-hub-agents[bot]@users.noreply.github.com"
-        )
+        git_env["GIT_COMMITTER_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
         git_env["GIT_AUTHOR_NAME"] = "hannibal-hub-agents[bot]"
-        git_env["GIT_AUTHOR_EMAIL"] = (
-            "hannibal-hub-agents[bot]@users.noreply.github.com"
-        )
+        git_env["GIT_AUTHOR_EMAIL"] = "hannibal-hub-agents[bot]@users.noreply.github.com"
 
         test_env = git_env.copy()
         api_key = get_feature_agent_key()
@@ -112,9 +106,7 @@ class FeatureTaskRunner:
             from github import Github
 
             gh = Github(api_key)
-            repo_name = os.getenv(
-                "GITHUB_REPOSITORY", "cgj8702-org/hannibal-hub-agents"
-            )
+            repo_name = os.getenv("GITHUB_REPOSITORY", "cgj8702-org/hannibal-hub-agents")
             gh_repo = gh.get_repo(repo_name)
 
             # Create isolated Git Worktree
@@ -234,19 +226,14 @@ class FeatureTaskRunner:
         except Exception as exc:
             err_msg = str(exc)
             err_code = getattr(exc, "code", None)
-            is_429 = (
-                err_code == 429
-                or "429" in err_msg
-                or "resource_exhausted" in err_msg.lower()
-            )
+            is_429 = err_code == 429 or "429" in err_msg or "resource_exhausted" in err_msg.lower()
 
             if is_429:
                 from logic.rate_limiter import extract_rate_limit_details
 
                 limit_details = extract_rate_limit_details(exc)
                 cooldown_secs = (
-                    limit_details.get("retry_after_seconds")
-                    or 86400.0  # Default to 24h for RPD
+                    limit_details.get("retry_after_seconds") or 86400.0  # Default to 24h for RPD
                 )
                 quota_limit = limit_details.get("quota_limit") or "UnknownQuotaLimit"
                 quota_val = limit_details.get("quota_value") or "unknown"
@@ -314,8 +301,6 @@ class FeatureTaskRunner:
                         env=git_env,
                     )
                 except Exception as cleanup_err:
-                    logger.warning(
-                        "Could not remove worktree %s: %s", worktree_path, cleanup_err
-                    )
+                    logger.warning("Could not remove worktree %s: %s", worktree_path, cleanup_err)
                 if worktree_path.exists():
                     shutil.rmtree(worktree_path, ignore_errors=True)

@@ -208,9 +208,7 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
     if chain:
         return chain[0]
     active_tier = _resolve_tier()
-    default_primary = (
-        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
-    )
+    default_primary = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
     return os.getenv("GEMMA_MODEL", default_primary)
 
 
@@ -223,22 +221,14 @@ def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int
         from pathlib import Path
 
         candidates = [
-            Path(__file__).resolve().parents[1]
-            / "assets"
-            / "registries"
-            / "gemini_models.json",
-            Path(__file__).resolve().parents[2]
-            / "assets"
-            / "registries"
-            / "gemini_models.json",
+            Path(__file__).resolve().parents[1] / "assets" / "registries" / "gemini_models.json",
+            Path(__file__).resolve().parents[2] / "assets" / "registries" / "gemini_models.json",
         ]
         registry_path = next((p for p in candidates if p.exists()), candidates[1])
         if registry_path.exists():
             data = json.loads(registry_path.read_text(encoding="utf-8"))
             full_key = (
-                target_model
-                if target_model.startswith("models/")
-                else f"models/{target_model}"
+                target_model if target_model.startswith("models/") else f"models/{target_model}"
             )
             for m in data.get("models", []):
                 if isinstance(m, dict) and m.get("name") in (target_model, full_key):
@@ -369,9 +359,7 @@ def _sanitize_pr_body(body: str) -> str:
     return result
 
 
-def _fetch_repo_pr_template(
-    gh: Any, repo_name: str, changed_files: list[str] | None = None
-) -> str:
+def _fetch_repo_pr_template(gh: Any, repo_name: str, changed_files: list[str] | None = None) -> str:
     """Fetch the target repository's custom PR template via PyGithub based on git diff analysis."""
     try:
         repo = gh.get_repo(repo_name)
@@ -397,7 +385,7 @@ def _fetch_repo_pr_template(
                     content_file = template_map[target_file]
                     if hasattr(content_file, "decoded_content"):
                         return content_file.decoded_content.decode("utf-8")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Could not fetch template file from map: %s", exc)
 
         candidate_paths = [
@@ -409,10 +397,10 @@ def _fetch_repo_pr_template(
                 content_file = repo.get_contents(path)
                 if hasattr(content_file, "decoded_content"):
                     return content_file.decoded_content.decode("utf-8")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("Could not fetch remote template path %s: %s", path, exc)
                 continue
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Could not fetch remote PR template for %s: %s", repo_name, exc)
 
     return _load_pr_template()
@@ -454,9 +442,7 @@ def get_max_input_tokens() -> int:
     return MAX_INPUT_TOKENS
 
 
-def count_tokens_exact(
-    contents: str | list[Any], model_name: str | None = None
-) -> int | None:
+def count_tokens_exact(contents: str | list[Any], model_name: str | None = None) -> int | None:
     """Count input tokens using Google GenAI SDK's client.models.count_tokens()."""
     target_model = model_name or get_active_model()
     try:
@@ -468,7 +454,7 @@ def count_tokens_exact(
             contents=contents if isinstance(contents, list) else [contents],
         )
         return getattr(res, "total_tokens", None)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("count_tokens API call skipped/unavailable: %s", exc)
         return None
 
@@ -525,9 +511,7 @@ class DepletedModelRegistry:
             ):
                 cooldown = 60.0
                 metric_type = "RPM/TPM (60s)"
-            elif (
-                "503" in err_str or "unavailable" in err_str or "high demand" in err_str
-            ):
+            elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
                 cooldown = 120.0
                 metric_type = "503 HIGH DEMAND (120s)"
 
@@ -620,9 +604,7 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
     to the primary model, and routine lifecycle events to the lightweight model.
     """
     active_tier = _resolve_tier()
-    default_primary = (
-        "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
-    )
+    default_primary = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
     primary = os.environ.get("GEMMA_MODEL", default_primary)
     lightweight = os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", "gemini-3.5-flash-lite")
 
@@ -745,7 +727,7 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
         return decoded
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error reading file: {e}"
 
 
@@ -777,21 +759,21 @@ def write_file(
         branch_created = False
         try:
             repo.get_branch(branch)
-        except Exception:  # noqa: BLE001
+        except Exception:
             sb = repo.get_branch(base)
             repo.create_git_ref(ref=f"refs/heads/{branch}", sha=sb.commit.sha)
             branch_created = True
 
         try:
             repo.create_file(file_path, message, content, branch=branch)
-        except Exception:  # noqa: BLE001
+        except Exception:
             existing = repo.get_contents(file_path, ref=branch)
             repo.update_file(file_path, message, content, existing.sha, branch=branch)
         status = f"Committed '{file_path}' to {branch}"
         if branch_created:
             status += f" (branch created from {base})"
         return status
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error writing file: {e}"
 
 
@@ -826,7 +808,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
         try:
             pr = repo.get_pull(number)
             is_pr = True
-        except Exception:  # noqa: BLE001
+        except Exception:
             is_pr = False
 
         if is_pr:
@@ -856,7 +838,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
                 parts.append(f"Body: {body_preview}")
 
         return "\n".join(parts)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error fetching issue/PR: {e}"
 
 
@@ -909,7 +891,7 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
                 f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
             )
         return "\n".join(diff_lines)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error fetching commit diff: {e}"
 
 
@@ -987,10 +969,8 @@ def update_issue(
             issue.add_to_labels(*labels)
             actions.append(f"Labels added: {labels}")
 
-        return (
-            f"#{number}: " + "; ".join(actions) if actions else f"#{number}: no changes"
-        )
-    except Exception as e:  # noqa: BLE001
+        return f"#{number}: " + "; ".join(actions) if actions else f"#{number}: no changes"
+    except Exception as e:
         return f"Error updating issue/PR: {e}"
 
 
@@ -1010,10 +990,7 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
     """
     # Programmatic Guardrail: Block duplicate add_comment if formal review() was already submitted in this same execution turn
     session_state = getattr(ctx, "state", None)
-    if (
-        isinstance(session_state, dict)
-        and session_state.get("review_submitted_in_this_turn")
-    ) or (
+    if (isinstance(session_state, dict) and session_state.get("review_submitted_in_this_turn")) or (
         "Successfully audited Pull Request" in body
         or "Skipped: Formal code review" in body
         or "submitted a formal code review report" in body
@@ -1058,7 +1035,7 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
         c = issue.create_comment(body=body)
         _COMMENT_RATE_LIMITER.record(target_key)
         return f"Commented on #{issue_number}: {c.html_url}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error commenting on issue/PR: {e}"
 
 
@@ -1097,7 +1074,7 @@ def open_pr(
             base=base_branch,
         )
         return f"Opened PR #{pr.number} {pr.html_url}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error opening PR: {e}"
 
 
@@ -1122,7 +1099,7 @@ def update_branch_from_base(ctx: Context, pr_number: int) -> str:
         if updated:
             return f"Successfully updated PR #{pr_number} branch '{pr.head.ref}' with latest changes from '{pr.base.ref}'."
         return f"PR #{pr_number} branch '{pr.head.ref}' is already up to date with '{pr.base.ref}'."
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return (
             f"Error updating PR #{pr_number} branch: {e}. "
             f"If there are complex merge conflicts, notify the user that manual local rebase is required."
@@ -1162,10 +1139,8 @@ def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
                 f"Successfully resolved merge conflicts on PR #{pr_number} "
                 f"({pr.head.ref} -> {pr.base.ref}): {detail}"
             )
-        return (
-            f"Could not resolve merge conflicts on PR #{pr_number}: {res.get('error')}"
-        )
-    except Exception as e:  # noqa: BLE001
+        return f"Could not resolve merge conflicts on PR #{pr_number}: {res.get('error')}"
+    except Exception as e:
         return f"Error resolving merge conflicts on PR #{pr_number}: {e}"
 
 
@@ -1209,7 +1184,7 @@ def mark_ready_for_review(ctx: Context, pr_number: int) -> str:
         if success is False:
             return f"Failed to mark PR #{pr_number} ready for review."
         return f"Successfully marked PR #{pr_number} as ready for review."
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error marking PR #{pr_number} ready for review: {e}"
 
 
@@ -1264,9 +1239,7 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
 
         if any(state == "CHANGES_REQUESTED" for state in latest_reviews.values()):
             blocking = [
-                user
-                for user, state in latest_reviews.items()
-                if state == "CHANGES_REQUESTED"
+                user for user, state in latest_reviews.items() if state == "CHANGES_REQUESTED"
             ]
             return (
                 f"Error: Cannot merge PR #{pr_number}. "
@@ -1275,7 +1248,7 @@ def merge_pr(ctx: Context, pr_number: int, merge_method: str = "merge") -> str:
 
         res = pr.merge(merge_method=merge_method)
         return f"Merged: {res}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error merging PR: {e}"
 
 
@@ -1392,9 +1365,7 @@ def _enforce_verdict(
                 diff_lines.append(f"+++ b/{f.filename}\n{patch}")
             diff_text = "\n".join(diff_lines)
         except Exception as diff_err:
-            logger.debug(
-                "Could not fetch PR diff text in _enforce_verdict: %s", diff_err
-            )
+            logger.debug("Could not fetch PR diff text in _enforce_verdict: %s", diff_err)
 
     for cand in json_candidates:
         try:
@@ -1403,9 +1374,7 @@ def _enforce_verdict(
                 if is_intended_request_changes and not data.get("verdict"):
                     data["verdict"] = "REQUEST_CHANGES"
 
-                if "resolutions" in data or (
-                    "summary" in data and "executive_summary" not in data
-                ):
+                if "resolutions" in data or ("summary" in data and "executive_summary" not in data):
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
                     enforced_verdict = calculate_sync_verdict(sync_obj)
@@ -1422,9 +1391,7 @@ def _enforce_verdict(
                         sync_issues = list(sync_obj.critical_issues) + list(
                             sync_obj.minor_suggestions
                         )
-                        inline_comments, _ = build_github_review_comments(
-                            sync_issues, diff_text
-                        )
+                        inline_comments, _ = build_github_review_comments(sync_issues, diff_text)
                     return rendered_body, enforced_verdict, inline_comments
                 elif (
                     "executive_summary" in data
@@ -1458,17 +1425,11 @@ def _enforce_verdict(
                                     suggested_fix=crit_fix,
                                 )
                             )
-                    rendered_body = render_code_review_markdown(
-                        cr_obj, enforced_verdict
-                    )
+                    rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
                     inline_comments: list[dict[str, Any]] = []
                     if diff_text:
-                        cr_issues = list(cr_obj.critical_issues) + list(
-                            cr_obj.minor_suggestions
-                        )
-                        inline_comments, _ = build_github_review_comments(
-                            cr_issues, diff_text
-                        )
+                        cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
+                        inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
                     return rendered_body, enforced_verdict, inline_comments
         except Exception as exc:
             logger.debug("Candidate JSON parse attempt skipped: %s", exc)
@@ -1512,9 +1473,7 @@ def _enforce_verdict(
             inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
         return rendered_body, enforced_verdict, inline_comments
     except Exception as parse_err:
-        logger.warning(
-            "Could not parse text review to CodeReviewResponse: %s", parse_err
-        )
+        logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)
 
     fallback_event = req_event if req_event else "COMMENT"
     if is_intended_request_changes:
@@ -1557,10 +1516,10 @@ def review(
 
         # Safety Check: Closed / Merged PR Protection
         if pr.state == "closed" or getattr(pr, "merged", False):
-            logger.info(
-                "PR #%d is closed or merged; skipping review submission", pr_number
+            logger.info("PR #%d is closed or merged; skipping review submission", pr_number)
+            return (
+                f"Error: Cannot submit review for PR #{pr_number} because it is closed or merged."
             )
-            return f"Error: Cannot submit review for PR #{pr_number} because it is closed or merged."
 
         body, event, inline_comments = _enforce_verdict(body, event, pr)
 
@@ -1582,7 +1541,7 @@ def review(
                         prev_rv.id,
                         pr_number,
                     )
-                except Exception as dismiss_err:  # noqa: BLE001
+                except Exception as dismiss_err:
                     logger.warning(
                         "Could not dismiss prior bot review %s: %s",
                         prev_rv.id,
@@ -1610,7 +1569,7 @@ def review(
             session_state["review_submitted_in_this_turn"] = True
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({event}): {detail}"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"Error submitting review: {e}"
 
 
@@ -1835,11 +1794,7 @@ class WebhookAgent:
         # Refresh model chain to get available non-depleted models
         full_chain = get_model_chain()
         curr_norm = self._current_model_name.replace("models/", "").strip().lower()
-        available = [
-            m
-            for m in full_chain
-            if m.replace("models/", "").strip().lower() != curr_norm
-        ]
+        available = [m for m in full_chain if m.replace("models/", "").strip().lower() != curr_norm]
         self._model_chain = available if available else full_chain
         self._chain_index = 0
 
@@ -1937,10 +1892,7 @@ class WebhookAgent:
             parts.append(f"PR Deletions: {pr.get('deletions', 'N/A')}")
             parts.append(f"PR Changed Files: {pr.get('changed_files', 'N/A')}")
 
-            if (
-                canonical == "pull_request.synchronize"
-                or raw.get("action") == "synchronize"
-            ):
+            if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
                 before_sha = raw.get("before", "")
                 head_sha = (pr.get("head") or {}).get("sha", "")
                 parts.append(
@@ -1964,9 +1916,7 @@ class WebhookAgent:
 
         # Include pre-fetched commit diff (incremental changes) if available
         if "commit_diff" in raw:
-            parts.append(
-                f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}"
-            )
+            parts.append(f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}")
 
         # Include PR diff (full accumulated state) if available
         if "pr_diff" in raw:
@@ -1974,9 +1924,7 @@ class WebhookAgent:
 
         # Include pre-fetched inline comment code context if available
         if "inline_code_context" in raw:
-            parts.append(
-                f"\nPre-Fetched Inline Code Context:\n{raw['inline_code_context']}"
-            )
+            parts.append(f"\nPre-Fetched Inline Code Context:\n{raw['inline_code_context']}")
 
         # Include pre-executed conflict resolution result if available
         if "conflict_resolution_result" in raw:
@@ -1989,15 +1937,11 @@ class WebhookAgent:
 
         # Include pre-fetched commit history summary if available
         if "commit_history_summary" in raw:
-            parts.append(
-                f"\nPre-Fetched Commit History Summary:\n{raw['commit_history_summary']}"
-            )
+            parts.append(f"\nPre-Fetched Commit History Summary:\n{raw['commit_history_summary']}")
 
         # Include pre-fetched previous bot reviews if available
         if "previous_bot_reviews" in raw:
-            parts.append(
-                f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}"
-            )
+            parts.append(f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}")
 
         # Include pre-processed /implement instruction if available
         if "implement_instruction" in raw:
@@ -2129,11 +2073,7 @@ class WebhookAgent:
 
         # Short-circuit execution if PR is closed or merged
         raw = event_data.get("raw_payload") or {}
-        pr_data = (
-            raw.get("pull_request")
-            or (raw.get("issue") or {}).get("pull_request")
-            or {}
-        )
+        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
         if isinstance(raw.get("issue"), dict) and not pr_data:
             pr_data = raw.get("issue") or {}
 
@@ -2293,9 +2233,9 @@ class WebhookAgent:
             ):
                 # Handle token recording if usage metadata is available
                 if hasattr(event, "usage_metadata") and event.usage_metadata:
-                    total_tok = getattr(
-                        event.usage_metadata, "total_token_count", 0
-                    ) or getattr(event.usage_metadata, "total_tokens", 0)
+                    total_tok = getattr(event.usage_metadata, "total_token_count", 0) or getattr(
+                        event.usage_metadata, "total_tokens", 0
+                    )
                     if total_tok > 0:
                         await rpm_waiter.record_actual_tokens(
                             model=self._current_model_name,
@@ -2382,44 +2322,36 @@ class WebhookAgent:
                                 f"\n\n[⚠️ SYSTEM NOTICE: You submitted a formal PR review {time_since_review:.1f} seconds ago. "
                                 "Do NOT call review() again unless explicitly requested by a new /review command.]"
                             )
-                            if user_message.parts and hasattr(
-                                user_message.parts[0], "text"
-                            ):
+                            if user_message.parts and hasattr(user_message.parts[0], "text"):
                                 user_message.parts[0].text += notice
 
-                        previous_critique = session.state.get(
-                            "last_review_critique", ""
-                        )
+                        previous_critique = session.state.get("last_review_critique", "")
                         if previous_critique:
                             critique_notice = (
                                 f"\n\n[YOUR PREVIOUS REVIEW CRITIQUE]:\n{previous_critique}\n"
                                 "Verify line-by-line which specific items were resolved by the new commit."
                             )
-                            if user_message.parts and hasattr(
-                                user_message.parts[0], "text"
-                            ):
+                            if user_message.parts and hasattr(user_message.parts[0], "text"):
                                 user_message.parts[0].text += critique_notice
 
                     # Set user_state values - they get merged into session.state by InMemorySessionService
                     # This is needed because session copies are returned and our direct mutations wouldn't persist
-                    self._session_service.user_state.setdefault(
-                        self._app_name, {}
-                    ).setdefault(user_id, {})["gh_client"] = gh_client
-                    self._session_service.user_state.setdefault(
-                        self._app_name, {}
-                    ).setdefault(user_id, {})["repo_full_name"] = repo_full_name
-                    self._session_service.user_state.setdefault(
-                        self._app_name, {}
-                    ).setdefault(user_id, {})["sender"] = user_id
+                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
+                        user_id, {}
+                    )["gh_client"] = gh_client
+                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
+                        user_id, {}
+                    )["repo_full_name"] = repo_full_name
+                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
+                        user_id, {}
+                    )["sender"] = user_id
 
                     # Execute the ADK runner with current model
                     await _execute_agent()
                     return  # Success - exit the retry loop
 
                 except Exception as e:
-                    if type(
-                        e
-                    ).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(
+                    if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(
                         type(e)
                     ):
                         logger.info(
@@ -2442,16 +2374,12 @@ class WebhookAgent:
                         self._advance_model_chain(error=e)
                         err_s = str(e).lower()
                         is_503_high_demand = (
-                            "503" in err_s
-                            or "unavailable" in err_s
-                            or "high demand" in err_s
+                            "503" in err_s or "unavailable" in err_s or "high demand" in err_s
                         )
                         retry_delay = (
                             0.5
                             if is_503_high_demand
-                            else min(
-                                rate_details.get("retry_after_seconds") or 2.0, 10.0
-                            )
+                            else min(rate_details.get("retry_after_seconds") or 2.0, 10.0)
                         )
                         logger.warning(
                             "Transient error on attempt %d/%d (trace: %s): %s. Active model failover -> %s (delay: %.1fs)",
@@ -2513,9 +2441,7 @@ class WebhookAgent:
         canonical = event_data.get("canonical", "")
         raw = event_data.get("raw_payload", {})
         comment_body = (
-            (raw.get("comment", {}) or {}).get("body", "")
-            if isinstance(raw, dict)
-            else ""
+            (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
         )
         is_pr_review_event = (
             canonical.startswith(("pull_request.", "pull_request_review"))
@@ -2525,11 +2451,7 @@ class WebhookAgent:
 
         if is_pr_review_event and not has_review_action and emitted_texts:
             full_text = "\n\n".join(emitted_texts)
-            if (
-                "Scorecard" in full_text
-                or "| Category |" in full_text
-                or "Verdict:" in full_text
-            ):
+            if "Scorecard" in full_text or "| Category |" in full_text or "Verdict:" in full_text:
                 pr_number = None
                 if isinstance(raw, dict):
                     pr_number = (raw.get("pull_request") or {}).get("number") or (
@@ -2574,7 +2496,7 @@ class WebhookAgent:
                             pr_number,
                             enforced_event,
                         )
-                    except Exception as fallback_err:  # noqa: BLE001
+                    except Exception as fallback_err:
                         logger.warning(
                             "Programmatic fallback review submission failed: %s",
                             fallback_err,

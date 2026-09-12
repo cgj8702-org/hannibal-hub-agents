@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from logic.constants import (
     DEFAULT_FEATURE_AGENT_PROJECT,
     DEFAULT_GITHUB_APP_ID,
@@ -42,7 +43,9 @@ def test_resolve_secret_fallback_mocked(monkeypatch: pytest.MonkeyPatch) -> None
     mock_sm = MagicMock()
     mock_payload = MagicMock()
     mock_payload.payload.data.decode.return_value = "resolved_from_secret_manager"
-    mock_sm.SecretManagerServiceClient.return_value.access_secret_version.return_value = mock_payload
+    mock_sm.SecretManagerServiceClient.return_value.access_secret_version.return_value = (
+        mock_payload
+    )
 
     with patch.dict("sys.modules", {"google.cloud.secretmanager": mock_sm}):
         with patch.dict("logic.secret_manager._SECRET_CACHE", {}, clear=True):

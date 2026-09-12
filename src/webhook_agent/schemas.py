@@ -72,15 +72,11 @@ class IssueItem(BaseModel):
 class SyncResolutionItem(BaseModel):
     """Resolution status of a previously requested review item in incremental commit diff."""
 
-    item_description: str = Field(
-        description="Description of previously requested issue"
-    )
+    item_description: str = Field(description="Description of previously requested issue")
     status: Literal["RESOLVED", "UNRESOLVED"] = Field(
         description="Whether the issue is RESOLVED or UNRESOLVED"
     )
-    evidence: str = Field(
-        description="Line citation or diff evidence verifying resolution"
-    )
+    evidence: str = Field(description="Line citation or diff evidence verifying resolution")
 
     @field_validator("item_description", "evidence", mode="before")
     @classmethod
@@ -128,9 +124,7 @@ class CodeReviewResponse(BaseModel):
 class SyncReviewResponse(BaseModel):
     """Structured Pydantic model for incremental PR synchronization re-reviews."""
 
-    summary: str = Field(
-        description="1-2 sentences summarizing incremental commit changes"
-    )
+    summary: str = Field(description="1-2 sentences summarizing incremental commit changes")
     verdict: Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"] | None = Field(
         default=None,
         description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",

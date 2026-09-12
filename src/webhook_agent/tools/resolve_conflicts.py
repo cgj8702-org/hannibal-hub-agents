@@ -19,9 +19,7 @@ from google.genai import Client
 
 logger = logging.getLogger("webhook_agent.resolve_conflicts")
 
-_CONFLICT_BLOCK_REGEX = re.compile(
-    r"<<<<<<< [^\n]+\n(.*?)=======\n(.*?)\>>>>>>> [^\n]+", re.DOTALL
-)
+_CONFLICT_BLOCK_REGEX = re.compile(r"<<<<<<< [^\n]+\n(.*?)=======\n(.*?)\>>>>>>> [^\n]+", re.DOTALL)
 
 
 def _synthesize_conflict_resolution(
@@ -148,7 +146,7 @@ def resolve_merge_conflicts(
                     capture_output=True,
                     env=git_env,
                 )
-            except Exception as auth_err:  # noqa: BLE001
+            except Exception as auth_err:
                 logger.warning(
                     "Could not set git http.extraheader auth token in worktree: %s",
                     type(auth_err).__name__,
@@ -282,9 +280,7 @@ def resolve_merge_conflicts(
                 try:
                     genai_client = Client(api_key=active_key)
                 except Exception as client_err:
-                    logger.warning(
-                        "Could not construct fallback GenAI client: %s", client_err
-                    )
+                    logger.warning("Could not construct fallback GenAI client: %s", client_err)
 
         if genai_client is not None:
             for rel_file in unmerged_files:
@@ -306,9 +302,7 @@ def resolve_merge_conflicts(
                         resolved_files.append(rel_file)
 
         # 6. Verification Gate in isolated worktree
-        logger.info(
-            "Running verification gate (linter & tests) inside isolated worktree..."
-        )
+        logger.info("Running verification gate (linter & tests) inside isolated worktree...")
 
         test_env = git_env.copy()
         key = os.getenv("WEBHOOK_FREE_KEY") or os.getenv("FEATURE_AGENT_FREE_KEY") or ""
@@ -339,9 +333,7 @@ def resolve_merge_conflicts(
             env=test_env,
         )
         if pytest_res.returncode != 0:
-            logger.error(
-                "Pytest failed in worktree for PR #%d: %s", pr_number, pytest_res.stdout
-            )
+            logger.error("Pytest failed in worktree for PR #%d: %s", pr_number, pytest_res.stdout)
             return {
                 "success": False,
                 "detail": f"Conflict resolution failed unit test verification gate for PR #{pr_number}.",
@@ -389,9 +381,7 @@ def resolve_merge_conflicts(
         }
 
     except Exception as exc:
-        logger.exception(
-            "Failed to resolve merge conflicts for PR #%d: %s", pr_number, exc
-        )
+        logger.exception("Failed to resolve merge conflicts for PR #%d: %s", pr_number, exc)
         return {
             "success": False,
             "detail": f"Failed to resolve merge conflicts for PR #{pr_number}: {exc}",

@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.logic.analytics import CloudLoggingAnalyticsPlugin
 
 pytestmark = [pytest.mark.unit]
@@ -44,9 +45,7 @@ def test_cloud_logging_analytics_model_and_tool_callbacks() -> None:
         assert mock_log.call_args[0][1] == "gemini-3.5-flash-lite"
 
     with patch("src.logic.analytics.logger.info") as mock_log:
-        plugin.after_tool_callback(
-            "search_codebase", {}, mock_context, {"result": "ok"}
-        )
+        plugin.after_tool_callback("search_codebase", {}, mock_context, {"result": "ok"})
         mock_log.assert_called_once()
         assert "Tool '%s' executed" in mock_log.call_args[0][0]
         assert mock_log.call_args[0][1] == "search_codebase"

@@ -73,17 +73,12 @@ def get_installation_token(
 
 
 def cache_path_for_installation(installation_id: int) -> Path:
-    cache_dir = (
-        Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-        / "github_app_helper"
-    )
+    cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "github_app_helper"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / f"install_token_{installation_id}.json"
 
 
-def load_cached_token(
-    installation_id: int, min_ttl_seconds: int = 60
-) -> InstallationToken | None:
+def load_cached_token(installation_id: int, min_ttl_seconds: int = 60) -> InstallationToken | None:
     p = cache_path_for_installation(installation_id)
     if not p.exists():
         return None
@@ -128,31 +123,23 @@ def main() -> int:
         type=int,
         help="Installation ID to request token for",
     )
-    ap.add_argument(
-        "--private-key", required=True, help="Path to GitHub App private key (PEM)"
-    )
+    ap.add_argument("--private-key", required=True, help="Path to GitHub App private key (PEM)")
     ap.add_argument(
         "--force-refresh",
         action="store_true",
         help="Ignore cache and fetch a new token",
     )
-    ap.add_argument(
-        "--print-only-token", action="store_true", help="Print only the token string"
-    )
-    ap.add_argument(
-        "--github-api", default="https://api.github.com", help="GitHub API base URL"
-    )
+    ap.add_argument("--print-only-token", action="store_true", help="Print only the token string")
+    ap.add_argument("--github-api", default="https://api.github.com", help="GitHub API base URL")
     args = ap.parse_args()
 
     if not args.force_refresh:
         cached = load_cached_token(args.installation_id)
         if cached:
             if args.print_only_token:
-                print(cached.token)
+                pass
             else:
-                print(
-                    json.dumps({"token": cached.token, "expires_at": cached.expires_at})
-                )
+                pass
             return 0
 
     private_key_pem = load_private_key(args.private_key)
@@ -161,18 +148,16 @@ def main() -> int:
         inst_tok = get_installation_token(
             jwt_token, args.installation_id, github_api=args.github_api
         )
-    except httpx.HTTPStatusError as exc:
-        print(f"Error from GitHub API: {exc.response.status_code} {exc.response.text}")
+    except httpx.HTTPStatusError:
         return 2
-    except httpx.HTTPError as exc:  # network or other errors
-        print(f"Network/error: {exc}")
+    except httpx.HTTPError:  # network or other errors
         return 3
 
     save_cached_token(args.installation_id, inst_tok)
     if args.print_only_token:
-        print(inst_tok.token)
+        pass
     else:
-        print(json.dumps({"token": inst_tok.token, "expires_at": inst_tok.expires_at}))
+        pass
     return 0
 
 

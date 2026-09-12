@@ -9,9 +9,9 @@ import logging
 import re
 from typing import Any
 
-from webhook_agent.audit_schema import AuditVerdict, RiskItem
-from webhook_agent.diff_tools import _strip_diff_prefix, verify_line_reference
-from webhook_agent.schemas import IssueItem
+from .audit_schema import AuditVerdict, RiskItem
+from .diff_tools import _strip_diff_prefix, verify_line_reference
+from .schemas import IssueItem
 
 logger = logging.getLogger("webhook_agent.comment_poster")
 
@@ -40,9 +40,7 @@ def sanitize_and_anchor_risks(
         except (ValueError, AttributeError):
             line_num = None
 
-        if line_num is not None and verify_line_reference(
-            diff_text, risk.file, line_num
-        ):
+        if line_num is not None and verify_line_reference(diff_text, risk.file, line_num):
             anchored_risks.append(risk)
         else:
             logger.warning(
@@ -94,9 +92,7 @@ def render_review_markdown(
 
 def prepare_review_payload(verdict: AuditVerdict, diff_text: str) -> dict[str, Any]:
     """Prepare validated, anchored GitHub review payload ready for submission."""
-    anchored_risks, top_level_risks = sanitize_and_anchor_risks(
-        verdict.risks, diff_text
-    )
+    anchored_risks, top_level_risks = sanitize_and_anchor_risks(verdict.risks, diff_text)
     body_md = render_review_markdown(verdict, anchored_risks, top_level_risks)
 
     payload: dict[str, Any] = {

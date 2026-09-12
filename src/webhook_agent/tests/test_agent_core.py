@@ -1,7 +1,8 @@
 """Tests for agent_core.py — focusing on AgentCore delegation and trace ID generation."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from webhook_agent.agent_core import (
     AgentCore,
@@ -270,9 +271,7 @@ class TestDynamicModelRouting:
 
         event_data = {
             "canonical": "pull_request_review_comment.created",
-            "raw_payload": {
-                "comment": {"body": "Hey @hannibal-hub-agents what do you think?"}
-            },
+            "raw_payload": {"comment": {"body": "Hey @hannibal-hub-agents what do you think?"}},
         }
         assert _select_model_for_event(event_data) == "gemini-3.6-flash"
 
@@ -316,9 +315,7 @@ class TestTokenTruncation:
         from webhook_agent.webhook_agent import _truncate_text_to_token_limit
 
         long_text = "A" * 200000
-        result = _truncate_text_to_token_limit(
-            long_text, max_tokens=10, label="Test payload"
-        )
+        result = _truncate_text_to_token_limit(long_text, max_tokens=10, label="Test payload")
         assert result == long_text
         assert "truncated" not in result
 
@@ -354,8 +351,7 @@ class TestToolRegistration:
 
         agent = WebhookAgent(dry_run=True)
         tool_names = [
-            getattr(t, "name", getattr(t, "__name__", str(t)))
-            for t in agent._code_auditor.tools
+            getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
         assert len(tool_names) == 17
 
@@ -365,8 +361,7 @@ class TestToolRegistration:
 
         agent = WebhookAgent(dry_run=True)
         tool_names = sorted(
-            getattr(t, "name", getattr(t, "__name__", str(t)))
-            for t in agent._code_auditor.tools
+            getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         )
         expected = sorted(
             [
@@ -397,8 +392,7 @@ class TestToolRegistration:
 
         agent = WebhookAgent(dry_run=True)
         tool_names = {
-            getattr(t, "name", getattr(t, "__name__", str(t)))
-            for t in agent._code_auditor.tools
+            getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         }
         removed = {
             "add_label",
@@ -411,9 +405,7 @@ class TestToolRegistration:
             "update_pr_description",
             "create_issue",
         }
-        assert tool_names.isdisjoint(removed), (
-            f"Found removed tools: {tool_names & removed}"
-        )
+        assert tool_names.isdisjoint(removed), f"Found removed tools: {tool_names & removed}"
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +667,7 @@ class TestTokenLimits:
 class TestProgrammaticResolveCommandRouter:
     def test_plan_and_execute_intercepts_resolve_command(self, monkeypatch):
         from unittest.mock import MagicMock, patch
+
         from webhook_agent.webhook_agent import WebhookAgent
 
         monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
@@ -696,9 +689,7 @@ class TestProgrammaticResolveCommandRouter:
             },
         }
 
-        with patch(
-            "webhook_agent.webhook_agent.resolve_merge_conflicts"
-        ) as mock_resolve:
+        with patch("webhook_agent.webhook_agent.resolve_merge_conflicts") as mock_resolve:
             mock_resolve.return_value = {
                 "success": True,
                 "detail": "Resolved conflicts in 2 files",
@@ -724,6 +715,7 @@ class TestProgrammaticResolveCommandRouter:
 class TestMarkReadyForReview:
     def test_mark_ready_for_review_success(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import mark_ready_for_review
 
         ctx = MagicMock()
@@ -739,6 +731,7 @@ class TestMarkReadyForReview:
 
     def test_mark_ready_for_review_already_ready(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import mark_ready_for_review
 
         ctx = MagicMock()
@@ -754,6 +747,7 @@ class TestMarkReadyForReview:
 class TestMergePrDraftSafetyCheck:
     def test_merge_pr_blocks_draft(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import merge_pr
 
         ctx = MagicMock()
@@ -773,15 +767,13 @@ def test_add_comment_blocked_after_review():
     ctx = MagicMock()
     ctx.state = {"review_submitted_in_this_turn": True}
     res = add_comment(ctx, issue_number=193, body="Extra summary comment")
-    assert (
-        "Skipped: Formal code review report already submitted for #193 in this turn"
-        in res
-    )
+    assert "Skipped: Formal code review report already submitted for #193 in this turn" in res
 
 
 class TestGetCommitDiffBranchUpdate:
     def test_get_commit_diff_returns_branch_update_notice(self):
         from unittest.mock import MagicMock
+
         from webhook_agent.webhook_agent import get_commit_diff
 
         ctx = MagicMock()
@@ -791,9 +783,7 @@ class TestGetCommitDiffBranchUpdate:
 
         mock_commit = MagicMock()
         mock_commit.parents = [MagicMock(sha="parent1"), MagicMock(sha="parent2")]
-        mock_commit.commit.message = (
-            "Merge branch 'main' into dependabot/uv/cryptography-50.0.1"
-        )
+        mock_commit.commit.message = "Merge branch 'main' into dependabot/uv/cryptography-50.0.1"
         mock_repo.get_commit.return_value = mock_commit
 
         res = get_commit_diff(ctx, "base_sha", "0abebcc123")

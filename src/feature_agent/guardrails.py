@@ -21,9 +21,7 @@ def exfil_guard(
     arg_str = str(args).lower()
     if "169.254.169.254" in arg_str or "metadata.google.internal" in arg_str:
         logger.warning("🔴 ExfilGuard blocked attempt to access GCP metadata server.")
-        return {
-            "error": "ExfilGuard policy: Access to GCP metadata server is strictly prohibited."
-        }
+        return {"error": "ExfilGuard policy: Access to GCP metadata server is strictly prohibited."}
     return None
 
 
@@ -36,9 +34,7 @@ def policies_guard(
 
     if "push --force" in arg_str or "-f" in arg_str:
         logger.warning("🔴 PoliciesGuard blocked forced push operation.")
-        return {
-            "error": "PoliciesGuard policy: Force pushing to remote origin is prohibited."
-        }
+        return {"error": "PoliciesGuard policy: Force pushing to remote origin is prohibited."}
     return None
 
 
@@ -49,9 +45,7 @@ def permission_guard(
     arg_str = str(args)
     # Match backticks or $(...)
     if re.search(r"`[^`]+`|\$\([^\)]+\)", arg_str):
-        logger.warning(
-            "🔴 PermissionGuard detected command substitution in args: %s", arg_str
-        )
+        logger.warning("🔴 PermissionGuard detected command substitution in args: %s", arg_str)
         # In automated sandbox, return error or require explicit grant
         return {
             "error": "PermissionGuard policy: Command substitution in tool arguments requires explicit authorization."

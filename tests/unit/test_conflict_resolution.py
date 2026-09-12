@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from webhook_agent.tools.resolve_conflicts import (
     _synthesize_conflict_resolution,
     resolve_merge_conflicts,
@@ -55,7 +56,4 @@ def test_resolve_merge_conflicts_failure_handling(tmp_path) -> None:
         repo_root=tmp_path,
     )
     assert res["success"] is False
-    assert (
-        "Failed to resolve merge conflicts" in res["detail"]
-        or "git" in res["detail"].lower()
-    )
+    assert "Failed to resolve merge conflicts" in res["detail"] or "git" in res["detail"].lower()
