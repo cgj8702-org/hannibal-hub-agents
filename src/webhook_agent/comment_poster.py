@@ -9,9 +9,9 @@ import logging
 import re
 from typing import Any
 
-from webhook_agent.audit_schema import AuditVerdict, RiskItem
-from webhook_agent.diff_tools import _strip_diff_prefix, verify_line_reference
-from webhook_agent.schemas import IssueItem
+from .audit_schema import AuditVerdict, RiskItem
+from .diff_tools import _strip_diff_prefix, verify_line_reference
+from .schemas import IssueItem
 
 logger = logging.getLogger("webhook_agent.comment_poster")
 
