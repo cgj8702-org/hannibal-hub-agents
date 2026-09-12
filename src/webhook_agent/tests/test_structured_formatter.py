@@ -406,3 +406,129 @@ def test_render_sync_review_markdown_fallback_when_no_prior_reviews():
     )
     assert "## 🛡️ Code Review: `APPROVE`" in rendered
     assert "## ⚡ Code Review Update:" not in rendered
+
+
+def test_verdict_override_safety_rejects_upgrade_of_caller_request_changes():
+    """Verify that _enforce_verdict never upgrades an explicit REQUEST_CHANGES event to APPROVE."""
+    json_payload = """{
+        "verdict": "REQUEST_CHANGES",
+        "executive_summary": "Dependabot PR drops ansicon environment marker.",
+        "confidence": 5,
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "risks_and_edge_cases": [
+            {"risk": "Dropping sys_platform marker breaks non-Windows platforms.", "recommendation": "Revert jinxed"}
+        ]
+    }"""
+    rendered_md, verdict = _enforce_verdict(json_payload, "REQUEST_CHANGES")
+    assert verdict == "REQUEST_CHANGES"
+    assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
+    crit_section = rendered_md.split("#### 🔴 Critical")[1].split("#### 🟡")[0]
+    assert "* *None found.*" not in crit_section
+
+
+def test_verdict_override_safety_rejects_upgrade_of_titled_request_changes():
+    """Verify that Markdown with a REQUEST_CHANGES header is not upgraded to APPROVE."""
+    text_review = """## 🛡️ Code Review: `REQUEST_CHANGES`
+
+### 1. Executive Summary
+
+* **Summary & Justification:** Dependabot PR bumps markdownify, but drops environment marker sys_platform == 'win32'.
+* **Auditor Confidence:** `5/5`
+
+---
+
+### 2. Action Items
+
+#### 🔴 Critical (Must Fix Before Merge)
+* *None found.*
+
+#### 🟡 Suggestions & Maintainability
+* *None found.*
+
+---
+
+### 3. Potential Risks & Edge Cases
+
+* **Risk:** Dropping `sys_platform == 'win32'` forces ansicon on Linux.
+"""
+    rendered_md, verdict = _enforce_verdict(text_review, "APPROVE")
+    assert verdict == "REQUEST_CHANGES"
+    assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
+
+
+def test_normalize_code_review_promotes_breaking_risks():
+    """Verify normalize_code_review_dict promotes breaking change risks to critical_issues."""
+    data = {
+        "executive_summary": "Routine dependency update.",
+        "confidence": 5,
+        "critical_issues": [],
+        "risks_and_edge_cases": [
+            {
+                "category": "breaking_change",
+                "description": "Dropped sys_platform == 'win32' marker in uv.lock",
+                "suggested_fix": "Restore marker in uv.lock",
+            }
+        ],
+    }
+    normalized = normalize_code_review_dict(data)
+    assert len(normalized["critical_issues"]) == 1
+    assert "Dropped sys_platform" in normalized["critical_issues"][0]["description"]
+    assert (
+        normalized["critical_issues"][0]["suggested_fix"] == "Restore marker in uv.lock"
+    )
+
+
+def test_calculate_strict_verdict_respects_explicit_verdict_and_breaking_risks():
+    """Verify calculate_strict_verdict flags explicit REQUEST_CHANGES and breaking risks."""
+    review_explicit = CodeReviewResponse(
+        verdict="REQUEST_CHANGES",
+        executive_summary="Reviewer requested changes.",
+        confidence=5,
+        critical_issues=[],
+        minor_suggestions=[],
+        risks_and_edge_cases=[],
+    )
+    assert calculate_strict_verdict(review_explicit) == "REQUEST_CHANGES"
+
+    review_risk = CodeReviewResponse(
+        executive_summary="Dependency bump.",
+        confidence=5,
+        critical_issues=[],
+        minor_suggestions=[],
+        risks_and_edge_cases=[
+            RiskItem(
+                risk="Unintended modification dropping environment marker in uv.lock",
+                recommendation="Revert lockfile",
+            )
+        ],
+    )
+    assert calculate_strict_verdict(review_risk) == "REQUEST_CHANGES"
+
+
+def test_calculate_sync_verdict_respects_explicit_verdict_and_unaddressed_summary():
+    """Verify calculate_sync_verdict flags explicit REQUEST_CHANGES and unaddressed summary issues."""
+    sync_explicit = SyncReviewResponse(
+        verdict="REQUEST_CHANGES",
+        summary="Changes remain unaddressed.",
+        confidence=5,
+        resolutions=[
+            SyncResolutionItem(
+                item_description="Drop of environment marker",
+                status="RESOLVED",
+                evidence="Verified",
+            )
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+    )
+    assert calculate_sync_verdict(sync_explicit) == "REQUEST_CHANGES"
+
+    sync_summary = SyncReviewResponse(
+        summary="Prior critical findings remain unaddressed.",
+        confidence=5,
+        resolutions=[],
+        critical_issues=[],
+        minor_suggestions=[],
+    )
+    assert calculate_sync_verdict(sync_summary) == "REQUEST_CHANGES"

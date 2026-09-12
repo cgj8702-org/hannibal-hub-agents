@@ -44,7 +44,7 @@ from .callbacks import (
 from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .memory_service import InMemoryMemoryService
 from .sanitizer_plugin import PromptSanitizerPlugin
-from .schemas import CodeReviewResponse, SyncReviewResponse
+from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
 from .formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -1299,10 +1299,23 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     Always parses and normalizes review output into strict Pydantic models (CodeReviewResponse
     or SyncReviewResponse) and renders clean Markdown using render_code_review_markdown or
     render_sync_review_markdown.
+
+    Safety Invariant: A safety guardrail must ONLY downgrade verdicts (APPROVE -> REQUEST_CHANGES
+    or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
     """
     import json
 
     cleaned_body = body.strip()
+    req_event = (event or "").strip().upper()
+    is_caller_request_changes = req_event == "REQUEST_CHANGES"
+    is_body_request_changes = (req_event != "APPROVE") and bool(
+        re.search(
+            r"##\s*(?:🛡️|⚡)?\s*Code Review(?:\s*Update)?:\s*`?REQUEST_CHANGES`?",
+            body,
+            re.IGNORECASE,
+        )
+    )
+    is_intended_request_changes = is_caller_request_changes or is_body_request_changes
 
     # Step 1: Look for embedded JSON object in body (raw JSON, inside codeblocks, or surrounded by text)
     json_candidates: list[str] = []
@@ -1345,12 +1358,20 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
         try:
             data = json.loads(cand)
             if isinstance(data, dict):
+                if is_intended_request_changes and not data.get("verdict"):
+                    data["verdict"] = "REQUEST_CHANGES"
+
                 if "resolutions" in data or (
                     "summary" in data and "executive_summary" not in data
                 ):
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
                     enforced_verdict = calculate_sync_verdict(sync_obj)
+                    if is_intended_request_changes and enforced_verdict == "APPROVE":
+                        logger.warning(
+                            "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
+                        )
+                        enforced_verdict = "REQUEST_CHANGES"
                     rendered_body = render_sync_review_markdown(
                         sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
                     )
@@ -1363,6 +1384,30 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     normalized_data = normalize_code_review_dict(data)
                     cr_obj = CodeReviewResponse.model_validate(normalized_data)
                     enforced_verdict = calculate_strict_verdict(cr_obj)
+                    if is_intended_request_changes and enforced_verdict == "APPROVE":
+                        logger.warning(
+                            "Safety Guardrail: Prevented mechanical upgrade of REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
+                        )
+                        enforced_verdict = "REQUEST_CHANGES"
+                        if not cr_obj.critical_issues:
+                            crit_desc = (
+                                cr_obj.risks_and_edge_cases[0].risk
+                                if cr_obj.risks_and_edge_cases
+                                else cr_obj.executive_summary
+                            )
+                            crit_fix = (
+                                cr_obj.risks_and_edge_cases[0].recommendation
+                                if cr_obj.risks_and_edge_cases
+                                else "Address requested changes before merge."
+                            )
+                            cr_obj.critical_issues.append(
+                                IssueItem(
+                                    path="codebase",
+                                    line=None,
+                                    description=crit_desc,
+                                    suggested_fix=crit_fix,
+                                )
+                            )
                     rendered_body = render_code_review_markdown(
                         cr_obj, enforced_verdict
                     )
@@ -1373,9 +1418,35 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     # Step 2: Fallback text parsing if no valid JSON object was parsed
     try:
         parsed_dict = parse_text_review_to_dict(body)
+        if is_intended_request_changes and not parsed_dict.get("verdict"):
+            parsed_dict["verdict"] = "REQUEST_CHANGES"
         normalized_dict = normalize_code_review_dict(parsed_dict)
         cr_obj = CodeReviewResponse.model_validate(normalized_dict)
         enforced_verdict = calculate_strict_verdict(cr_obj)
+        if is_intended_request_changes and enforced_verdict == "APPROVE":
+            logger.warning(
+                "Safety Guardrail: Prevented mechanical upgrade of text REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
+            )
+            enforced_verdict = "REQUEST_CHANGES"
+            if not cr_obj.critical_issues:
+                crit_desc = (
+                    cr_obj.risks_and_edge_cases[0].risk
+                    if cr_obj.risks_and_edge_cases
+                    else cr_obj.executive_summary
+                )
+                crit_fix = (
+                    cr_obj.risks_and_edge_cases[0].recommendation
+                    if cr_obj.risks_and_edge_cases
+                    else "Address requested changes before merge."
+                )
+                cr_obj.critical_issues.append(
+                    IssueItem(
+                        path="codebase",
+                        line=None,
+                        description=crit_desc,
+                        suggested_fix=crit_fix,
+                    )
+                )
         rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
         return rendered_body, enforced_verdict
     except Exception as parse_err:
@@ -1383,7 +1454,10 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
             "Could not parse text review to CodeReviewResponse: %s", parse_err
         )
 
-    return body, event.upper()
+    fallback_event = req_event if req_event else "COMMENT"
+    if is_intended_request_changes:
+        fallback_event = "REQUEST_CHANGES"
+    return body, fallback_event
 
 
 def review(
@@ -1559,7 +1633,7 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 - Do NOT perform a human architectural code review — evaluate version bumps and lockfile changes.
 - Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
 - Watch for **accidental environment marker deletions** (e.g., dropping `sys_platform == 'win32'`) or unexpected modifications to unrelated packages in the lockfile.
-- If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`.
+- If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`, set `verdict: "REQUEST_CHANGES"`, and add a blocking entry directly under `critical_issues`. NEVER place breaking lockfile corruption solely in `risks_and_edge_cases`.
 
 """
 

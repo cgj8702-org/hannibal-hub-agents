@@ -14,6 +14,17 @@ from .schemas import CodeReviewResponse, SyncReviewResponse, clean_field_string
 
 logger = logging.getLogger("webhook_agent.formatter")
 
+BREAKING_RISK_KEYWORDS = (
+    "environment marker",
+    "marker deletion",
+    "dropping marker",
+    "dropped marker",
+    "unauthorized modification",
+    "unintended modification",
+    "lockfile corruption",
+    "breaking change",
+)
+
 
 def truncate_log_payload(val: Any, max_length: int = 300) -> str:
     """Truncate long string representations (diffs, JSON, tool output) for clean Cloud Logging output."""
@@ -32,6 +43,13 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
     normalized = dict(data)
 
+    if "verdict" in normalized:
+        verdict_val = str(normalized.get("verdict") or "").strip().upper()
+        if verdict_val in ("APPROVE", "REQUEST_CHANGES", "COMMENT"):
+            normalized["verdict"] = verdict_val
+        else:
+            normalized["verdict"] = None
+
     if not normalized.get("executive_summary"):
         normalized["executive_summary"] = "Autonomous PR code review report."
     else:
@@ -44,7 +62,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(conf, int) or not (1 <= conf <= 5):
         normalized["confidence"] = 5
 
-    raw_risks = normalized.get("risks_and_edge_cases")
+    raw_risks = normalized.get("risks_and_edge_cases") or normalized.get("risks")
     clean_risks: list[dict[str, str]] = []
     if isinstance(raw_risks, list):
         for item in raw_risks:
@@ -79,7 +97,10 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 ) or r_text.startswith("#"):
                     continue
                 rec_text = str(
-                    item.get("recommendation") or item.get("suggested_fix") or ""
+                    item.get("recommendation")
+                    or item.get("suggested_fix")
+                    or item.get("remediation")
+                    or ""
                 ).strip()
                 if r_text:
                     clean_risks.append(
@@ -91,7 +112,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
     normalized["risks_and_edge_cases"] = clean_risks
 
-    raw_crit = normalized.get("critical_issues")
+    raw_crit = normalized.get("critical_issues") or normalized.get("critical")
     clean_crit: list[dict[str, Any]] = []
     if isinstance(raw_crit, list):
         for item in raw_crit:
@@ -131,6 +152,98 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             "suggested_fix": fix,
                         }
                     )
+
+    # Risk Promotion: Check if risks identify breaking changes, security vulnerabilities, or lockfile corruption
+    for r_item in clean_risks:
+        r_text = r_item["risk"]
+        rec_text = r_item["recommendation"]
+        r_lower = r_text.lower()
+        rec_lower = rec_text.lower()
+        if any(kw in r_lower or kw in rec_lower for kw in BREAKING_RISK_KEYWORDS):
+            if not any(
+                r_text in c.get("description", "") or c.get("description", "") in r_text
+                for c in clean_crit
+            ):
+                clean_crit.append(
+                    {
+                        "path": (
+                            "uv.lock"
+                            if ("lock" in r_lower or "marker" in r_lower)
+                            else "codebase"
+                        ),
+                        "line": None,
+                        "description": r_text,
+                        "suggested_fix": rec_text
+                        or "Address breaking change or unintended modification.",
+                    }
+                )
+
+    if isinstance(raw_risks, list):
+        for item in raw_risks:
+            if isinstance(item, dict):
+                cat = str(item.get("category") or "").strip().lower()
+                sev = str(item.get("severity") or "").strip().lower()
+                desc = str(item.get("description") or item.get("risk") or "").strip()
+                fix = str(
+                    item.get("suggested_fix")
+                    or item.get("recommendation")
+                    or item.get("remediation")
+                    or ""
+                ).strip()
+                if (
+                    cat in ("breaking_change", "security", "critical", "blocker")
+                    or sev in ("critical", "high", "blocker")
+                ) and desc:
+                    if not any(desc in c.get("description", "") for c in clean_crit):
+                        clean_crit.append(
+                            {
+                                "path": str(item.get("path") or "codebase"),
+                                "line": (
+                                    item.get("line")
+                                    if isinstance(item.get("line"), int)
+                                    else None
+                                ),
+                                "description": desc,
+                                "suggested_fix": fix,
+                            }
+                        )
+
+    # Check executive summary for breaking keywords if clean_crit is still empty
+    summary_lower = normalized["executive_summary"].lower()
+    if any(kw in summary_lower for kw in BREAKING_RISK_KEYWORDS):
+        if not clean_crit:
+            clean_crit.append(
+                {
+                    "path": (
+                        "uv.lock"
+                        if ("lock" in summary_lower or "marker" in summary_lower)
+                        else "codebase"
+                    ),
+                    "line": None,
+                    "description": normalized["executive_summary"],
+                    "suggested_fix": "Resolve breaking lockfile or dependency modifications.",
+                }
+            )
+
+    # Synthesize critical issue if verdict is explicitly REQUEST_CHANGES but clean_crit is empty
+    if normalized.get("verdict") == "REQUEST_CHANGES" and not clean_crit:
+        crit_desc = (
+            clean_risks[0]["risk"] if clean_risks else normalized["executive_summary"]
+        )
+        crit_fix = (
+            clean_risks[0]["recommendation"]
+            if clean_risks
+            else "Address requested changes before merge."
+        )
+        clean_crit.append(
+            {
+                "path": "codebase",
+                "line": None,
+                "description": crit_desc,
+                "suggested_fix": crit_fix,
+            }
+        )
+
     normalized["critical_issues"] = clean_crit
 
     raw_minor = normalized.get("minor_suggestions")
@@ -192,6 +305,14 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
         return {}
 
     normalized = dict(data)
+
+    if "verdict" in normalized:
+        verdict_val = str(normalized.get("verdict") or "").strip().upper()
+        if verdict_val in ("APPROVE", "REQUEST_CHANGES", "COMMENT"):
+            normalized["verdict"] = verdict_val
+        else:
+            normalized["verdict"] = None
+
     if not normalized.get("summary"):
         normalized["summary"] = "Pull request synchronization review update."
     else:
@@ -364,6 +485,34 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     else:
                         clean_crit.append(issue_dict)
 
+    # Synthesize critical issue if verdict is explicitly REQUEST_CHANGES or unaddressed items flagged
+    summary_lower = normalized["summary"].lower()
+    if (
+        (
+            normalized.get("verdict") == "REQUEST_CHANGES"
+            or any(
+                kw in summary_lower
+                for kw in (
+                    "unaddressed",
+                    "unresolved",
+                    "must fix",
+                    "blocking",
+                    *BREAKING_RISK_KEYWORDS,
+                )
+            )
+        )
+        and not clean_crit
+        and not [r for r in clean_res if r.get("status") == "UNRESOLVED"]
+    ):
+        clean_crit.append(
+            {
+                "path": "codebase",
+                "line": None,
+                "description": normalized["summary"],
+                "suggested_fix": "Address unaddressed review findings or breaking changes before merge.",
+            }
+        )
+
     normalized["critical_issues"] = clean_crit
     normalized["minor_suggestions"] = clean_minor
 
@@ -380,7 +529,9 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
 
     Rules:
     - ANY critical issue -> REQUEST_CHANGES
-    - Confidence < 4 -> COMMENT
+    - Explicit review.verdict == "REQUEST_CHANGES" -> REQUEST_CHANGES
+    - ANY breaking risk or lockfile corruption in risks/summary -> REQUEST_CHANGES
+    - Confidence < 4 or explicit review.verdict == "COMMENT" -> COMMENT
     - 0 critical issues, confidence >= 4 -> APPROVE
     """
     if len(review.critical_issues) > 0:
@@ -390,9 +541,32 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
         )
         return "REQUEST_CHANGES"
 
-    if review.confidence < 4:
+    if getattr(review, "verdict", None) == "REQUEST_CHANGES":
+        logger.info("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
+        return "REQUEST_CHANGES"
+
+    for item in review.risks_and_edge_cases:
+        r_text = (item.risk or "").lower()
+        rec_text = (item.recommendation or "").lower()
+        if any(kw in r_text or kw in rec_text for kw in BREAKING_RISK_KEYWORDS):
+            logger.info(
+                "Mechanical verdict: REQUEST_CHANGES (breaking risk detected: %s)",
+                item.risk,
+            )
+            return "REQUEST_CHANGES"
+
+    summary_lower = (review.executive_summary or "").lower()
+    if any(kw in summary_lower for kw in BREAKING_RISK_KEYWORDS):
         logger.info(
-            "Mechanical verdict: COMMENT (confidence=%d < 4)", review.confidence
+            "Mechanical verdict: REQUEST_CHANGES (breaking risk in executive summary)"
+        )
+        return "REQUEST_CHANGES"
+
+    if review.confidence < 4 or getattr(review, "verdict", None) == "COMMENT":
+        logger.info(
+            "Mechanical verdict: COMMENT (confidence=%d, explicit_verdict=%s)",
+            review.confidence,
+            getattr(review, "verdict", None),
         )
         return "COMMENT"
 
@@ -406,7 +580,9 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
     Rules:
     - ANY unresolved finding -> REQUEST_CHANGES
     - ANY critical issue -> REQUEST_CHANGES
-    - Confidence < 4 -> COMMENT
+    - Explicit review.verdict == "REQUEST_CHANGES" -> REQUEST_CHANGES
+    - Summary flags unaddressed critical issues or breaking modifications -> REQUEST_CHANGES
+    - Confidence < 4 or explicit review.verdict == "COMMENT" -> COMMENT
     - All items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
     """
     unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
@@ -420,7 +596,27 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
         )
         return "REQUEST_CHANGES"
 
-    if review.confidence < 4:
+    if getattr(review, "verdict", None) == "REQUEST_CHANGES":
+        logger.info("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
+        return "REQUEST_CHANGES"
+
+    summary_lower = (review.summary or "").lower()
+    if any(
+        kw in summary_lower
+        for kw in (
+            "unaddressed",
+            "unresolved",
+            "must fix",
+            "blocking",
+            *BREAKING_RISK_KEYWORDS,
+        )
+    ):
+        logger.info(
+            "Sync verdict: REQUEST_CHANGES (blocking issue noted in sync summary)"
+        )
+        return "REQUEST_CHANGES"
+
+    if review.confidence < 4 or getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
 
     logger.info(
@@ -462,7 +658,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
 
     risks: list[dict[str, str]] = []
     risk_matches = re.findall(
-        r"Potential Edge Case / Risk:\s*([^\n]+)(?:\n\s*\*?\s*Recommended Safeguard:\s*([^\n]+))?",
+        r"(?:\*?\s*\*\*?Risk:\*\*?|Potential Edge Case / Risk:)\s*([^\n]+)(?:\n\s*\*?\s*(?:\*?\s*\*\*?Recommendation:\*\*?|Recommended Safeguard:)\s*([^\n]+))?",
         body,
         re.IGNORECASE,
     )
@@ -684,6 +880,7 @@ def render_sync_review_markdown(
         cr_data = {
             "executive_summary": review.summary or "Autonomous PR code review report.",
             "confidence": review.confidence,
+            "verdict": review.verdict or verdict,
             "critical_issues": [item.model_dump() for item in review.critical_issues],
             "minor_suggestions": [
                 item.model_dump() for item in review.minor_suggestions
