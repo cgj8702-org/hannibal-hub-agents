@@ -41,6 +41,7 @@ from .callbacks import (
     before_tool_callback,
     on_tool_error_callback,
 )
+from .comment_poster import build_github_review_comments
 from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .formatter import (
     calculate_strict_verdict,
@@ -68,7 +69,6 @@ def calculate_verdict(
 
     Rules:
     - If has_critical or (scores and any(s <= 2 for s in scores.values())): REQUEST_CHANGES
-    - If confidence <= 3: COMMENT
     - Otherwise: APPROVE
     """
     if has_critical:
@@ -79,8 +79,6 @@ def calculate_verdict(
         avg_score = sum(scores.values()) / len(scores)
         if avg_score < 3.5:
             return "REQUEST_CHANGES"
-    if confidence <= 3:
-        return "COMMENT"
     return "APPROVE"
 
 
@@ -1321,12 +1319,15 @@ def _parse_confidence(body: str) -> int | None:
     return None
 
 
-def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
+def _enforce_verdict(
+    body: str, event: str, pr: Any = None
+) -> tuple[str, str, list[dict[str, Any]]]:
     """Programmatically enforce verdict rules based on structured JSON or Markdown text.
 
     Always parses and normalizes review output into strict Pydantic models (CodeReviewResponse
-    or SyncReviewResponse) and renders clean Markdown using render_code_review_markdown or
-    render_sync_review_markdown.
+    or SyncReviewResponse), renders clean Markdown using render_code_review_markdown or
+    render_sync_review_markdown, and generates native GitHub inline review comments with
+    ```suggestion blocks for diff-anchored issues.
 
     Safety Invariant: A safety guardrail must ONLY downgrade verdicts (APPROVE -> REQUEST_CHANGES
     or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
@@ -1369,6 +1370,7 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
         json_candidates.append(json_obj_match.group(1))
 
     has_prior_reviews = True
+    diff_text = ""
     if pr is not None:
         try:
             reviews = list(pr.get_reviews())
@@ -1381,6 +1383,18 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
             has_prior_reviews = bool(bot_reviews)
         except Exception:
             has_prior_reviews = True
+
+        try:
+            files = pr.get_files()
+            diff_lines: list[str] = []
+            for f in files:
+                patch = getattr(f, "patch", "") or ""
+                diff_lines.append(f"+++ b/{f.filename}\n{patch}")
+            diff_text = "\n".join(diff_lines)
+        except Exception as diff_err:
+            logger.debug(
+                "Could not fetch PR diff text in _enforce_verdict: %s", diff_err
+            )
 
     for cand in json_candidates:
         try:
@@ -1403,7 +1417,15 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     rendered_body = render_sync_review_markdown(
                         sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
                     )
-                    return rendered_body, enforced_verdict
+                    inline_comments: list[dict[str, Any]] = []
+                    if diff_text:
+                        sync_issues = list(sync_obj.critical_issues) + list(
+                            sync_obj.minor_suggestions
+                        )
+                        inline_comments, _ = build_github_review_comments(
+                            sync_issues, diff_text
+                        )
+                    return rendered_body, enforced_verdict, inline_comments
                 elif (
                     "executive_summary" in data
                     or "critical_issues" in data
@@ -1439,7 +1461,15 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     rendered_body = render_code_review_markdown(
                         cr_obj, enforced_verdict
                     )
-                    return rendered_body, enforced_verdict
+                    inline_comments: list[dict[str, Any]] = []
+                    if diff_text:
+                        cr_issues = list(cr_obj.critical_issues) + list(
+                            cr_obj.minor_suggestions
+                        )
+                        inline_comments, _ = build_github_review_comments(
+                            cr_issues, diff_text
+                        )
+                    return rendered_body, enforced_verdict, inline_comments
         except Exception as exc:
             logger.debug("Candidate JSON parse attempt skipped: %s", exc)
 
@@ -1476,7 +1506,11 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
                     )
                 )
         rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
-        return rendered_body, enforced_verdict
+        inline_comments: list[dict[str, Any]] = []
+        if diff_text:
+            cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
+            inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
+        return rendered_body, enforced_verdict, inline_comments
     except Exception as parse_err:
         logger.warning(
             "Could not parse text review to CodeReviewResponse: %s", parse_err
@@ -1485,7 +1519,7 @@ def _enforce_verdict(body: str, event: str, pr: Any = None) -> tuple[str, str]:
     fallback_event = req_event if req_event else "COMMENT"
     if is_intended_request_changes:
         fallback_event = "REQUEST_CHANGES"
-    return body, fallback_event
+    return body, fallback_event, []
 
 
 def review(
@@ -1528,7 +1562,7 @@ def review(
             )
             return f"Error: Cannot submit review for PR #{pr_number} because it is closed or merged."
 
-        body, event = _enforce_verdict(body, event, pr)
+        body, event, inline_comments = _enforce_verdict(body, event, pr)
 
         # Supersede / dismiss prior bot reviews
         existing_reviews = pr.get_reviews()
@@ -1555,7 +1589,21 @@ def review(
                         dismiss_err,
                     )
 
-        rv = pr.create_review(body=body, event=event)
+        try:
+            if inline_comments:
+                rv = pr.create_review(body=body, event=event, comments=inline_comments)
+            else:
+                rv = pr.create_review(body=body, event=event)
+        except Exception as review_err:
+            if inline_comments:
+                logger.warning(
+                    "pr.create_review with %d inline comments failed (%s); falling back to body-only review",
+                    len(inline_comments),
+                    review_err,
+                )
+                rv = pr.create_review(body=body, event=event)
+            else:
+                raise
         _COMMENT_RATE_LIMITER.record(target_key)
         session_state = getattr(ctx, "state", None)
         if isinstance(session_state, dict):
@@ -1617,11 +1665,13 @@ When reviewing a PR, you MUST:
      2) **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
      3) **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
      4) **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
-   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `confidence`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `context_gaps`.
+   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `context_gaps`.
+   - For each actionable bug or improvement in `critical_issues` or `minor_suggestions`, specify the exact `path`, `line`, and clinical replacement code in `suggested_fix`. This enables native GitHub Suggested Change inline review comments (` ```suggestion `).
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
-   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `confidence`.
+   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`.
+   - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
    - Mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
    - Distinguish PR-authored commits from base branch merges (`Merge branch 'main' ...`). Commits originating from merging or updating from the base branch are part of the target branch and must NOT be attributed to the PR author or flagged as scope creep.
 
@@ -1629,8 +1679,7 @@ When reviewing a PR, you MUST:
 
 These rules override your judgment. Apply them mechanically based on your findings:
 - ANY critical issue -> event MUST be REQUEST_CHANGES
-- Your confidence level is 3 or below -> event MUST be COMMENT (never APPROVE when uncertain)
-- 0 critical issues AND confidence >= 4 -> event MAY be APPROVE
+- 0 critical issues -> event MAY be APPROVE
 
 ### Critical Thinking & Anti-Sycophancy Requirements
 
@@ -2173,7 +2222,7 @@ class WebhookAgent:
                             detail=status_detail,
                         )
                     ]
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.exception(
                         "Programmatic /resolve execution failed for PR #%d: %s",
                         pr_number,
@@ -2491,10 +2540,27 @@ class WebhookAgent:
                     try:
                         repo = gh_client.get_repo(repo_full_name)
                         pr = repo.get_pull(pr_number)
-                        body, enforced_event = _enforce_verdict(
+                        body, enforced_event, inline_comments = _enforce_verdict(
                             full_text, "COMMENT", pr
                         )
-                        rv = pr.create_review(body=body, event=enforced_event)
+                        try:
+                            if inline_comments:
+                                rv = pr.create_review(
+                                    body=body,
+                                    event=enforced_event,
+                                    comments=inline_comments,
+                                )
+                            else:
+                                rv = pr.create_review(body=body, event=enforced_event)
+                        except Exception as fb_err:
+                            if inline_comments:
+                                logger.warning(
+                                    "Programmatic fallback review with inline comments failed (%s); falling back to body-only review",
+                                    fb_err,
+                                )
+                                rv = pr.create_review(body=body, event=enforced_event)
+                            else:
+                                raise
                         detail = getattr(rv, "html_url", str(rv))
                         results.append(
                             ActionResult(

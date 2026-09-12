@@ -3,7 +3,6 @@
 ### 1. Executive Summary
 
 * **Summary & Justification:** [1-2 direct sentences explaining the PR changes, code quality, and verdict rationale]
-* **Auditor Confidence:** `[1-5]/5`
 
 ---
 

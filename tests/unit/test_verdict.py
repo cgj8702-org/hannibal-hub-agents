@@ -10,25 +10,26 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 @pytest.mark.webhook_agent
 def test_calculate_verdict_low_score_triggers_request_changes() -> None:
     scores = {"correctness": 2, "readability": 5, "architecture": 5}
-    assert calculate_verdict(scores, confidence=5) == "REQUEST_CHANGES"
+    assert calculate_verdict(scores) == "REQUEST_CHANGES"
 
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 def test_calculate_verdict_low_average_triggers_request_changes() -> None:
     scores = {"correctness": 3, "readability": 3, "architecture": 3}
-    assert calculate_verdict(scores, confidence=5) == "REQUEST_CHANGES"
+    assert calculate_verdict(scores) == "REQUEST_CHANGES"
 
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_calculate_verdict_low_confidence_triggers_comment() -> None:
+def test_calculate_verdict_has_critical_triggers_request_changes() -> None:
     scores = {"correctness": 5, "readability": 5, "architecture": 5}
-    assert calculate_verdict(scores, confidence=3) == "COMMENT"
+    assert calculate_verdict(scores, has_critical=True) == "REQUEST_CHANGES"
 
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 def test_calculate_verdict_high_scores_and_confidence_approves() -> None:
     scores = {"correctness": 5, "readability": 4, "architecture": 4}
-    assert calculate_verdict(scores, confidence=5) == "APPROVE"
+    assert calculate_verdict(scores) == "APPROVE"
+
