@@ -125,7 +125,6 @@ async def before_model_callback(
         except Exception:
             pass
 
-    target_model = getattr(llm_request, "model", None) or "gemini-2.5-flash"
     await rpm_waiter.check_and_wait(
         model=target_model,
         estimated_tokens=exact_tokens,
@@ -133,6 +132,7 @@ async def before_model_callback(
     )
 
     callback_context.state["prompt_tokens"] = exact_tokens
+    callback_context.state["active_model"] = target_model
     return None
 
 
@@ -146,6 +146,20 @@ async def after_model_callback(
         )
         callback_context.state["total_tokens"] = total_tokens
         logger.debug("after_model_callback: recorded total_tokens=%d", total_tokens)
+
+        if total_tokens > 0:
+            target_model = callback_context.state.get("active_model")
+            if not target_model:
+                try:
+                    from webhook_agent.webhook_agent import get_active_model
+
+                    target_model = get_active_model()
+                except ImportError:
+                    target_model = "gemini-3.8-flash"
+            await rpm_waiter.record_actual_tokens(
+                model=target_model,
+                actual_tokens=int(total_tokens),
+            )
 
     # Sanitize hallucinated 'github:' tool prefixes from LLM response before ADK tool lookup
     if hasattr(llm_response, "content") and llm_response.content:

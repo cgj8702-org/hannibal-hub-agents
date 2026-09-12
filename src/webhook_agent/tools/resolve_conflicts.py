@@ -7,6 +7,7 @@ synthesis, linter gating (scripts/ruff-all.sh), and unit test verification (pyte
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -16,6 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from google.genai import Client
+
+try:
+    from logic.rate_limiter import _resolve_tier, rpm_waiter
+except ImportError:
+    from src.logic.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.resolve_conflicts")
 
@@ -46,11 +52,55 @@ def _synthesize_conflict_resolution(
         f"File Content with Conflict Markers:\n\n{file_content}"
     )
 
+    active_tier = _resolve_tier()
+    estimated_tokens = len(prompt) // 4 + 500
+
+    try:
+        from webhook_agent.webhook_agent import run_in_bg_loop
+    except ImportError:
+        try:
+            from src.webhook_agent.webhook_agent import run_in_bg_loop
+        except ImportError:
+            run_in_bg_loop = None
+
+    if run_in_bg_loop is not None:
+        try:
+            run_in_bg_loop(
+                rpm_waiter.check_and_wait(
+                    model=target_model,
+                    estimated_tokens=estimated_tokens,
+                    tier=active_tier,
+                )
+            )
+        except Exception as limit_err:
+            logger.warning(
+                "Rate limiter pre-flight check warning for conflict resolution on model '%s': %s",
+                target_model,
+                limit_err,
+            )
+
     try:
         response = genai_client.models.generate_content(
             model=target_model,
             contents=prompt,
         )
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            raw_tok = getattr(response.usage_metadata, "total_token_count", 0) or getattr(
+                response.usage_metadata, "total_tokens", 0
+            )
+            try:
+                total_tokens = int(raw_tok)
+            except (TypeError, ValueError):
+                total_tokens = 0
+            if total_tokens > 0 and run_in_bg_loop is not None:
+                with contextlib.suppress(Exception):
+                    run_in_bg_loop(
+                        rpm_waiter.record_actual_tokens(
+                            model=target_model,
+                            actual_tokens=total_tokens,
+                        )
+                    )
+
         resolved_text = response.text or ""
         if resolved_text.startswith("```"):
             lines = resolved_text.splitlines()

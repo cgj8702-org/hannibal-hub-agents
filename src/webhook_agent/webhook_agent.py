@@ -25,7 +25,6 @@ from typing import Any
 from github import Github
 from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.agents.context import Context
-from google.adk.models import Gemini
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -1715,9 +1714,9 @@ class WebhookAgent:
         get_active_api_key()
 
         # Model instance for pipeline sub-agents
-        model_instance = Gemini(
-            model=self._current_model_name,
-            client_kwargs={"api_key": get_active_api_key()},
+        model_instance = get_adk_model(
+            model_name=self._current_model_name,
+            api_key=get_active_api_key(),
         )
         PromptSanitizerPlugin()
 
@@ -1726,6 +1725,8 @@ class WebhookAgent:
             model=model_instance,
             description="Inspects modified files and classifies PR scope (dev_docs, minor_fix, core_backend).",
             instruction="Analyze the PR diff and modified file list. Classify scope into dev_docs, minor_fix, or core_backend.",
+            before_model_callback=before_model_callback,
+            after_model_callback=after_model_callback,
         )
 
         self._code_auditor = LlmAgent(
@@ -1770,6 +1771,8 @@ class WebhookAgent:
             description="Produces structured AuditVerdict JSON output.",
             instruction="Synthesize audit findings into an AuditVerdict structured JSON payload. Clean dev/docs PRs return risks: [].",
             output_schema=AuditVerdict,
+            before_model_callback=before_model_callback,
+            after_model_callback=after_model_callback,
         )
 
         self._agent = SequentialAgent(
