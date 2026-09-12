@@ -86,9 +86,7 @@ class StateEvaluatorNode:
 class CodeAuditorNode:
     """Node 4: Prepares raw LLM audit payload structure."""
 
-    def process(
-        self, state: GraphState, llm_response_dict: dict[str, Any]
-    ) -> GraphState:
+    def process(self, state: GraphState, llm_response_dict: dict[str, Any]) -> GraphState:
         state.audit_dict = llm_response_dict
         logger.debug("Graph Node 4 [CodeAuditor]: audit payload ingested")
         return state

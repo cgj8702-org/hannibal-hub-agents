@@ -23,18 +23,12 @@ class GuardrailsPlugin(BasePlugin):
         self._last_edits: list[str] = []
         self._failure_counts: dict[str, int] = {}
 
-    def after_model_callback(
-        self, callback_context: CallbackContext, llm_response: Any
-    ) -> Any:
+    def after_model_callback(self, callback_context: CallbackContext, llm_response: Any) -> Any:
         """NoProgressGuard: Detect if model generates identical content repeated turns."""
         text = getattr(llm_response, "text", "") or ""
         if text:
-            if len(self._last_edits) >= 3 and all(
-                e == text for e in self._last_edits[-3:]
-            ):
-                logger.warning(
-                    "⚠️ NoProgressGuard triggered: model repeating identical edits 3x."
-                )
+            if len(self._last_edits) >= 3 and all(e == text for e in self._last_edits[-3:]):
+                logger.warning("⚠️ NoProgressGuard triggered: model repeating identical edits 3x.")
                 callback_context.state["halt_reason"] = "no_progress_loop"
             self._last_edits.append(text)
             if len(self._last_edits) > 10:

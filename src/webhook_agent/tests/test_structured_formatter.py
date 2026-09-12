@@ -154,9 +154,7 @@ def test_enforce_verdict_with_loose_sync_review_json():
       ],
       "confidence": 5
     }"""
-    rendered_md, verdict, _inline_comments = _enforce_verdict(
-        loose_sync_json, "APPROVE"
-    )
+    rendered_md, verdict, _inline_comments = _enforce_verdict(loose_sync_json, "APPROVE")
     assert verdict == "APPROVE"
     assert "## ⚡ Code Review Update: `APPROVE`" in rendered_md
     assert "Asset Path Resolution Mismatch" in rendered_md
@@ -211,10 +209,7 @@ def test_parse_text_review_to_dict():
 Confidence: 4/5
 """
     data = parse_text_review_to_dict(text_review)
-    assert (
-        data["executive_summary"]
-        == "Add logging telemetry and update configuration logic."
-    )
+    assert data["executive_summary"] == "Add logging telemetry and update configuration logic."
     assert len(data["risks_and_edge_cases"]) >= 1
     assert (
         data["risks_and_edge_cases"][0]["risk"]
@@ -249,14 +244,9 @@ def test_normalize_code_review_dict_edge_cases():
     assert normalized["executive_summary"] == "Test summary"
     assert normalized["confidence"] == 5
     assert len(normalized["critical_issues"]) == 1
-    assert (
-        normalized["critical_issues"][0]["description"] == "Loose string critical issue"
-    )
+    assert normalized["critical_issues"][0]["description"] == "Loose string critical issue"
     assert len(normalized["minor_suggestions"]) == 1
-    assert (
-        normalized["minor_suggestions"][0]["description"]
-        == "Loose string minor suggestion"
-    )
+    assert normalized["minor_suggestions"][0]["description"] == "Loose string minor suggestion"
     assert len(normalized["risks_and_edge_cases"]) == 1
     assert normalized["risks_and_edge_cases"][0]["risk"] == "Loose string risk item"
 
@@ -311,9 +301,7 @@ def test_enforce_verdict_with_malformed_json_inside_codeblock():
   "confidence": 5
 }
 ```"""
-    rendered_md, verdict, _inline_comments = _enforce_verdict(
-        malformed_input, "APPROVE"
-    )
+    rendered_md, verdict, _inline_comments = _enforce_verdict(malformed_input, "APPROVE")
     assert verdict == "APPROVE"
     assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
     assert "Add logging telemetry" in rendered_md
@@ -384,10 +372,7 @@ def test_normalize_strips_redundant_summary_label_prefix():
         "executive_summary": "Update Summary:** Successfully addressed all critical review feedback."
     }
     norm1 = normalize_code_review_dict(d1)
-    assert (
-        norm1["executive_summary"]
-        == "Successfully addressed all critical review feedback."
-    )
+    assert norm1["executive_summary"] == "Successfully addressed all critical review feedback."
 
     d2 = {"summary": "**Update Summary:** Refactored worker background sweep."}
     norm2 = normalize_sync_review_dict(d2)
@@ -406,9 +391,7 @@ def test_render_sync_review_markdown_fallback_when_no_prior_reviews():
         minor_suggestions=[],
     )
 
-    rendered = render_sync_review_markdown(
-        sync_resp, verdict="APPROVE", has_prior_reviews=False
-    )
+    rendered = render_sync_review_markdown(sync_resp, verdict="APPROVE", has_prior_reviews=False)
     assert "## 🛡️ Code Review: `APPROVE`" in rendered
     assert "## ⚡ Code Review Update:" not in rendered
 
@@ -425,9 +408,7 @@ def test_verdict_override_safety_rejects_upgrade_of_caller_request_changes():
             {"risk": "Dropping sys_platform marker breaks non-Windows platforms.", "recommendation": "Revert jinxed"}
         ]
     }"""
-    rendered_md, verdict, _inline_comments = _enforce_verdict(
-        json_payload, "REQUEST_CHANGES"
-    )
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_payload, "REQUEST_CHANGES")
     assert verdict == "REQUEST_CHANGES"
     assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
     crit_section = rendered_md.split("#### 🔴 Critical")[1].split("#### 🟡")[0]
@@ -481,9 +462,7 @@ def test_normalize_code_review_promotes_breaking_risks():
     normalized = normalize_code_review_dict(data)
     assert len(normalized["critical_issues"]) == 1
     assert "Dropped sys_platform" in normalized["critical_issues"][0]["description"]
-    assert (
-        normalized["critical_issues"][0]["suggested_fix"] == "Restore marker in uv.lock"
-    )
+    assert normalized["critical_issues"][0]["suggested_fix"] == "Restore marker in uv.lock"
 
 
 def test_calculate_strict_verdict_respects_explicit_verdict_and_breaking_risks():
@@ -549,18 +528,13 @@ def test_format_suggestion_body_with_code():
         "with contextlib.suppress(ValueError):\n    x = int(val)",
     )
     assert "Use contextlib.suppress here." in body
-    assert (
-        "```suggestion\nwith contextlib.suppress(ValueError):\n    x = int(val)\n```"
-        in body
-    )
+    assert "```suggestion\nwith contextlib.suppress(ValueError):\n    x = int(val)\n```" in body
 
 
 def test_format_suggestion_body_strips_existing_fences():
     from webhook_agent.comment_poster import format_suggestion_body
 
-    body = format_suggestion_body(
-        "Replace loop", "```python\nfor i in items:\n    pass\n```"
-    )
+    body = format_suggestion_body("Replace loop", "```python\nfor i in items:\n    pass\n```")
     assert "```suggestion\nfor i in items:\n    pass\n```" in body
     assert "```python" not in body
 
@@ -644,9 +618,7 @@ def test_enforce_verdict_with_pr_generates_inline_comments():
         ],
         "minor_suggestions": []
     }"""
-    _rendered_md, verdict, inline_comments = _enforce_verdict(
-        json_input, "APPROVE", pr=mock_pr
-    )
+    _rendered_md, verdict, inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
     assert verdict == "REQUEST_CHANGES"
     assert len(inline_comments) == 1
     assert inline_comments[0]["path"] == "src/foo.py"

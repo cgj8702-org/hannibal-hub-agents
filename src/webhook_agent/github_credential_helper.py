@@ -73,17 +73,12 @@ def get_installation_token(
 
 
 def cache_path_for_installation(installation_id: int) -> Path:
-    cache_dir = (
-        Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-        / "github_app_helper"
-    )
+    cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "github_app_helper"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / f"install_token_{installation_id}.json"
 
 
-def load_cached_token(
-    installation_id: int, min_ttl_seconds: int = 60
-) -> InstallationToken | None:
+def load_cached_token(installation_id: int, min_ttl_seconds: int = 60) -> InstallationToken | None:
     p = cache_path_for_installation(installation_id)
     if not p.exists():
         return None
@@ -128,20 +123,14 @@ def main() -> int:
         type=int,
         help="Installation ID to request token for",
     )
-    ap.add_argument(
-        "--private-key", required=True, help="Path to GitHub App private key (PEM)"
-    )
+    ap.add_argument("--private-key", required=True, help="Path to GitHub App private key (PEM)")
     ap.add_argument(
         "--force-refresh",
         action="store_true",
         help="Ignore cache and fetch a new token",
     )
-    ap.add_argument(
-        "--print-only-token", action="store_true", help="Print only the token string"
-    )
-    ap.add_argument(
-        "--github-api", default="https://api.github.com", help="GitHub API base URL"
-    )
+    ap.add_argument("--print-only-token", action="store_true", help="Print only the token string")
+    ap.add_argument("--github-api", default="https://api.github.com", help="GitHub API base URL")
     args = ap.parse_args()
 
     if not args.force_refresh:

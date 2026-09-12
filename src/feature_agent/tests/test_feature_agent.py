@@ -61,9 +61,7 @@ def test_get_feature_agent_key_isolation(monkeypatch):
 
 
 def test_firestore_checkpoint_registry_save_and_get():
-    registry = FirestoreFeatureCheckpointRegistry(
-        collection_name="test_feature_checkpoints"
-    )
+    registry = FirestoreFeatureCheckpointRegistry(collection_name="test_feature_checkpoints")
     registry.save_checkpoint(
         issue_number=101,
         instruction="build rate limiter endpoint",
@@ -86,17 +84,19 @@ def test_feature_task_runner_quota_paused(monkeypatch):
     monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
     runner = FeatureTaskRunner()
 
-    with patch(
-        "feature_agent.runner.firestore_checkpoint_registry.get_checkpoint",
-        return_value={
-            "status": "quota_paused",
-            "resume_at": None,
-        },
-    ), patch("github.Github"), patch("subprocess.run") as mock_run:
+    with (
+        patch(
+            "feature_agent.runner.firestore_checkpoint_registry.get_checkpoint",
+            return_value={
+                "status": "quota_paused",
+                "resume_at": None,
+            },
+        ),
+        patch("github.Github"),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="clean")
-        res = runner.execute_task(
-            issue_number=77, instruction="quota pause test"
-        )
+        res = runner.execute_task(issue_number=77, instruction="quota pause test")
         assert "Issue #77" in res
 
 
@@ -113,9 +113,7 @@ def test_feature_tools_resolve_in_window_traversal_blocked():
 
 
 def test_guardrails_exfil_guard():
-    res = exfil_guard(
-        MagicMock(), {"url": "http://169.254.169.254/latest"}, MagicMock()
-    )
+    res = exfil_guard(MagicMock(), {"url": "http://169.254.169.254/latest"}, MagicMock())
     assert res is not None and "strictly prohibited" in res["error"]
 
 

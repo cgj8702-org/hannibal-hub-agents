@@ -41,9 +41,7 @@ def parse_review_feedback_items(review_body: str) -> list[dict[str, str]]:
         return issues
 
     # Match bullet points like * file.py:L42 - description
-    pattern = re.compile(
-        r"[\*\-]\s+`?([^:`\s]+):(?:L|line\s*)?(\d+)`?:?\s*(.*)", re.IGNORECASE
-    )
+    pattern = re.compile(r"[\*\-]\s+`?([^:`\s]+):(?:L|line\s*)?(\d+)`?:?\s*(.*)", re.IGNORECASE)
     for line in review_body.splitlines():
         line_str = line.strip()
         match = pattern.search(line_str)
@@ -75,9 +73,7 @@ def auto_fix_pr_feedback(
         "true",
         "True",
     ):
-        return (
-            "Automated code fixes are disabled by policy (ALLOW_AUTOMATED_MUTATIONS=0)."
-        )
+        return "Automated code fixes are disabled by policy (ALLOW_AUTOMATED_MUTATIONS=0)."
 
     repo_path = Path(repo_root).resolve()
     worktree_id = f"pr_{pr_number}_fix_{uuid.uuid4().hex[:6]}"
@@ -218,8 +214,6 @@ def auto_fix_pr_feedback(
                     env=git_env,
                 )
             except Exception as cleanup_err:
-                logger.warning(
-                    "Could not remove worktree %s: %s", worktree_path, cleanup_err
-                )
+                logger.warning("Could not remove worktree %s: %s", worktree_path, cleanup_err)
             if worktree_path.exists():
                 shutil.rmtree(worktree_path, ignore_errors=True)

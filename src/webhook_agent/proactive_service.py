@@ -90,8 +90,7 @@ class ProactiveEvaluator:
             ):
                 try:
                     checks_summary = "\n".join(
-                        f"- ❌ **{c['name']}**: `{c['conclusion']}`"
-                        for c in failing_checks
+                        f"- ❌ **{c['name']}**: `{c['conclusion']}`" for c in failing_checks
                     )
                     pr.create_issue_comment(
                         f"## 🚨 Proactive Diagnostic: Failing CI Checks\n\n"
@@ -119,9 +118,7 @@ class ProactiveEvaluator:
         """Checks if PR has actual review comments >24h old with no subsequent activity."""
         try:
             get_review_comments = getattr(pr, "get_review_comments", None)
-            review_comments = (
-                list(get_review_comments()) if callable(get_review_comments) else []
-            )
+            review_comments = list(get_review_comments()) if callable(get_review_comments) else []
             get_reviews = getattr(pr, "get_reviews", None)
             reviews = list(get_reviews()) if callable(get_reviews) else []
             if not review_comments and not reviews:
@@ -130,9 +127,7 @@ class ProactiveEvaluator:
             now = datetime.now(UTC)
             latest_comment_time = None
             for c in review_comments:
-                c_time = getattr(c, "created_at", None) or getattr(
-                    c, "updated_at", None
-                )
+                c_time = getattr(c, "created_at", None) or getattr(c, "updated_at", None)
                 if c_time:
                     if c_time.tzinfo is None:
                         c_time = c_time.replace(tzinfo=UTC)

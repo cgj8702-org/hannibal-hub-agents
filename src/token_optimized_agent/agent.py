@@ -23,8 +23,7 @@ analyst_agent = Agent(
     output_schema=AnalysisOutput,
     description="Analyzes complex data payloads and extracts key insights.",
     instruction=(
-        "Analyze the input data concisely. Extract key points and call"
-        " finish_task when completed."
+        "Analyze the input data concisely. Extract key points and call finish_task when completed."
     ),
     generate_content_config=genai_types.GenerateContentConfig(
         max_output_tokens=512,
@@ -36,9 +35,7 @@ lookup_agent = Agent(
     name="lookup_helper",
     model="gemini-3.6-flash",
     description="Performs quick configuration lookups.",
-    instruction=(
-        "You perform key-value lookups using lookup_config. Keep responses brief."
-    ),
+    instruction=("You perform key-value lookups using lookup_config. Keep responses brief."),
     include_contents="none",
     tools=[lookup_config],
     generate_content_config=genai_types.GenerateContentConfig(

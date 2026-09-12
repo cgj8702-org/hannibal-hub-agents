@@ -56,7 +56,4 @@ def test_resolve_merge_conflicts_failure_handling(tmp_path) -> None:
         repo_root=tmp_path,
     )
     assert res["success"] is False
-    assert (
-        "Failed to resolve merge conflicts" in res["detail"]
-        or "git" in res["detail"].lower()
-    )
+    assert "Failed to resolve merge conflicts" in res["detail"] or "git" in res["detail"].lower()

@@ -174,9 +174,7 @@ class TestShouldProcessEvent:
 
     def test_suppress_bot_actor_without_suffix(self):
         """Bot events where sender.login lacks the [bot] suffix should be suppressed."""
-        ev = _make_normalized(
-            "pull_request", action="opened", sender_login="hannibal-hub-agents"
-        )
+        ev = _make_normalized("pull_request", action="opened", sender_login="hannibal-hub-agents")
         assert self.processor.should_process_event(ev) is False
 
     def test_suppress_bot_actor_by_type(self):
@@ -455,9 +453,7 @@ class TestShouldProcessEvent:
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):
         """PR lifecycle events pass should_process_event for autonomous LLM evaluation."""
         assert (
-            self.processor.should_process_event(
-                _make_normalized("pull_request", action="closed")
-            )
+            self.processor.should_process_event(_make_normalized("pull_request", action="closed"))
             is False
         )
         assert (
@@ -476,15 +472,11 @@ class TestShouldProcessEvent:
             is False
         )
         assert (
-            self.processor.should_process_event(
-                _make_normalized("installation", action="created")
-            )
+            self.processor.should_process_event(_make_normalized("installation", action="created"))
             is False
         )
         assert (
-            self.processor.should_process_event(
-                _make_normalized("installation", action="deleted")
-            )
+            self.processor.should_process_event(_make_normalized("installation", action="deleted"))
             is False
         )
 
@@ -622,9 +614,7 @@ class TestAddEyesReaction:
 
         mock_gh.get_repo.assert_called_once_with("owner/repo")
         mock_repo.get_issue_comment.assert_called_once_with(101)
-        mock_repo.get_issue_comment.return_value.create_reaction.assert_called_once_with(
-            "eyes"
-        )
+        mock_repo.get_issue_comment.return_value.create_reaction.assert_called_once_with("eyes")
 
     def test_adds_reaction_to_pr_review_comment(self):
         from unittest.mock import MagicMock
@@ -726,10 +716,7 @@ class TestPreworkPipelines:
 
         _prefetch_inline_comment_context(None, "owner/repo", payload)
         assert "inline_code_context" in payload["raw_payload"]
-        assert (
-            "File: src/main.py (Line 42)"
-            in payload["raw_payload"]["inline_code_context"]
-        )
+        assert "File: src/main.py (Line 42)" in payload["raw_payload"]["inline_code_context"]
 
     def test_prefetch_commit_history(self):
         from unittest.mock import MagicMock
@@ -787,9 +774,7 @@ class TestPreworkPipelines:
         _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
         assert "previous_bot_reviews" in payload["raw_payload"]
         assert "DISMISSED" in payload["raw_payload"]["previous_bot_reviews"]
-        mock_review.dismiss.assert_called_once_with(
-            "Superseded by new commit push to PR branch."
-        )
+        mock_review.dismiss.assert_called_once_with("Superseded by new commit push to PR branch.")
 
 
 class TestBaseBranchMergeSync:

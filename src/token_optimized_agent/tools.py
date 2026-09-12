@@ -19,9 +19,7 @@ async def save_large_data_artifact(
     Returns:
         A dictionary with status and version info.
     """
-    part = types.Part(
-        inline_data=types.Blob(mime_type="text/plain", data=content.encode("utf-8"))
-    )
+    part = types.Part(inline_data=types.Blob(mime_type="text/plain", data=content.encode("utf-8")))
     version = await tool_context.save_artifact(filename, part)
     return {
         "status": "success",

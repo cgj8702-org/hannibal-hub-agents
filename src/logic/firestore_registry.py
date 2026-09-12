@@ -44,13 +44,12 @@ class FirestoreDepletedModelRegistry:
     def _get_db(self) -> Any | None:
         if not self._initialized:
             self._initialized = True
-            if _HAS_FIRESTORE and os.getenv(
-                "ENABLE_FIRESTORE_REGISTRY", "0"
-            ).lower() in ("1", "true"):
+            if _HAS_FIRESTORE and os.getenv("ENABLE_FIRESTORE_REGISTRY", "0").lower() in (
+                "1",
+                "true",
+            ):
                 try:
-                    project_id = os.getenv("GCP_PROJECT_ID") or os.getenv(
-                        "PUBSUB_PROJECT"
-                    )
+                    project_id = os.getenv("GCP_PROJECT_ID") or os.getenv("PUBSUB_PROJECT")
                     self._db = firestore.Client(project=project_id)
                     logger.info(
                         "🔥 Firestore Depleted Model Registry initialized for project [%s]",
@@ -100,9 +99,9 @@ class FirestoreDepletedModelRegistry:
         db = self._get_db()
         if db is not None:
             try:
-                expire_dt = datetime.datetime.now(
-                    datetime.UTC
-                ) + datetime.timedelta(seconds=cooldown)
+                expire_dt = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+                    seconds=cooldown
+                )
                 db.collection(self.collection_name).document(doc_id).set(
                     {
                         "model": model_name,

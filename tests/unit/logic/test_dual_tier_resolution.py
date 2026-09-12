@@ -16,9 +16,7 @@ def test_resolve_webhook_api_key_fast_fail_missing_free_key(monkeypatch) -> None
     monkeypatch.delenv("WEBHOOK_FREE_KEY", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
-    with pytest.raises(
-        RuntimeError, match="CRITICAL: Missing required secret 'WEBHOOK_FREE_KEY'"
-    ):
+    with pytest.raises(RuntimeError, match="CRITICAL: Missing required secret 'WEBHOOK_FREE_KEY'"):
         resolve_webhook_api_key()
 
 
@@ -28,9 +26,7 @@ def test_resolve_webhook_api_key_fast_fail_missing_paid_key(monkeypatch) -> None
     monkeypatch.delenv("WEBHOOK_PAID_KEY", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
-    with pytest.raises(
-        RuntimeError, match="CRITICAL: Missing required secret 'WEBHOOK_PAID_KEY'"
-    ):
+    with pytest.raises(RuntimeError, match="CRITICAL: Missing required secret 'WEBHOOK_PAID_KEY'"):
         resolve_webhook_api_key()
 
 

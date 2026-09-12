@@ -80,22 +80,14 @@ def extract_project_name(raw_text: str) -> str:
 
 def is_webhook_project_pdf(raw_text: str) -> bool:
     """Verify if PDF header/footer matches the Webhook Agent project IDs from envrc or keywords."""
-    free_proj = os.environ.get(
-        "WEBHOOK_FREE_PROJECT", "gen-lang-client-0615466973"
-    ).lower()
+    free_proj = os.environ.get("WEBHOOK_FREE_PROJECT", "gen-lang-client-0615466973").lower()
     paid_proj = os.environ.get("WEBHOOK_PAID_PROJECT", "cgj8702-webhook-agent").lower()
-    chatbot_paid = os.environ.get(
-        "CHATBOT_PAID_PROJECT", "chatbot-project-hannibal"
-    ).lower()
-    chatbot_free = os.environ.get(
-        "CHATBOT_FREE_PROJECT", "gen-lang-client-0035989819"
-    ).lower()
+    chatbot_paid = os.environ.get("CHATBOT_PAID_PROJECT", "chatbot-project-hannibal").lower()
+    chatbot_free = os.environ.get("CHATBOT_FREE_PROJECT", "gen-lang-client-0035989819").lower()
 
     text_lower = raw_text.lower()
 
-    if (free_proj and free_proj in text_lower) or (
-        paid_proj and paid_proj in text_lower
-    ):
+    if (free_proj and free_proj in text_lower) or (paid_proj and paid_proj in text_lower):
         return True
 
     if (chatbot_paid and chatbot_paid in text_lower) or (
@@ -109,9 +101,7 @@ def is_webhook_project_pdf(raw_text: str) -> bool:
 
 def classify_pdf(raw_text: str, filename: str = "") -> str:
     """Determine if PDF text/filename represents a 'paid' tier (Tier 1+) or 'free' tier document using envrc projects and keywords."""
-    free_proj = os.environ.get(
-        "WEBHOOK_FREE_PROJECT", "gen-lang-client-0615466973"
-    ).lower()
+    free_proj = os.environ.get("WEBHOOK_FREE_PROJECT", "gen-lang-client-0615466973").lower()
     paid_proj = os.environ.get("WEBHOOK_PAID_PROJECT", "cgj8702-webhook-agent").lower()
 
     combined = (raw_text + " " + filename).lower()
@@ -185,9 +175,7 @@ def parse_pdf_file(pdf_path: Path) -> tuple[str, dict[str, Any]]:
     for match in pattern.finditer(full_text):
         raw_name, _cat, rpm_lim, tpm_lim, rpd_lim = match.groups()
         name_clean = raw_name.strip().lower()
-        model_id = MODEL_MAPPING.get(
-            name_clean, f"models/{name_clean.replace(' ', '-')}"
-        )
+        model_id = MODEL_MAPPING.get(name_clean, f"models/{name_clean.replace(' ', '-')}")
         records[model_id] = extract_tier_entry(
             {
                 "RPM": rpm_lim,
@@ -261,9 +249,7 @@ def main(args_list: list[str] | None = None) -> None:
             )
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(
-                json.dumps(dual_tier_registry, indent=4), encoding="utf-8"
-            )
+            output_path.write_text(json.dumps(dual_tier_registry, indent=4), encoding="utf-8")
             logger.info(
                 "Saved rate limits registry to %s (Free: %s, Paid: %s)",
                 output_path,

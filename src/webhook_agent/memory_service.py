@@ -81,9 +81,7 @@ class InMemoryMemoryService(BaseMemoryService):
                     "text": text,
                 }
                 if entry.custom_metadata:
-                    metadata.update(
-                        {k: str(v) for k, v in entry.custom_metadata.items()}
-                    )
+                    metadata.update({k: str(v) for k, v in entry.custom_metadata.items()})
                 if custom_metadata:
                     metadata.update({k: str(v) for k, v in custom_metadata.items()})
 
@@ -165,9 +163,7 @@ class InMemoryMemoryService(BaseMemoryService):
 
         # Filter by keyword match (case-insensitive)
         query_lower = query.lower()
-        matched = [
-            e for e in entries if query_lower in e["metadata"].get("text", "").lower()
-        ]
+        matched = [e for e in entries if query_lower in e["metadata"].get("text", "").lower()]
 
         # Return up to 10 most recent matches
         matched = matched[-10:]
@@ -185,8 +181,7 @@ class InMemoryMemoryService(BaseMemoryService):
                     custom_metadata={
                         k: v
                         for k, v in metadata.items()
-                        if k
-                        not in ("app_name", "user_id", "author", "timestamp", "text")
+                        if k not in ("app_name", "user_id", "author", "timestamp", "text")
                     },
                 )
             )

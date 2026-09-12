@@ -68,9 +68,7 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     callback_context.state["active_tier"] = active_tier
     callback_context.state["review_submitted_in_this_turn"] = False
     callback_context.state["mutating_tool_executed_in_this_turn"] = False
-    agent_name = getattr(
-        getattr(callback_context, "agent", None), "name", "unknown_agent"
-    )
+    agent_name = getattr(getattr(callback_context, "agent", None), "name", "unknown_agent")
     logger.info("🤖 [SubAgent: %s] Starting sub-agent execution...", agent_name)
     logger.debug(
         "before_agent_callback: initialized active_tier=%s in state for sub-agent '%s'",
@@ -143,9 +141,9 @@ async def after_model_callback(
 ) -> LlmResponse | None:
     """Record token usage metadata and sanitize hallucinated tool prefixes after Gemini responds."""
     if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
-        total_tokens = getattr(
-            llm_response.usage_metadata, "total_token_count", 0
-        ) or getattr(llm_response.usage_metadata, "total_tokens", 0)
+        total_tokens = getattr(llm_response.usage_metadata, "total_token_count", 0) or getattr(
+            llm_response.usage_metadata, "total_tokens", 0
+        )
         callback_context.state["total_tokens"] = total_tokens
         logger.debug("after_model_callback: recorded total_tokens=%d", total_tokens)
 
@@ -183,9 +181,7 @@ async def on_tool_error_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext, error: Exception
 ) -> dict[str, Any] | None:
     """Self-healing error recovery callback."""
-    logger.warning(
-        "on_tool_error_callback: tool '%s' raised error: %s", tool.name, error
-    )
+    logger.warning("on_tool_error_callback: tool '%s' raised error: %s", tool.name, error)
     if tool.name == "update_branch_from_base":
         pr_number = args.get("pr_number") or args.get("number")
         if pr_number:

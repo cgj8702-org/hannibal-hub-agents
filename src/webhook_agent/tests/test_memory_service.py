@@ -49,9 +49,7 @@ def test_in_memory_service_multithreaded_concurrency() -> None:
                 id=f"thread-{thread_idx}-mem-{i}",
                 author=f"thread-{thread_idx}",
                 content=Content(
-                    parts=[
-                        {"text": f"Concurrent log item {i} from thread {thread_idx}"}
-                    ]
+                    parts=[{"text": f"Concurrent log item {i} from thread {thread_idx}"}]
                 ),
             )
             service.add_memory(

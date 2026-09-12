@@ -144,9 +144,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         {
                             "path": path_val,
                             "line": (
-                                item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None
+                                item.get("line") if isinstance(item.get("line"), int) else None
                             ),
                             "description": desc,
                             "suggested_fix": fix,
@@ -167,9 +165,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 clean_crit.append(
                     {
                         "path": (
-                            "uv.lock"
-                            if ("lock" in r_lower or "marker" in r_lower)
-                            else "codebase"
+                            "uv.lock" if ("lock" in r_lower or "marker" in r_lower) else "codebase"
                         ),
                         "line": None,
                         "description": r_text,
@@ -191,16 +187,18 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     or ""
                 ).strip()
                 if (
-                    cat in ("breaking_change", "security", "critical", "blocker")
-                    or sev in ("critical", "high", "blocker")
-                ) and desc and not any(desc in c.get("description", "") for c in clean_crit):
+                    (
+                        cat in ("breaking_change", "security", "critical", "blocker")
+                        or sev in ("critical", "high", "blocker")
+                    )
+                    and desc
+                    and not any(desc in c.get("description", "") for c in clean_crit)
+                ):
                     clean_crit.append(
                         {
                             "path": str(item.get("path") or "codebase"),
                             "line": (
-                                item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None
+                                item.get("line") if isinstance(item.get("line"), int) else None
                             ),
                             "description": desc,
                             "suggested_fix": fix,
@@ -225,9 +223,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
     # Synthesize critical issue if verdict is explicitly REQUEST_CHANGES but clean_crit is empty
     if normalized.get("verdict") == "REQUEST_CHANGES" and not clean_crit:
-        crit_desc = (
-            clean_risks[0]["risk"] if clean_risks else normalized["executive_summary"]
-        )
+        crit_desc = clean_risks[0]["risk"] if clean_risks else normalized["executive_summary"]
         crit_fix = (
             clean_risks[0]["recommendation"]
             if clean_risks
@@ -278,9 +274,7 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         {
                             "path": path_val,
                             "line": (
-                                item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None
+                                item.get("line") if isinstance(item.get("line"), int) else None
                             ),
                             "description": desc,
                             "suggested_fix": fix,
@@ -343,9 +337,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 if status not in ("RESOLVED", "UNRESOLVED"):
                     status = "RESOLVED"
                 ev = str(
-                    item.get("evidence")
-                    or item.get("details")
-                    or "Verified in commit diff."
+                    item.get("evidence") or item.get("details") or "Verified in commit diff."
                 ).strip()
                 clean_res.append(
                     {
@@ -356,9 +348,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 )
     normalized["resolutions"] = clean_res
 
-    raw_crit = normalized.get("critical_issues") or normalized.get(
-        "new_critical_issues"
-    )
+    raw_crit = normalized.get("critical_issues") or normalized.get("new_critical_issues")
     clean_crit: list[dict[str, Any]] = []
     if isinstance(raw_crit, list):
         for item in raw_crit:
@@ -387,18 +377,14 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         {
                             "path": path,
                             "line": (
-                                item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None
+                                item.get("line") if isinstance(item.get("line"), int) else None
                             ),
                             "description": desc,
                             "suggested_fix": fix,
                         }
                     )
 
-    raw_minor = normalized.get("minor_suggestions") or normalized.get(
-        "new_minor_suggestions"
-    )
+    raw_minor = normalized.get("minor_suggestions") or normalized.get("new_minor_suggestions")
     clean_minor: list[dict[str, Any]] = []
     if isinstance(raw_minor, list):
         for item in raw_minor:
@@ -427,9 +413,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         {
                             "path": path,
                             "line": (
-                                item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None
+                                item.get("line") if isinstance(item.get("line"), int) else None
                             ),
                             "description": desc,
                             "suggested_fix": fix,
@@ -454,10 +438,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 path = str(item.get("path") or "codebase").strip()
                 title = str(item.get("title") or "").strip()
                 desc = str(
-                    item.get("description")
-                    or title
-                    or item.get("item_description")
-                    or ""
+                    item.get("description") or title or item.get("item_description") or ""
                 ).strip()
                 cat = str(item.get("category") or "").strip()
                 sev = str(item.get("severity") or "").upper()
@@ -466,11 +447,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 if desc and desc.lower() not in ("none", "none found"):
                     issue_dict = {
                         "path": path,
-                        "line": (
-                            item.get("line")
-                            if isinstance(item.get("line"), int)
-                            else None
-                        ),
+                        "line": (item.get("line") if isinstance(item.get("line"), int) else None),
                         "description": full_desc,
                         "suggested_fix": fix,
                     }
@@ -555,9 +532,7 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
 
     summary_lower = (review.executive_summary or "").lower()
     if any(kw in summary_lower for kw in BREAKING_RISK_KEYWORDS):
-        logger.info(
-            "Mechanical verdict: REQUEST_CHANGES (breaking risk in executive summary)"
-        )
+        logger.info("Mechanical verdict: REQUEST_CHANGES (breaking risk in executive summary)")
         return "REQUEST_CHANGES"
 
     if getattr(review, "verdict", None) == "COMMENT":
@@ -608,9 +583,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
             *BREAKING_RISK_KEYWORDS,
         )
     ):
-        logger.info(
-            "Sync verdict: REQUEST_CHANGES (blocking issue noted in sync summary)"
-        )
+        logger.info("Sync verdict: REQUEST_CHANGES (blocking issue noted in sync summary)")
         return "REQUEST_CHANGES"
 
     if getattr(review, "verdict", None) == "COMMENT":
@@ -645,9 +618,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             for line in body.splitlines()
             if line.strip() and not line.startswith("#")
         ]
-        data["executive_summary"] = (
-            lines[0] if lines else "Autonomous PR code review report."
-        )
+        data["executive_summary"] = lines[0] if lines else "Autonomous PR code review report."
 
     conf_match = re.search(r"Confidence:\s*`?(\d)`?/5", body, re.IGNORECASE)
     if conf_match:
@@ -734,13 +705,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             and ":" in line_s
         ):
             parts = line_s.lstrip("*-•").strip().split(":", 1)
-            raw_path = (
-                parts[0]
-                .replace("🔴", "")
-                .replace("🟡", "")
-                .replace("✅", "")
-                .strip("`* ")
-            )
+            raw_path = parts[0].replace("🔴", "").replace("🟡", "").replace("✅", "").strip("`* ")
             desc_part = parts[1].strip() if len(parts) > 1 else ""
             clean_desc = desc_part if desc_part else line_s.lstrip("*-•🔴🟡✅ ").strip()
 
@@ -775,9 +740,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     return data
 
 
-def render_code_review_markdown(
-    review: CodeReviewResponse, verdict: str | None = None
-) -> str:
+def render_code_review_markdown(review: CodeReviewResponse, verdict: str | None = None) -> str:
     """Render CodeReviewResponse into clean, modern GitHub Markdown."""
     if verdict is None:
         verdict = calculate_strict_verdict(review)
@@ -815,9 +778,7 @@ def render_code_review_markdown(
         for item in review.risks_and_edge_cases:
             risk_lines.append(f"* **Risk:** {item.risk}")
             if item.recommendation and item.recommendation.strip():
-                risk_lines.append(
-                    f"  * *Recommendation*: {item.recommendation.strip()}"
-                )
+                risk_lines.append(f"  * *Recommendation*: {item.recommendation.strip()}")
         risk_block = "\n".join(risk_lines).strip()
     else:
         risk_block = "* *None identified for this PR scope.*"
@@ -877,9 +838,7 @@ def render_sync_review_markdown(
             "confidence": review.confidence,
             "verdict": review.verdict or verdict,
             "critical_issues": [item.model_dump() for item in review.critical_issues],
-            "minor_suggestions": [
-                item.model_dump() for item in review.minor_suggestions
-            ],
+            "minor_suggestions": [item.model_dump() for item in review.minor_suggestions],
             "risks_and_edge_cases": [],
         }
         cr_obj = CodeReviewResponse.model_validate(cr_data)

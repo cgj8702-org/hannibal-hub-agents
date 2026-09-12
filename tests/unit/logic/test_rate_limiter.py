@@ -71,9 +71,7 @@ async def test_rpm_burst_pacing(mock_registry: Path) -> None:
 @pytest.mark.anyio
 async def test_record_actual_tokens(mock_registry: Path) -> None:
     waiter = RPMWaiter(registry_path=mock_registry)
-    await waiter.check_and_wait(
-        model="gemini-3.5-flash-lite", estimated_tokens=50, tier="free"
-    )
+    await waiter.check_and_wait(model="gemini-3.5-flash-lite", estimated_tokens=50, tier="free")
     assert waiter.token_histories["gemini-3.5-flash-lite"][0][1] == 50
     assert not waiter.token_histories["gemini-3.5-flash-lite"][0][2]
 
@@ -110,10 +108,7 @@ def test_extract_rate_limit_details_from_adk_error() -> None:
 
     extracted = extract_rate_limit_details(adk_error)
     assert extracted["code"] == 429
-    assert (
-        extracted["quota_limit"]
-        == "GenerateContentRequestsPerMinutePerProjectPerRegion"
-    )
+    assert extracted["quota_limit"] == "GenerateContentRequestsPerMinutePerProjectPerRegion"
     assert extracted["quota_value"] == "15"
     assert extracted["retry_after_seconds"] == 45.5
     assert extracted["reason"] == "RATE_LIMIT_EXCEEDED"

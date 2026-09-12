@@ -54,18 +54,14 @@ class PlanOutput(BaseModel):
     """Structured output schema from planner_agent."""
 
     plan_summary: str = Field(description="High-level summary of proposed code edits.")
-    target_files: list[str] = Field(
-        description="List of file paths targeted for modification."
-    )
+    target_files: list[str] = Field(description="List of file paths targeted for modification.")
     steps: list[str] = Field(description="Sequential implementation steps.")
 
 
 class DeveloperOutput(BaseModel):
     """Structured output schema from developer_agent."""
 
-    edits_summary: str = Field(
-        description="Summary of surgical file replacements applied."
-    )
+    edits_summary: str = Field(description="Summary of surgical file replacements applied.")
     modified_files: list[str] = Field(description="List of modified file paths.")
     status: Literal["completed", "partial", "failed"] = Field(
         description="Status of development edits."
@@ -103,9 +99,7 @@ class PRComposerOutput(BaseModel):
         description="Git commit message formatted with Conventional Commits."
     )
     branch_name: str = Field(description="Target git branch name.")
-    status: Literal["committed", "pushed", "failed"] = Field(
-        description="Git operation status."
-    )
+    status: Literal["committed", "pushed", "failed"] = Field(description="Git operation status.")
 
 
 # --- Item 2: Custom EscalationChecker Agent ---
@@ -115,9 +109,7 @@ class EscalationChecker(BaseAgent):
     def __init__(self, name: str = "escalation_checker"):
         super().__init__(name=name)
 
-    async def _run_async_impl(
-        self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event]:
+    async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event]:
         evaluation_result = ctx.session.state.get("feature_evaluation")
         if evaluation_result and evaluation_result.get("grade") == "pass":
             logger.info(
@@ -134,14 +126,10 @@ class EscalationChecker(BaseAgent):
 
 
 # --- Item 16: Volatile <system-reminder> Tail Injection Callback ---
-def reminder_injection_callback(
-    callback_context: CallbackContext, llm_request: Any
-) -> None:
+def reminder_injection_callback(callback_context: CallbackContext, llm_request: Any) -> None:
     """Inject volatile date/status tail as a trailing <system-reminder> Content."""
     try:
-        now_str = datetime.datetime.now(datetime.UTC).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
-        )
+        now_str = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         halt_reason = callback_context.state.get("halt_reason", "")
         reminder_text = (
             f"<system-reminder>\n"
@@ -158,18 +146,13 @@ def reminder_injection_callback(
 
 
 # --- Item 18: Signed Artifact URL Redaction Callback ---
-def redact_artifact_urls_callback(
-    callback_context: CallbackContext, llm_request: Any
-) -> None:
+def redact_artifact_urls_callback(callback_context: CallbackContext, llm_request: Any) -> None:
     """Redact signed blob URLs from model view to prevent credential leakage."""
     try:
         if hasattr(llm_request, "contents") and isinstance(llm_request.contents, list):
             for content in llm_request.contents:
                 for part in getattr(content, "parts", []) or []:
-                    if (
-                        getattr(part, "text", None)
-                        and "storage.googleapis.com" in part.text
-                    ):
+                    if getattr(part, "text", None) and "storage.googleapis.com" in part.text:
                         part.text = part.text.replace(
                             "storage.googleapis.com", "[REDACTED_BLOB_HOST]"
                         )
@@ -182,16 +165,11 @@ def get_feature_agent_key() -> str:
     from logic.secret_manager import resolve_secret
 
     key = (
-        resolve_secret("FEATURE_AGENT_FREE_KEY")
-        or resolve_secret("FEATURE_AGENT_PAID_KEY")
+        resolve_secret("FEATURE_AGENT_FREE_KEY") or resolve_secret("FEATURE_AGENT_PAID_KEY")
     ).strip()
     if not key:
         if "PYTEST_CURRENT_TEST" in os.environ:
-            return (
-                os.getenv("GEMINI_API_KEY")
-                or os.getenv("GOOGLE_API_KEY")
-                or "pytest_autokey"
-            )
+            return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "pytest_autokey"
         raise RuntimeError(
             "CRITICAL ISOLATION ERROR: Missing required secret 'FEATURE_AGENT_FREE_KEY'. "
             "Feature Agent must run on its own isolated GCP project and API key."

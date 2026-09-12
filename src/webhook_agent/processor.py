@@ -53,9 +53,7 @@ def _env_int(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning(
-            "Invalid integer for %s=%r, using default %d", name, raw, default
-        )
+        logger.warning("Invalid integer for %s=%r, using default %d", name, raw, default)
         return default
 
 
@@ -143,11 +141,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         pr_number = None
         if "pull_request" in raw and isinstance(raw["pull_request"], dict):
             pr_number = raw["pull_request"].get("number")
-        elif (
-            "issue" in raw
-            and isinstance(raw["issue"], dict)
-            and raw["issue"].get("pull_request")
-        ):
+        elif "issue" in raw and isinstance(raw["issue"], dict) and raw["issue"].get("pull_request"):
             pr_number = raw["issue"].get("number")
 
         if not pr_number:
@@ -159,9 +153,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         diff_lines: list[str] = []
         for f in pr.get_files():
             patch = f.patch or "No patch available (binary/renamed/empty)."
-            diff_lines.append(
-                f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
-            )
+            diff_lines.append(f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}")
 
         if diff_lines:
             raw["pr_diff"] = "\n".join(diff_lines)
@@ -171,10 +163,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
                 len(diff_lines),
             )
 
-        if (
-            canonical == "pull_request.synchronize"
-            or raw.get("action") == "synchronize"
-        ):
+        if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 
         _prefetch_inline_comment_context(gh, repo_name, payload)
@@ -185,9 +174,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         logger.debug("Could not pre-fetch PR diff: %s", exc)
 
 
-def _prefetch_inline_comment_context(
-    gh: Github, repo_name: str, payload: dict[str, Any]
-) -> None:
+def _prefetch_inline_comment_context(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Pre-fetch code context snippet for inline review comment events."""
     try:
         canonical = payload.get("canonical", "")
@@ -213,9 +200,7 @@ def _prefetch_inline_comment_context(
         logger.debug("Could not pre-fetch inline comment context: %s", exc)
 
 
-def _preexecute_resolve_command(
-    gh: Github, repo_name: str, payload: dict[str, Any]
-) -> None:
+def _preexecute_resolve_command(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Pre-execute conflict resolution programmatically on /resolve command."""
     try:
         raw = payload.get("raw_payload")
@@ -285,9 +270,7 @@ def _preexecute_resolve_command(
         logger.debug("Could not pre-execute /resolve command: %s", exc)
 
 
-def _prefetch_commit_history(
-    gh: Github, repo_name: str, payload: dict[str, Any]
-) -> None:
+def _prefetch_commit_history(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Pre-fetch commit history log summary for /create command."""
     try:
         raw = payload.get("raw_payload")
@@ -322,9 +305,7 @@ def _prefetch_commit_history(
         commit_summaries: list[str] = []
         for c in pr.get_commits():
             msg = (
-                c.commit.message.splitlines()[0]
-                if c.commit and c.commit.message
-                else "No message"
+                c.commit.message.splitlines()[0] if c.commit and c.commit.message else "No message"
             )
             sha = c.sha[:7] if c.sha else "N/A"
             author = c.author.login if c.author else "Unknown"
@@ -341,9 +322,7 @@ def _prefetch_commit_history(
         logger.debug("Could not pre-fetch commit history for /create: %s", exc)
 
 
-def is_base_branch_merge_sync(
-    gh: Github, repo_name: str, payload: dict[str, Any]
-) -> bool:
+def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any]) -> bool:
     """Check if a pull_request.synchronize event is an update from the base branch (e.g. merging main).
 
     When a PR branch is updated with the base branch (via GitHub's 'Update branch' button
@@ -417,15 +396,15 @@ def is_base_branch_merge_sync(
         parent_shas = [p.sha for p in parents if hasattr(p, "sha")]
         is_base_parent = base_sha in parent_shas or is_merge_msg
 
-        return bool(is_merge_msg or (is_base_parent and (not before_sha or before_sha in parent_shas)))
+        return bool(
+            is_merge_msg or (is_base_parent and (not before_sha or before_sha in parent_shas))
+        )
     except Exception as exc:
         logger.debug("Could not verify base branch merge sync: %s", exc)
         return False
 
 
-def _prefetch_previous_bot_reviews(
-    gh: Github, repo_name: str, payload: dict[str, Any]
-) -> None:
+def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Pre-fetch previous reviews posted by hannibal-hub-agents[bot]."""
     try:
         raw = payload.get("raw_payload")
@@ -492,9 +471,7 @@ def _prefetch_previous_bot_reviews(
         logger.debug("Could not pre-fetch previous bot reviews: %s", exc)
 
 
-def _preexecute_implement_command(
-    gh: Github, repo_name: str, payload: dict[str, Any]
-) -> None:
+def _preexecute_implement_command(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Pre-process /implement or /feature commands on Issues and Issue comments."""
     try:
         raw = payload.get("raw_payload")
@@ -668,10 +645,7 @@ class WebhookProcessor:
             comment_user = (raw.get("comment") or {}).get("user") or {}
             comment_author = comment_user.get("login", "")
             allowed_users = {"cgj8702", "cgj8702-agents"}
-            if (
-                sender_login not in allowed_users
-                and comment_author not in allowed_users
-            ):
+            if sender_login not in allowed_users and comment_author not in allowed_users:
                 return False
 
         event_name = ev.get("event_name")
@@ -740,9 +714,7 @@ class WebhookProcessor:
         agent = self._get_agent_core()
 
         raw_repo = payload.get("repository")
-        if not isinstance(raw_repo, dict) and isinstance(
-            payload.get("raw_payload"), dict
-        ):
+        if not isinstance(raw_repo, dict) and isinstance(payload.get("raw_payload"), dict):
             raw_repo = payload["raw_payload"].get("repository")
         repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
         if not repo_name:

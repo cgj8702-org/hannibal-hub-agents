@@ -76,9 +76,7 @@ async def fetch_model_registry() -> bool:
         keys_to_poll["paid"] = paid_key
 
     if not keys_to_poll:
-        LOGGER.error(
-            "No valid WEBHOOK_FREE_KEY or WEBHOOK_PAID_KEY found in environment."
-        )
+        LOGGER.error("No valid WEBHOOK_FREE_KEY or WEBHOOK_PAID_KEY found in environment.")
         return False
 
     models_by_name: dict[str, dict[str, Any]] = {}
@@ -90,9 +88,7 @@ async def fetch_model_registry() -> bool:
             client = genai.Client(api_key=api_key)
             for model in client.models.list():
                 actions = getattr(model, "supported_actions", None) or []
-                is_text_gen = any(
-                    a in actions for a in ("generateContent", "bidiGenerateContent")
-                )
+                is_text_gen = any(a in actions for a in ("generateContent", "bidiGenerateContent"))
 
                 search_corpus = f"{getattr(model, 'name', '')} {getattr(model, 'display_name', '')} {getattr(model, 'description', '')}".lower()
                 is_excluded = any(kw in search_corpus for kw in excluded_keywords)
@@ -107,12 +103,8 @@ async def fetch_model_registry() -> bool:
                             "version": getattr(model, "version", None),
                             "display_name": getattr(model, "display_name", None),
                             "description": getattr(model, "description", None),
-                            "input_token_limit": getattr(
-                                model, "input_token_limit", None
-                            ),
-                            "output_token_limit": getattr(
-                                model, "output_token_limit", None
-                            ),
+                            "input_token_limit": getattr(model, "input_token_limit", None),
+                            "output_token_limit": getattr(model, "output_token_limit", None),
                             "supported_actions": actions,
                             "accessible_tiers": [],
                         }
@@ -149,9 +141,7 @@ async def fetch_model_registry() -> bool:
     import tempfile
 
     try:
-        with tempfile.NamedTemporaryFile(
-            "w", dir=target_dir, delete=False, encoding="utf-8"
-        ) as tf:
+        with tempfile.NamedTemporaryFile("w", dir=target_dir, delete=False, encoding="utf-8") as tf:
             json.dump(payload, tf, indent=2)
             tf.flush()
             os.fsync(tf.fileno())

@@ -23,12 +23,7 @@ class MessagePruningPlugin(BasePlugin):
         super().__init__(name="message_pruning_plugin")
         self.max_history_events = max_history_events
 
-    async def before_model_callback(
-        self, *, callback_context: Any, llm_request: Any
-    ) -> Any:
-        if (
-            hasattr(llm_request, "contents")
-            and len(llm_request.contents) > self.max_history_events
-        ):
+    async def before_model_callback(self, *, callback_context: Any, llm_request: Any) -> Any:
+        if hasattr(llm_request, "contents") and len(llm_request.contents) > self.max_history_events:
             llm_request.contents = llm_request.contents[-self.max_history_events :]
         return None
