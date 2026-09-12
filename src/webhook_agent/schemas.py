@@ -80,6 +80,10 @@ class CodeReviewResponse(BaseModel):
     executive_summary: str = Field(
         description="1-2 sentences summarizing PR goal, overall quality, and verdict rationale"
     )
+    verdict: Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"] | None = Field(
+        default=None,
+        description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",
+    )
     confidence: int = Field(
         ge=1, le=5, description="Auditor confidence rating from 1 to 5"
     )
@@ -112,6 +116,10 @@ class SyncReviewResponse(BaseModel):
 
     summary: str = Field(
         description="1-2 sentences summarizing incremental commit changes"
+    )
+    verdict: Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"] | None = Field(
+        default=None,
+        description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",
     )
     resolutions: list[SyncResolutionItem] = Field(
         description="Resolution status for all previously requested findings"
