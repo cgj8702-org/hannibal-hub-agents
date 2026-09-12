@@ -217,32 +217,39 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
 
 
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
-    """Reads TPM limit for model and tier from rate_limits.json."""
+    """Reads TPM limit for model and tier from gemini_models.json."""
     active_tier = tier or _resolve_tier()
     target_model = model if model and model != "default" else get_active_model()
     try:
         import json
         from pathlib import Path
 
-        registry_path = (
+        candidates = [
             Path(__file__).resolve().parents[1]
             / "assets"
             / "registries"
-            / "rate_limits.json"
-        )
+            / "gemini_models.json",
+            Path(__file__).resolve().parents[2]
+            / "assets"
+            / "registries"
+            / "gemini_models.json",
+        ]
+        registry_path = next((p for p in candidates if p.exists()), candidates[1])
         if registry_path.exists():
-            rate_limits = json.loads(registry_path.read_text(encoding="utf-8"))
+            data = json.loads(registry_path.read_text(encoding="utf-8"))
             full_key = (
                 target_model
                 if target_model.startswith("models/")
                 else f"models/{target_model}"
             )
-            entry = rate_limits.get(target_model, rate_limits.get(full_key, {}))
-            tier_data = entry.get(active_tier, entry) if isinstance(entry, dict) else {}
-            if isinstance(tier_data, dict):
-                tpm_val = tier_data.get("tpm", 0)
-                if isinstance(tpm_val, (int, float)) and tpm_val > 0:
-                    return int(tpm_val)
+            for m in data.get("models", []):
+                if isinstance(m, dict) and m.get("name") in (target_model, full_key):
+                    rate_limits = m.get("rate_limits", {})
+                    tier_data = rate_limits.get(active_tier, {})
+                    if isinstance(tier_data, dict):
+                        tpm_val = tier_data.get("tpm", 0)
+                        if isinstance(tpm_val, (int, float)) and tpm_val > 0:
+                            return int(tpm_val)
     except Exception:
         pass
     return 15000 if active_tier == "free" else 100000
