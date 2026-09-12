@@ -579,7 +579,7 @@ def get_model_chain() -> list[str]:
         4. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM)
 
     Paid Tier Chain:
-        1. gemini-3.8-flash (10,000 RPD / 4M TPM)
+        1. gemini-3.8-flash (10,000 RPD / 2M TPM)
         2. gemini-3.7-flash (10,000 RPD / 2M TPM)
         3. gemini-3.6-flash (10,000 RPD / 2M TPM)
         4. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
