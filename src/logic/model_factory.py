@@ -103,7 +103,7 @@ def get_adk_model(
 
     if not model_name:
         default_model = (
-            "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.6-flash"
+            "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
         )
         model_name = os.getenv("GEMMA_MODEL", default_model)
 

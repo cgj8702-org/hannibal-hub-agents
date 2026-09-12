@@ -107,7 +107,7 @@ async def before_model_callback(
 
         default_model = get_active_model()
     except ImportError:
-        default_model = "gemini-3.6-flash"
+        default_model = "gemini-3.8-flash"
     target_model = getattr(llm_request, "model", None) or default_model
 
     input_text = ""

@@ -34,7 +34,7 @@ def _synthesize_conflict_resolution(
     if "<<<<<<< " not in file_content or ">>>>>>> " not in file_content:
         return file_content
 
-    target_model = model_name or os.getenv("GEMMA_MODEL", "gemini-3.6-flash")
+    target_model = model_name or os.getenv("GEMMA_MODEL", "gemini-3.8-flash")
 
     prompt = (
         f"You are a Senior Engineer agentically resolving a git merge conflict in `{file_path}`.\n"

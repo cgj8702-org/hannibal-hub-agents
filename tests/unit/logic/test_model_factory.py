@@ -27,3 +27,12 @@ def test_get_adk_model_standard_gemini() -> None:
     assert isinstance(model, Gemini)
     assert not isinstance(model, RateLimitedGemini)
     assert model.model == "gemini-3.6-flash"
+
+
+@pytest.mark.unit
+def test_get_adk_model_paid_tier_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify get_adk_model on paid tier defaults to gemini-3.8-flash."""
+    monkeypatch.delenv("GEMMA_MODEL", raising=False)
+    model = get_adk_model(tier="paid", api_key="test_key")
+    assert isinstance(model, RateLimitedGemini)
+    assert model.model == "gemini-3.8-flash"
