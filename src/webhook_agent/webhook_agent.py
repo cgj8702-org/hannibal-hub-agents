@@ -1355,6 +1355,7 @@ def _enforce_verdict(
             has_prior_reviews = bool(bot_reviews)
         except Exception:
             has_prior_reviews = True
+            bot_reviews = []
 
         try:
             files = pr.get_files()
@@ -1380,22 +1381,15 @@ def _enforce_verdict(
                     # Programmatic hallucination guard: clear resolutions if no prior review
                     # had actionable CHANGES_REQUESTED items
                     if pr is not None and sync_obj.resolutions:
-                        try:
-                            prior_had_changes = any(
-                                getattr(r, "state", "") == "CHANGES_REQUESTED"
-                                for r in pr.get_reviews()
-                                if (getattr(getattr(r, "user", None), "login", "") or "")
-                                .lower()
-                                .startswith("hannibal-hub-agents")
+                        prior_had_changes = any(
+                            getattr(r, "state", "") == "CHANGES_REQUESTED" for r in bot_reviews
+                        )
+                        if not prior_had_changes:
+                            logger.warning(
+                                "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior CHANGES_REQUESTED reviews exist)",
+                                len(sync_obj.resolutions),
                             )
-                            if not prior_had_changes:
-                                logger.warning(
-                                    "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior CHANGES_REQUESTED reviews exist)",
-                                    len(sync_obj.resolutions),
-                                )
-                                sync_obj.resolutions = []
-                        except Exception as guard_err:
-                            logger.debug("Resolution guard check failed: %s", guard_err)
+                            sync_obj.resolutions = []
 
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
@@ -1986,6 +1980,12 @@ Clean dev/docs PRs return risks: [].
         # Include pre-fetched previous bot reviews if available
         if "previous_bot_reviews" in raw:
             parts.append(f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}")
+            if not raw.get("prior_reviews_had_request_changes", False):
+                parts.append(
+                    "\nNOTE ON RESOLUTION TRACKER: No prior review requested changes on this PR. "
+                    "You MUST leave 'resolutions' as an empty list ([]) in SyncReviewResponse. "
+                    "Do NOT invent or backfill resolved items."
+                )
 
         # Include pre-processed /implement instruction if available
         if "implement_instruction" in raw:
