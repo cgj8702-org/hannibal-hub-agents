@@ -48,6 +48,8 @@ filterwarnings = [
     "ignore:.*FeatureName.AGENT_CONFIG is enabled.*:UserWarning",
     "ignore:.*LoopAgent is deprecated in favor of Workflow.*:DeprecationWarning",
     "ignore:.*SequentialAgent is deprecated in favor of Workflow.*:DeprecationWarning",
+    "ignore:BaseAgentConfig is deprecated:DeprecationWarning",
+    "ignore:::google.auth.transport.grpc",
 ]
 
 [tool.ruff]
