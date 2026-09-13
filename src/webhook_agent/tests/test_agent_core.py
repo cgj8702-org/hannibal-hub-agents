@@ -830,3 +830,65 @@ class TestRpmWaiterTpmCeiling:
         assert len(slept_times) == 1
         # Expect wait for (fake_now - 20.0 + 60.0) - fake_now = 40.0s
         assert abs(slept_times[0] - 40.0) < 0.2
+
+
+class TestReviewDismissalOrdering:
+    def test_review_failure_does_not_dismiss_existing_reviews(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import review
+
+        ctx = MagicMock()
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        ctx.state = {"gh_client": mock_gh, "repo_full_name": "owner/repo"}
+
+        mock_existing = MagicMock()
+        mock_existing.id = 101
+        mock_existing.user.login = "hannibal-hub-agents[bot]"
+        mock_existing.state = "CHANGES_REQUESTED"
+        mock_pr.get_reviews.return_value = [mock_existing]
+        mock_pr.state = "open"
+        mock_pr.merged = False
+        mock_pr.create_review.side_effect = RuntimeError("GitHub API 503")
+
+        res = review(ctx, pr_number=42, body="New review body", event="APPROVE")
+        assert "Error submitting review: GitHub API 503" in res
+        mock_existing.dismiss.assert_not_called()
+
+    def test_review_success_dismisses_prior_reviews_excluding_current(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import review
+
+        ctx = MagicMock()
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        ctx.state = {"gh_client": mock_gh, "repo_full_name": "owner/repo"}
+
+        mock_prior = MagicMock()
+        mock_prior.id = 101
+        mock_prior.user.login = "hannibal-hub-agents[bot]"
+        mock_prior.state = "CHANGES_REQUESTED"
+
+        mock_new = MagicMock()
+        mock_new.id = 202
+        mock_new.user.login = "hannibal-hub-agents[bot]"
+        mock_new.state = "APPROVED"
+        mock_new.html_url = "https://github.com/owner/repo/pull/42#pullrequestreview-202"
+
+        mock_pr.state = "open"
+        mock_pr.merged = False
+        mock_pr.create_review.return_value = mock_new
+        mock_pr.get_reviews.return_value = [mock_prior, mock_new]
+
+        res = review(ctx, pr_number=42, body="Approved!", event="APPROVE")
+        assert "Submitted review (APPROVE)" in res
+        mock_prior.dismiss.assert_called_once_with(
+            "Superseded by fresh code review on latest commit."
+        )
+        mock_new.dismiss.assert_not_called()

@@ -46,6 +46,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
+logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("google.auth").setLevel(logging.WARNING)
 
 
@@ -80,6 +81,7 @@ def setup_cloud_logging() -> None:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("google.auth").setLevel(logging.WARNING)
         logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
+        logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
