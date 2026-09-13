@@ -1522,31 +1522,6 @@ def review(
 
         body, event, inline_comments = _enforce_verdict(body, event, pr)
 
-        # Supersede / dismiss prior bot reviews
-        existing_reviews = pr.get_reviews()
-        for prev_rv in existing_reviews:
-            if (
-                prev_rv.user
-                and (
-                    prev_rv.user.login in (BOT_LOGIN, "hannibal-hub-agents")
-                    or prev_rv.user.login.startswith("hannibal-hub-agents")
-                )
-                and prev_rv.state in ("CHANGES_REQUESTED", "APPROVED")
-            ):
-                try:
-                    prev_rv.dismiss("Superseded by fresh code review on latest commit.")
-                    logger.info(
-                        "Dismissed prior bot review %s on PR #%d",
-                        prev_rv.id,
-                        pr_number,
-                    )
-                except Exception as dismiss_err:
-                    logger.warning(
-                        "Could not dismiss prior bot review %s: %s",
-                        prev_rv.id,
-                        dismiss_err,
-                    )
-
         try:
             if inline_comments:
                 rv = pr.create_review(body=body, event=event, comments=inline_comments)
@@ -1562,6 +1537,32 @@ def review(
                 rv = pr.create_review(body=body, event=event)
             else:
                 raise
+
+        # Supersede / dismiss prior bot reviews ONLY after new review is created
+        existing_reviews = pr.get_reviews()
+        for prev_rv in existing_reviews:
+            if (
+                prev_rv.user
+                and (
+                    prev_rv.user.login in (BOT_LOGIN, "hannibal-hub-agents")
+                    or prev_rv.user.login.startswith("hannibal-hub-agents")
+                )
+                and prev_rv.state in ("CHANGES_REQUESTED", "APPROVED")
+                and getattr(prev_rv, "id", None) != getattr(rv, "id", None)
+            ):
+                try:
+                    prev_rv.dismiss("Superseded by fresh code review on latest commit.")
+                    logger.info(
+                        "Dismissed prior bot review %s on PR #%d",
+                        prev_rv.id,
+                        pr_number,
+                    )
+                except Exception as dismiss_err:
+                    logger.warning(
+                        "Could not dismiss prior bot review %s: %s",
+                        prev_rv.id,
+                        dismiss_err,
+                    )
         _COMMENT_RATE_LIMITER.record(target_key)
         session_state = getattr(ctx, "state", None)
         if isinstance(session_state, dict):
