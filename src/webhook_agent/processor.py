@@ -560,6 +560,17 @@ class WebhookProcessor:
         # being discarded and rebuilt on every event.
         self._agent_core: AgentCore | None = None
 
+    @property
+    def gh(self) -> Github:
+        """Return an authenticated Github client, creating or loading cached installation token."""
+        inst_token = load_cached_token(self.installation_id)
+        if inst_token is None:
+            pem = load_private_key(self.private_key_path)
+            jwt_token = generate_jwt(self.app_id, pem)
+            inst_token = get_installation_token(jwt_token, self.installation_id)
+            save_cached_token(self.installation_id, inst_token)
+        return Github(auth=Auth.Token(inst_token.token))
+
     def _get_agent_core(self) -> AgentCore:
         if self._agent_core is None:
             self._agent_core = AgentCore(
@@ -702,14 +713,7 @@ class WebhookProcessor:
         # Set canonical event name in payload for AgentCore and WebhookAgent
         payload["canonical"] = event_key
 
-        inst_token = load_cached_token(self.installation_id)
-        if inst_token is None:
-            pem = load_private_key(self.private_key_path)
-            jwt_token = generate_jwt(self.app_id, pem)
-            inst_token = get_installation_token(jwt_token, self.installation_id)
-            save_cached_token(self.installation_id, inst_token)
-
-        gh = Github(auth=Auth.Token(inst_token.token))
+        gh = self.gh
 
         agent = self._get_agent_core()
 

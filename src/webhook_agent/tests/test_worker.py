@@ -972,3 +972,18 @@ class TestBaseBranchMergeSync:
             mock_agent.run.assert_not_called()
             mock_eyes.assert_not_called()
             assert "Suppressed pull_request.synchronize for PR #125" in caplog.text
+
+    def test_processor_gh_property(self):
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        with (
+            patch(
+                "webhook_agent.processor.load_cached_token",
+                return_value=MagicMock(token="fake-token"),
+            ),
+            patch("webhook_agent.processor.Github") as mock_github_cls,
+        ):
+            client = processor.gh
+            assert client == mock_github_cls.return_value
+            mock_github_cls.assert_called_once()
