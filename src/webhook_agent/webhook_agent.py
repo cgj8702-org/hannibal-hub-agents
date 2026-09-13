@@ -1630,7 +1630,8 @@ When reviewing a PR, you MUST:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
    - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
-   - Mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
+   - Only track items in `resolutions` that were actually raised as requested changes/findings in `previous_bot_reviews`. If there were no prior review action items or the previous review was APPROVED, leave `resolutions` as an empty list `[]`. Never invent or backfill resolved items from the new commit's changes.
+   - For items that were in `previous_bot_reviews`, mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
    - Distinguish PR-authored commits from base branch merges (`Merge branch 'main' ...`). Commits originating from merging or updating from the base branch are part of the target branch and must NOT be attributed to the PR author or flagged as scope creep.
 
 ### Verdict Rules (Non-Negotiable)
