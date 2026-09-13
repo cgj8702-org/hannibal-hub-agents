@@ -1,10 +1,9 @@
 #!/bin/bash
-# Ruff-All: Clinical Linting & Formatting
-# Usage: bash .agents/scripts/ruff-all.sh
+# Ruff-All: Clinical Linting, Formatting & Type Checking
+# Usage: bash scripts/ruff-all.sh
 
-echo "› Running Ruff Linter (Fixing auto-fixable issues)..."
-# Final check to see if any issues remain
-if ! uv run ruff check --fix --unsafe-fixes; then
+echo "› Running Ruff Linter (Safe auto-fixes only)..."
+if ! uv run ruff check --fix; then
     echo "------------------------------------------------------------"
     echo "[!] Clinical Violation: Ruff found remaining linting issues."
     echo "    Please fix the errors above before committing."
@@ -15,5 +14,14 @@ fi
 echo "› Running Ruff Formatter..."
 uv run ruff format
 
-echo "› Linting & Formatting Complete. Code is clinical."
+echo "› Running MyPy Static Type Check..."
+if ! uv run mypy; then
+    echo "------------------------------------------------------------"
+    echo "[!] Clinical Violation: MyPy found static typing issues."
+    echo "    Please fix the errors above before committing."
+    echo "------------------------------------------------------------"
+    exit 1
+fi
+
+echo "› Linting, Formatting & Type Validation Complete. Code is clinical."
 exit 0

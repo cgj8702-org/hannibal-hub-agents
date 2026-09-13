@@ -15,11 +15,11 @@ from typing import Any
 logger = logging.getLogger("firestore_registry")
 
 try:
-    from google.cloud import firestore
+    from google.cloud import firestore  # type: ignore[attr-defined]
 
     _HAS_FIRESTORE = True
 except ImportError:
-    firestore = None  # type: ignore[assignment]
+    firestore = None
     _HAS_FIRESTORE = False
 
 

@@ -35,7 +35,7 @@ def _synthesize_conflict_resolution(
     if "<<<<<<< " not in file_content or ">>>>>>> " not in file_content:
         return file_content
 
-    target_model = model_name or os.getenv("GEMMA_MODEL", "gemini-3.8-flash")
+    target_model: str = str(model_name or os.getenv("GEMMA_MODEL") or "gemini-3.8-flash")
 
     prompt = (
         f"You are a Senior Engineer agentically resolving a git merge conflict in `{file_path}`.\n"
@@ -52,10 +52,13 @@ def _synthesize_conflict_resolution(
     active_tier = _resolve_tier()
     estimated_tokens = len(prompt) // 4 + 500
 
+    run_in_bg_loop: Any = None
     try:
-        from webhook_agent.webhook_agent import run_in_bg_loop
+        from webhook_agent.webhook_agent import run_in_bg_loop as _bg_loop
+
+        run_in_bg_loop = _bg_loop
     except ImportError:
-        run_in_bg_loop = None
+        pass
 
     if run_in_bg_loop is not None:
         try:
@@ -319,9 +322,9 @@ def resolve_merge_conflicts(
 
         if genai_client is not None:
             for rel_file in unmerged_files:
-                file_path = worktree_path / rel_file
-                if file_path.exists() and file_path.is_file():
-                    raw_content = file_path.read_text(encoding="utf-8")
+                abs_file_path = worktree_path / rel_file
+                if abs_file_path.exists() and abs_file_path.is_file():
+                    raw_content = abs_file_path.read_text(encoding="utf-8")
                     if "<<<<<<< " in raw_content:
                         logger.info(
                             "Agentically synthesizing conflict resolution for %s via Gemini LLM...",
@@ -333,7 +336,7 @@ def resolve_merge_conflicts(
                             genai_client=genai_client,
                             model_name=model_name,
                         )
-                        file_path.write_text(resolved_content, encoding="utf-8")
+                        abs_file_path.write_text(resolved_content, encoding="utf-8")
                         resolved_files.append(rel_file)
 
         # 6. Verification Gate in isolated worktree

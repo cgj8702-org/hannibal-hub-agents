@@ -21,9 +21,10 @@ import logging
 import os
 import signal
 import sys
+from typing import Any
 
 from google.api_core import exceptions as gcp_exceptions
-from google.cloud import pubsub_v1
+from google.cloud import pubsub_v1  # type: ignore[attr-defined]
 
 from .processor import WebhookProcessor
 
@@ -115,7 +116,7 @@ def main() -> int:
     subscription_path = subscription
     keep_running = True
 
-    def _signal_handler(signum, frame):
+    def _signal_handler(signum: int, frame: Any) -> None:
         nonlocal keep_running
         logger.info("🛑 Signal %s received, shutting down...", signum)
         keep_running = False

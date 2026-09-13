@@ -37,7 +37,7 @@ MUTATING_TOOLS: set[str] = {
 }
 
 
-def _check_pr_closed_short_circuit(state: dict[str, Any]) -> None:
+def _check_pr_closed_short_circuit(state: Any) -> None:
     """Check if target PR is registered as closed/merged and abort agent turn immediately."""
     repo_full_name = state.get("repo_full_name") or ""
     pr_number = state.get("pr_number") or state.get("issue_number")

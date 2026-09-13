@@ -26,7 +26,7 @@ def resolve_secret(secret_id: str, default: str = "") -> str:
 
     # Attempt resolution from Secret Manager (cgj8702-webhook-agent)
     try:
-        from google.cloud import secretmanager
+        from google.cloud import secretmanager  # type: ignore[attr-defined]
 
         project_id = os.getenv("WEBHOOK_PAID_PROJECT", "cgj8702-webhook-agent")
         client = secretmanager.SecretManagerServiceClient()

@@ -8,7 +8,7 @@ dependencies = [
     "cryptography>=49.0.0",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
-    "jwt>=1.4.0",
+    "pyjwt>=2.10.0",
     "google-genai>=2.3.0",
     "pygithub>=2.9.1",
     "pytz>=2026.2",
@@ -133,9 +133,9 @@ disallow_incomplete_defs = true
 [[tool.mypy.overrides]]
 module = [
     "webhook_agent.tests.*",
+    "tests.*",
 ]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
+ignore_errors = true
 
 # --- Library Overrides ---
 # These libraries lack type stubs or have complex C-extensions
@@ -144,8 +144,11 @@ module = [
     "cryptography.*",
     "fastapi.*",
     "github.*",
+    "google",
     "google.*",
+    "google.adk",
     "google.adk.*",
+    "google.cloud",
     "google.cloud.*",
     "google.genai.*",
     "httpx.*",

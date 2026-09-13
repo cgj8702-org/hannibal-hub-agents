@@ -86,8 +86,8 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
             if pr_num and comment_id:
                 repo = gh.get_repo(repo_name)
                 pr = repo.get_pull(int(pr_num))
-                comment = pr.get_review_comment(int(comment_id))
-                comment.create_reaction("eyes")
+                pr_comment = pr.get_review_comment(int(comment_id))
+                pr_comment.create_reaction("eyes")
         elif canonical in ("pull_request.opened", "pull_request.reopened") or (
             canonical.startswith("pull_request.") and action in ("opened", "reopened")
         ):
@@ -148,6 +148,9 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             pr_number = raw["pull_request"].get("number")
         elif "issue" in raw and isinstance(raw["issue"], dict) and raw["issue"].get("pull_request"):
             pr_number = raw["issue"].get("number")
+
+        if pr_number is None:
+            return
 
         try:
             pr_num_int = int(pr_number)
@@ -516,6 +519,7 @@ class WebhookProcessor:
         self.private_key_path = os.getenv(
             "GITHUB_PRIVATE_KEY_PATH", "/tmp/keys/github-app-private-key.pem"
         )
+        self.dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
         # Built lazily on first process_event() call — NOT here. Keeps
         # WebhookProcessor() cheap to construct for tests that only exercise
         # routing/filtering (see test_worker.py), and ensures the ADK
@@ -523,11 +527,12 @@ class WebhookProcessor:
         # once and reused for the lifetime of this worker process, instead of
         # being discarded and rebuilt on every event.
         self._agent_core: AgentCore | None = None
+        self._gh: Github | None = None
 
     @property
     def gh(self) -> Github:
         """Return an authenticated Github client, creating or loading cached installation token."""
-        if getattr(self, "_gh", None) is not None:
+        if self._gh is not None:
             return self._gh
         inst_token = load_cached_token(self.installation_id)
         if inst_token is None:
@@ -535,14 +540,44 @@ class WebhookProcessor:
             jwt_token = generate_jwt(self.app_id, pem)
             inst_token = get_installation_token(jwt_token, self.installation_id)
             save_cached_token(self.installation_id, inst_token)
-        return Github(auth=Auth.Token(inst_token.token))
+        self._gh = Github(auth=Auth.Token(inst_token.token))
+        return self._gh
 
     def _get_agent_core(self) -> AgentCore:
+        """Return or lazily construct the AgentCore singleton."""
         if self._agent_core is None:
             self._agent_core = AgentCore(
-                dry_run=os.environ.get("DRY_RUN", "0") in ("1", "true", "True"),
+                gh_client=self.gh,
+                dry_run=self.dry_run,
             )
         return self._agent_core
+
+    def normalize_event_type(self, raw: dict[str, Any], headers: dict[str, str]) -> str:
+        """Resolve a canonical event name from headers and payload."""
+        event_name = headers.get("X-GitHub-Event") or headers.get("x-github-event")
+        action = raw.get("action")
+        mapping = {
+            ("pull_request", "opened"): "pull_request.opened",
+            ("pull_request", "reopened"): "pull_request.reopened",
+            ("pull_request", "synchronize"): "pull_request.synchronize",
+            ("issue_comment", "created"): "issue_comment.created",
+            (
+                "pull_request_review_comment",
+                "created",
+            ): "pull_request_review_comment.created",
+            ("pull_request_review", "submitted"): "pull_request_review.submitted",
+            ("pull_request", "review_requested"): "pull_request_review_requested",
+            ("label", "created"): "label.created",
+            ("label", "deleted"): "label.deleted",
+            ("installation", "created"): "installation.created",
+            ("installation", "deleted"): "installation.deleted",
+        }
+        if event_name and action:
+            if canonical := mapping.get((str(event_name), str(action))):
+                return canonical
+        if action:
+            return f"{event_name}.{action}"
+        return "unknown"
 
     # ---------------------------------------------------------------------------
     # Routing helpers
@@ -576,7 +611,7 @@ class WebhookProcessor:
             ("installation", "created"): "installation.created",
             ("installation", "deleted"): "installation.deleted",
         }
-        key = (event_name, action)
+        key = (str(event_name or ""), str(action or ""))
         if canonical := mapping.get(key):
             return canonical
         if action:
@@ -741,12 +776,10 @@ class WebhookProcessor:
 
             raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
             pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
+            merged_at_val = pr_data.get("merged_at") if isinstance(pr_data, dict) else None
             is_merged = (
                 pr_data.get("merged") is True
-                or (
-                    isinstance(pr_data.get("merged_at"), str)
-                    and bool(pr_data.get("merged_at").strip())
-                )
+                or (isinstance(merged_at_val, str) and bool(merged_at_val.strip()))
                 if isinstance(pr_data, dict)
                 else False
             )

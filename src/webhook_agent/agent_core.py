@@ -32,7 +32,7 @@ class AgentCore:
     Delegates planning and execution to the ADK-powered WebhookAgent.
     """
 
-    def __init__(self, gh_client=None, dry_run: bool = False, planner=None):
+    def __init__(self, gh_client: Any = None, dry_run: bool = False, planner: Any = None) -> None:
         # gh_client is optional so a long-lived AgentCore can be constructed
         # once and reused while callers supply a fresh GitHub client per-call.
         self.gh = gh_client
@@ -45,7 +45,7 @@ class AgentCore:
         event_data: dict[str, Any],
         repo_full_name: str,
         trace_id: str | None = None,
-        gh_client=None,
+        gh_client: Any = None,
     ) -> list[ActionResult]:
         """Process a normalized event through the ADK-powered agent.
 
