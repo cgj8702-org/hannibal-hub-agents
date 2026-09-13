@@ -41,32 +41,56 @@ async def test_before_agent_callback() -> None:
 @pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from logic.rate_limiter import rpm_waiter
+
     ctx = MagicMock()
     ctx.state = {"active_tier": "free"}
-    ctx.agent.model = "gemini-2.5-flash"
+    ctx.agent.model = "gemini-3.5-flash-lite"
 
     req = MagicMock()
     req.contents = "test content"
-    req.model = "gemini-2.5-flash"
+    req.model = "gemini-3.5-flash-lite"
+
+    mock_check = AsyncMock()
+    monkeypatch.setattr(rpm_waiter, "check_and_wait", mock_check)
 
     res = await before_model_callback(ctx, req)
     assert res is None
     assert "prompt_tokens" in ctx.state
+    assert ctx.state.get("active_model") == "gemini-3.5-flash-lite"
+    mock_check.assert_awaited_once_with(
+        model="gemini-3.5-flash-lite",
+        estimated_tokens=ctx.state["prompt_tokens"],
+        tier="free",
+    )
 
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 @pytest.mark.anyio
-async def test_after_model_callback() -> None:
+async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from logic.rate_limiter import rpm_waiter
+
     ctx = MagicMock()
-    ctx.state = {}
+    ctx.state = {"active_model": "gemini-3.5-flash-lite"}
 
     resp = MagicMock()
     resp.usage_metadata.total_token_count = 125
 
+    mock_record = AsyncMock()
+    monkeypatch.setattr(rpm_waiter, "record_actual_tokens", mock_record)
+
     res = await after_model_callback(ctx, resp)
     assert res is None
     assert ctx.state.get("total_tokens") == 125
+    mock_record.assert_awaited_once_with(
+        model="gemini-3.5-flash-lite",
+        actual_tokens=125,
+    )
 
 
 @pytest.mark.unit
