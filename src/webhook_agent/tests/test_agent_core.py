@@ -791,3 +791,42 @@ class TestGetCommitDiffBranchUpdate:
         assert "is a branch update merge commit" in res
         assert "No new PR-specific code changes were introduced." in res
         mock_repo.compare.assert_not_called()
+
+
+class TestRpmWaiterTpmCeiling:
+    def test_tpm_hard_ceiling_forces_wait(self, monkeypatch):
+        import asyncio
+
+        from logic.rate_limiter import RPMWaiter
+
+        fake_now = 1000.0
+        waiter = RPMWaiter(clock=lambda: fake_now)
+
+        # Mock registry TPM limit to 100,000 for a test model
+        waiter.model_limits = {"test-model": {"free": {"rpm": 10, "tpm": 100000, "rpd": 100.0}}}
+
+        # Pre-seed token history with finalized tokens reaching 95,000 (95% > 90% threshold)
+        norm_model = waiter._norm("test-model")
+        waiter.token_histories[norm_model] = [[fake_now - 20.0, 95000, True]]
+
+        # Intercept asyncio.sleep to check wait_time without actually sleeping
+        slept_times = []
+
+        async def mock_sleep(secs):
+            slept_times.append(secs)
+
+        monkeypatch.setattr("asyncio.sleep", mock_sleep)
+
+        # Request even a tiny 100-token estimate; hard ceiling should trigger
+        async def _run():
+            await waiter.check_and_wait(
+                model="test-model",
+                estimated_tokens=100,
+                tier="free",
+            )
+
+        asyncio.run(_run())
+
+        assert len(slept_times) == 1
+        # Expect wait for (fake_now - 20.0 + 60.0) - fake_now = 40.0s
+        assert abs(slept_times[0] - 40.0) < 0.2
