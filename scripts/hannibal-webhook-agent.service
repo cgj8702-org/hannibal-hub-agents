@@ -5,6 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/carly/hannibal-hub-agents
+Environment="PYTHONPATH=/home/carly/hannibal-hub-agents/src"
 ExecStart=/bin/bash -c 'source /home/carly/hannibal-hub-agents/scripts/load_secrets.sh && exec /home/carly/.local/bin/uv run python main.py'
 Restart=always
 RestartSec=5s
