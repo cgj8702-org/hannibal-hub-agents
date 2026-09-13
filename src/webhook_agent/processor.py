@@ -26,6 +26,7 @@ from github import Auth, Github
 
 from .agent_core import AgentCore
 from .bot_identity import _is_bot_event
+from .cancellation import pr_closed_registry
 from .formatter import (
     truncate_log_payload,
 )
@@ -148,11 +149,33 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         elif "issue" in raw and isinstance(raw["issue"], dict) and raw["issue"].get("pull_request"):
             pr_number = raw["issue"].get("number")
 
-        if not pr_number:
+        try:
+            pr_num_int = int(pr_number)
+        except (TypeError, ValueError):
             return
 
         repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
+        pr = repo.get_pull(pr_num_int)
+
+        # Check live PR state: if closed or merged, register in pr_closed_registry
+        raw_state = getattr(pr, "state", None)
+        pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
+        is_merged = getattr(pr, "merged", None) is True
+        if pr_state == "closed" or is_merged:
+            pr_closed_registry.mark_closed(repo_name, pr_num_int)
+            if "pull_request" in raw and isinstance(raw["pull_request"], dict):
+                raw["pull_request"]["state"] = "closed"
+                raw["pull_request"]["merged"] = True
+            elif "issue" in raw and isinstance(raw["issue"], dict):
+                raw["issue"]["state"] = "closed"
+            logger.info(
+                "🔒 Live GitHub check: PR %s#%d is closed or merged (state=%s, merged=%s); registered as closed",
+                repo_name,
+                pr_num_int,
+                pr_state,
+                is_merged,
+            )
+            return
 
         diff_lines: list[str] = []
         for f in pr.get_files():
@@ -163,7 +186,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             raw["pr_diff"] = "\n".join(diff_lines)
             logger.info(
                 "Pre-fetched PR #%d diff (%d files) for 1-turn review",
-                pr_number,
+                pr_num_int,
                 len(diff_lines),
             )
 
@@ -546,6 +569,8 @@ class WebhookProcessor:
     @property
     def gh(self) -> Github:
         """Return an authenticated Github client, creating or loading cached installation token."""
+        if getattr(self, "_gh", None) is not None:
+            return self._gh
         inst_token = load_cached_token(self.installation_id)
         if inst_token is None:
             pem = load_private_key(self.private_key_path)
@@ -569,6 +594,8 @@ class WebhookProcessor:
 
         Handles unknown events gracefully.
         """
+        if ev.get("canonical"):
+            return str(ev["canonical"])
         event_name = ev.get("event_name")
         action = ev.get("action")
         if event_name == "ping":
@@ -735,6 +762,48 @@ class WebhookProcessor:
             _prefetch_commit_history(gh, repo_name, payload)
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
             _preexecute_implement_command(gh, repo_name, payload)
+
+        # Short-circuit if target PR is closed or merged
+        raw = payload.get("raw_payload") or {}
+        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+        canonical = payload.get("canonical", "")
+        is_pr_event = bool(pr_data) or canonical.startswith(
+            ("pull_request.", "pull_request_review", "pull_request_review_comment.")
+        )
+        pr_number = (
+            pr_data.get("number")
+            if isinstance(pr_data, dict)
+            else (raw.get("issue") or {}).get("number")
+        )
+
+        if is_pr_event and pr_number is not None:
+            try:
+                pr_num_int = int(pr_number)
+            except (TypeError, ValueError):
+                pr_num_int = None
+
+            raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
+            pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
+            is_merged = (
+                pr_data.get("merged") is True
+                or (
+                    isinstance(pr_data.get("merged_at"), str)
+                    and bool(pr_data.get("merged_at").strip())
+                )
+                if isinstance(pr_data, dict)
+                else False
+            )
+            if (
+                pr_state == "closed"
+                or is_merged
+                or (pr_num_int is not None and pr_closed_registry.is_closed(repo_name, pr_num_int))
+            ):
+                logger.info(
+                    "🔒 PR %s#%s is closed or merged; skipping agent execution.",
+                    repo_name,
+                    pr_number,
+                )
+                return
 
         results = agent.run(payload, repo_name, gh_client=gh)
         if results:
