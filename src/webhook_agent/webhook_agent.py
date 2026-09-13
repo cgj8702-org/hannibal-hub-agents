@@ -37,6 +37,10 @@ from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
 from webhook_agent.logic.model_factory import RateLimitedGemini, get_adk_model
+from webhook_agent.logic.plugins import (
+    ToolOutputPruningPlugin,
+    WebhookHistoryPruningPlugin,
+)
 from webhook_agent.logic.rate_limiter import (
     _resolve_tier,
     extract_rate_limit_details,
@@ -48,6 +52,7 @@ from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
 from .callbacks import (
     after_model_callback,
+    after_tool_callback,
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
@@ -143,9 +148,9 @@ def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
     loop = _ensure_bg_loop()
     future: Future[Any] = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
-        # Wait for result; use a reasonably long timeout to avoid hanging
-        # the caller indefinitely if the remote model call stalls.
-        return future.result(timeout=300)
+        # Wait for result; use a 600s timeout to allow complex multi-step reasoning
+        # and rate-limiter pauses without prematurely failing the delivery.
+        return future.result(timeout=600)
     except CancelledError:
         raise
     except Exception:
@@ -1780,6 +1785,7 @@ class WebhookAgent:
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
             before_tool_callback=before_tool_callback,
+            after_tool_callback=after_tool_callback,
             on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
@@ -1835,6 +1841,9 @@ Clean dev/docs PRs return risks: [].
             ],
         )
 
+        self._history_pruning_plugin = WebhookHistoryPruningPlugin(max_events=12)
+        self._tool_pruning_plugin = ToolOutputPruningPlugin()
+
         self._app = App(
             name=self._app_name,
             root_agent=self._agent,
@@ -1843,6 +1852,10 @@ Clean dev/docs PRs return risks: [].
                 ttl_seconds=1800,
                 cache_intervals=10,
             ),
+            plugins=[
+                self._history_pruning_plugin,
+                self._tool_pruning_plugin,
+            ],
         )
 
         # Create the runner
@@ -2303,16 +2316,6 @@ Clean dev/docs PRs return risks: [].
         final_session = None
 
         async def _execute_agent() -> None:
-            # Apply dynamic sliding-window rate limiting (RPM/TPM aware per tier)
-            msg_text = (
-                getattr(user_message.parts[0], "text", "") or "" if user_message.parts else ""
-            )
-            est_tokens = len(msg_text) // 4 + 500
-            await rpm_waiter.check_and_wait(
-                model=self._current_model_name,
-                estimated_tokens=est_tokens,
-            )
-
             async for event in self._runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
