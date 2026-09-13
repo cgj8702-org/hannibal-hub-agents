@@ -2001,14 +2001,6 @@ Clean dev/docs PRs return risks: [].
                     "Do NOT invent or backfill resolved items."
                 )
 
-        # Include pre-processed /implement instruction if available
-        if "implement_instruction" in raw:
-            parts.append(
-                f"\nPre-Processed /implement Command:\n{raw['implement_instruction']}\n"
-                f"INSTRUCTION: Call tool 'auto_implement_issue_feature' to autonomously build "
-                f"and open a PR for this feature using FEATURE_AGENT_FREE_KEY in an isolated worktree."
-            )
-
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(
             text, max_tokens=get_max_input_tokens(), label="User payload"
