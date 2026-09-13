@@ -1376,6 +1376,27 @@ def _enforce_verdict(
                 if "resolutions" in data or ("summary" in data and "executive_summary" not in data):
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+
+                    # Programmatic hallucination guard: clear resolutions if no prior review
+                    # had actionable CHANGES_REQUESTED items
+                    if pr is not None and sync_obj.resolutions:
+                        try:
+                            prior_had_changes = any(
+                                getattr(r, "state", "") == "CHANGES_REQUESTED"
+                                for r in pr.get_reviews()
+                                if (getattr(getattr(r, "user", None), "login", "") or "")
+                                .lower()
+                                .startswith("hannibal-hub-agents")
+                            )
+                            if not prior_had_changes:
+                                logger.warning(
+                                    "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior CHANGES_REQUESTED reviews exist)",
+                                    len(sync_obj.resolutions),
+                                )
+                                sync_obj.resolutions = []
+                        except Exception as guard_err:
+                            logger.debug("Resolution guard check failed: %s", guard_err)
+
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
