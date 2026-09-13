@@ -67,11 +67,15 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
             return
 
         if canonical.startswith("issue_comment."):
+            issue_data = raw.get("issue", {})
+            pr_data = raw.get("pull_request", {})
+            issue_num = issue_data.get("number") or pr_data.get("number")
             comment_data = raw.get("comment", {})
             comment_id = comment_data.get("id")
-            if comment_id:
+            if issue_num and comment_id:
                 repo = gh.get_repo(repo_name)
-                comment = repo.get_issue_comment(int(comment_id))
+                issue = repo.get_issue(int(issue_num))
+                comment = issue.get_comment(int(comment_id))
                 comment.create_reaction("eyes")
         elif canonical.startswith("pull_request_review_comment."):
             pr_data = raw.get("pull_request", {})
