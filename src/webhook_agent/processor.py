@@ -436,13 +436,17 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         except Exception:
             return
 
+        canonical = payload.get("canonical", "")
+        action = raw.get("action")
+        is_synchronize = canonical == "pull_request.synchronize" or action == "synchronize"
+
         bot_reviews: list[str] = []
         for r in pr.get_reviews():
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
             if "hannibal-hub-agents" in login or login.endswith("[bot]"):
                 state = getattr(r, "state", "COMMENT")
-                if state == "APPROVED":
+                if state == "APPROVED" and is_synchronize:
                     try:
                         r.dismiss("Superseded by new commit push to PR branch.")
                         logger.info(

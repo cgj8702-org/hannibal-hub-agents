@@ -922,6 +922,37 @@ class TestBaseBranchMergeSync:
         assert "previous_bot_reviews" not in payload["raw_payload"]
         mock_review.dismiss.assert_not_called()
 
+    def test_prefetch_previous_bot_reviews_preserves_approval_on_pr_edited(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.processor import _prefetch_previous_bot_reviews
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = mock_repo.get_pull.return_value
+
+        mock_review = MagicMock()
+        mock_review.user.login = "hannibal-hub-agents[bot]"
+        mock_review.state = "APPROVED"
+        mock_review.body = "LGTM! Ready to merge."
+        mock_pr.get_reviews.return_value = [mock_review]
+
+        payload = {
+            "canonical": "pull_request.edited",
+            "raw_payload": {
+                "action": "edited",
+                "pull_request": {
+                    "number": 135,
+                    "head": {"sha": "c199559", "ref": "fix/proactive-sweep-and-logging-noise"},
+                    "base": {"ref": "main", "sha": "07977df"},
+                },
+            },
+        }
+
+        _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
+        assert "previous_bot_reviews" in payload["raw_payload"]
+        mock_review.dismiss.assert_not_called()
+
     def test_process_event_suppresses_base_branch_merge_sync(self, caplog):
         import logging
         from unittest.mock import MagicMock, patch
