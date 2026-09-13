@@ -1725,7 +1725,12 @@ class WebhookAgent:
             name="pr_router",
             model=model_instance,
             description="Inspects modified files and classifies PR scope (dev_docs, minor_fix, core_backend).",
-            instruction="Analyze the PR diff and modified file list. Classify scope into dev_docs, minor_fix, or core_backend.",
+            instruction=(
+                "Analyze the PR diff and modified file list. "
+                "Classify scope into exactly one of: dev_docs, minor_fix, or core_backend. "
+                "Output only the classification name."
+            ),
+            output_key="pr_scope",
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
         )
@@ -1735,6 +1740,7 @@ class WebhookAgent:
             model=model_instance,
             description="Conducts AST diff-grounded risk audit using Gemini Thinking Mode.",
             instruction=SYSTEM_INSTRUCTION,
+            output_key="code_review_analysis",
             planner=BuiltInPlanner(
                 thinking_config=genai_types.ThinkingConfig(
                     include_thoughts=True,
@@ -1769,9 +1775,22 @@ class WebhookAgent:
         self._verdict_agent = LlmAgent(
             name="verdict_agent",
             model=model_instance,
+            include_contents="none",
             description="Produces structured AuditVerdict JSON output.",
-            instruction="Synthesize audit findings into an AuditVerdict structured JSON payload. Clean dev/docs PRs return risks: [].",
+            instruction="""You are the Chief Auditor synthesizing final verdicts for Pull Requests.
+Evaluate the classified PR scope and the code auditor's technical findings:
+
+### PR Scope
+{pr_scope}
+
+### Audit Analysis & Findings
+{code_review_analysis}
+
+Synthesize these findings into an AuditVerdict structured JSON payload matching the schema.
+Clean dev/docs PRs return risks: [].
+""",
             output_schema=AuditVerdict,
+            output_key="audit_verdict",
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
         )
@@ -2220,6 +2239,7 @@ class WebhookAgent:
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
         emitted_texts: list[str] = []
+        final_session = None
 
         async def _execute_agent():
             # Apply dynamic sliding-window rate limiting (RPM/TPM aware per tier)
@@ -2284,7 +2304,7 @@ class WebhookAgent:
                             )
 
         async def _run():
-            nonlocal results
+            nonlocal results, final_session
             last_error = None
 
             # Try with retry and optional fallback model
@@ -2352,6 +2372,13 @@ class WebhookAgent:
 
                     # Execute the ADK runner with current model
                     await _execute_agent()
+
+                    # Fetch the final session state with all sub-agent output_key updates
+                    final_session = await self._session_service.get_session(
+                        app_name=self._app_name,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
                     return  # Success - exit the retry loop
 
                 except Exception as e:
@@ -2440,8 +2467,8 @@ class WebhookAgent:
         # for completion synchronously.
         run_in_bg_loop(_run())
 
-        # Programmatic review fallback: if no review tool was called during a PR review event,
-        # but text critique/scorecard was produced, post the review programmatically.
+        # Deterministic review submission: if no review tool was called during a PR review event,
+        # extract structured audit state from ADK session or emitted texts, and enforce verdict.
         canonical = event_data.get("canonical", "")
         raw = event_data.get("raw_payload", {})
         comment_body = (
@@ -2453,19 +2480,41 @@ class WebhookAgent:
         )
         has_review_action = any(r.tool == "review" for r in results)
 
-        if is_pr_review_event and not has_review_action and emitted_texts:
-            full_text = "\n\n".join(emitted_texts)
-            is_review_content = (
-                "Scorecard" in full_text
-                or "| Category |" in full_text
-                or "Verdict:" in full_text
-                or '"verdict"' in full_text
-                or '"executive_summary"' in full_text
-                or '"critical_issues"' in full_text
-                or '"resolutions"' in full_text
-                or "Code Review" in full_text
-            )
-            if is_review_content:
+        if is_pr_review_event and not has_review_action:
+            # 1. Safely extract review payload from session state or emitted text
+            review_payload = ""
+            if final_session and final_session.state:
+                raw_verdict = final_session.state.get("audit_verdict")
+                raw_analysis = final_session.state.get("code_review_analysis")
+
+                if raw_verdict:
+                    if hasattr(raw_verdict, "model_dump_json"):
+                        review_payload = raw_verdict.model_dump_json()
+                    elif isinstance(raw_verdict, dict):
+                        import json
+
+                        review_payload = json.dumps(raw_verdict)
+                    else:
+                        review_payload = str(raw_verdict)
+                elif raw_analysis:
+                    review_payload = str(raw_analysis)
+
+            if not review_payload and emitted_texts:
+                full_text = "\n\n".join(emitted_texts)
+                is_review_content = (
+                    "Scorecard" in full_text
+                    or "| Category |" in full_text
+                    or "Verdict:" in full_text
+                    or '"verdict"' in full_text
+                    or '"executive_summary"' in full_text
+                    or '"critical_issues"' in full_text
+                    or '"resolutions"' in full_text
+                    or "Code Review" in full_text
+                )
+                if is_review_content:
+                    review_payload = full_text
+
+            if review_payload:
                 pr_number = None
                 if isinstance(raw, dict):
                     pr_number = (raw.get("pull_request") or {}).get("number") or (
@@ -2477,7 +2526,7 @@ class WebhookAgent:
                         repo = gh_client.get_repo(repo_full_name)
                         pr = repo.get_pull(pr_number)
                         body, enforced_event, inline_comments = _enforce_verdict(
-                            full_text, "COMMENT", pr
+                            review_payload, "COMMENT", pr
                         )
                         try:
                             if inline_comments:
@@ -2491,28 +2540,29 @@ class WebhookAgent:
                         except Exception as fb_err:
                             if inline_comments:
                                 logger.warning(
-                                    "Programmatic fallback review with inline comments failed (%s); falling back to body-only review",
+                                    "Review with inline comments failed (%s); falling back to body-only review",
                                     fb_err,
                                 )
                                 rv = pr.create_review(body=body, event=enforced_event)
                             else:
                                 raise
+
                         detail = getattr(rv, "html_url", str(rv))
                         results.append(
                             ActionResult(
                                 tool="review",
                                 success=True,
-                                detail=f"Programmatic fallback review ({enforced_event}): {detail}",
+                                detail=f"Deterministic review submitted ({enforced_event}): {detail}",
                             )
                         )
                         logger.info(
-                            "Programmatic fallback review submitted for PR #%d (%s)",
+                            "Deterministic review submitted for PR #%d (%s)",
                             pr_number,
                             enforced_event,
                         )
                     except Exception as fallback_err:
                         logger.warning(
-                            "Programmatic fallback review submission failed: %s",
+                            "Deterministic review submission failed: %s",
                             fallback_err,
                         )
 

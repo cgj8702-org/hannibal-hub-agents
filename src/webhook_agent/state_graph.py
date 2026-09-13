@@ -138,3 +138,20 @@ class ADKStateGraph:
             state = self.auditor.process(state, audit_dict)
             state = self.normalizer.process(state)
         return state
+
+    def evaluate_preflight(
+        self,
+        canonical: str,
+        repo_name: str,
+        raw_payload: dict[str, Any],
+    ) -> GraphState:
+        """Run pre-flight routing, hydration, and proactive rule evaluation."""
+        state = GraphState(
+            canonical=canonical,
+            repo_name=repo_name,
+            raw_payload=raw_payload,
+        )
+        state = self.router.process(state)
+        state = self.hydration.process(state)
+        state = self.evaluator.process(state)
+        return state
