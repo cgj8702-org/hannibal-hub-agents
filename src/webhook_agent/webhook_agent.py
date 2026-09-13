@@ -2455,7 +2455,17 @@ class WebhookAgent:
 
         if is_pr_review_event and not has_review_action and emitted_texts:
             full_text = "\n\n".join(emitted_texts)
-            if "Scorecard" in full_text or "| Category |" in full_text or "Verdict:" in full_text:
+            is_review_content = (
+                "Scorecard" in full_text
+                or "| Category |" in full_text
+                or "Verdict:" in full_text
+                or '"verdict"' in full_text
+                or '"executive_summary"' in full_text
+                or '"critical_issues"' in full_text
+                or '"resolutions"' in full_text
+                or "Code Review" in full_text
+            )
+            if is_review_content:
                 pr_number = None
                 if isinstance(raw, dict):
                     pr_number = (raw.get("pull_request") or {}).get("number") or (
