@@ -142,14 +142,26 @@ def main() -> int:
                     "cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents",
                 )
                 target_repos = [r.strip() for r in repos_env.split(",") if r.strip()]
-                for repo_name in target_repos:
-                    evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                    sweep_thread = threading.Thread(
-                        target=evaluator.evaluate_open_prs,
-                        name=f"ProactiveSweep-{repo_name.split('/')[-1]}",
-                        daemon=True,
-                    )
-                    sweep_thread.start()
+
+                def _run_sweeps(repos: list[str]) -> None:
+                    for repo_name in repos:
+                        try:
+                            evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                            evaluator.evaluate_open_prs()
+                        except Exception as sweep_err:
+                            logger.warning(
+                                "Proactive sweep error for %s: %s",
+                                repo_name,
+                                sweep_err,
+                            )
+
+                sweep_thread = threading.Thread(
+                    target=_run_sweeps,
+                    args=(target_repos,),
+                    name="ProactiveSweepWorker",
+                    daemon=True,
+                )
+                sweep_thread.start()
             except Exception as exc:
                 logger.warning("Proactive background sweep skipped/failed: %s", exc)
 
