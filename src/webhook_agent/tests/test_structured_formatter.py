@@ -519,6 +519,16 @@ def test_calculate_sync_verdict_respects_explicit_verdict_and_unaddressed_summar
     )
     assert calculate_sync_verdict(sync_summary) == "REQUEST_CHANGES"
 
+    # Test negated blocking keywords does NOT force REQUEST_CHANGES
+    sync_negated = SyncReviewResponse(
+        summary="Updated PR guidelines with no blocking action items.",
+        confidence=5,
+        resolutions=[],
+        critical_issues=[],
+        minor_suggestions=[],
+    )
+    assert calculate_sync_verdict(sync_negated) == "APPROVE"
+
 
 def test_format_suggestion_body_with_code():
     from webhook_agent.comment_poster import format_suggestion_body

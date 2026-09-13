@@ -25,6 +25,29 @@ BREAKING_RISK_KEYWORDS = (
     "breaking change",
 )
 
+SUMMARY_RISK_KEYWORDS = (
+    "unaddressed",
+    "unresolved",
+    "must fix",
+    "blocking",
+    *BREAKING_RISK_KEYWORDS,
+)
+
+
+def has_genuine_summary_risk(summary: str | None) -> bool:
+    """Check if summary mentions blocking or unaddressed risks without negation."""
+    if not summary:
+        return False
+    summary_lower = summary.lower()
+    for kw in SUMMARY_RISK_KEYWORDS:
+        if kw in summary_lower:
+            # Check if this keyword is negated (e.g. "no blocking", "no unresolved", "without blocking", "not blocking")
+            negation_pattern = rf"\b(?:no|none|not|without|zero)\s+[\w\s]{{0,25}}\b{re.escape(kw)}"
+            if re.search(negation_pattern, summary_lower):
+                continue
+            return True
+    return False
+
 
 def truncate_log_payload(val: Any, max_length: int = 300) -> str:
     """Truncate long string representations (diffs, JSON, tool output) for clean Cloud Logging output."""
@@ -461,20 +484,10 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         clean_crit.append(issue_dict)
 
     # Synthesize critical issue if verdict is explicitly REQUEST_CHANGES or unaddressed items flagged
-    summary_lower = normalized["summary"].lower()
     if (
         (
             normalized.get("verdict") == "REQUEST_CHANGES"
-            or any(
-                kw in summary_lower
-                for kw in (
-                    "unaddressed",
-                    "unresolved",
-                    "must fix",
-                    "blocking",
-                    *BREAKING_RISK_KEYWORDS,
-                )
-            )
+            or has_genuine_summary_risk(normalized["summary"])
         )
         and not clean_crit
         and not [r for r in clean_res if r.get("status") == "UNRESOLVED"]
@@ -509,9 +522,11 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
     - Confidence < 4 or explicit review.verdict == "COMMENT" -> COMMENT
     - 0 critical issues, confidence >= 4 -> APPROVE
     """
-    if len(review.critical_issues) > 0:
+    has_critical = len(review.critical_issues) > 0
+
+    if has_critical:
         logger.info(
-            "Mechanical verdict: REQUEST_CHANGES (critical_issues=%d)",
+            "Mechanical verdict: REQUEST_CHANGES (%d critical issues)",
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
@@ -520,26 +535,17 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
         logger.info("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
 
-    for item in review.risks_and_edge_cases:
-        r_text = (item.risk or "").lower()
-        rec_text = (item.recommendation or "").lower()
-        if any(kw in r_text or kw in rec_text for kw in BREAKING_RISK_KEYWORDS):
-            logger.info(
-                "Mechanical verdict: REQUEST_CHANGES (breaking risk detected: %s)",
-                item.risk,
-            )
+    for r in review.risks_and_edge_cases:
+        desc = (r.risk + " " + r.recommendation).lower()
+        if any(kw in desc for kw in BREAKING_RISK_KEYWORDS):
+            logger.info("Mechanical verdict: REQUEST_CHANGES (breaking risk flagged: %s)", r.risk)
             return "REQUEST_CHANGES"
 
-    summary_lower = (review.executive_summary or "").lower()
-    if any(kw in summary_lower for kw in BREAKING_RISK_KEYWORDS):
-        logger.info("Mechanical verdict: REQUEST_CHANGES (breaking risk in executive summary)")
-        return "REQUEST_CHANGES"
-
     if getattr(review, "verdict", None) == "COMMENT":
-        logger.info(
-            "Mechanical verdict: COMMENT (explicit_verdict=%s)",
-            getattr(review, "verdict", None),
-        )
+        return "COMMENT"
+
+    if review.confidence is not None and review.confidence < 4:
+        logger.info("Mechanical verdict: COMMENT (confidence=%d < 4)", review.confidence)
         return "COMMENT"
 
     logger.info("Mechanical verdict: APPROVE (0 critical issues)")
@@ -572,17 +578,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
         logger.info("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
 
-    summary_lower = (review.summary or "").lower()
-    if any(
-        kw in summary_lower
-        for kw in (
-            "unaddressed",
-            "unresolved",
-            "must fix",
-            "blocking",
-            *BREAKING_RISK_KEYWORDS,
-        )
-    ):
+    if has_genuine_summary_risk(review.summary):
         logger.info("Sync verdict: REQUEST_CHANGES (blocking issue noted in sync summary)")
         return "REQUEST_CHANGES"
 
