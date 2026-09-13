@@ -14,7 +14,7 @@ from google.adk.agents import BaseAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.plugins import BasePlugin
 
-logger = logging.getLogger("logic.analytics")
+logger = logging.getLogger("webhook_agent.logic.analytics")
 
 
 class CloudLoggingAnalyticsPlugin(BasePlugin):

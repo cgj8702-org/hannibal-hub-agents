@@ -18,10 +18,7 @@ from typing import Any
 
 from google.genai import Client
 
-try:
-    from logic.rate_limiter import _resolve_tier, rpm_waiter
-except ImportError:
-    from src.logic.rate_limiter import _resolve_tier, rpm_waiter
+from webhook_agent.logic.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.resolve_conflicts")
 
@@ -58,10 +55,7 @@ def _synthesize_conflict_resolution(
     try:
         from webhook_agent.webhook_agent import run_in_bg_loop
     except ImportError:
-        try:
-            from src.webhook_agent.webhook_agent import run_in_bg_loop
-        except ImportError:
-            run_in_bg_loop = None
+        run_in_bg_loop = None
 
     if run_in_bg_loop is not None:
         try:
@@ -311,20 +305,11 @@ def resolve_merge_conflicts(
 
                 genai_client = get_shared_genai_client()
             except Exception:
-                try:
-                    from src.webhook_agent.webhook_agent import (
-                        get_shared_genai_client,
-                    )
-
-                    genai_client = get_shared_genai_client()
-                except Exception:
-                    pass
+                pass
 
         if genai_client is None:
-            try:
-                from logic.rate_limiter import get_active_api_key
-            except ImportError:
-                from src.logic.rate_limiter import get_active_api_key
+            from webhook_agent.logic.rate_limiter import get_active_api_key
+
             active_key = get_active_api_key()
             if active_key:
                 try:

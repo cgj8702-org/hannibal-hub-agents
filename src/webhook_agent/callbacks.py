@@ -19,10 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import BaseTool, ToolContext
 
-try:
-    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-except ImportError:
-    from src.logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
+from webhook_agent.logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.callbacks")
 

@@ -67,7 +67,7 @@ class FirestoreDepletedModelRegistry:
         self, model_name: str, error: Exception | None = None, key_alias: str = ""
     ) -> None:
         """Mark a model (and optional key alias) as depleted across memory and Firestore."""
-        from logic.rate_limiter import extract_rate_limit_details
+        from webhook_agent.logic.rate_limiter import extract_rate_limit_details
 
         cooldown = self.default_cooldown
         metric_type = "DEFAULT (1h)"

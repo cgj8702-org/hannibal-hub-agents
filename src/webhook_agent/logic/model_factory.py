@@ -13,20 +13,13 @@ from typing import Any
 
 from google.adk.models import Gemini
 
-try:
-    from logic.rate_limiter import (
-        _resolve_tier,
-        get_active_api_key,
-        rpm_waiter,
-    )
-except ImportError:
-    from src.logic.rate_limiter import (
-        _resolve_tier,
-        get_active_api_key,
-        rpm_waiter,
-    )
+from webhook_agent.logic.rate_limiter import (
+    _resolve_tier,
+    get_active_api_key,
+    rpm_waiter,
+)
 
-logger = logging.getLogger("logic.model_factory")
+logger = logging.getLogger("webhook_agent.logic.model_factory")
 
 
 class RateLimitedGemini(Gemini):

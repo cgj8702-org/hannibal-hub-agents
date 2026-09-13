@@ -504,7 +504,7 @@ class WebhookProcessor:
         # Load essential GitHub credentials from the environment.
         # Empty env vars (e.g. from a failed secret resolution) are treated as
         # unset so the worker fails with a clear error instead of int('') crashing.
-        from logic.constants import (
+        from webhook_agent.logic.constants import (
             DEFAULT_GITHUB_APP_ID,
             DEFAULT_GITHUB_INSTALLATION_ID,
         )

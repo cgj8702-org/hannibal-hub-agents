@@ -66,7 +66,7 @@ def publish_dead_letter(
 
 def setup_cloud_logging() -> None:
     """Initialize Google Cloud Logging handler if available."""
-    from logic.constants import DEFAULT_PUBSUB_PROJECT
+    from webhook_agent.logic.constants import DEFAULT_PUBSUB_PROJECT
 
     try:
         import google.cloud.logging
@@ -92,7 +92,7 @@ def setup_cloud_logging() -> None:
 # Main entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
-    from logic.constants import (
+    from webhook_agent.logic.constants import (
         DEFAULT_PUBSUB_DEAD_LETTER_TOPIC,
         DEFAULT_PUBSUB_PROJECT,
         DEFAULT_PUBSUB_SUBSCRIPTION,

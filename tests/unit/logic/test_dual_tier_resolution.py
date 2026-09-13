@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.logic.rate_limiter import (
+from webhook_agent.logic.rate_limiter import (
     get_allowed_models,
     resolve_webhook_api_key,
 )

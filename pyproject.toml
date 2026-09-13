@@ -93,7 +93,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["webhook_agent", "logic"]
+known-first-party = ["webhook_agent"]
 
 [tool.ruff.lint.per-file-ignores]
 ".agents/**" = ["F821", "T201"]
@@ -127,10 +127,16 @@ strict_optional = true
 [[tool.mypy.overrides]]
 module = [
     "webhook_agent.*",
-    "logic.*",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "webhook_agent.tests.*",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 # --- Library Overrides ---
 # These libraries lack type stubs or have complex C-extensions

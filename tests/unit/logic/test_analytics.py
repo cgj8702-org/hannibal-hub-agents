@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.logic.analytics import CloudLoggingAnalyticsPlugin
+from webhook_agent.logic.analytics import CloudLoggingAnalyticsPlugin
 
 pytestmark = [pytest.mark.unit]
 
@@ -18,7 +18,7 @@ def test_cloud_logging_analytics_plugin_callbacks() -> None:
     mock_context.state = {}
     mock_context.session_id = "test_session_123"
 
-    with patch("src.logic.analytics.logger.info") as mock_log:
+    with patch("webhook_agent.logic.analytics.logger.info") as mock_log:
         plugin.before_agent_callback(mock_agent, mock_context)
         assert f"__start_time_{mock_agent.name}" in mock_context.state
 
@@ -38,13 +38,13 @@ def test_cloud_logging_analytics_model_and_tool_callbacks() -> None:
     mock_llm.model = "gemini-3.5-flash-lite"
     mock_llm.contents = "sample prompt content"
 
-    with patch("src.logic.analytics.logger.info") as mock_log:
+    with patch("webhook_agent.logic.analytics.logger.info") as mock_log:
         plugin.before_model_callback(mock_context, mock_llm)
         mock_log.assert_called_once()
         assert "Model request to '%s'" in mock_log.call_args[0][0]
         assert mock_log.call_args[0][1] == "gemini-3.5-flash-lite"
 
-    with patch("src.logic.analytics.logger.info") as mock_log:
+    with patch("webhook_agent.logic.analytics.logger.info") as mock_log:
         plugin.after_tool_callback("search_codebase", {}, mock_context, {"result": "ok"})
         mock_log.assert_called_once()
         assert "Tool '%s' executed" in mock_log.call_args[0][0]

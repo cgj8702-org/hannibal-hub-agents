@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 
-logger = logging.getLogger("logic.secret_manager")
+logger = logging.getLogger("webhook_agent.logic.secret_manager")
 
 _SECRET_CACHE: dict[str, str] = {}
 

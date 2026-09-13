@@ -20,6 +20,7 @@ import threading
 import time
 from concurrent.futures import CancelledError
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from github import Github
@@ -30,6 +31,14 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
+
+from webhook_agent.logic.model_factory import RateLimitedGemini, get_adk_model
+from webhook_agent.logic.rate_limiter import (
+    _resolve_tier,
+    extract_rate_limit_details,
+    get_active_api_key,
+    rpm_waiter,
+)
 
 from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
@@ -80,23 +89,6 @@ def calculate_verdict(
             return "REQUEST_CHANGES"
     return "APPROVE"
 
-
-try:
-    from logic.model_factory import RateLimitedGemini, get_adk_model
-    from logic.rate_limiter import (
-        _resolve_tier,
-        extract_rate_limit_details,
-        get_active_api_key,
-        rpm_waiter,
-    )
-except ImportError:
-    from src.logic.model_factory import RateLimitedGemini, get_adk_model
-    from src.logic.rate_limiter import (
-        _resolve_tier,
-        extract_rate_limit_details,
-        get_active_api_key,
-        rpm_waiter,
-    )
 
 __all__ = [
     "RateLimitedGemini",
@@ -293,7 +285,7 @@ def _truncate_input_for_tier(
     return text[: max_chars - len(truncated_msg)] + truncated_msg
 
 
-# RateLimitedGemini is imported from logic.model_factory above
+# RateLimitedGemini is imported from webhook_agent.logic.model_factory above
 
 
 # ---------------------------------------------------------------------------
@@ -301,15 +293,17 @@ def _truncate_input_for_tier(
 # ---------------------------------------------------------------------------
 
 
+def _load_prompt_template(filename: str) -> str:
+    """Load prompt template from local templates directory."""
+    template_path = Path(__file__).parent / "templates" / filename
+    if template_path.exists():
+        return template_path.read_text(encoding="utf-8")
+    return ""
+
+
 def _load_template(filename: str) -> str:
-    """Load a template file from the templates directory."""
-    template_path = os.path.join(os.path.dirname(__file__), "templates", filename)
-    try:
-        with open(template_path, encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        logger.warning("Template not found at %s", template_path)
-        return ""
+    """Load a template file from the templates directory (backward compatibility)."""
+    return _load_prompt_template(filename)
 
 
 def _sanitize_pr_body(body: str) -> str:
@@ -541,7 +535,7 @@ class DepletedModelRegistry:
 
 
 try:
-    from logic.firestore_registry import (
+    from webhook_agent.logic.firestore_registry import (
         firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
     )
 except ImportError:
