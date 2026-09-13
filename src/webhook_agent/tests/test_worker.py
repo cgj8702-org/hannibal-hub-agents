@@ -613,8 +613,10 @@ class TestAddEyesReaction:
         _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
         mock_gh.get_repo.assert_called_once_with("owner/repo")
-        mock_repo.get_issue_comment.assert_called_once_with(101)
-        mock_repo.get_issue_comment.return_value.create_reaction.assert_called_once_with("eyes")
+        mock_issue = mock_repo.get_issue.return_value
+        mock_repo.get_issue.assert_called_once_with(42)
+        mock_issue.get_comment.assert_called_once_with(101)
+        mock_issue.get_comment.return_value.create_reaction.assert_called_once_with("eyes")
 
     def test_adds_reaction_to_pr_review_comment(self):
         from unittest.mock import MagicMock
