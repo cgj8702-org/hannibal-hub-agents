@@ -24,11 +24,14 @@ from pathlib import Path
 from typing import Any
 
 from github import Github
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 from google.adk.agents.context import Context
+from google.adk.agents.context_cache_config import ContextCacheConfig
+from google.adk.apps import App
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
@@ -1754,6 +1757,7 @@ class WebhookAgent:
                 "Output only the classification name."
             ),
             output_key="pr_scope",
+            before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
         )
@@ -1770,6 +1774,7 @@ class WebhookAgent:
                     thinking_budget=-1,
                 )
             ),
+            before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
             before_tool_callback=before_tool_callback,
@@ -1814,20 +1819,29 @@ Clean dev/docs PRs return risks: [].
 """,
             output_schema=AuditVerdict,
             output_key="audit_verdict",
+            before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
         )
 
-        self._agent = SequentialAgent(
+        self._agent = Workflow(
             name="webhook_agent",
-            sub_agents=[self._pr_router, self._code_auditor, self._verdict_agent],
-            before_agent_callback=before_agent_callback,
+            edges=[(START, self._pr_router, self._code_auditor, self._verdict_agent)],
+        )
+
+        self._app = App(
+            name=self._app_name,
+            root_agent=self._agent,
+            context_cache_config=ContextCacheConfig(
+                min_tokens=4096,
+                ttl_seconds=1800,
+                cache_intervals=10,
+            ),
         )
 
         # Create the runner
         self._runner = Runner(
-            agent=self._agent,
-            app_name=self._app_name,
+            app=self._app,
             session_service=self._session_service,
             memory_service=self._memory_service,
         )
@@ -1860,8 +1874,7 @@ Clean dev/docs PRs return risks: [].
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
             self._runner = Runner(
-                agent=self._agent,
-                app_name=self._app_name,
+                app=self._app,
                 session_service=self._session_service,
                 memory_service=self._memory_service,
             )
@@ -1874,8 +1887,7 @@ Clean dev/docs PRs return risks: [].
 
         # Recreate runner with new agent
         self._runner = Runner(
-            agent=self._agent,
-            app_name=self._app_name,
+            app=self._app,
             session_service=self._session_service,
             memory_service=self._memory_service,
         )
