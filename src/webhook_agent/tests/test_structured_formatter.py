@@ -636,3 +636,58 @@ def test_enforce_verdict_with_pr_generates_inline_comments():
     assert inline_comments[0]["side"] == "RIGHT"
     assert "```suggestion\n    return 100\n```" in inline_comments[0]["body"]
     assert "Return 100 instead" in inline_comments[0]["body"]
+
+
+def test_enforce_verdict_sync_review_resolution_guard_clears_hallucinations():
+    from unittest.mock import MagicMock
+
+    mock_pr = MagicMock()
+    mock_rv_approved = MagicMock()
+    mock_rv_approved.state = "APPROVED"
+    mock_rv_approved.user.login = "hannibal-hub-agents[bot]"
+    mock_pr.get_reviews.return_value = [mock_rv_approved]
+    mock_pr.get_files.return_value = []
+
+    json_input = """{
+        "summary": "Follow-up review with no prior changes requested.",
+        "resolutions": [
+            {
+                "issue_summary": "Imaginary bug that was never reported",
+                "status": "RESOLVED",
+                "evidence": "Cleaned up"
+            }
+        ],
+        "critical_issues": [],
+        "minor_suggestions": []
+    }"""
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
+    assert verdict == "APPROVE"
+    assert "Imaginary bug that was never reported" not in rendered_md
+    assert "Resolution Tracker" not in rendered_md or "| Imaginary bug" not in rendered_md
+
+
+def test_enforce_verdict_sync_review_resolution_guard_preserves_legitimate_resolutions():
+    from unittest.mock import MagicMock
+
+    mock_pr = MagicMock()
+    mock_rv_changes = MagicMock()
+    mock_rv_changes.state = "CHANGES_REQUESTED"
+    mock_rv_changes.user.login = "hannibal-hub-agents[bot]"
+    mock_pr.get_reviews.return_value = [mock_rv_changes]
+    mock_pr.get_files.return_value = []
+
+    json_input = """{
+        "summary": "Follow-up review resolving prior change request.",
+        "resolutions": [
+            {
+                "item_description": "Real bug reported in prior review",
+                "status": "RESOLVED",
+                "evidence": "Fix verified"
+            }
+        ],
+        "critical_issues": [],
+        "minor_suggestions": []
+    }"""
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
+    assert verdict == "APPROVE"
+    assert "Real bug reported in prior review" in rendered_md

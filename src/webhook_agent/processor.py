@@ -458,19 +458,24 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
             return
 
         bot_reviews: list[str] = []
+        had_request_changes = False
         for r in pr.get_reviews():
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
             if "hannibal-hub-agents" in login or login.endswith("[bot]"):
                 state = getattr(r, "state", "COMMENT")
+                if state == "CHANGES_REQUESTED":
+                    had_request_changes = True
                 body_snippet = (r.body or "")[:300].replace("\n", " ")
                 bot_reviews.append(f"- State: {state} | Body: {body_snippet}")
 
+        raw["prior_reviews_had_request_changes"] = had_request_changes
         if bot_reviews:
             raw["previous_bot_reviews"] = "\n".join(bot_reviews[-3:])
             logger.info(
-                "Pre-fetched previous bot reviews (%d reviews) for PR #%d",
+                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s) for PR #%d",
                 len(bot_reviews),
+                had_request_changes,
                 pr_number,
             )
     except Exception as exc:
