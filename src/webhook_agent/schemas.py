@@ -130,7 +130,8 @@ class SyncReviewResponse(BaseModel):
         description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",
     )
     resolutions: list[SyncResolutionItem] = Field(
-        description="Resolution status for all previously requested findings"
+        default_factory=list,
+        description="Resolution status for all previously requested findings",
     )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,

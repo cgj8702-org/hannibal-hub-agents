@@ -773,8 +773,8 @@ class TestPreworkPipelines:
 
         _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
         assert "previous_bot_reviews" in payload["raw_payload"]
-        assert "DISMISSED" in payload["raw_payload"]["previous_bot_reviews"]
-        mock_review.dismiss.assert_called_once_with("Superseded by new commit push to PR branch.")
+        assert "APPROVED" in payload["raw_payload"]["previous_bot_reviews"]
+        mock_review.dismiss.assert_not_called()
 
 
 class TestBaseBranchMergeSync:
@@ -882,7 +882,7 @@ class TestBaseBranchMergeSync:
 
         assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
-    def test_prefetch_previous_bot_reviews_preserves_approval_on_base_merge(self):
+    def test_prefetch_previous_bot_reviews_is_strictly_read_only(self):
         from unittest.mock import MagicMock
 
         from webhook_agent.processor import _prefetch_previous_bot_reviews
@@ -903,23 +903,16 @@ class TestBaseBranchMergeSync:
                 "action": "synchronize",
                 "pull_request": {
                     "number": 125,
-                    "head": {
-                        "sha": "0abebcc",
-                        "ref": "dependabot/uv/cryptography-50.0.1",
-                    },
-                    "base": {"ref": "main", "sha": "36acd0e"},
+                    "head": {"sha": "c199559", "ref": "feature"},
+                    "base": {"ref": "main", "sha": "07977df"},
                 },
-                "commits": [
-                    {
-                        "id": "0abebcc",
-                        "message": "Merge branch 'main' into dependabot/uv/cryptography-50.0.1",
-                    }
-                ],
             },
         }
 
         _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
-        assert "previous_bot_reviews" not in payload["raw_payload"]
+        assert "previous_bot_reviews" in payload["raw_payload"]
+        assert "APPROVED" in payload["raw_payload"]["previous_bot_reviews"]
+        # Must never dismiss reviews as a side-effect during pre-fetching!
         mock_review.dismiss.assert_not_called()
 
     def test_process_event_suppresses_base_branch_merge_sync(self, caplog):
@@ -972,3 +965,18 @@ class TestBaseBranchMergeSync:
             mock_agent.run.assert_not_called()
             mock_eyes.assert_not_called()
             assert "Suppressed pull_request.synchronize for PR #125" in caplog.text
+
+    def test_processor_gh_property(self):
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        with (
+            patch(
+                "webhook_agent.processor.load_cached_token",
+                return_value=MagicMock(token="fake-token"),
+            ),
+            patch("webhook_agent.processor.Github") as mock_github_cls,
+        ):
+            client = processor.gh
+            assert client == mock_github_cls.return_value
+            mock_github_cls.assert_called_once()

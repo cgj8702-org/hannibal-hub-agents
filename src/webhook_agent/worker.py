@@ -43,7 +43,10 @@ logging.basicConfig(
 
 # Silence verbose third-party loggers
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
+logging.getLogger("google.auth").setLevel(logging.WARNING)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +72,15 @@ def setup_cloud_logging() -> None:
 
         project_id = os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
         client = google.cloud.logging.Client(project=project_id)
-        client.setup_logging(log_level=logging.DEBUG)
+        client.setup_logging(log_level=logging.INFO)
+
+        # Ensure third-party transport loggers remain quiet under cloud logging
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("google.auth").setLevel(logging.WARNING)
+        logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
+
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
         logger.warning("Could not initialize Google Cloud Logging handler: %s", exc)
