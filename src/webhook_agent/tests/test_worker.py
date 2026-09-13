@@ -773,8 +773,8 @@ class TestPreworkPipelines:
 
         _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
         assert "previous_bot_reviews" in payload["raw_payload"]
-        assert "DISMISSED" in payload["raw_payload"]["previous_bot_reviews"]
-        mock_review.dismiss.assert_called_once_with("Superseded by new commit push to PR branch.")
+        assert "APPROVED" in payload["raw_payload"]["previous_bot_reviews"]
+        mock_review.dismiss.assert_not_called()
 
 
 class TestBaseBranchMergeSync:
@@ -882,7 +882,7 @@ class TestBaseBranchMergeSync:
 
         assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
-    def test_prefetch_previous_bot_reviews_preserves_approval_on_base_merge(self):
+    def test_prefetch_previous_bot_reviews_is_strictly_read_only(self):
         from unittest.mock import MagicMock
 
         from webhook_agent.processor import _prefetch_previous_bot_reviews
@@ -903,47 +903,7 @@ class TestBaseBranchMergeSync:
                 "action": "synchronize",
                 "pull_request": {
                     "number": 125,
-                    "head": {
-                        "sha": "0abebcc",
-                        "ref": "dependabot/uv/cryptography-50.0.1",
-                    },
-                    "base": {"ref": "main", "sha": "36acd0e"},
-                },
-                "commits": [
-                    {
-                        "id": "0abebcc",
-                        "message": "Merge branch 'main' into dependabot/uv/cryptography-50.0.1",
-                    }
-                ],
-            },
-        }
-
-        _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
-        assert "previous_bot_reviews" not in payload["raw_payload"]
-        mock_review.dismiss.assert_not_called()
-
-    def test_prefetch_previous_bot_reviews_preserves_approval_on_pr_edited(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.processor import _prefetch_previous_bot_reviews
-
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = mock_repo.get_pull.return_value
-
-        mock_review = MagicMock()
-        mock_review.user.login = "hannibal-hub-agents[bot]"
-        mock_review.state = "APPROVED"
-        mock_review.body = "LGTM! Ready to merge."
-        mock_pr.get_reviews.return_value = [mock_review]
-
-        payload = {
-            "canonical": "pull_request.edited",
-            "raw_payload": {
-                "action": "edited",
-                "pull_request": {
-                    "number": 135,
-                    "head": {"sha": "c199559", "ref": "fix/proactive-sweep-and-logging-noise"},
+                    "head": {"sha": "c199559", "ref": "feature"},
                     "base": {"ref": "main", "sha": "07977df"},
                 },
             },
@@ -951,6 +911,8 @@ class TestBaseBranchMergeSync:
 
         _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
         assert "previous_bot_reviews" in payload["raw_payload"]
+        assert "APPROVED" in payload["raw_payload"]["previous_bot_reviews"]
+        # Must never dismiss reviews as a side-effect during pre-fetching!
         mock_review.dismiss.assert_not_called()
 
     def test_process_event_suppresses_base_branch_merge_sync(self, caplog):

@@ -411,12 +411,6 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         if not isinstance(raw, dict) or "previous_bot_reviews" in raw:
             return
 
-        if is_base_branch_merge_sync(gh, repo_name, payload):
-            logger.info(
-                "Skipping previous bot review dismissal: synchronize is a base branch update."
-            )
-            return
-
         pr_number = None
         if "pull_request" in raw and isinstance(raw["pull_request"], dict):
             pr_number = raw["pull_request"].get("number")
@@ -436,31 +430,12 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         except Exception:
             return
 
-        canonical = payload.get("canonical", "")
-        action = raw.get("action")
-        is_synchronize = canonical == "pull_request.synchronize" or action == "synchronize"
-
         bot_reviews: list[str] = []
         for r in pr.get_reviews():
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
             if "hannibal-hub-agents" in login or login.endswith("[bot]"):
                 state = getattr(r, "state", "COMMENT")
-                if state == "APPROVED" and is_synchronize:
-                    try:
-                        r.dismiss("Superseded by new commit push to PR branch.")
-                        logger.info(
-                            "Automatically dismissed stale bot approval (review %s) on PR #%d",
-                            getattr(r, "id", "N/A"),
-                            pr_number,
-                        )
-                        state = "DISMISSED"
-                    except Exception as dismiss_err:
-                        logger.warning(
-                            "Could not dismiss stale bot approval on PR #%d: %s",
-                            pr_number,
-                            dismiss_err,
-                        )
                 body_snippet = (r.body or "")[:300].replace("\n", " ")
                 bot_reviews.append(f"- State: {state} | Body: {body_snippet}")
 
