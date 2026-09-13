@@ -2500,7 +2500,19 @@ Clean dev/docs PRs return risks: [].
                     review_payload = str(raw_analysis)
 
             if not review_payload and emitted_texts:
-                review_payload = "\n\n".join(emitted_texts)
+                full_text = "\n\n".join(emitted_texts)
+                is_review_content = (
+                    "Scorecard" in full_text
+                    or "| Category |" in full_text
+                    or "Verdict:" in full_text
+                    or '"verdict"' in full_text
+                    or '"executive_summary"' in full_text
+                    or '"critical_issues"' in full_text
+                    or '"resolutions"' in full_text
+                    or "Code Review" in full_text
+                )
+                if is_review_content:
+                    review_payload = full_text
 
             if review_payload:
                 pr_number = None
