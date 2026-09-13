@@ -137,14 +137,19 @@ def main() -> int:
 
                 from .proactive_service import ProactiveEvaluator
 
-                target_repo = os.environ.get("GITHUB_REPOSITORY", "cgj8702-org/hannibal-hub-agents")
-                evaluator = ProactiveEvaluator(processor.gh, target_repo)
-                sweep_thread = threading.Thread(
-                    target=evaluator.evaluate_open_prs,
-                    name="ProactiveSweepWorker",
-                    daemon=True,
+                repos_env = os.environ.get(
+                    "TARGET_REPOSITORIES",
+                    "cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents",
                 )
-                sweep_thread.start()
+                target_repos = [r.strip() for r in repos_env.split(",") if r.strip()]
+                for repo_name in target_repos:
+                    evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                    sweep_thread = threading.Thread(
+                        target=evaluator.evaluate_open_prs,
+                        name=f"ProactiveSweep-{repo_name.split('/')[-1]}",
+                        daemon=True,
+                    )
+                    sweep_thread.start()
             except Exception as exc:
                 logger.warning("Proactive background sweep skipped/failed: %s", exc)
 
