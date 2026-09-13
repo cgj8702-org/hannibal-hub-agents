@@ -1826,7 +1826,11 @@ Clean dev/docs PRs return risks: [].
 
         self._agent = Workflow(
             name="webhook_agent",
-            edges=[(START, self._pr_router, self._code_auditor, self._verdict_agent)],
+            edges=[
+                (START, self._pr_router),
+                (self._pr_router, self._code_auditor),
+                (self._code_auditor, self._verdict_agent),
+            ],
         )
 
         self._app = App(
