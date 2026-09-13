@@ -980,3 +980,11 @@ class TestBaseBranchMergeSync:
             client = processor.gh
             assert client == mock_github_cls.return_value
             mock_github_cls.assert_called_once()
+
+    def test_worker_suppresses_google_genai_models_logger(self):
+        import logging
+
+        import webhook_agent.worker  # noqa: F401
+
+        logger = logging.getLogger("google_genai.models")
+        assert logger.level == logging.ERROR
