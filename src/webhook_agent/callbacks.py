@@ -19,10 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import BaseTool, ToolContext
 
-try:
-    from logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
-except ImportError:
-    from src.logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
+from webhook_agent.logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.callbacks")
 
@@ -40,7 +37,7 @@ MUTATING_TOOLS: set[str] = {
 }
 
 
-def _check_pr_closed_short_circuit(state: dict[str, Any]) -> None:
+def _check_pr_closed_short_circuit(state: Any) -> None:
     """Check if target PR is registered as closed/merged and abort agent turn immediately."""
     repo_full_name = state.get("repo_full_name") or ""
     pr_number = state.get("pr_number") or state.get("issue_number")

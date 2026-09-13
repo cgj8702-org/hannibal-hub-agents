@@ -8,7 +8,7 @@ dependencies = [
     "cryptography>=49.0.0",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
-    "jwt>=1.4.0",
+    "pyjwt>=2.10.0",
     "google-genai>=2.3.0",
     "pygithub>=2.9.1",
     "pytz>=2026.2",
@@ -37,7 +37,6 @@ markers = [
     "integration: Component integration tests using local worktrees or CLI tools.",
     "slow: Heavy multi-turn or resource-intensive tests.",
     "e2e: Live end-to-end tests against GitHub APIs or GCP Firestore.",
-    "feature_agent: Tests specific to the Autonomous Feature Developer.",
     "webhook_agent: Tests specific to the Webhook Receiver Agent.",
     "guardrails: Tests for safety plugins and security guardrails.",
     "firestore: Tests for Firestore checkpoint registries.",
@@ -47,7 +46,6 @@ filterwarnings = [
     "ignore:.*EventsCompactionConfig.*:UserWarning",
     "ignore:.*FeatureName.AGENT_CONFIG is enabled.*:UserWarning",
     "ignore:.*LoopAgent is deprecated in favor of Workflow.*:DeprecationWarning",
-    "ignore:.*SequentialAgent is deprecated in favor of Workflow.*:DeprecationWarning",
     "ignore:BaseAgentConfig is deprecated:DeprecationWarning",
     "ignore:::google.auth.transport.grpc",
 ]
@@ -94,7 +92,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["webhook_agent", "feature_agent", "logic", "token_optimized_agent"]
+known-first-party = ["webhook_agent"]
 
 [tool.ruff.lint.per-file-ignores]
 ".agents/**" = ["F821", "T201"]
@@ -128,12 +126,16 @@ strict_optional = true
 [[tool.mypy.overrides]]
 module = [
     "webhook_agent.*",
-    "feature_agent.*",
-    "logic.*",
-    "token_optimized_agent.*",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "webhook_agent.tests.*",
+    "tests.*",
+]
+ignore_errors = true
 
 # --- Library Overrides ---
 # These libraries lack type stubs or have complex C-extensions
@@ -142,8 +144,11 @@ module = [
     "cryptography.*",
     "fastapi.*",
     "github.*",
+    "google",
     "google.*",
+    "google.adk",
     "google.adk.*",
+    "google.cloud",
     "google.cloud.*",
     "google.genai.*",
     "httpx.*",

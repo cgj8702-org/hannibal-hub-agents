@@ -26,7 +26,7 @@ from google.adk.memory.base_memory_service import (
     SearchMemoryResponse,
 )
 from google.adk.sessions.session import Session
-from google.genai.types import Content
+from google.genai.types import Content, Part
 
 logger = logging.getLogger("webhook_agent.memory")
 
@@ -56,7 +56,7 @@ class InMemoryMemoryService(BaseMemoryService):
                     parts.append(part.text)
         return " ".join(parts) if parts else ""
 
-    def add_memory(
+    def add_memory(  # type: ignore[override]
         self,
         *,
         app_name: str,
@@ -94,7 +94,7 @@ class InMemoryMemoryService(BaseMemoryService):
             app_name,
         )
 
-    def add_events_to_memory(
+    def add_events_to_memory(  # type: ignore[override]
         self,
         *,
         app_name: str,
@@ -135,7 +135,7 @@ class InMemoryMemoryService(BaseMemoryService):
                 custom_metadata=custom_metadata,
             )
 
-    def add_session_to_memory(self, session: Session) -> None:
+    def add_session_to_memory(self, session: Session) -> None:  # type: ignore[override]
         """Store all events from a session as memories."""
         self.add_events_to_memory(
             app_name=session.app_name,
@@ -144,7 +144,7 @@ class InMemoryMemoryService(BaseMemoryService):
             session_id=session.id,
         )
 
-    def search_memory(
+    def search_memory(  # type: ignore[override]
         self,
         *,
         app_name: str,
@@ -171,7 +171,7 @@ class InMemoryMemoryService(BaseMemoryService):
         memories: list[MemoryEntry] = []
         for entry in matched:
             metadata = entry["metadata"]
-            content = Content(parts=[{"text": metadata.get("text", "")}])
+            content = Content(parts=[Part.from_text(text=str(metadata.get("text", "")))])
             memories.append(
                 MemoryEntry(
                     id=entry["id"],

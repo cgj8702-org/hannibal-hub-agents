@@ -18,10 +18,7 @@ from typing import Any
 
 from google.genai import Client
 
-try:
-    from logic.rate_limiter import _resolve_tier, rpm_waiter
-except ImportError:
-    from src.logic.rate_limiter import _resolve_tier, rpm_waiter
+from webhook_agent.logic.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.resolve_conflicts")
 
@@ -38,7 +35,7 @@ def _synthesize_conflict_resolution(
     if "<<<<<<< " not in file_content or ">>>>>>> " not in file_content:
         return file_content
 
-    target_model = model_name or os.getenv("GEMMA_MODEL", "gemini-3.8-flash")
+    target_model: str = str(model_name or os.getenv("GEMMA_MODEL") or "gemini-3.8-flash")
 
     prompt = (
         f"You are a Senior Engineer agentically resolving a git merge conflict in `{file_path}`.\n"
@@ -55,13 +52,13 @@ def _synthesize_conflict_resolution(
     active_tier = _resolve_tier()
     estimated_tokens = len(prompt) // 4 + 500
 
+    run_in_bg_loop: Any = None
     try:
-        from webhook_agent.webhook_agent import run_in_bg_loop
+        from webhook_agent.webhook_agent import run_in_bg_loop as _bg_loop
+
+        run_in_bg_loop = _bg_loop
     except ImportError:
-        try:
-            from src.webhook_agent.webhook_agent import run_in_bg_loop
-        except ImportError:
-            run_in_bg_loop = None
+        pass
 
     if run_in_bg_loop is not None:
         try:
@@ -311,20 +308,11 @@ def resolve_merge_conflicts(
 
                 genai_client = get_shared_genai_client()
             except Exception:
-                try:
-                    from src.webhook_agent.webhook_agent import (
-                        get_shared_genai_client,
-                    )
-
-                    genai_client = get_shared_genai_client()
-                except Exception:
-                    pass
+                pass
 
         if genai_client is None:
-            try:
-                from logic.rate_limiter import get_active_api_key
-            except ImportError:
-                from src.logic.rate_limiter import get_active_api_key
+            from webhook_agent.logic.rate_limiter import get_active_api_key
+
             active_key = get_active_api_key()
             if active_key:
                 try:
@@ -334,9 +322,9 @@ def resolve_merge_conflicts(
 
         if genai_client is not None:
             for rel_file in unmerged_files:
-                file_path = worktree_path / rel_file
-                if file_path.exists() and file_path.is_file():
-                    raw_content = file_path.read_text(encoding="utf-8")
+                abs_file_path = worktree_path / rel_file
+                if abs_file_path.exists() and abs_file_path.is_file():
+                    raw_content = abs_file_path.read_text(encoding="utf-8")
                     if "<<<<<<< " in raw_content:
                         logger.info(
                             "Agentically synthesizing conflict resolution for %s via Gemini LLM...",
@@ -348,7 +336,7 @@ def resolve_merge_conflicts(
                             genai_client=genai_client,
                             model_name=model_name,
                         )
-                        file_path.write_text(resolved_content, encoding="utf-8")
+                        abs_file_path.write_text(resolved_content, encoding="utf-8")
                         resolved_files.append(rel_file)
 
         # 6. Verification Gate in isolated worktree

@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any
 
-from google.cloud import pubsub_v1
+from google.cloud import pubsub_v1  # type: ignore[attr-defined]
 
 logger = logging.getLogger("webhook_agent.enqueue")
 
@@ -29,7 +29,7 @@ def publish_webhook_message(
         future = publisher.publish(topic_path, data, **(attributes or {}))
 
         # Do not block on publish; optionally attach callback to log result
-        def _cb(fut):
+        def _cb(fut: Any) -> None:
             try:
                 message_id = fut.result()
                 logger.debug("📨 Enqueued delivery: %s", str(message_id)[-4:])

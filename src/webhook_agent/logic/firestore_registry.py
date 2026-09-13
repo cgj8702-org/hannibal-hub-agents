@@ -15,11 +15,11 @@ from typing import Any
 logger = logging.getLogger("firestore_registry")
 
 try:
-    from google.cloud import firestore
+    from google.cloud import firestore  # type: ignore[attr-defined]
 
     _HAS_FIRESTORE = True
 except ImportError:
-    firestore = None  # type: ignore[assignment]
+    firestore = None
     _HAS_FIRESTORE = False
 
 
@@ -67,7 +67,7 @@ class FirestoreDepletedModelRegistry:
         self, model_name: str, error: Exception | None = None, key_alias: str = ""
     ) -> None:
         """Mark a model (and optional key alias) as depleted across memory and Firestore."""
-        from logic.rate_limiter import extract_rate_limit_details
+        from webhook_agent.logic.rate_limiter import extract_rate_limit_details
 
         cooldown = self.default_cooldown
         metric_type = "DEFAULT (1h)"

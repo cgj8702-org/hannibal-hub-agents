@@ -73,7 +73,7 @@ def _get_firestore_tier() -> str:
         return cached_tier
 
     try:
-        from logic.firestore_registry import firestore_depleted_registry
+        from webhook_agent.logic.firestore_registry import firestore_depleted_registry
 
         db = firestore_depleted_registry._get_db()
         if db is not None:
@@ -139,7 +139,7 @@ def resolve_webhook_api_key() -> tuple[str, str, str]:
     Returns:
         (api_key, key_source, resolved_tier)
     """
-    from logic.secret_manager import resolve_secret
+    from webhook_agent.logic.secret_manager import resolve_secret
 
     tier = _resolve_tier()
     if tier == "paid":

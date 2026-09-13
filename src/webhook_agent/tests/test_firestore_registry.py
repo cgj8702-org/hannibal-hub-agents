@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from logic.firestore_registry import FirestoreDepletedModelRegistry
+from webhook_agent.logic.firestore_registry import FirestoreDepletedModelRegistry
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.firestore]
 

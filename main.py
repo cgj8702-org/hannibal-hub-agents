@@ -18,7 +18,7 @@ def run_worker():
     logger.info("🚀 Starting Webhook Processor Worker...")
     # We use uv run if available, or just python
     # Since we are in a uv environment, we can call the module directly
-    from src.webhook_agent import worker
+    from webhook_agent import worker
 
     try:
         sys.exit(worker.main())

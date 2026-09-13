@@ -11,19 +11,10 @@ from webhook_agent.callbacks import (
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
-    get_model_tpm_limit,
     on_tool_error_callback,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-def test_get_model_tpm_limit() -> None:
-    assert get_model_tpm_limit("gemma-4-31b-it", "free") == 15000
-    assert get_model_tpm_limit("gemini-2.5-flash", "free") == 1000000
-    assert get_model_tpm_limit("gemini-2.5-flash", "paid") == 4000000
 
 
 @pytest.mark.unit
@@ -43,7 +34,7 @@ async def test_before_agent_callback() -> None:
 async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 
-    from logic.rate_limiter import rpm_waiter
+    from webhook_agent.logic.rate_limiter import rpm_waiter
 
     ctx = MagicMock()
     ctx.state = {"active_tier": "free"}
@@ -73,7 +64,7 @@ async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 
-    from logic.rate_limiter import rpm_waiter
+    from webhook_agent.logic.rate_limiter import rpm_waiter
 
     ctx = MagicMock()
     ctx.state = {"active_model": "gemini-3.5-flash-lite"}

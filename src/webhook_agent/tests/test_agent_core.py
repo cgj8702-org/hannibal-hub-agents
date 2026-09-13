@@ -797,7 +797,7 @@ class TestRpmWaiterTpmCeiling:
     def test_tpm_hard_ceiling_forces_wait(self, monkeypatch):
         import asyncio
 
-        from logic.rate_limiter import RPMWaiter
+        from webhook_agent.logic.rate_limiter import RPMWaiter
 
         fake_now = 1000.0
         waiter = RPMWaiter(clock=lambda: fake_now)

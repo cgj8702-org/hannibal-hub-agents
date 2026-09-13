@@ -24,7 +24,7 @@ logger = logging.getLogger("webhook_agent.auto_fix")
 def _get_shared_genai_client() -> Client | None:
     """Fallback to retrieve shared GenAI client for LLM fix generation."""
     try:
-        from logic.rate_limiter import get_active_api_key
+        from webhook_agent.logic.rate_limiter import get_active_api_key
 
         key = get_active_api_key()
         if key:
@@ -95,7 +95,7 @@ def auto_fix_pr_feedback(
         # 1. Fetch remote branch details
         from github import Github
 
-        from logic.rate_limiter import get_active_api_key
+        from webhook_agent.logic.rate_limiter import get_active_api_key
 
         token = get_active_api_key()
         gh = Github(token)

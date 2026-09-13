@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from logic.constants import (
+from webhook_agent.logic.constants import (
     DEFAULT_FEATURE_AGENT_PROJECT,
     DEFAULT_GITHUB_APP_ID,
     DEFAULT_GITHUB_INSTALLATION_ID,
@@ -13,7 +13,7 @@ from logic.constants import (
     DEFAULT_WEBHOOK_FREE_PROJECT,
     DEFAULT_WEBHOOK_PAID_PROJECT,
 )
-from logic.secret_manager import resolve_secret
+from webhook_agent.logic.secret_manager import resolve_secret
 
 pytestmark = [pytest.mark.unit]
 
@@ -48,6 +48,6 @@ def test_resolve_secret_fallback_mocked(monkeypatch: pytest.MonkeyPatch) -> None
     )
 
     with patch.dict("sys.modules", {"google.cloud.secretmanager": mock_sm}):
-        with patch.dict("logic.secret_manager._SECRET_CACHE", {}, clear=True):
+        with patch.dict("webhook_agent.logic.secret_manager._SECRET_CACHE", {}, clear=True):
             val = resolve_secret("WEBHOOK_FREE_KEY")
             assert val == "resolved_from_secret_manager"

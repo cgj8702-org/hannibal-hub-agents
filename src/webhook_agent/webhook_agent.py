@@ -18,18 +18,31 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import CancelledError
+from collections.abc import Coroutine
+from concurrent.futures import CancelledError, Future
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from github import Github
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 from google.adk.agents.context import Context
+from google.adk.agents.context_cache_config import ContextCacheConfig
+from google.adk.apps import App
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
+
+from webhook_agent.logic.model_factory import RateLimitedGemini, get_adk_model
+from webhook_agent.logic.rate_limiter import (
+    _resolve_tier,
+    extract_rate_limit_details,
+    get_active_api_key,
+    rpm_waiter,
+)
 
 from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
@@ -81,23 +94,6 @@ def calculate_verdict(
     return "APPROVE"
 
 
-try:
-    from logic.model_factory import RateLimitedGemini, get_adk_model
-    from logic.rate_limiter import (
-        _resolve_tier,
-        extract_rate_limit_details,
-        get_active_api_key,
-        rpm_waiter,
-    )
-except ImportError:
-    from src.logic.model_factory import RateLimitedGemini, get_adk_model
-    from src.logic.rate_limiter import (
-        _resolve_tier,
-        extract_rate_limit_details,
-        get_active_api_key,
-        rpm_waiter,
-    )
-
 __all__ = [
     "RateLimitedGemini",
     "WebhookAgent",
@@ -114,7 +110,7 @@ __all__ = [
 # onto it via asyncio.run_coroutine_threadsafe.
 _BG_LOOP: asyncio.AbstractEventLoop | None = None
 _BG_LOOP_THREAD: threading.Thread | None = None
-_GENAI_CLIENT: object | None = None
+_GENAI_CLIENT: Any = None
 
 
 def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
@@ -142,10 +138,10 @@ def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
     return _BG_LOOP
 
 
-def run_in_bg_loop(coro: asyncio.coroutines) -> Any:
+def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
     """Schedule coroutine on the background loop and wait for result."""
     loop = _ensure_bg_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future: Future[Any] = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
         # Wait for result; use a reasonably long timeout to avoid hanging
         # the caller indefinitely if the remote model call stalls.
@@ -158,7 +154,7 @@ def run_in_bg_loop(coro: asyncio.coroutines) -> Any:
         raise
 
 
-async def _create_genai_client_async(api_key: str):
+async def _create_genai_client_async(api_key: str) -> Any:
     """Create a google.genai Client on the background loop thread."""
     from google.genai import Client
 
@@ -167,7 +163,7 @@ async def _create_genai_client_async(api_key: str):
     return Client(api_key=api_key)
 
 
-def get_shared_genai_client() -> object | None:
+def get_shared_genai_client() -> Any:
     """Return a process-wide cached google.genai Client, creating it on the
     background loop if needed. Returns None if no API key is configured.
     """
@@ -293,7 +289,7 @@ def _truncate_input_for_tier(
     return text[: max_chars - len(truncated_msg)] + truncated_msg
 
 
-# RateLimitedGemini is imported from logic.model_factory above
+# RateLimitedGemini is imported from webhook_agent.logic.model_factory above
 
 
 # ---------------------------------------------------------------------------
@@ -301,15 +297,17 @@ def _truncate_input_for_tier(
 # ---------------------------------------------------------------------------
 
 
+def _load_prompt_template(filename: str) -> str:
+    """Load prompt template from local templates directory."""
+    template_path = Path(__file__).parent / "templates" / filename
+    if template_path.exists():
+        return template_path.read_text(encoding="utf-8")
+    return ""
+
+
 def _load_template(filename: str) -> str:
-    """Load a template file from the templates directory."""
-    template_path = os.path.join(os.path.dirname(__file__), "templates", filename)
-    try:
-        with open(template_path, encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        logger.warning("Template not found at %s", template_path)
-        return ""
+    """Load a template file from the templates directory (backward compatibility)."""
+    return _load_prompt_template(filename)
 
 
 def _sanitize_pr_body(body: str) -> str:
@@ -540,8 +538,9 @@ class DepletedModelRegistry:
         return [m for m in chain if not self.is_depleted(m)]
 
 
+_DEPLETED_MODEL_REGISTRY: Any
 try:
-    from logic.firestore_registry import (
+    from webhook_agent.logic.firestore_registry import (
         firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
     )
 except ImportError:
@@ -587,8 +586,7 @@ def get_model_chain() -> list[str]:
 
     primary = os.environ.get("GEMMA_MODEL", default_primary)
     chain = [primary] + [m for m in default_chain if m != primary]
-    seen: set[str] = set()
-    deduped = [m for m in chain if not (m in seen or seen.add(m))]
+    deduped = list(dict.fromkeys(chain))
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
     final_chain = available if available else deduped
     logger.debug("Resolved %s model chain: %s", active_tier, final_chain)
@@ -767,7 +765,8 @@ def write_file(
             repo.create_file(file_path, message, content, branch=branch)
         except Exception:
             existing = repo.get_contents(file_path, ref=branch)
-            repo.update_file(file_path, message, content, existing.sha, branch=branch)
+            sha = existing[0].sha if isinstance(existing, list) else existing.sha
+            repo.update_file(file_path, message, content, sha, branch=branch)
         status = f"Committed '{file_path}' to {branch}"
         if branch_created:
             status += f" (branch created from {base})"
@@ -1440,7 +1439,7 @@ def _enforce_verdict(
                                 )
                             )
                     rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
-                    inline_comments: list[dict[str, Any]] = []
+                    inline_comments = []
                     if diff_text:
                         cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
                         inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
@@ -1481,7 +1480,7 @@ def _enforce_verdict(
                     )
                 )
         rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
-        inline_comments: list[dict[str, Any]] = []
+        inline_comments = []
         if diff_text:
             cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
             inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
@@ -1548,7 +1547,7 @@ def review(
 
         try:
             if inline_comments:
-                rv = pr.create_review(body=body, event=event, comments=inline_comments)
+                rv = pr.create_review(body=body, event=event, comments=inline_comments)  # type: ignore[arg-type]
             else:
                 rv = pr.create_review(body=body, event=event)
         except Exception as review_err:
@@ -1760,6 +1759,7 @@ class WebhookAgent:
                 "Output only the classification name."
             ),
             output_key="pr_scope",
+            before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
         )
@@ -1776,6 +1776,7 @@ class WebhookAgent:
                     thinking_budget=-1,
                 )
             ),
+            before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
             before_tool_callback=before_tool_callback,
@@ -1820,20 +1821,33 @@ Clean dev/docs PRs return risks: [].
 """,
             output_schema=AuditVerdict,
             output_key="audit_verdict",
+            before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
         )
 
-        self._agent = SequentialAgent(
+        self._agent = Workflow(
             name="webhook_agent",
-            sub_agents=[self._pr_router, self._code_auditor, self._verdict_agent],
-            before_agent_callback=before_agent_callback,
+            edges=[
+                (START, self._pr_router),
+                (self._pr_router, self._code_auditor),
+                (self._code_auditor, self._verdict_agent),
+            ],
+        )
+
+        self._app = App(
+            name=self._app_name,
+            root_agent=self._agent,
+            context_cache_config=ContextCacheConfig(
+                min_tokens=4096,
+                ttl_seconds=1800,
+                cache_intervals=10,
+            ),
         )
 
         # Create the runner
         self._runner = Runner(
-            agent=self._agent,
-            app_name=self._app_name,
+            app=self._app,
             session_service=self._session_service,
             memory_service=self._memory_service,
         )
@@ -1866,8 +1880,7 @@ Clean dev/docs PRs return risks: [].
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
             self._runner = Runner(
-                agent=self._agent,
-                app_name=self._app_name,
+                app=self._app,
                 session_service=self._session_service,
                 memory_service=self._memory_service,
             )
@@ -1880,8 +1893,7 @@ Clean dev/docs PRs return risks: [].
 
         # Recreate runner with new agent
         self._runner = Runner(
-            agent=self._agent,
-            app_name=self._app_name,
+            app=self._app,
             session_service=self._session_service,
             memory_service=self._memory_service,
         )
@@ -2001,14 +2013,6 @@ Clean dev/docs PRs return risks: [].
                     "Do NOT invent or backfill resolved items."
                 )
 
-        # Include pre-processed /implement instruction if available
-        if "implement_instruction" in raw:
-            parts.append(
-                f"\nPre-Processed /implement Command:\n{raw['implement_instruction']}\n"
-                f"INSTRUCTION: Call tool 'auto_implement_issue_feature' to autonomously build "
-                f"and open a PR for this feature using FEATURE_AGENT_FREE_KEY in an isolated worktree."
-            )
-
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(
             text, max_tokens=get_max_input_tokens(), label="User payload"
@@ -2117,11 +2121,10 @@ Clean dev/docs PRs return risks: [].
 
         raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
         pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
+        merged_at_val = pr_data.get("merged_at") if isinstance(pr_data, dict) else None
         is_merged = (
             pr_data.get("merged") is True
-            or (
-                isinstance(pr_data.get("merged_at"), str) and bool(pr_data.get("merged_at").strip())
-            )
+            or (isinstance(merged_at_val, str) and bool(merged_at_val.strip()))
             if isinstance(pr_data, dict)
             else False
         )
@@ -2273,7 +2276,7 @@ Clean dev/docs PRs return risks: [].
         user_message = self._build_user_message(event_data)
         logger.debug(
             "📝 Built user message for agent (length: %d chars)",
-            len(user_message.parts[0].text) if user_message.parts else 0,
+            len(getattr(user_message.parts[0], "text", "") or "") if user_message.parts else 0,
         )
 
         # Select model tier dynamically for this event
@@ -2299,9 +2302,11 @@ Clean dev/docs PRs return risks: [].
         emitted_texts: list[str] = []
         final_session = None
 
-        async def _execute_agent():
+        async def _execute_agent() -> None:
             # Apply dynamic sliding-window rate limiting (RPM/TPM aware per tier)
-            msg_text = user_message.parts[0].text if user_message.parts else ""
+            msg_text = (
+                getattr(user_message.parts[0], "text", "") or "" if user_message.parts else ""
+            )
             est_tokens = len(msg_text) // 4 + 500
             await rpm_waiter.check_and_wait(
                 model=self._current_model_name,
@@ -2335,7 +2340,7 @@ Clean dev/docs PRs return risks: [].
                         for response in responses:
                             results.append(
                                 ActionResult(
-                                    tool=response.name,
+                                    tool=str(response.name or ""),
                                     success=True,
                                     detail=f"tool executed: {response.response}",
                                 )
@@ -2361,7 +2366,7 @@ Clean dev/docs PRs return risks: [].
                                 trace_id[-4:],
                             )
 
-        async def _run():
+        async def _run() -> None:
             nonlocal results, final_session
             last_error = None
 
@@ -2405,7 +2410,9 @@ Clean dev/docs PRs return risks: [].
                                 "Do NOT call review() again unless explicitly requested by a new /review command.]"
                             )
                             if user_message.parts and hasattr(user_message.parts[0], "text"):
-                                user_message.parts[0].text += notice
+                                user_message.parts[0].text = (
+                                    user_message.parts[0].text or ""
+                                ) + notice
 
                         previous_critique = session.state.get("last_review_critique", "")
                         if previous_critique:
@@ -2414,7 +2421,9 @@ Clean dev/docs PRs return risks: [].
                                 "Verify line-by-line which specific items were resolved by the new commit."
                             )
                             if user_message.parts and hasattr(user_message.parts[0], "text"):
-                                user_message.parts[0].text += critique_notice
+                                user_message.parts[0].text = (
+                                    user_message.parts[0].text or ""
+                                ) + critique_notice
 
                     # Set user_state values - they get merged into session.state by InMemorySessionService
                     # This is needed because session copies are returned and our direct mutations wouldn't persist
@@ -2591,7 +2600,7 @@ Clean dev/docs PRs return risks: [].
                                 rv = pr.create_review(
                                     body=body,
                                     event=enforced_event,
-                                    comments=inline_comments,
+                                    comments=inline_comments,  # type: ignore[arg-type]
                                 )
                             else:
                                 rv = pr.create_review(body=body, event=enforced_event)
