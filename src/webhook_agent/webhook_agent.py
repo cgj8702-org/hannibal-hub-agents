@@ -1514,10 +1514,19 @@ def review(
         pr = repo.get_pull(pr_number)
 
         # Safety Check: Closed / Merged PR Protection
-        if pr.state == "closed" or getattr(pr, "merged", False):
+        raw_state = getattr(pr, "state", None)
+        pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
+        is_merged = getattr(pr, "merged", None) is True
+        if pr_state == "closed" or is_merged:
             logger.info("PR #%d is closed or merged; skipping review submission", pr_number)
-            return (
-                f"Error: Cannot submit review for PR #{pr_number} because it is closed or merged."
+            try:
+                from .cancellation import AbortAgentExecution, pr_closed_registry
+            except ImportError:
+                from webhook_agent.cancellation import AbortAgentExecution, pr_closed_registry
+
+            pr_closed_registry.mark_closed(repo_name, pr_number)
+            raise AbortAgentExecution(
+                f"PR {repo_name}#{pr_number} is closed or merged. Skipping review submission."
             )
 
         body, event, inline_comments = _enforce_verdict(body, event, pr)
@@ -1572,6 +1581,8 @@ def review(
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({event}): {detail}"
     except Exception as e:
+        if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(e)):
+            raise
         return f"Error submitting review: {e}"
 
 
@@ -2063,6 +2074,51 @@ Clean dev/docs PRs return risks: [].
                 )
             ]
 
+        # Short-circuit execution if PR is closed or merged
+        raw = event_data.get("raw_payload") or {}
+        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+        if isinstance(raw.get("issue"), dict) and not pr_data:
+            pr_data = raw.get("issue") or {}
+
+        repo_name = (
+            event_data.get("repo_name") or (raw.get("repository") or {}).get("full_name") or ""
+        )
+        pr_number = pr_data.get("number") if isinstance(pr_data, dict) else None
+
+        try:
+            from .cancellation import pr_closed_registry
+        except ImportError:
+            from webhook_agent.cancellation import pr_closed_registry
+
+        is_registry_closed = bool(
+            repo_name and pr_number and pr_closed_registry.is_closed(repo_name, int(pr_number))
+        )
+
+        raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
+        pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
+        is_merged = (
+            pr_data.get("merged") is True
+            or (
+                isinstance(pr_data.get("merged_at"), str) and bool(pr_data.get("merged_at").strip())
+            )
+            if isinstance(pr_data, dict)
+            else False
+        )
+        if pr_state == "closed" or is_merged or is_registry_closed:
+            logger.info(
+                "🔒 PR is closed or merged (state=%s, merged=%s, registry=%s); short-circuiting execution",
+                pr_state,
+                is_merged,
+                is_registry_closed,
+            )
+            return [
+                ActionResult(
+                    tool="skip_closed_pr",
+                    success=True,
+                    detail=f"PR is closed/merged (state={pr_state}, merged={is_merged}, registry={is_registry_closed}); agent execution skipped.",
+                )
+            ]
+
         # Check mutation policy
         allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "0") in (
             "1",
@@ -2094,28 +2150,6 @@ Clean dev/docs PRs return risks: [].
                     tool="plan",
                     success=True,
                     detail="dry-run: would process event through ADK agent",
-                )
-            ]
-
-        # Short-circuit execution if PR is closed or merged
-        raw = event_data.get("raw_payload") or {}
-        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
-        if isinstance(raw.get("issue"), dict) and not pr_data:
-            pr_data = raw.get("issue") or {}
-
-        pr_state = (pr_data.get("state") or "").lower()
-        is_merged = bool(pr_data.get("merged") or pr_data.get("merged_at"))
-        if pr_state == "closed" or is_merged:
-            logger.info(
-                "🔒 PR is closed or merged (state=%s, merged=%s); short-circuiting execution",
-                pr_state,
-                is_merged,
-            )
-            return [
-                ActionResult(
-                    tool="skip_closed_pr",
-                    success=True,
-                    detail=f"PR is closed/merged (state={pr_state}, merged={is_merged}); agent execution skipped.",
                 )
             ]
 
