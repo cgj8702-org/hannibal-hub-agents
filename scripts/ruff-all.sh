@@ -15,7 +15,7 @@ echo "› Running Ruff Formatter..."
 uv run ruff format
 
 echo "› Running MyPy Static Type Check..."
-if ! uv run mypy; then
+if ! uv run mypy --show-error-codes; then
     echo "------------------------------------------------------------"
     echo "[!] Clinical Violation: MyPy found static typing issues."
     echo "    Please fix the errors above before committing."
