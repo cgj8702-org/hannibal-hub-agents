@@ -343,6 +343,22 @@ class RPMWaiter:
                         wait_tpm,
                     )
 
+                # Hard ceiling: if finalized (actual) usage already >= 90% of TPM limit, force wait
+                finalized_tpm = sum(tok for _, tok, fin in token_history if fin)
+                ceiling_threshold = int(tpm_limit * 0.9)
+                if finalized_tpm >= ceiling_threshold:
+                    oldest_finalized = min((ts for ts, _, fin in token_history if fin), default=now)
+                    wait_ceiling = max(0.1, (oldest_finalized + self.window) - now)
+                    wait_tpm = max(wait_tpm, wait_ceiling)
+                    logger.warning(
+                        "TPM HARD CEILING (%s): Finalized %d/%d tokens (90%% threshold). "
+                        "Forcing %.1fs wait...",
+                        norm_model,
+                        finalized_tpm,
+                        tpm_limit,
+                        wait_ceiling,
+                    )
+
             wait_time = max(wait_rpm, wait_tpm)
 
             # Reserve slot
