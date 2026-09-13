@@ -1541,11 +1541,13 @@ def review(
         # Supersede / dismiss prior bot reviews ONLY after new review is created
         existing_reviews = pr.get_reviews()
         for prev_rv in existing_reviews:
+            prev_login = (getattr(getattr(prev_rv, "user", None), "login", "") or "").lower()
             if (
-                prev_rv.user
+                prev_login
                 and (
-                    prev_rv.user.login in (BOT_LOGIN, "hannibal-hub-agents")
-                    or prev_rv.user.login.startswith("hannibal-hub-agents")
+                    prev_login in (BOT_LOGIN.lower(), "hannibal-hub-agents")
+                    or prev_login.startswith("hannibal-hub-agents")
+                    or prev_login.endswith("[bot]")
                 )
                 and prev_rv.state in ("CHANGES_REQUESTED", "APPROVED")
                 and getattr(prev_rv, "id", None) != getattr(rv, "id", None)
