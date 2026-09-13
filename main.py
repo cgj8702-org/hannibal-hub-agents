@@ -1,7 +1,16 @@
+from __future__ import annotations
+
 import logging
 import multiprocessing
 import signal
 import sys
+from pathlib import Path
+from types import FrameType
+
+# Ensure src/ is on sys.path for direct entry point execution
+SRC_DIR = Path(__file__).resolve().parent / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 # Configure logging for the entry point
 logging.basicConfig(
@@ -13,11 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
-def run_worker():
+def run_worker() -> None:
     """Launch the Pub/Sub event processor worker."""
     logger.info("🚀 Starting Webhook Processor Worker...")
-    # We use uv run if available, or just python
-    # Since we are in a uv environment, we can call the module directly
     from webhook_agent import worker
 
     try:
@@ -26,7 +33,7 @@ def run_worker():
         sys.exit(e.code)
 
 
-def main():
+def main() -> None:
     """
     Orchestrate the hannibal-hub-agents services.
     Starts the worker as a separate process.
@@ -39,8 +46,8 @@ def main():
     # Start process
     worker_proc.start()
 
-    def signal_handler(sig, frame):
-        logger.info(f"🛑 Received signal {sig}, shutting down services...")
+    def signal_handler(sig: int, frame: FrameType | None) -> None:
+        logger.info("🛑 Received signal %d, shutting down services...", sig)
         worker_proc.terminate()
         worker_proc.join()
         logger.info("✅ All services shut down.")
