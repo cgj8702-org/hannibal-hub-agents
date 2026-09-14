@@ -310,7 +310,7 @@ class RPMWaiter:
             if len(history) >= rpm_limit:
                 oldest_ts = history[0]
                 wait_rpm = max(0.1, (oldest_ts + self.window) - now)
-                logger.warning(
+                logger.info(
                     "RPM THROTTLE (%s): Used %d/%d. Sleeping %.1fs...",
                     norm_model,
                     len(history),
@@ -333,7 +333,7 @@ class RPMWaiter:
                         if accumulated >= needed_tokens_to_expire:
                             break
                     wait_tpm = max(0.1, (required_ts + self.window) - now)
-                    logger.warning(
+                    logger.info(
                         "TPM THROTTLE (%s): Active %d+%d/%d TPM limit exceeded. "
                         "Waiting %.1fs for tokens to expire...",
                         norm_model,

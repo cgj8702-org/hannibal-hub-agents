@@ -37,7 +37,7 @@ class WebhookHistoryPruningPlugin(BasePlugin):
                     llm_request.contents[0],
                     *llm_request.contents[-(self.max_events - 1) :],
                 ]
-                logger.info(
+                logger.debug(
                     "✂️ WebhookHistoryPruningPlugin: Pruned model contents from %d to %d events",
                     old_count,
                     len(llm_request.contents),

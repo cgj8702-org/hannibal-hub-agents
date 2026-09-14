@@ -46,7 +46,7 @@ def _check_pr_closed_short_circuit(state: Any) -> None:
             from .cancellation import AbortAgentExecution, pr_closed_registry
 
             if pr_closed_registry.is_closed(str(repo_full_name), int(pr_number)):
-                logger.warning(
+                logger.info(
                     "🔒 Short-circuiting agent turn: PR %s#%s is marked CLOSED",
                     repo_full_name,
                     pr_number,
@@ -215,7 +215,7 @@ async def after_tool_callback(
     _check_pr_closed_short_circuit(tool_context.state)
     if isinstance(tool_response, str) and len(tool_response) > MAX_TOOL_CHARS:
         excess = len(tool_response) - MAX_TOOL_CHARS
-        logger.warning(
+        logger.info(
             "⚠️ Tool '%s' output exceeded %d chars (%d chars); truncating with notice",
             tool.name,
             MAX_TOOL_CHARS,
@@ -230,7 +230,7 @@ async def after_tool_callback(
         for k, v in list(tool_response.items()):
             if isinstance(v, str) and len(v) > MAX_TOOL_CHARS:
                 excess = len(v) - MAX_TOOL_CHARS
-                logger.warning(
+                logger.info(
                     "⚠️ Tool '%s' response['%s'] exceeded %d chars (%d chars); truncating with notice",
                     tool.name,
                     k,
