@@ -691,3 +691,37 @@ def test_enforce_verdict_sync_review_resolution_guard_preserves_legitimate_resol
     rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
     assert verdict == "APPROVE"
     assert "Real bug reported in prior review" in rendered_md
+
+
+def test_reproduce_pr_155_mangled_formatting():
+    from webhook_agent.webhook_agent import _enforce_verdict
+
+    text_input = (
+        "## 🛡️ Code Review: `REQUEST_CHANGES`\n\n"
+        "### 1. Executive Summary\n\n"
+        "* **Summary & Justification:** The PR introduces experimental metrics calculation and shell payload execution utilities with multiple critical security vulnerabilities.\n\n"
+        "---\n\n"
+        "### 2. Action Items\n\n"
+        "#### 🔴 Critical (Must Fix Before Merge)\n"
+        "* `src/webhook_agent/flawed_feature.py` (Line 9)\n"
+        "* Hardcoded credential pattern (`DUMMY_PRODUCTION_API_KEY`) violates security best practices and risks accidental secret exposure.\n"
+        "* \n"
+        "* `src/webhook_agent/flawed_feature.py` (Line 15)\n"
+        "* \n"
+        "* `src/webhook_agent/flawed_feature.py` (Line 21)\n"
+        "* Null dereference hazard if `items` is `None` (allowed by type annotation `dict[str, Any] | None`).\n"
+        "* \n"
+        "* `src/webhook_agent/flawed_feature.py` (Line 22)\n"
+        "* Guaranteed `ZeroDivisionError` due to division by literal zero (`total / 0`).\n"
+        "* \n\n"
+        "#### 🟡 Suggestions & Maintainability\n"
+        "* *None found.*\n\n"
+        "---\n\n"
+        "### 3. Potential Risks & Edge Cases\n\n"
+        "* *None identified for this PR scope.*\n"
+    )
+    rendered_md, _verdict, _ = _enforce_verdict(text_input, "REQUEST_CHANGES")
+    assert "* `codebase`: " not in rendered_md
+    assert "* `src/webhook_agent/flawed_feature.py:9`" in rendered_md
+    assert "* `src/webhook_agent/flawed_feature.py:21`" in rendered_md
+    assert "* `src/webhook_agent/flawed_feature.py:22`" in rendered_md

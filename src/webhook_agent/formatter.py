@@ -677,13 +677,20 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
         "SUMMARY & JUSTIFICATION",
     }
 
+    pending_path: str | None = None
+    pending_line: int | None = None
+
     for line in body.splitlines():
         line_s = line.strip()
         if "Critical" in line_s:
             current_section = "critical"
+            pending_path = None
+            pending_line = None
             continue
         elif "Minor" in line_s or "Refactoring" in line_s or "Suggestion" in line_s:
             current_section = "minor"
+            pending_path = None
+            pending_line = None
             continue
         elif (
             "Potential Risk" in line_s
@@ -693,42 +700,114 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             or line_s.startswith("##")
         ):
             current_section = "other"
+            pending_path = None
+            pending_line = None
             continue
 
-        if (
-            current_section in ("critical", "minor")
-            and line_s.startswith(("*", "-", "•"))
-            and ":" in line_s
-        ):
-            parts = line_s.lstrip("*-•").strip().split(":", 1)
-            raw_path = parts[0].replace("🔴", "").replace("🟡", "").replace("✅", "").strip("`* ")
-            desc_part = parts[1].strip() if len(parts) > 1 else ""
-            clean_desc = desc_part if desc_part else line_s.lstrip("*-•🔴🟡✅ ").strip()
+        if current_section in ("critical", "minor") and line_s.startswith(("*", "-", "•")):
+            raw_content = line_s.lstrip("*-• ").strip()
+            if not raw_content:
+                continue
 
-            raw_path_norm = raw_path.strip().upper()
-            clean_desc_norm = clean_desc.strip("`* :.").upper()
-
+            norm_content = raw_content.strip("`* :.").upper()
             if (
-                not clean_desc
-                or clean_desc.strip("`* :") == raw_path
-                or clean_desc_norm in NON_ISSUE_TOKENS
-                or raw_path_norm in NON_ISSUE_PATHS
-                or "NONE FOUND" in clean_desc_norm
-                or "NONE IDENTIFIED" in clean_desc_norm
-                or clean_desc_norm.startswith(("APPROVE", "5/5"))
+                norm_content in NON_ISSUE_TOKENS
+                or "NONE FOUND" in norm_content
+                or "NONE IDENTIFIED" in norm_content
+                or norm_content.startswith(("APPROVE", "5/5"))
             ):
                 continue
 
-            item_dict = {
-                "path": raw_path if "/" in raw_path or "." in raw_path else "codebase",
-                "line": None,
-                "description": clean_desc,
-                "suggested_fix": "",
-            }
-            if current_section == "critical":
-                critical_issues.append(item_dict)
-            elif current_section == "minor":
-                minor_suggestions.append(item_dict)
+            # Check if this line is purely a file location header (e.g. `* `src/foo.py` (Line 9)` or `* `src/foo.py:9``)
+            clean_header = (
+                raw_content.replace("🔴", "").replace("🟡", "").replace("✅", "").strip("`* ")
+            )
+            loc_match = re.match(
+                r"^`?([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_\-]+)`?(?:\s*(?:[\(:]\s*(?:Line\s*)?(\d+)\)?|,\s*Line\s*(\d+)))?\s*$",
+                clean_header,
+                re.IGNORECASE,
+            )
+
+            # Check if line has both location and description separated by `:` or ` - `
+            sep_match = None
+            if not loc_match:
+                for sep in (":", " - "):
+                    if sep in raw_content:
+                        p_left, p_right = raw_content.split(sep, 1)
+                        clean_left = (
+                            p_left.replace("🔴", "")
+                            .replace("🟡", "")
+                            .replace("✅", "")
+                            .strip("`* ")
+                        )
+                        candidate_loc = re.match(
+                            r"^`?([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_\-]+)`?(?:\s*(?:[\(:]\s*(?:Line\s*)?(\d+)\)?|,\s*Line\s*(\d+)))?\s*$",
+                            clean_left,
+                            re.IGNORECASE,
+                        )
+                        if candidate_loc:
+                            sep_match = (candidate_loc, p_right.strip())
+                            break
+
+            if loc_match:
+                # Standalone file location header; record and pair with the following bullet's description
+                path_str = loc_match.group(1)
+                line_str = loc_match.group(2) or loc_match.group(3)
+                pending_path = path_str
+                pending_line = int(line_str) if line_str else None
+                continue
+
+            if sep_match:
+                candidate_loc, desc_text = sep_match
+                path_str = candidate_loc.group(1)
+                line_str = candidate_loc.group(2) or candidate_loc.group(3)
+                target_path = path_str if ("/" in path_str or "." in path_str) else "codebase"
+                target_line = int(line_str) if line_str else None
+                clean_desc = desc_text if desc_text else raw_content
+                pending_path = None
+                pending_line = None
+            elif pending_path:
+                # Pair with pending file location header
+                target_path = pending_path
+                target_line = pending_line
+                clean_desc = raw_content
+                pending_path = None
+                pending_line = None
+            else:
+                parts = raw_content.split(":", 1) if ":" in raw_content else [raw_content]
+                raw_path = (
+                    parts[0].replace("🔴", "").replace("🟡", "").replace("✅", "").strip("`* ")
+                )
+                desc_part = parts[1].strip() if len(parts) > 1 else ""
+                clean_desc = desc_part if desc_part else raw_content
+                raw_path_norm = raw_path.strip().upper()
+                clean_desc_norm = clean_desc.strip("`* :.").upper()
+
+                if (
+                    not clean_desc
+                    or clean_desc.strip("`* :") == raw_path
+                    or clean_desc_norm in NON_ISSUE_TOKENS
+                    or raw_path_norm in NON_ISSUE_PATHS
+                    or "NONE FOUND" in clean_desc_norm
+                    or "NONE IDENTIFIED" in clean_desc_norm
+                    or clean_desc_norm.startswith(("APPROVE", "5/5"))
+                ):
+                    continue
+
+                target_path = raw_path if ("/" in raw_path or "." in raw_path) else "codebase"
+                target_line = None
+
+            if clean_desc and clean_desc.strip("`* :."):
+                item_dict = {
+                    "path": target_path,
+                    "line": target_line,
+                    "description": clean_desc,
+                    "suggested_fix": "",
+                }
+                if current_section == "critical":
+                    critical_issues.append(item_dict)
+                elif current_section == "minor":
+                    minor_suggestions.append(item_dict)
 
     data["critical_issues"] = critical_issues
     data["minor_suggestions"] = minor_suggestions
