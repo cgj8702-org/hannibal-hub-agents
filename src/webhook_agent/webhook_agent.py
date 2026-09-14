@@ -27,7 +27,6 @@ from typing import Any
 from github import Github
 from google.adk.agents import LlmAgent
 from google.adk.agents.context import Context
-from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps import App
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
@@ -210,17 +209,6 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
     active_tier = _resolve_tier()
     default_primary = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
     return os.getenv("GEMMA_MODEL", default_primary)
-
-
-def _build_context_cache_config() -> ContextCacheConfig | None:
-    """Enable ADK context caching only for tiers that support cached content."""
-    if _resolve_tier() == "free":
-        return None
-    return ContextCacheConfig(
-        min_tokens=4096,
-        ttl_seconds=1800,
-        cache_intervals=10,
-    )
 
 
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
@@ -1863,7 +1851,6 @@ Clean dev/docs PRs return risks: [].
         self._app = App(
             name=self._app_name,
             root_agent=self._agent,
-            context_cache_config=_build_context_cache_config(),
             plugins=[
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,

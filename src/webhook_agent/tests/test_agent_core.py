@@ -204,24 +204,6 @@ class TestIsTransientError:
 
 
 class TestWebhookAgentModelChain:
-    def test_free_tier_disables_context_caching(self, monkeypatch):
-        """Free tier must not request unsupported Gemini context caching."""
-        from webhook_agent.webhook_agent import _build_context_cache_config
-
-        monkeypatch.setenv("WEBHOOK_TIER", "free")
-        assert _build_context_cache_config() is None
-
-    def test_paid_tier_enables_context_caching(self, monkeypatch):
-        """Paid tier retains the configured ADK context-cache policy."""
-        from webhook_agent.webhook_agent import _build_context_cache_config
-
-        monkeypatch.setenv("WEBHOOK_TIER", "paid")
-        config = _build_context_cache_config()
-        assert config is not None
-        assert config.min_tokens == 4096
-        assert config.ttl_seconds == 1800
-        assert config.cache_intervals == 10
-
     def test_get_model_chain_orders_tpm_descending(self):
         """get_model_chain should order models by capacity without duplicates and omit 3.6 on Free Tier."""
         from webhook_agent.webhook_agent import get_model_chain
@@ -356,13 +338,15 @@ class TestTokenTruncation:
         text = msg.parts[0].text
         assert "D" * 60000 in text
 
-    def test_code_auditor_preserves_review_context(self):
-        """The auditor must retain the original PR context and scope guidance."""
+    def test_code_auditor_preserves_review_context_and_disables_caching(self, monkeypatch):
+        """The auditor retains PR context and the app never enables caching."""
         from webhook_agent.webhook_agent import WebhookAgent
 
+        monkeypatch.setenv("WEBHOOK_TIER", "free")
         agent = WebhookAgent(dry_run=True)
         assert agent._code_auditor.include_contents == "default"
         assert "scope label" in agent._code_auditor.instruction
+        assert agent._app.context_cache_config is None
 
 
 # ---------------------------------------------------------------------------
