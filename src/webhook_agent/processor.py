@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+from datetime import UTC, datetime
 from typing import Any
 
 from github import Auth, Github
@@ -528,11 +530,14 @@ class WebhookProcessor:
         # being discarded and rebuilt on every event.
         self._agent_core: AgentCore | None = None
         self._gh: Github | None = None
+        self._gh_token_expires_at: float | None = None
 
     @property
     def gh(self) -> Github:
         """Return an authenticated Github client, creating or loading cached installation token."""
-        if self._gh is not None:
+        if self._gh is not None and (
+            self._gh_token_expires_at is None or time.time() < self._gh_token_expires_at - 60
+        ):
             return self._gh
         inst_token = load_cached_token(self.installation_id)
         if inst_token is None:
@@ -541,7 +546,24 @@ class WebhookProcessor:
             inst_token = get_installation_token(jwt_token, self.installation_id)
             save_cached_token(self.installation_id, inst_token)
         self._gh = Github(auth=Auth.Token(inst_token.token))
+        expires_at = getattr(inst_token, "expires_at", None)
+        if expires_at:
+            try:
+                self._gh_token_expires_at = (
+                    datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    .astimezone(UTC)
+                    .timestamp()
+                )
+            except (AttributeError, TypeError, ValueError):
+                self._gh_token_expires_at = None
+        else:
+            self._gh_token_expires_at = None
         return self._gh
+
+    def invalidate_github_client(self) -> None:
+        """Discard the cached client after an authentication failure."""
+        self._gh = None
+        self._gh_token_expires_at = None
 
     def _get_agent_core(self) -> AgentCore:
         """Return or lazily construct the AgentCore singleton."""
@@ -760,7 +782,11 @@ class WebhookProcessor:
         pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
         canonical = payload.get("canonical", "")
         is_pr_event = bool(pr_data) or canonical.startswith(
-            ("pull_request.", "pull_request_review", "pull_request_review_comment.")
+            (
+                "pull_request.",
+                "pull_request_review",
+                "pull_request_review_comment.",
+            )
         )
         pr_number = (
             pr_data.get("number")

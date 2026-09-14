@@ -983,10 +983,38 @@ class TestBaseBranchMergeSync:
             assert client == mock_github_cls.return_value
             mock_github_cls.assert_called_once()
 
+    def test_processor_gh_refreshes_expired_installation_token(self):
+        from datetime import UTC, datetime, timedelta
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        expired = MagicMock(
+            token="expired-token",
+            expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+        )
+        refreshed = MagicMock(
+            token="refreshed-token",
+            expires_at=(datetime.now(UTC) + timedelta(minutes=9)).isoformat(),
+        )
+        with (
+            patch(
+                "webhook_agent.processor.load_cached_token",
+                side_effect=[expired, refreshed],
+            ),
+            patch("webhook_agent.processor.Github") as mock_github_cls,
+        ):
+            first_client = processor.gh
+            second_client = processor.gh
+
+        assert first_client == mock_github_cls.return_value
+        assert second_client == mock_github_cls.return_value
+        assert mock_github_cls.call_count == 2
+
     def test_worker_suppresses_google_genai_models_logger(self):
         import logging
 
-        import webhook_agent.worker  # noqa: F401
+        import webhook_agent.worker as worker_module
 
+        assert worker_module is not None
         logger = logging.getLogger("google_genai.models")
         assert logger.level == logging.ERROR
