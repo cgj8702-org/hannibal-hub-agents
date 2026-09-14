@@ -33,7 +33,7 @@ class ProactiveEvaluator:
             )
 
             for pr in open_prs:
-                pr_result = self._evaluate_single_pr(repo, pr)
+                pr_result = self._evaluate_single_pr(pr)
                 if pr_result:
                     results.append(pr_result)
         except Exception as exc:
@@ -41,8 +41,8 @@ class ProactiveEvaluator:
 
         return results
 
-    def _evaluate_single_pr(self, repo: Any, pr: Any) -> dict[str, Any] | None:
-        """Evaluates a single PR for stale threads, merge conflicts, and failing CI."""
+    def _evaluate_single_pr(self, pr: Any) -> dict[str, Any] | None:
+        """Evaluate a PR for merge conflicts and stale review threads."""
         pr_number = pr.number
         actions_taken: list[str] = []
 
@@ -81,34 +81,6 @@ class ProactiveEvaluator:
                     pr_number,
                     exc,
                 )
-
-        # 3. Check Failing CI Check Runs
-        failing_checks = self._get_failing_check_runs(pr)
-        if failing_checks:
-            if not self._has_recent_comment_with_text(
-                pr, "Proactive Diagnostic: Failing CI Checks"
-            ):
-                try:
-                    checks_summary = "\n".join(
-                        f"- ❌ **{c['name']}**: `{c['conclusion']}`" for c in failing_checks
-                    )
-                    pr.create_issue_comment(
-                        f"## 🚨 Proactive Diagnostic: Failing CI Checks\n\n"
-                        f"The following CI checks failed on this PR:\n{checks_summary}\n\n"
-                        f"Please review the check run details or run `uv run pytest` / `bash scripts/ruff-all.sh` locally to fix. 🛠️\n\n"
-                        f"*Posted automatically by Hannibal Hub Proactive Agent*"
-                    )
-                    logger.info(
-                        "Proactive Action: Posted CI failure diagnostic on PR #%d",
-                        pr_number,
-                    )
-                    actions_taken.append("ci_failure_diagnostic_posted")
-                except GithubException as exc:
-                    logger.warning(
-                        "Failed to post CI failure diagnostic on PR #%d: %s",
-                        pr_number,
-                        exc,
-                    )
 
         if actions_taken:
             return {"pr_number": pr_number, "actions": actions_taken}
@@ -165,30 +137,3 @@ class ProactiveEvaluator:
         except Exception:
             pass
         return False
-
-    def _get_failing_check_runs(self, pr: Any) -> list[dict[str, str]]:
-        """Retrieves failing GitHub Actions check runs for the PR's head commit."""
-        failing: list[dict[str, str]] = []
-        try:
-            head_sha = getattr(getattr(pr, "head", None), "sha", None)
-            if not head_sha:
-                return failing
-            repo = self.gh.get_repo(self.repo_name)
-            commit = repo.get_commit(head_sha)
-            check_runs = commit.get_check_runs()
-            for check in check_runs:
-                conclusion = check.conclusion
-                if conclusion in ("failure", "timed_out", "action_required"):
-                    failing.append(
-                        {
-                            "name": check.name or "CI Check",
-                            "conclusion": conclusion,
-                        }
-                    )
-        except Exception as exc:
-            logger.debug(
-                "Could not fetch check runs for PR #%d: %s",
-                getattr(pr, "number", 0),
-                exc,
-            )
-        return failing
