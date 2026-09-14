@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from .audit_schema import AuditVerdict, RiskItem
-from .diff_tools import _strip_diff_prefix, verify_line_reference
+from .diff_tools import _strip_diff_prefix, check_window, verify_line_reference, walk_right_side
 from .schemas import IssueItem
 
 logger = logging.getLogger("webhook_agent.comment_poster")
@@ -128,6 +128,9 @@ def build_github_review_comments(
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Convert diff-anchored IssueItems into GitHub review comment payloads.
 
+    Uses walk_right_side and check_window to snap off-by-a-few line references
+    back onto valid added diff lines.
+
     Returns:
         (inline_comments, anchored_keys):
         - inline_comments: list of dicts suitable for GitHub create_review(comments=[...]):
@@ -137,27 +140,61 @@ def build_github_review_comments(
     inline_comments: list[dict[str, Any]] = []
     anchored_keys: set[str] = set()
 
+    anchors, text_by_line = walk_right_side(diff_text)
+
     for issue in issues:
         if not issue.path or issue.line is None:
             continue
 
         clean_path = _strip_diff_prefix(issue.path)
-        if verify_line_reference(diff_text, clean_path, issue.line):
+        file_anchors = anchors.get(clean_path) or anchors.get(issue.path) or set()
+        file_lines = text_by_line.get(clean_path) or text_by_line.get(issue.path) or {}
+
+        target_line = issue.line
+
+        # Direct match on modified/added diff line
+        if target_line in file_anchors:
             body = format_suggestion_body(issue.description, issue.suggested_fix)
             inline_comments.append(
                 {
                     "path": clean_path,
-                    "line": issue.line,
+                    "line": target_line,
                     "side": "RIGHT",
                     "body": body,
                 }
             )
-            anchored_keys.add(f"{clean_path}:{issue.line}")
-        else:
-            logger.debug(
-                "Issue at '%s:%s' falls outside modified diff hunks. Skipping inline comment.",
-                clean_path,
-                issue.line,
-            )
+            anchored_keys.add(f"{clean_path}:{target_line}")
+            continue
+
+        # Check window and attempt line-snapping within modified hunks
+        code_context = issue.window or issue.suggested_fix or issue.description
+        if file_lines and code_context:
+            verified, snapped_line, reason = check_window(code_context, target_line, file_lines)
+            if verified and snapped_line in file_anchors:
+                logger.info(
+                    "Snapped issue anchor at '%s:%s' -> '%s:%s' (%s)",
+                    clean_path,
+                    target_line,
+                    clean_path,
+                    snapped_line,
+                    reason,
+                )
+                body = format_suggestion_body(issue.description, issue.suggested_fix)
+                inline_comments.append(
+                    {
+                        "path": clean_path,
+                        "line": snapped_line,
+                        "side": "RIGHT",
+                        "body": body,
+                    }
+                )
+                anchored_keys.add(f"{clean_path}:{snapped_line}")
+                continue
+
+        logger.debug(
+            "Issue at '%s:%s' falls outside modified diff hunks and could not be snapped. Skipping inline comment.",
+            clean_path,
+            issue.line,
+        )
 
     return inline_comments, anchored_keys

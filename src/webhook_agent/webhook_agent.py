@@ -62,6 +62,7 @@ from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
+    extract_json_payload,
     normalize_code_review_dict,
     normalize_sync_review_dict,
     parse_text_review_to_dict,
@@ -1321,28 +1322,37 @@ def _enforce_verdict(
     )
     is_intended_request_changes = is_caller_request_changes or is_body_request_changes
 
-    # Step 1: Look for embedded JSON object in body (raw JSON, inside codeblocks, or surrounded by text)
-    json_candidates: list[str] = []
+    # Step 1: Attempt robust JSON payload extraction, quote repair, and object salvage
+    extracted_data = extract_json_payload(body)
+    data_candidates: list[dict[str, Any]] = [extracted_data] if extracted_data else []
 
-    # Check direct string if wrapped in codeblocks
-    if cleaned_body.startswith("```"):
-        stripped_cb = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
-        stripped_cb = re.sub(r"\n?```$", "", stripped_cb).strip()
-        json_candidates.append(stripped_cb)
+    if not data_candidates:
+        # Step 2: Fallback candidate scanning
+        json_candidates: list[str] = []
+        if cleaned_body.startswith("```"):
+            stripped_cb = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
+            stripped_cb = re.sub(r"\n?```$", "", stripped_cb).strip()
+            json_candidates.append(stripped_cb)
 
-    if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
-        json_candidates.append(cleaned_body)
+        if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
+            json_candidates.append(cleaned_body)
 
-    # Check codeblocks anywhere in body
-    for cb_match in re.finditer(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", body):
-        json_candidates.append(cb_match.group(1))
+        for cb_match in re.finditer(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", body):
+            json_candidates.append(cb_match.group(1))
 
-    # Check regex for any JSON object containing key schema fields
-    for json_obj_match in re.finditer(
-        r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions)\"[\s\S]*?\})",
-        body,
-    ):
-        json_candidates.append(json_obj_match.group(1))
+        for json_obj_match in re.finditer(
+            r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions)\"[\s\S]*?\})",
+            body,
+        ):
+            json_candidates.append(json_obj_match.group(1))
+
+        for cand in json_candidates:
+            try:
+                cand_data = json.loads(cand)
+                if isinstance(cand_data, dict):
+                    data_candidates.append(cand_data)
+            except Exception:
+                continue
 
     has_prior_reviews = True
     diff_text = ""
@@ -1370,9 +1380,8 @@ def _enforce_verdict(
         except Exception as diff_err:
             logger.debug("Could not fetch PR diff text in _enforce_verdict: %s", diff_err)
 
-    for cand in json_candidates:
+    for data in data_candidates:
         try:
-            data = json.loads(cand)
             if isinstance(data, dict):
                 if is_intended_request_changes and not data.get("verdict"):
                     data["verdict"] = "REQUEST_CHANGES"
@@ -1696,7 +1705,27 @@ Always scan for these patterns, which are frequently missed:
 - String formatting that breaks on Unicode or special characters
 - Missing error handling on network calls, file I/O, or database operations
 
+### Review Voice & Comment Style (Adapted from adk-samples)
+
+Two registers only for review comments and descriptions:
+- **Register A (60%)**: A polite full sentence ending in `?`. (e.g., "Can we use `subprocess.run()` with a list here instead?", "It seems the lock is released before the write finishes. Is that intentional?", "Is there a reason we're not reusing `get_client()` here?")
+- **Register B (40%)**: A lowercase fragment, 2-6 words. (e.g., "missing await here", "this'll break if list is empty", "same issue as above")
+
+**Strictly Banned in Comments:**
+- Zero emojis inside code comments, suggestions, or inline reviews.
+- No severity labels or bold prefixes (e.g. `**Critical:**`, `[HIGH]`, `🔴`) inside comment bodies.
+- No markdown headers or bullet lists inside inline comments.
+- Never write vague quality prose like "Consider refactoring to improve readability and maintainability" — cite observable facts at the line.
+- Avoid greetings, sign-offs, or thanking the author.
+
+### Diff Grounding & The "Observable Defect" Filter
+- A finding must point to something **DIRECTLY OBSERVABLE** in the diff at the line you anchor it to.
+- Do NOT report that something is absent (e.g. "import is missing", "function is not defined") unless you are reviewing a newly added file in full. In partial diffs, definitions normally exist outside the hunk.
+- Do NOT speculate on issues that require tracing across unshown files, guessing external inputs, or executing code. If a finding cannot be verified from the visible diff lines alone, drop it.
+- **Diff Scan Protocol**: File by file, scan the diff and formulate your thoughts. Then output your final findings as EXACTLY ONE JSON object conforming to `CodeReviewResponse` or `SyncReviewResponse`.
+
 ### Dependabot / Dependency PR Protocol (MANDATORY)
+
 
 When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with `dependabot/`):
 - Focus on **dependency security, version scope, and lockfile integrity**.

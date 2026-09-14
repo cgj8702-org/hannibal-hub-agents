@@ -48,8 +48,12 @@ class IssueItem(BaseModel):
     suggested_fix: str = Field(
         default="", description="Actionable code fix or refactoring suggestion"
     )
+    window: str = Field(
+        default="", description="Diff rows the finding sits on, prefixed with line numbers"
+    )
+    verify_steps: str = Field(default="", description="Literal procedure to verify the issue")
 
-    @field_validator("path", "description", mode="before")
+    @field_validator("path", "description", "window", "verify_steps", mode="before")
     @classmethod
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
