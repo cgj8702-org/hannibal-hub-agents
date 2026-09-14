@@ -6,8 +6,11 @@ and sync_review_template.md with strict un-cheatable mechanical rules.
 
 from __future__ import annotations
 
+import itertools
+import json
 import logging
 import re
+from collections.abc import Generator
 from typing import Any
 
 from .schemas import CodeReviewResponse, SyncReviewResponse, clean_field_string
@@ -33,6 +36,207 @@ SUMMARY_RISK_KEYWORDS = (
     *BREAKING_RISK_KEYWORDS,
 )
 
+NOT_CHEAP_MARKERS = re.compile(
+    r"\btrace\b|\bassum\w*\b|consider the case|if an attacker|"
+    r"\bsimulat\w*\b|\bimagine\b|run the code|execute\b|another file|"
+    r"\bgrep the repo\b|across (the )?(repo|codebase)",
+    re.IGNORECASE,
+)
+
+FINDING_KEYS = (
+    "path|line|body|window|verify_steps|description|suggested_fix|executive_summary|"
+    "risk|recommendation|summary|resolutions|critical_issues|minor_suggestions|"
+    "risks_and_edge_cases|context_gaps|verdict|status|evidence|item_description|title"
+)
+
+STRING_FIELD_OPEN = re.compile(rf'"(?:{FINDING_KEYS})"\s*:\s*"')
+STRING_FIELD_END = re.compile(rf'"(?=\s*(?:,\s*"(?:{FINDING_KEYS})"\s*:|\s*}}))')
+MAX_ENDS_PER_FIELD = 8
+MAX_REPAIR_STEPS = 16384
+MAX_REPAIR_FIELDS = 150
+MAX_BODY_CHARS = 4000
+MAX_UNBROKEN_RUN = 120
+
+
+def is_implausible_body(body: str) -> bool:
+    """Check if a body string exceeds acceptable bounds for a code review comment."""
+    if len(body) > MAX_BODY_CHARS:
+        return True
+    longest = max((len(run) for run in body.split()), default=0)
+    return longest > MAX_UNBROKEN_RUN
+
+
+def is_not_cheap_finding(verify_steps: str) -> bool:
+    """Check if stated verification steps admit needing multi-file tracing or speculative execution."""
+    if not verify_steps:
+        return False
+    return bool(NOT_CHEAP_MARKERS.search(verify_steps))
+
+
+def _escape_value(value: str) -> str:
+    """Re-escape a value's double quotes, normalizing first so it is idempotent."""
+    return value.replace('\\"', '"').replace('"', '\\"')
+
+
+def _repair_readings(block: str, budget: list[int]) -> Generator[str]:
+    """Every way of escaping the block, one per choice of where values end.
+
+    Adapted directly from adk-samples/.github/scripts/post_review_comments.py.
+    """
+    stack: list[tuple[int, str]] = [(0, "")]
+
+    while stack:
+        if budget[0] <= 0:
+            return
+        index, prefix = stack.pop()
+
+        opener = STRING_FIELD_OPEN.search(block, index)
+        if opener is None:
+            budget[0] -= 1
+            yield prefix + block[index:]
+            continue
+
+        head = prefix + block[index : opener.end()]
+        ends = list(
+            itertools.islice(STRING_FIELD_END.finditer(block, opener.end()), MAX_ENDS_PER_FIELD)
+        )
+        if not ends:
+            budget[0] -= 1
+            yield head + block[opener.end() :]
+            continue
+
+        for end in reversed(ends):
+            budget[0] -= 1
+            value = block[opener.end() : end.start()]
+            stack.append((end.end(), f'{head}{_escape_value(value)}"'))
+
+
+def _repaired_findings(block: str) -> Any | None:
+    """Attempt repair of malformed JSON strings caused by unescaped quotes."""
+    fields = sum(1 for _ in STRING_FIELD_OPEN.finditer(block))
+    if fields > MAX_REPAIR_FIELDS:
+        return None
+
+    readings: dict[str, Any] = {}
+    decoder = json.JSONDecoder()
+    budget = [MAX_REPAIR_STEPS]
+
+    for candidate in _repair_readings(block, budget):
+        try:
+            start_bracket = min(
+                [pos for pos in (candidate.find("{"), candidate.find("[")) if pos != -1],
+                default=-1,
+            )
+            if start_bracket == -1:
+                continue
+            obj, _ = decoder.raw_decode(candidate, start_bracket)
+        except (ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(obj, (dict, list)) and obj:
+            readings.setdefault(json.dumps(obj, sort_keys=True), obj)
+            if len(readings) > 1:
+                return None
+
+    if budget[0] <= 0 or len(readings) != 1:
+        return None
+    return next(iter(readings.values()))
+
+
+def _salvage_objects(block: str) -> list[dict[str, Any]]:
+    """Decode dictionary objects one by one, skipping ones that will not parse."""
+    decoder = json.JSONDecoder()
+    salvaged: list[dict[str, Any]] = []
+    index = 0
+    while (start := block.find("{", index)) != -1:
+        try:
+            candidate, index = decoder.raw_decode(block, start)
+        except (ValueError, json.JSONDecodeError):
+            index = start + 1
+            continue
+        if isinstance(candidate, dict) and any(
+            k in candidate
+            for k in (
+                "path",
+                "description",
+                "risk",
+                "summary",
+                "item_description",
+                "critical_issues",
+                "resolutions",
+            )
+        ):
+            salvaged.append(candidate)
+    return salvaged
+
+
+def extract_json_payload(text: str) -> dict[str, Any] | None:
+    """Extract, repair, or salvage structured JSON payload from reviewer output."""
+    if not text or not text.strip():
+        return None
+
+    cleaned = text.strip()
+
+    # Find all fenced code blocks (```json ... ``` or ``` ... ```)
+    fenced_blocks = list(re.finditer(r"```(?:json)?\s*([\s\S]*?)\s*```", text))
+    candidate_blocks: list[str] = []
+
+    # Priority 1: The LAST fenced codeblock (model plain-text scan comes first, JSON is last)
+    if fenced_blocks:
+        candidate_blocks.append(fenced_blocks[-1].group(1).strip())
+
+    # Priority 2: Direct string if wrapped in braces or brackets
+    if (cleaned.startswith("{") and cleaned.endswith("}")) or (
+        cleaned.startswith("[") and cleaned.endswith("]")
+    ):
+        candidate_blocks.append(cleaned)
+
+    # Priority 3: Any earlier fenced code blocks
+    if len(fenced_blocks) > 1:
+        for fb in reversed(fenced_blocks[:-1]):
+            candidate_blocks.append(fb.group(1).strip())
+
+    # Priority 4: Regex match for outermost JSON object with schema fields
+    for match in re.finditer(
+        r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions|summary|risks)\"[\s\S]*?\})",
+        text,
+    ):
+        candidate_blocks.append(match.group(1).strip())
+
+    for block in candidate_blocks:
+        if not block:
+            continue
+        # 1. Try standard JSON decode
+        try:
+            parsed = json.loads(block)
+            if isinstance(parsed, dict):
+                return parsed
+            if isinstance(parsed, list):
+                return {"critical_issues": parsed}
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+        # 2. Try quote repair
+        repaired = _repaired_findings(block)
+        if repaired is not None:
+            if isinstance(repaired, dict):
+                logger.info("Successfully repaired malformed JSON review object")
+                return repaired
+            if isinstance(repaired, list):
+                logger.info("Successfully repaired malformed JSON review list")
+                return {"critical_issues": repaired}
+
+        # 3. Try salvaging objects
+        salvaged = _salvage_objects(block)
+        if salvaged:
+            for obj in salvaged:
+                if any(k in obj for k in ("critical_issues", "resolutions", "executive_summary")):
+                    logger.info("Salvaged top-level review response object from malformed JSON")
+                    return obj
+            logger.info("Salvaged %d individual review items from malformed JSON", len(salvaged))
+            return {"critical_issues": salvaged}
+
+    return None
+
 
 def has_genuine_summary_risk(summary: str | None) -> bool:
     """Check if summary mentions blocking or unaddressed risks without negation."""
@@ -41,7 +245,6 @@ def has_genuine_summary_risk(summary: str | None) -> bool:
     summary_lower = summary.lower()
     for kw in SUMMARY_RISK_KEYWORDS:
         if kw in summary_lower:
-            # Check if this keyword is negated (e.g. "no blocking", "no unresolved", "without blocking", "not blocking")
             negation_pattern = rf"\b(?:no|none|not|without|zero)\s+[\w\s]{{0,25}}\b{re.escape(kw)}"
             if re.search(negation_pattern, summary_lower):
                 continue
@@ -158,6 +361,16 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 desc = str(item.get("description") or "").strip()
                 fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 path_val = str(item.get("path") or "codebase").strip()
+                steps = str(item.get("verify_steps") or "").strip()
+                window_val = str(item.get("window") or "").strip()
+
+                if is_not_cheap_finding(steps):
+                    logger.info("Dropping finding failing cheapness check: %s", desc[:60])
+                    continue
+                if is_implausible_body(desc):
+                    logger.info("Dropping finding with implausible body: %s", desc[:60])
+                    continue
+
                 if desc and desc.lower() not in (
                     "none",
                     "none found",
@@ -171,6 +384,8 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             ),
                             "description": desc,
                             "suggested_fix": fix,
+                            "window": window_val,
+                            "verify_steps": steps,
                         }
                     )
 
@@ -287,6 +502,16 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 desc = str(item.get("description") or "").strip()
                 fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
                 path_val = str(item.get("path") or "codebase").strip()
+                steps = str(item.get("verify_steps") or "").strip()
+                window_val = str(item.get("window") or "").strip()
+
+                if is_not_cheap_finding(steps):
+                    logger.info("Dropping finding failing cheapness check: %s", desc[:60])
+                    continue
+                if is_implausible_body(desc):
+                    logger.info("Dropping finding with implausible body: %s", desc[:60])
+                    continue
+
                 if desc and desc.lower() not in (
                     "none",
                     "none found",
@@ -301,8 +526,11 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             ),
                             "description": desc,
                             "suggested_fix": fix,
+                            "window": window_val,
+                            "verify_steps": steps,
                         }
                     )
+
     normalized["minor_suggestions"] = clean_minor
 
     raw_gaps = normalized.get("context_gaps")
@@ -395,6 +623,16 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     or ""
                 ).strip()
                 fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
+                steps = str(item.get("verify_steps") or "").strip()
+                window_val = str(item.get("window") or "").strip()
+
+                if is_not_cheap_finding(steps):
+                    logger.info("Dropping sync finding failing cheapness check: %s", desc[:60])
+                    continue
+                if is_implausible_body(desc):
+                    logger.info("Dropping sync finding with implausible body: %s", desc[:60])
+                    continue
+
                 if desc and desc.lower() not in ("none", "none found"):
                     clean_crit.append(
                         {
@@ -404,6 +642,8 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             ),
                             "description": desc,
                             "suggested_fix": fix,
+                            "window": window_val,
+                            "verify_steps": steps,
                         }
                     )
 
@@ -431,6 +671,18 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                     or ""
                 ).strip()
                 fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
+                steps = str(item.get("verify_steps") or "").strip()
+                window_val = str(item.get("window") or "").strip()
+
+                if is_not_cheap_finding(steps):
+                    logger.info(
+                        "Dropping sync minor finding failing cheapness check: %s", desc[:60]
+                    )
+                    continue
+                if is_implausible_body(desc):
+                    logger.info("Dropping sync minor finding with implausible body: %s", desc[:60])
+                    continue
+
                 if desc and desc.lower() not in ("none", "none found"):
                     clean_minor.append(
                         {
@@ -440,6 +692,8 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                             ),
                             "description": desc,
                             "suggested_fix": fix,
+                            "window": window_val,
+                            "verify_steps": steps,
                         }
                     )
 
