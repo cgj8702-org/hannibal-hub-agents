@@ -5,10 +5,24 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+from github import GithubException
+
 from webhook_agent.proactive_service import ProactiveEvaluator
 
 
 class TestProactiveEvaluator:
+    def test_evaluate_open_prs_propagates_authentication_failure(self):
+        mock_gh = MagicMock()
+        mock_gh.get_repo.side_effect = GithubException(401, "Bad credentials", {})
+
+        evaluator = ProactiveEvaluator(mock_gh, "owner/repo")
+
+        with pytest.raises(GithubException) as exc_info:
+            evaluator.evaluate_open_prs()
+
+        assert exc_info.value.status == 401
+
     def test_evaluate_open_prs_empty(self):
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value

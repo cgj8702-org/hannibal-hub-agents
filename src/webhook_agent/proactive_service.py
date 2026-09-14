@@ -36,6 +36,8 @@ class ProactiveEvaluator:
                 pr_result = self._evaluate_single_pr(repo, pr)
                 if pr_result:
                     results.append(pr_result)
+        except GithubException:
+            raise
         except Exception as exc:
             logger.error("Proactive sweep failed for repo %s: %s", self.repo_name, exc)
 

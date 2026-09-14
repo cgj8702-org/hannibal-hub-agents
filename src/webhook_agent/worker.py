@@ -23,6 +23,7 @@ import signal
 import sys
 from typing import Any
 
+from github import GithubException
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import pubsub_v1  # type: ignore[attr-defined]
 
@@ -151,6 +152,28 @@ def main() -> int:
                         try:
                             evaluator = ProactiveEvaluator(processor.gh, repo_name)
                             evaluator.evaluate_open_prs()
+                        except GithubException as sweep_err:
+                            if sweep_err.status != 401:
+                                logger.warning(
+                                    "Proactive sweep error for %s: %s",
+                                    repo_name,
+                                    sweep_err,
+                                )
+                                continue
+                            logger.warning(
+                                "Refreshing GitHub installation token after 401 for %s",
+                                repo_name,
+                            )
+                            processor.invalidate_github_client()
+                            try:
+                                evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                                evaluator.evaluate_open_prs()
+                            except Exception as retry_err:
+                                logger.warning(
+                                    "Proactive sweep retry failed for %s: %s",
+                                    repo_name,
+                                    retry_err,
+                                )
                         except Exception as sweep_err:
                             logger.warning(
                                 "Proactive sweep error for %s: %s",
