@@ -49,19 +49,20 @@ class RateLimitedGemini(Gemini):
             contents_str = str(getattr(llm_request, "contents", ""))
             estimated_tokens = max(1, len(contents_str) // 4)
 
-        try:
-            await rpm_waiter.check_and_wait(
-                model=model_name,
-                estimated_tokens=estimated_tokens,
-                tier=active_tier,
-            )
-        except Exception as exc:
-            logger.warning(
-                "RPM/TPM pre-flight check error on model '%s' (tier '%s'): %s",
-                model_name,
-                active_tier,
-                exc,
-            )
+        if not getattr(llm_request, "_rate_limit_checked", False):
+            try:
+                await rpm_waiter.check_and_wait(
+                    model=model_name,
+                    estimated_tokens=estimated_tokens,
+                    tier=active_tier,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "RPM/TPM pre-flight check error on model '%s' (tier '%s'): %s",
+                    model_name,
+                    active_tier,
+                    exc,
+                )
 
         async for response in super().generate_content_async(llm_request, stream=stream):
             yield response

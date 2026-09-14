@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from webhook_agent.callbacks import (
+    MAX_TOOL_CHARS,
     after_model_callback,
+    after_tool_callback,
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
@@ -147,3 +149,57 @@ async def test_on_tool_error_callback_rate_limit() -> None:
     assert res is not None
     assert res["success"] is False
     assert "temporary limit or error" in res["detail"]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_after_tool_callback_string_under_limit() -> None:
+    tool = MagicMock()
+    tool.name = "read_file"
+    args = {"path": "main.py"}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    short_response = "short content"
+    res = await after_tool_callback(tool, args, ctx, short_response)
+    assert res == short_response
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_after_tool_callback_string_truncation() -> None:
+    tool = MagicMock()
+    tool.name = "read_file"
+    args = {"path": "large_file.py"}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    long_response = "A" * (MAX_TOOL_CHARS + 5000)
+    res = await after_tool_callback(tool, args, ctx, long_response)
+    assert isinstance(res, str)
+    assert res.startswith("A" * MAX_TOOL_CHARS)
+    assert "Truncated 5000 characters" in res
+    assert "[... Truncated" in res
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_after_tool_callback_dict_truncation() -> None:
+    tool = MagicMock()
+    tool.name = "get_diff"
+    args = {"pr_number": 42}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    dict_response = {
+        "status": "ok",
+        "diff": "B" * (MAX_TOOL_CHARS + 2000),
+    }
+    res = await after_tool_callback(tool, args, ctx, dict_response)
+    assert isinstance(res, dict)
+    assert res["status"] == "ok"
+    assert res["diff"].startswith("B" * MAX_TOOL_CHARS)
+    assert "Truncated 2000 characters" in res["diff"]
