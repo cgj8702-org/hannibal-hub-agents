@@ -49,16 +49,17 @@ def walk_right_side(
     new_remaining = 0
 
     for row in diff.splitlines():
-        if old_remaining <= 0 and new_remaining <= 0:
-            if row.startswith("+++ "):
-                target = row[4:].strip()
-                path = None if target == "/dev/null" else _strip_diff_prefix(target)
-                continue
-            header = HUNK_HEADER.match(row)
-            if header:
-                old_remaining = int(header.group(2) or 1)
-                new_line = int(header.group(3))
-                new_remaining = int(header.group(4) or 1)
+        if row.startswith("+++ "):
+            target = row[4:].strip()
+            path = None if target == "/dev/null" else _strip_diff_prefix(target)
+            old_remaining = 0
+            new_remaining = 0
+            continue
+        header = HUNK_HEADER.match(row)
+        if header:
+            old_remaining = int(header.group(2) or 1)
+            new_line = int(header.group(3))
+            new_remaining = int(header.group(4) or 1)
             continue
 
         if row.startswith("\\"):

@@ -29,6 +29,7 @@ from github import Auth, Github
 from .agent_core import AgentCore
 from .bot_identity import _is_bot_event
 from .cancellation import pr_closed_registry
+from .diff_filter import filter_review_diff
 from .formatter import (
     truncate_log_payload,
 )
@@ -188,11 +189,15 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             diff_lines.append(f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}")
 
         if diff_lines:
-            raw["pr_diff"] = "\n".join(diff_lines)
+            raw_diff = "\n".join(diff_lines)
+            filtered = filter_review_diff(raw_diff)
+            raw["pr_diff"] = filtered.filtered_diff or raw_diff
             logger.info(
-                "Pre-fetched PR #%d diff (%d files) for 1-turn review",
+                "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d) for 1-turn review",
                 pr_num_int,
                 len(diff_lines),
+                len(filtered.kept_files),
+                filtered.reviewable_lines,
             )
 
         if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
