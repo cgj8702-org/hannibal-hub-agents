@@ -531,6 +531,7 @@ class WebhookProcessor:
         self._agent_core: AgentCore | None = None
         self._gh: Github | None = None
         self._gh_token_expires_at: float | None = None
+        self._force_github_token_refresh = False
 
     @property
     def gh(self) -> Github:
@@ -539,12 +540,15 @@ class WebhookProcessor:
             self._gh_token_expires_at is None or time.time() < self._gh_token_expires_at - 60
         ):
             return self._gh
-        inst_token = load_cached_token(self.installation_id)
+        inst_token = (
+            None if self._force_github_token_refresh else load_cached_token(self.installation_id)
+        )
         if inst_token is None:
             pem = load_private_key(self.private_key_path)
             jwt_token = generate_jwt(self.app_id, pem)
             inst_token = get_installation_token(jwt_token, self.installation_id)
             save_cached_token(self.installation_id, inst_token)
+            self._force_github_token_refresh = False
         self._gh = Github(auth=Auth.Token(inst_token.token))
         expires_at = getattr(inst_token, "expires_at", None)
         if expires_at:
@@ -564,6 +568,7 @@ class WebhookProcessor:
         """Discard the cached client after an authentication failure."""
         self._gh = None
         self._gh_token_expires_at = None
+        self._force_github_token_refresh = True
 
     def _get_agent_core(self) -> AgentCore:
         """Return or lazily construct the AgentCore singleton."""
