@@ -1506,13 +1506,14 @@ def review(
 ) -> str:
     """Submit a formal review on a pull request.
 
-    The verdict is programmatically enforced based on scorecard scores
-    parsed from the review body. If the agent's chosen event violates
-    the verdict rules, it is overridden before submission.
+    The review findings MUST be supplied as a structured JSON string matching the
+    CodeReviewResponse schema (for initial PR reviews) or SyncReviewResponse schema
+    (for PR synchronization updates). The final GitHub Markdown review is deterministically
+    rendered from the validated schema.
 
     Args:
         pr_number: Pull request number.
-        body: Review body (Markdown).
+        body: Review payload (strictly a JSON string conforming to CodeReviewResponse or SyncReviewResponse).
         event: Review event type. One of APPROVE, COMMENT, REQUEST_CHANGES.
 
     Returns:
@@ -1655,12 +1656,12 @@ When reviewing a PR, you MUST:
      2) **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
      3) **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
      4) **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
-   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `context_gaps`.
+   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `context_gaps`. When calling `review()`, pass this JSON string as the `body` parameter. Do NOT pass raw Markdown into `review()`; the system deterministically renders clean GitHub Markdown from your validated JSON.
    - For each actionable bug or improvement in `critical_issues` or `minor_suggestions`, specify the exact `path`, `line`, and clinical replacement code in `suggested_fix`. This enables native GitHub Suggested Change inline review comments (` ```suggestion `).
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
-   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`.
+   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`. When calling `review()`, pass this JSON string as the `body` parameter.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
    - Only track items in `resolutions` that were actually raised as requested changes/findings in `previous_bot_reviews`. If there were no prior review action items or the previous review was APPROVED, leave `resolutions` as an empty list `[]`. Never invent or backfill resolved items from the new commit's changes.
    - For items that were in `previous_bot_reviews`, mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
@@ -1781,7 +1782,7 @@ class WebhookAgent:
             output_key="code_review_analysis",
             planner=BuiltInPlanner(
                 thinking_config=genai_types.ThinkingConfig(
-                    include_thoughts=True,
+                    include_thoughts=False,
                     thinking_budget=-1,
                 )
             ),
@@ -2348,13 +2349,18 @@ Clean dev/docs PRs return risks: [].
                                 )
                             )
 
-                # Handle text responses — log the agent's reasoning
+                # Handle text responses — log the agent's reasoning (filtering out thought tokens)
                 if (
                     event.content
                     and event.content.parts
-                    and any(hasattr(p, "text") and p.text for p in event.content.parts)
+                    and any(
+                        hasattr(p, "text") and p.text and not getattr(p, "thought", False)
+                        for p in event.content.parts
+                    )
                 ):
                     for part in event.content.parts:
+                        if getattr(part, "thought", False):
+                            continue
                         if hasattr(part, "text") and part.text:
                             emitted_texts.append(part.text)
                             logger.debug(
