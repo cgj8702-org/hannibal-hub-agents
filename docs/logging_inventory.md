@@ -47,14 +47,14 @@ Complete audit catalog of all logging calls across `src/` in the `hannibal-hub-a
 | [rate_limiter.py](../src/logic/rate_limiter.py#L62) | 62 | `_get_firestore_tier` | `DEBUG` | `Firestore dynamic config read skipped: %s` |
 | [rate_limiter.py](../src/logic/rate_limiter.py#L95) | 95 | `get_allowed_models` | `ERROR` | `Failed to resolve allowed models from rate_limits.json: %s` |
 | [rate_limiter.py](../src/logic/rate_limiter.py#L264) | 264 | `check_and_wait` | `WARNING` | `FAST FAIL (%s): Model has 0 quota on tier '%s'. Rejecting.` |
-| [rate_limiter.py](../src/logic/rate_limiter.py#L294) | 294 | `check_and_wait` | `WARNING` | `RPM THROTTLE (%s): Used %d/%d. Sleeping %.1fs...` |
-| [rate_limiter.py](../src/logic/rate_limiter.py#L319) | 319 | `check_and_wait` | `WARNING` | `TPM THROTTLE (%s): Active %d+%d/%d TPM limit exceeded. Waiting %.1fs for tokens to expire...` |
+| [rate_limiter.py](../src/logic/rate_limiter.py#L294) | 294 | `check_and_wait` | `INFO` | `RPM THROTTLE (%s): Used %d/%d. Sleeping %.1fs...` |
+| [rate_limiter.py](../src/logic/rate_limiter.py#L319) | 319 | `check_and_wait` | `INFO` | `TPM THROTTLE (%s): Active %d+%d/%d TPM limit exceeded. Waiting %.1fs for tokens to expire...` |
 | [secret_manager.py](../src/logic/secret_manager.py#L38) | 38 | `resolve_secret` | `DEBUG` | `Successfully resolved secret '%s' from Secret Manager` |
 | [secret_manager.py](../src/logic/secret_manager.py#L43) | 43 | `resolve_secret` | `DEBUG` | `Secret Manager fallback skipped for '%s': %s` |
 | [agent_core.py](../src/webhook_agent/agent_core.py#L56) | 56 | `run` | `DEBUG` | `🧠 Starting ADK agent processing (trace: %s, repo: %s)` |
 | [agent_core.py](../src/webhook_agent/agent_core.py#L62) | 62 | `run` | `INFO` | `🧠 Processing event via ADK agent (trace: %s, repo: %s)` |
 | [agent_core.py](../src/webhook_agent/agent_core.py#L80) | 80 | `run` | `DEBUG` | `🧠 ADK agent processing completed (trace: %s, result_count: %d)` |
-| [callbacks.py](../src/webhook_agent/callbacks.py#L51) | 51 | `_check_pr_closed_short_circuit` | `WARNING` | `🔒 Short-circuiting agent turn: PR %s#%s is marked CLOSED` |
+| [callbacks.py](../src/webhook_agent/callbacks.py#L51) | 51 | `_check_pr_closed_short_circuit` | `INFO` | `🔒 Short-circuiting agent turn: PR %s#%s is marked CLOSED` |
 | [callbacks.py](../src/webhook_agent/callbacks.py#L73) | 73 | `before_agent_callback` | `INFO` | `🤖 [SubAgent: %s] Starting sub-agent execution...` |
 | [callbacks.py](../src/webhook_agent/callbacks.py#L74) | 74 | `before_agent_callback` | `DEBUG` | `before_agent_callback: initialized active_tier=%s in state for sub-agent '%s'` |
 | [callbacks.py](../src/webhook_agent/callbacks.py#L149) | 149 | `after_model_callback` | `DEBUG` | `after_model_callback: recorded total_tokens=%d` |
