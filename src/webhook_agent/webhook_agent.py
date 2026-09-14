@@ -58,6 +58,7 @@ from .callbacks import (
     on_tool_error_callback,
 )
 from .comment_poster import build_github_review_comments
+from .diff_filter import filter_review_diff
 from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .formatter import (
     calculate_strict_verdict,
@@ -831,7 +832,12 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
                     diff_lines.append(
                         f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}"
                     )
-                diff_text = "\n".join(diff_lines) if diff_lines else "No files changed."
+                raw_diff = "\n".join(diff_lines) if diff_lines else "No files changed."
+                if raw_diff and raw_diff != "No files changed.":
+                    filtered_res = filter_review_diff(raw_diff)
+                    diff_text = filtered_res.filtered_diff or raw_diff
+                else:
+                    diff_text = raw_diff
                 parts.append(f"\nDiff:\n{diff_text}")
 
         else:
@@ -893,7 +899,9 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
             diff_lines.append(
                 f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
             )
-        return "\n".join(diff_lines)
+        raw_diff = "\n".join(diff_lines)
+        filtered_res = filter_review_diff(raw_diff)
+        return filtered_res.filtered_diff or raw_diff
     except Exception as e:
         return f"Error fetching commit diff: {e}"
 
@@ -1370,15 +1378,35 @@ def _enforce_verdict(
             has_prior_reviews = True
             bot_reviews = []
 
+        review_budget: int | None = None
+        existing_comments_data: list[dict[str, Any]] = []
         try:
             files = pr.get_files()
             diff_lines: list[str] = []
             for f in files:
                 patch = getattr(f, "patch", "") or ""
                 diff_lines.append(f"+++ b/{f.filename}\n{patch}")
-            diff_text = "\n".join(diff_lines)
+            raw_diff = "\n".join(diff_lines)
+            filtered_res = filter_review_diff(raw_diff)
+            diff_text = filtered_res.filtered_diff or raw_diff
+            review_budget = filtered_res.budget
         except Exception as diff_err:
             logger.debug("Could not fetch PR diff text in _enforce_verdict: %s", diff_err)
+
+        try:
+            for c in pr.get_review_comments():
+                existing_comments_data.append(
+                    {
+                        "path": getattr(c, "path", ""),
+                        "line": getattr(c, "line", None) or getattr(c, "original_line", None),
+                        "body": getattr(c, "body", ""),
+                    }
+                )
+        except Exception as comm_err:
+            logger.debug("Could not fetch existing PR review comments: %s", comm_err)
+    else:
+        review_budget = None
+        existing_comments_data = []
 
     for data in data_candidates:
         try:
@@ -1417,7 +1445,12 @@ def _enforce_verdict(
                         sync_issues = list(sync_obj.critical_issues) + list(
                             sync_obj.minor_suggestions
                         )
-                        inline_comments, _ = build_github_review_comments(sync_issues, diff_text)
+                        inline_comments, _ = build_github_review_comments(
+                            sync_issues,
+                            diff_text,
+                            existing_comments=existing_comments_data,
+                            max_comments=review_budget,
+                        )
                     return rendered_body, enforced_verdict, inline_comments
                 elif (
                     "executive_summary" in data
@@ -1455,7 +1488,12 @@ def _enforce_verdict(
                     inline_comments = []
                     if diff_text:
                         cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
-                        inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
+                        inline_comments, _ = build_github_review_comments(
+                            cr_issues,
+                            diff_text,
+                            existing_comments=existing_comments_data,
+                            max_comments=review_budget,
+                        )
                     return rendered_body, enforced_verdict, inline_comments
         except Exception as exc:
             logger.debug("Candidate JSON parse attempt skipped: %s", exc)
@@ -1496,7 +1534,12 @@ def _enforce_verdict(
         inline_comments = []
         if diff_text:
             cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
-            inline_comments, _ = build_github_review_comments(cr_issues, diff_text)
+            inline_comments, _ = build_github_review_comments(
+                cr_issues,
+                diff_text,
+                existing_comments=existing_comments_data,
+                max_comments=review_budget,
+            )
         return rendered_body, enforced_verdict, inline_comments
     except Exception as parse_err:
         logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)
