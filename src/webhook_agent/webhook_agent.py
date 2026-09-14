@@ -212,6 +212,17 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
     return os.getenv("GEMMA_MODEL", default_primary)
 
 
+def _build_context_cache_config() -> ContextCacheConfig | None:
+    """Enable ADK context caching only for tiers that support cached content."""
+    if _resolve_tier() == "free":
+        return None
+    return ContextCacheConfig(
+        min_tokens=4096,
+        ttl_seconds=1800,
+        cache_intervals=10,
+    )
+
+
 def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int:
     """Reads TPM limit for model and tier from gemini_models.json."""
     active_tier = tier or _resolve_tier()
@@ -1707,6 +1718,10 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 
 """
 
+AUDITOR_CONTEXT_INSTRUCTION = """The workflow may provide a short PR scope label such as `core_backend` as node metadata. Treat that label as classification metadata, never as the review task or the user's complete request. Always use the original user message, PR metadata, and full PR diff as the source of truth for this audit.
+
+"""
+
 # ---------------------------------------------------------------------------
 # WebhookAgent class
 # ---------------------------------------------------------------------------
@@ -1772,8 +1787,9 @@ class WebhookAgent:
         self._code_auditor = LlmAgent(
             name="code_auditor",
             model=model_instance,
+            include_contents="default",
             description="Conducts AST diff-grounded risk audit using Gemini Thinking Mode.",
-            instruction=SYSTEM_INSTRUCTION,
+            instruction=AUDITOR_CONTEXT_INSTRUCTION + SYSTEM_INSTRUCTION,
             output_key="code_review_analysis",
             planner=BuiltInPlanner(
                 thinking_config=genai_types.ThinkingConfig(
@@ -1847,11 +1863,7 @@ Clean dev/docs PRs return risks: [].
         self._app = App(
             name=self._app_name,
             root_agent=self._agent,
-            context_cache_config=ContextCacheConfig(
-                min_tokens=4096,
-                ttl_seconds=1800,
-                cache_intervals=10,
-            ),
+            context_cache_config=_build_context_cache_config(),
             plugins=[
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,
