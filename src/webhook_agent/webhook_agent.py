@@ -58,8 +58,6 @@ from .callbacks import (
     on_tool_error_callback,
 )
 from .comment_poster import build_github_review_comments
-from .diff_filter import filter_review_diff
-from .diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -70,9 +68,11 @@ from .formatter import (
     render_code_review_markdown,
     render_sync_review_markdown,
 )
+from .logic.diff_filter import filter_review_diff
 from .memory_service import InMemoryMemoryService
 from .sanitizer_plugin import PromptSanitizerPlugin
 from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
+from .tools.diff_tools import get_pr_diff_file_map_tool, verify_line_reference_tool
 from .tools.resolve_conflicts import resolve_merge_conflicts
 from .tools.search_tool import google_search_grounding_tool
 from .webhook_types import ActionResult
