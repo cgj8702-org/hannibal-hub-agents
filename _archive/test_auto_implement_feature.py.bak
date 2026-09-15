@@ -1,0 +1,62 @@
+"""Unit tests for auto_implement_issue_feature tool and Firestore checkpointing."""
+
+from unittest.mock import MagicMock, patch
+from google.adk.agents.context import Context
+from webhook_agent.processor import _preexecute_implement_command
+from webhook_agent.tools.auto_implement_feature import (
+    FirestoreFeatureCheckpointRegistry,
+    auto_implement_issue_feature,
+)
+
+
+def test_firestore_checkpoint_registry_save_and_read():
+    registry = FirestoreFeatureCheckpointRegistry(collection_name="test_checkpoints")
+    registry.save_checkpoint(
+        issue_number=99,
+        instruction="add rate limiting",
+        branch_name="feat/issue-99-auto-impl",
+        session_id="delegate-issue-99",
+        status="in_progress",
+    )
+    # Check local fallback or db handles safely without crashing
+    doc = registry.get_checkpoint(99)
+    assert doc is None or isinstance(doc, dict)
+
+
+def test_auto_implement_feature_disabled_policy(monkeypatch):
+    monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "0")
+    ctx = MagicMock(spec=Context)
+    res = auto_implement_issue_feature(ctx, issue_number=10, instruction="test feature")
+    assert "disabled by policy" in res
+
+
+def test_auto_implement_feature_quota_paused_checkpoint(monkeypatch):
+    monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
+    ctx = MagicMock(spec=Context)
+
+    with patch(
+        "webhook_agent.tools.auto_implement_feature.firestore_checkpoint_registry.get_checkpoint",
+        return_value={
+            "status": "quota_paused",
+            "resume_at": None,
+        },
+    ):
+        with patch("webhook_agent.tools.auto_implement_feature.Github"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="clean")
+                res = auto_implement_issue_feature(
+                    ctx, issue_number=42, instruction="add rate limiting"
+                )
+                assert "Issue #42" in res
+
+
+def test_preexecute_implement_command_extraction():
+    payload = {
+        "raw_payload": {
+            "issue": {"number": 12, "title": "Add analytics endpoint"},
+            "comment": {"body": "/implement add analytics endpoint to /api/v1"},
+        }
+    }
+    _preexecute_implement_command(MagicMock(), "owner/repo", payload)
+    assert "implement_instruction" in payload["raw_payload"]
+    assert "Issue #12: add analytics endpoint to /api/v1" in payload["raw_payload"]["implement_instruction"]

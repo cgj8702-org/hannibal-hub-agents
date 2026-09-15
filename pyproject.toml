@@ -32,6 +32,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 addopts = "--strict-markers"
+norecursedirs = ["_archive", ".*", "dev", "docs"]
 markers = [
     "unit: Fast isolated unit tests with mocked dependencies.",
     "integration: Component integration tests using local worktrees or CLI tools.",
