@@ -10,9 +10,14 @@ import re
 from typing import Any
 
 from .audit_schema import AuditVerdict, RiskItem
-from .diff_tools import _strip_diff_prefix, check_window, verify_line_reference, walk_right_side
-from .duplicate_detector import already_raised, build_exclusions, group_repeated_findings
+from .logic.duplicate_detector import already_raised, build_exclusions, group_repeated_findings
 from .schemas import IssueItem
+from .tools.diff_tools import (
+    _strip_diff_prefix,
+    check_window,
+    verify_line_reference,
+    walk_right_side,
+)
 
 logger = logging.getLogger("webhook_agent.comment_poster")
 

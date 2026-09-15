@@ -29,7 +29,6 @@ from github import Auth, Github
 from .agent_core import AgentCore
 from .bot_identity import _is_bot_event
 from .cancellation import pr_closed_registry
-from .diff_filter import filter_review_diff
 from .formatter import (
     truncate_log_payload,
 )
@@ -40,6 +39,7 @@ from .github_credential_helper import (
     load_private_key,
     save_cached_token,
 )
+from .logic.diff_filter import filter_review_diff
 
 logger = logging.getLogger("webhook_agent.processor")
 
