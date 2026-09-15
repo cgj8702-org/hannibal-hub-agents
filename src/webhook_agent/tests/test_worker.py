@@ -385,7 +385,6 @@ class TestShouldProcessEvent:
         """All webhook agent modules use unified 'webhook_agent.*' logger namespace."""
         from webhook_agent import (
             agent_core,
-            enqueue,
             memory_service,
             processor,
             webhook_agent,
@@ -396,7 +395,6 @@ class TestShouldProcessEvent:
         assert worker.logger.name == "webhook_agent.worker"
         assert webhook_agent.logger.name == "webhook_agent.agent"
         assert agent_core.logger.name == "webhook_agent.core"
-        assert enqueue.logger.name == "webhook_agent.enqueue"
         assert memory_service.logger.name == "webhook_agent.memory"
 
     def test_fetch_repo_pr_template_fallback(self):
