@@ -4,11 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from webhook_agent.logic.genai_provider import (
-    GenerateContentProvider,
-    InteractionsProvider,
-    get_text_generation_provider,
-)
+from webhook_agent.logic.genai_provider import GenerateContentProvider, get_text_generation_provider
 from webhook_agent.tools.resolve_conflicts import (
     _synthesize_conflict_resolution,
     resolve_merge_conflicts,
@@ -61,54 +57,10 @@ def test_text_generation_provider_defaults_to_generate_content() -> None:
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_interactions_provider_normalizes_output_and_id() -> None:
+def test_shared_text_generation_provider_uses_legacy_default() -> None:
     mock_client = MagicMock()
-    mock_interaction = MagicMock(output_text="resolved", id="int_123")
-    mock_client.interactions.create.return_value = mock_interaction
-    provider = get_text_generation_provider(mock_client, use_interactions=True)
-
-    result = provider.generate(model="gemini-3.8-flash", prompt="resolve this")
-
-    assert isinstance(provider, InteractionsProvider)
-    assert result.text == "resolved"
-    assert result.interaction_id == "int_123"
-    mock_client.interactions.create.assert_called_once_with(
-        model="gemini-3.8-flash",
-        input="resolve this",
-    )
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-def test_synthesize_conflict_resolution_can_use_interactions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GEMINI_API_USE_INTERACTIONS", "true")
-    content = "<<<<<<< HEAD\nhead\n=======\nbase\n>>>>>>> origin/main\n"
-    mock_client = MagicMock()
-    mock_client.interactions.create.return_value = MagicMock(
-        output_text="resolved\n",
-        id="int_456",
-    )
-
-    result = _synthesize_conflict_resolution("foo.py", content, mock_client)
-
-    assert result == "resolved\n"
-    mock_client.interactions.create.assert_called_once()
-    mock_client.models.generate_content.assert_not_called()
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-def test_shared_text_generation_provider_uses_opt_in_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    mock_client = MagicMock()
-    monkeypatch.setattr("webhook_agent.webhook_agent.get_shared_genai_client", lambda: mock_client)
-    provider = get_shared_text_generation_provider(use_interactions=False)
+    provider = get_shared_text_generation_provider()
     assert isinstance(provider, GenerateContentProvider)
-
-    monkeypatch.setenv("GEMINI_API_USE_INTERACTIONS", "true")
-    interaction_provider = get_shared_text_generation_provider()
-    assert isinstance(interaction_provider, InteractionsProvider)
 
 
 @pytest.mark.unit

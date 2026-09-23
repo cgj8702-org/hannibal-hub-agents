@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -121,59 +120,18 @@ class GenerateContentProvider:
         )
 
 
-class InteractionsProvider:
-    """Adapter for the single-turn Gemini Interactions API."""
-
-    def __init__(self, client: Client) -> None:
-        self._client = client
-
-    def generate(
-        self,
-        model: str,
-        prompt: str,
-        *,
-        config: Any | None = None,
-        **kwargs: Any,
-    ) -> TextGenerationResult:
-        call_kwargs: dict[str, Any] = {"model": model, "input": prompt}
-        if config is not None:
-            call_kwargs["config"] = config
-        call_kwargs.update(kwargs)
-        interaction = self._client.interactions.create(**call_kwargs)
-        return TextGenerationResult(
-            text=_normalize_text(getattr(interaction, "output_text", "") or ""),
-            interaction_id=getattr(interaction, "id", None),
-            citations=_extract_citations(interaction),
-        )
-
-
-def interactions_enabled() -> bool:
-    """Return whether the opt-in Interactions provider is enabled."""
-    return os.getenv("GEMINI_API_USE_INTERACTIONS", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def get_text_generation_provider(
     client: Client,
     *,
     use_interactions: bool | None = None,
 ) -> TextGenerationProvider:
-    """Build the configured provider while keeping legacy behavior as default."""
-    enabled = interactions_enabled() if use_interactions is None else use_interactions
-    if enabled:
-        return InteractionsProvider(client)
+    """Return the legacy Gemini provider for the app-owned static prompt flow."""
     return GenerateContentProvider(client)
 
 
 __all__ = [
     "GenerateContentProvider",
-    "InteractionsProvider",
     "TextGenerationProvider",
     "TextGenerationResult",
     "get_text_generation_provider",
-    "interactions_enabled",
 ]
