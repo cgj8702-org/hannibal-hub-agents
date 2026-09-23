@@ -70,6 +70,7 @@ from .formatter import (
     render_sync_review_markdown,
 )
 from .logic.diff_filter import filter_review_diff
+from .logic.review_idempotency import review_claim_registry
 from .memory_service import InMemoryMemoryService
 from .sanitizer_plugin import PromptSanitizerPlugin
 from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
@@ -1630,6 +1631,18 @@ def _submit_formal_review(
             logger.info("Skipping duplicate bot review for %s at head %s", target_key, head_sha)
             return f"Skipped: bot review already exists for current head {head_sha}.", False
 
+        claim = None
+        if head_sha:
+            repo_name, _, number_text = target_key.rpartition("#")
+            claim = review_claim_registry.claim(
+                repo_name,
+                int(number_text),
+                head_sha,
+                github_review_exists=False,
+            )
+            if claim is None:
+                return f"Skipped: review claim already exists for current head {head_sha}.", False
+
         state_dict = state if isinstance(state, dict) else {}
         review_mode = state_dict.get("review_mode")
         if review_mode not in ("initial", "sync"):
@@ -1638,22 +1651,34 @@ def _submit_formal_review(
             body, event, pr, review_mode=review_mode
         )
 
-        if inline_comments:
-            try:
-                rv = pr.create_review(
-                    body=rendered_body,
-                    event=enforced_event,
-                    comments=inline_comments,
-                )
-            except Exception as review_err:
-                logger.warning(
-                    "pr.create_review with %d inline comments failed (%s); falling back to body-only review",
-                    len(inline_comments),
-                    review_err,
-                )
+        try:
+            if inline_comments:
+                try:
+                    rv = pr.create_review(
+                        body=rendered_body,
+                        event=enforced_event,
+                        comments=inline_comments,
+                    )
+                except Exception as review_err:
+                    logger.warning(
+                        "pr.create_review with %d inline comments failed (%s); falling back to body-only review",
+                        len(inline_comments),
+                        review_err,
+                    )
+                    rv = pr.create_review(body=rendered_body, event=enforced_event)
+            else:
                 rv = pr.create_review(body=rendered_body, event=enforced_event)
-        else:
-            rv = pr.create_review(body=rendered_body, event=enforced_event)
+        except Exception:
+            if claim is not None:
+                review_claim_registry.release(claim)
+            raise
+
+        if claim is not None:
+            review_claim_registry.mark_submitted(
+                claim,
+                str(getattr(rv, "id", "")),
+                str(getattr(rv, "html_url", "")),
+            )
 
         # Dismiss only after GitHub accepted the new review.
         for prev_rv in bot_reviews:
