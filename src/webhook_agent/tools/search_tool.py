@@ -13,6 +13,8 @@ import os
 
 from google.adk.agents.context import Context
 
+from webhook_agent.logic.genai_provider import get_text_generation_provider
+
 logger = logging.getLogger("webhook_agent.search")
 
 MAX_SEARCH_CALLS_PER_SESSION = 3
@@ -64,27 +66,17 @@ def google_search_grounding_tool(ctx: Context, query: str) -> str:
             http_options=types.HttpOptions(timeout=15000),
         )
 
-        response = client.models.generate_content(
+        provider = get_text_generation_provider(client)
+        generation = provider.generate(
             model="gemini-3.5-flash-lite",
-            contents=f"Search query: {query.strip()}",
+            prompt=f"Search query: {query.strip()}",
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             ),
         )
 
-        text = response.text or "No text output returned."
-
-        # Extract grounding metadata / URL citations if available
-        citations: list[str] = []
-        if hasattr(response, "candidates") and response.candidates:
-            cand = response.candidates[0]
-            g_meta = getattr(cand, "grounding_metadata", None)
-            if g_meta and hasattr(g_meta, "grounding_chunks"):
-                for chunk in g_meta.grounding_chunks or []:
-                    web = getattr(chunk, "web", None)
-                    if web and getattr(web, "uri", None):
-                        title = getattr(web, "title", "Source")
-                        citations.append(f"- [{title}]({web.uri})")
+        text = generation.text or "No text output returned."
+        citations = generation.citations or []
 
         out_parts = [f"### 🔍 Google Search Results for: '{query.strip()}'", "", text]
         if citations:

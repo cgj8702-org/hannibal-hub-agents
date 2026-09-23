@@ -902,3 +902,114 @@ class TestReviewDismissalOrdering:
             "Superseded by fresh code review on latest commit."
         )
         mock_new.dismiss.assert_not_called()
+
+
+class TestReviewIdempotency:
+    @staticmethod
+    def _pr(head_sha="head-1", reviews=None):
+        from unittest.mock import MagicMock
+
+        pr = MagicMock()
+        pr.state = "open"
+        pr.merged = False
+        pr.head.sha = head_sha
+        pr.get_reviews.return_value = list(reviews or [])
+        new_review = MagicMock()
+        new_review.id = 202
+        new_review.html_url = "https://github.com/owner/repo/pull/42#review-202"
+        pr.create_review.return_value = new_review
+        return pr
+
+    @staticmethod
+    def _bot_review(commit_id, state="APPROVED"):
+        from unittest.mock import MagicMock
+
+        review = MagicMock()
+        review.id = 101
+        review.user.login = "hannibal-hub-agents[bot]"
+        review.commit_id = commit_id
+        review.state = state
+        return review
+
+    def test_same_head_suppresses_duplicate(self):
+        from webhook_agent.webhook_agent import _submit_formal_review
+
+        prior = self._bot_review("head-1")
+        pr = self._pr(reviews=[prior])
+
+        result, submitted = _submit_formal_review(
+            pr, "duplicate", "COMMENT", "owner/repo#100", {"review_mode": "initial"}
+        )
+
+        assert submitted is False
+        assert "already exists for current head head-1" in result
+        pr.create_review.assert_not_called()
+        prior.dismiss.assert_not_called()
+
+    def test_prior_head_renders_update_and_dismisses_after_success(self):
+        from webhook_agent.webhook_agent import _submit_formal_review
+
+        prior = self._bot_review("old-head")
+        pr = self._pr(reviews=[prior])
+        body = '{"executive_summary":"New commit reviewed.","critical_issues":[]}'
+
+        result, submitted = _submit_formal_review(
+            pr, body, "COMMENT", "owner/repo#101", {"review_mode": "sync"}
+        )
+
+        assert submitted is True
+        assert "Submitted review (APPROVE)" in result
+        submitted_body = pr.create_review.call_args.kwargs["body"]
+        assert "## ⚡ Code Review Update: `APPROVE`" in submitted_body
+        prior.dismiss.assert_called_once()
+
+    def test_synchronize_initial_shaped_data_uses_update_renderer(self):
+        from webhook_agent.webhook_agent import _enforce_verdict
+
+        pr = self._pr(reviews=[self._bot_review("old-head")])
+        body = '{"executive_summary":"Synchronize result.","critical_issues":[]}'
+
+        rendered, verdict, _ = _enforce_verdict(body, "COMMENT", pr, review_mode="sync")
+
+        assert verdict == "APPROVE"
+        assert "## ⚡ Code Review Update: `APPROVE`" in rendered
+
+    def test_concurrent_submissions_create_only_one_review(self):
+        import threading
+        import time
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import _submit_formal_review
+
+        pr = self._pr(head_sha="race-head")
+        prior_reviews = []
+        pr.get_reviews.side_effect = lambda: list(prior_reviews)
+        created = MagicMock(id=303, html_url="https://example.test/review-303")
+
+        def create_review(**_kwargs):
+            time.sleep(0.03)
+            prior_reviews.append(self._bot_review("race-head", state="APPROVED"))
+            return created
+
+        pr.create_review.side_effect = create_review
+        results = []
+
+        def submit():
+            results.append(
+                _submit_formal_review(
+                    pr,
+                    "race",
+                    "COMMENT",
+                    "owner/repo#102",
+                    {"review_mode": "initial"},
+                )
+            )
+
+        threads = [threading.Thread(target=submit) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert sum(submitted for _result, submitted in results) == 1
+        assert pr.create_review.call_count == 1

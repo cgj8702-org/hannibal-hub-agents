@@ -10,6 +10,8 @@ from github import GithubException
 
 from webhook_agent.proactive_service import ProactiveEvaluator
 
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 
 class TestProactiveEvaluator:
     def test_evaluate_open_prs_propagates_authentication_failure(self):
@@ -54,3 +56,21 @@ class TestProactiveEvaluator:
         assert "stale_thread_reminder_posted" in results[0]["actions"]
         mock_pr.create_issue_comment.assert_called_once()
         assert "Proactive Reminder" in mock_pr.create_issue_comment.call_args[0][0]
+
+    def test_approval_without_inline_comments_does_not_trigger_reminder(self):
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = MagicMock()
+        mock_pr.number = 158
+        mock_pr.mergeable = True
+        old_review = MagicMock()
+        old_review.submitted_at = datetime.now(UTC) - timedelta(hours=25)
+        mock_pr.get_review_comments.return_value = []
+        mock_pr.get_reviews.return_value = [old_review]
+        mock_pr.get_issue_comments.return_value = []
+        mock_repo.get_pulls.return_value = [mock_pr]
+
+        evaluator = ProactiveEvaluator(mock_gh, "owner/repo")
+
+        assert evaluator.evaluate_open_prs() == []
+        mock_pr.create_issue_comment.assert_not_called()

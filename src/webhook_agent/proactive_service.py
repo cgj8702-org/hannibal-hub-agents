@@ -89,13 +89,15 @@ class ProactiveEvaluator:
         return None
 
     def _has_stale_unresolved_thread(self, pr: Any) -> bool:
-        """Checks if PR has actual review comments >24h old with no subsequent activity."""
+        """Check for inline review comments idle for more than 24 hours.
+
+        Formal approvals and requested-change review records are not threads;
+        only inline review comments can trigger this reminder.
+        """
         try:
             get_review_comments = getattr(pr, "get_review_comments", None)
             review_comments = list(get_review_comments()) if callable(get_review_comments) else []
-            get_reviews = getattr(pr, "get_reviews", None)
-            reviews = list(get_reviews()) if callable(get_reviews) else []
-            if not review_comments and not reviews:
+            if not review_comments:
                 return False
 
             now = datetime.now(UTC)
@@ -107,14 +109,6 @@ class ProactiveEvaluator:
                         c_time = c_time.replace(tzinfo=UTC)
                     if latest_comment_time is None or c_time > latest_comment_time:
                         latest_comment_time = c_time
-
-            for r in reviews:
-                r_time = getattr(r, "submitted_at", None)
-                if r_time:
-                    if r_time.tzinfo is None:
-                        r_time = r_time.replace(tzinfo=UTC)
-                    if latest_comment_time is None or r_time > latest_comment_time:
-                        latest_comment_time = r_time
 
             if not latest_comment_time:
                 return False

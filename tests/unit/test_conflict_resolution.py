@@ -4,10 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from webhook_agent.logic.genai_provider import GenerateContentProvider, get_text_generation_provider
 from webhook_agent.tools.resolve_conflicts import (
     _synthesize_conflict_resolution,
     resolve_merge_conflicts,
 )
+from webhook_agent.webhook_agent import get_shared_text_generation_provider
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
@@ -42,6 +44,23 @@ def test_synthesize_conflict_resolution_with_markers() -> None:
     result = _synthesize_conflict_resolution("foo.py", content, mock_client)
     assert result == "def foo():\n    return 'resolved'\n"
     mock_client.models.generate_content.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_text_generation_provider_defaults_to_generate_content() -> None:
+    mock_client = MagicMock()
+    provider = get_text_generation_provider(mock_client)
+
+    assert isinstance(provider, GenerateContentProvider)
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_shared_text_generation_provider_uses_legacy_default() -> None:
+    mock_client = MagicMock()
+    provider = get_shared_text_generation_provider()
+    assert isinstance(provider, GenerateContentProvider)
 
 
 @pytest.mark.unit
