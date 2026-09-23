@@ -70,6 +70,7 @@ from .formatter import (
     render_sync_review_markdown,
 )
 from .logic.diff_filter import filter_review_diff
+from .logic.review_idempotency import review_claim_registry
 from .memory_service import InMemoryMemoryService
 from .sanitizer_plugin import PromptSanitizerPlugin
 from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
@@ -944,6 +945,28 @@ class CommentRateLimiter:
 
 
 _COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
+_REVIEW_LOCKS: dict[str, threading.Lock] = {}
+_REVIEW_LOCKS_GUARD = threading.Lock()
+
+
+def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
+    """Return whether an event is allowed to initiate a formal code review."""
+    return (
+        canonical
+        in {
+            "pull_request.opened",
+            "pull_request.reopened",
+            "pull_request.synchronize",
+            "pull_request_review_requested",
+        }
+        or "/review" in comment_body.lower()
+    )
+
+
+def _review_lock(target_key: str) -> threading.Lock:
+    """Return the process-local lock used to serialize one PR's submissions."""
+    with _REVIEW_LOCKS_GUARD:
+        return _REVIEW_LOCKS.setdefault(target_key, threading.Lock())
 
 
 def update_issue(
@@ -1314,7 +1337,7 @@ def _parse_confidence(body: str) -> int | None:
 
 
 def _enforce_verdict(
-    body: str, event: str, pr: Any = None
+    body: str, event: str, pr: Any = None, review_mode: str | None = None
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """Programmatically enforce verdict rules based on structured JSON or Markdown text.
 
@@ -1424,7 +1447,28 @@ def _enforce_verdict(
                 if is_intended_request_changes and not data.get("verdict"):
                     data["verdict"] = "REQUEST_CHANGES"
 
-                if "resolutions" in data or ("summary" in data and "executive_summary" not in data):
+                # Webhook mode is authoritative. The model may return the
+                # initial schema for a synchronize event (or vice versa).
+                if review_mode == "sync" and "summary" not in data:
+                    data = dict(data)
+                    data["summary"] = data.get(
+                        "executive_summary", "Pull request synchronization review update."
+                    )
+                    data.setdefault("resolutions", [])
+                elif review_mode == "initial" and "executive_summary" not in data:
+                    data = dict(data)
+                    data["executive_summary"] = data.get(
+                        "summary", "Autonomous PR code review report."
+                    )
+
+                use_sync_schema = review_mode == "sync" or (
+                    review_mode not in ("initial", "sync")
+                    and (
+                        "resolutions" in data
+                        or ("summary" in data and "executive_summary" not in data)
+                    )
+                )
+                if use_sync_schema:
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
 
@@ -1513,6 +1557,24 @@ def _enforce_verdict(
         parsed_dict = parse_text_review_to_dict(body)
         if is_intended_request_changes and not parsed_dict.get("verdict"):
             parsed_dict["verdict"] = "REQUEST_CHANGES"
+        if review_mode == "sync" and "summary" not in parsed_dict:
+            parsed_dict["summary"] = parsed_dict.get(
+                "executive_summary", "Pull request synchronization review update."
+            )
+            parsed_dict.setdefault("resolutions", [])
+        elif review_mode == "initial" and "executive_summary" not in parsed_dict:
+            parsed_dict["executive_summary"] = parsed_dict.get(
+                "summary", "Autonomous PR code review report."
+            )
+        if review_mode == "sync":
+            normalized_sync = normalize_sync_review_dict(parsed_dict)
+            sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+            enforced_verdict = calculate_sync_verdict(sync_obj)
+            rendered_body = render_sync_review_markdown(
+                sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
+            )
+            return rendered_body, enforced_verdict, []
+
         normalized_dict = normalize_code_review_dict(parsed_dict)
         cr_obj = CodeReviewResponse.model_validate(normalized_dict)
         enforced_verdict = calculate_strict_verdict(cr_obj)
@@ -1560,6 +1622,97 @@ def _enforce_verdict(
     return body, fallback_event, []
 
 
+def _submit_formal_review(
+    pr: Any,
+    body: str,
+    event: str,
+    target_key: str,
+    state: Any = None,
+) -> tuple[str, bool]:
+    """Submit one guarded review, shared by the tool and deterministic fallback."""
+    with _review_lock(target_key):
+        head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        reviews = list(pr.get_reviews())
+        bot_reviews = []
+        for rv in reviews:
+            login = (getattr(getattr(rv, "user", None), "login", "") or "").lower()
+            if "hannibal-hub-agents" in login or login.endswith("[bot]"):
+                bot_reviews.append(rv)
+
+        if head_sha and any(
+            str(getattr(rv, "commit_id", "") or "") == head_sha for rv in bot_reviews
+        ):
+            logger.info("Skipping duplicate bot review for %s at head %s", target_key, head_sha)
+            return f"Skipped: bot review already exists for current head {head_sha}.", False
+
+        claim = None
+        if head_sha:
+            repo_name, _, number_text = target_key.rpartition("#")
+            claim = review_claim_registry.claim(
+                repo_name,
+                int(number_text),
+                head_sha,
+                github_review_exists=False,
+            )
+            if claim is None:
+                return f"Skipped: review claim already exists for current head {head_sha}.", False
+
+        state_dict = state if isinstance(state, dict) else {}
+        review_mode = state_dict.get("review_mode")
+        if review_mode not in ("initial", "sync"):
+            review_mode = "sync" if bot_reviews else "initial"
+        rendered_body, enforced_event, inline_comments = _enforce_verdict(
+            body, event, pr, review_mode=review_mode
+        )
+
+        try:
+            if inline_comments:
+                try:
+                    rv = pr.create_review(
+                        body=rendered_body,
+                        event=enforced_event,
+                        comments=inline_comments,
+                    )
+                except Exception as review_err:
+                    logger.warning(
+                        "pr.create_review with %d inline comments failed (%s); falling back to body-only review",
+                        len(inline_comments),
+                        review_err,
+                    )
+                    rv = pr.create_review(body=rendered_body, event=enforced_event)
+            else:
+                rv = pr.create_review(body=rendered_body, event=enforced_event)
+        except Exception:
+            if claim is not None:
+                review_claim_registry.release(claim)
+            raise
+
+        if claim is not None:
+            review_claim_registry.mark_submitted(
+                claim,
+                str(getattr(rv, "id", "")),
+                str(getattr(rv, "html_url", "")),
+            )
+
+        # Dismiss only after GitHub accepted the new review.
+        for prev_rv in bot_reviews:
+            if getattr(prev_rv, "state", "") in ("CHANGES_REQUESTED", "APPROVED") and getattr(
+                prev_rv, "id", None
+            ) != getattr(rv, "id", None):
+                try:
+                    prev_rv.dismiss("Superseded by fresh code review on latest commit.")
+                except Exception as dismiss_err:
+                    logger.warning(
+                        "Could not dismiss prior bot review %s: %s", prev_rv.id, dismiss_err
+                    )
+
+        _COMMENT_RATE_LIMITER.record(target_key)
+        if isinstance(state, dict):
+            state["review_submitted_in_this_turn"] = True
+        detail = getattr(rv, "html_url", str(rv))
+        return f"Submitted review ({enforced_event}): {detail}", True
+
+
 def review(
     ctx: Context,
     pr_number: int,
@@ -1583,6 +1736,10 @@ def review(
     """
     repo_name = _get_repo_full_name(ctx)
     target_key = f"{repo_name}#{pr_number}"
+    session_state = getattr(ctx, "state", None)
+    if isinstance(session_state, dict) and session_state.get("formal_review_eligible") is False:
+        return "Skipped: event is not eligible for a formal code review."
+
     if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
         return (
             f"Error: Review/comment rate limit exceeded for #{pr_number} "
@@ -1610,57 +1767,14 @@ def review(
                 f"PR {repo_name}#{pr_number} is closed or merged. Skipping review submission."
             )
 
-        body, event, inline_comments = _enforce_verdict(body, event, pr)
-
-        try:
-            if inline_comments:
-                rv = pr.create_review(body=body, event=event, comments=inline_comments)  # type: ignore[arg-type]
-            else:
-                rv = pr.create_review(body=body, event=event)
-        except Exception as review_err:
-            if inline_comments:
-                logger.warning(
-                    "pr.create_review with %d inline comments failed (%s); falling back to body-only review",
-                    len(inline_comments),
-                    review_err,
-                )
-                rv = pr.create_review(body=body, event=event)
-            else:
-                raise
-
-        # Supersede / dismiss prior bot reviews ONLY after new review is created
-        existing_reviews = pr.get_reviews()
-        for prev_rv in existing_reviews:
-            prev_login = (getattr(getattr(prev_rv, "user", None), "login", "") or "").lower()
-            if (
-                prev_login
-                and (
-                    prev_login in (BOT_LOGIN.lower(), "hannibal-hub-agents")
-                    or prev_login.startswith("hannibal-hub-agents")
-                    or prev_login.endswith("[bot]")
-                )
-                and prev_rv.state in ("CHANGES_REQUESTED", "APPROVED")
-                and getattr(prev_rv, "id", None) != getattr(rv, "id", None)
-            ):
-                try:
-                    prev_rv.dismiss("Superseded by fresh code review on latest commit.")
-                    logger.info(
-                        "Dismissed prior bot review %s on PR #%d",
-                        prev_rv.id,
-                        pr_number,
-                    )
-                except Exception as dismiss_err:
-                    logger.warning(
-                        "Could not dismiss prior bot review %s: %s",
-                        prev_rv.id,
-                        dismiss_err,
-                    )
-        _COMMENT_RATE_LIMITER.record(target_key)
-        session_state = getattr(ctx, "state", None)
-        if isinstance(session_state, dict):
-            session_state["review_submitted_in_this_turn"] = True
-        detail = getattr(rv, "html_url", str(rv))
-        return f"Submitted review ({event}): {detail}"
+        result, _submitted = _submit_formal_review(
+            pr,
+            body,
+            event,
+            target_key,
+            getattr(ctx, "state", None),
+        )
+        return result
     except Exception as e:
         if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(e)):
             raise
@@ -2526,6 +2640,17 @@ Clean dev/docs PRs return risks: [].
                     self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
                         user_id, {}
                     )["sender"] = user_id
+                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
+                        user_id, {}
+                    )["review_mode"] = (
+                        "sync" if canonical == "pull_request.synchronize" else "initial"
+                    )
+                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
+                        user_id, {}
+                    )["formal_review_eligible"] = _is_formal_review_eligible(
+                        canonical,
+                        comment_body,
+                    )
 
                     # Execute the ADK runner with current model
                     await _execute_agent()
@@ -2633,10 +2758,7 @@ Clean dev/docs PRs return risks: [].
         comment_body = (
             (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
         )
-        is_pr_review_event = (
-            canonical.startswith(("pull_request.", "pull_request_review"))
-            or "/review" in comment_body
-        )
+        is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
         has_review_action = any(r.tool == "review" for r in results)
 
         if is_pr_review_event and not has_review_action:
@@ -2684,41 +2806,25 @@ Clean dev/docs PRs return risks: [].
                     try:
                         repo = gh_client.get_repo(repo_full_name)
                         pr = repo.get_pull(pr_number)
-                        body, enforced_event, inline_comments = _enforce_verdict(
-                            review_payload, "COMMENT", pr
+                        detail, submitted = _submit_formal_review(
+                            pr,
+                            review_payload,
+                            "COMMENT",
+                            f"{repo_full_name}#{pr_number}",
+                            {
+                                "review_mode": (
+                                    "sync" if canonical == "pull_request.synchronize" else "initial"
+                                )
+                            },
                         )
-                        try:
-                            if inline_comments:
-                                rv = pr.create_review(
-                                    body=body,
-                                    event=enforced_event,
-                                    comments=inline_comments,  # type: ignore[arg-type]
-                                )
-                            else:
-                                rv = pr.create_review(body=body, event=enforced_event)
-                        except Exception as fb_err:
-                            if inline_comments:
-                                logger.warning(
-                                    "Review with inline comments failed (%s); falling back to body-only review",
-                                    fb_err,
-                                )
-                                rv = pr.create_review(body=body, event=enforced_event)
-                            else:
-                                raise
-
-                        detail = getattr(rv, "html_url", str(rv))
                         results.append(
                             ActionResult(
                                 tool="review",
-                                success=True,
-                                detail=f"Deterministic review submitted ({enforced_event}): {detail}",
+                                success=submitted,
+                                detail=detail,
                             )
                         )
-                        logger.info(
-                            "Deterministic review submitted for PR #%d (%s)",
-                            pr_number,
-                            enforced_event,
-                        )
+                        logger.info("Deterministic review result for PR #%d: %s", pr_number, detail)
                     except Exception as fallback_err:
                         logger.warning(
                             "Deterministic review submission failed: %s",
