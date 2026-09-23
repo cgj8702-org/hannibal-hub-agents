@@ -35,6 +35,7 @@ from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
+from webhook_agent.logic.genai_provider import get_text_generation_provider
 from webhook_agent.logic.model_factory import RateLimitedGemini, get_adk_model
 from webhook_agent.logic.plugins import (
     ToolOutputPruningPlugin,
@@ -106,6 +107,7 @@ __all__ = [
     "calculate_verdict",
     "get_active_model",
     "get_adk_model",
+    "get_shared_text_generation_provider",
 ]
 
 # Persistent background event loop used to run ADK coroutines safely from
@@ -196,6 +198,21 @@ def get_shared_genai_client() -> Any:
     except Exception as exc:
         logger.exception("Failed to create shared GenAI client: %s", exc)
         return None
+
+
+def get_shared_text_generation_provider(
+    *,
+    use_interactions: bool | None = None,
+) -> Any | None:
+    """Return the shared provider adapter while keeping legacy generation as the default.
+
+    The main agent workflow remains opt-in for Interactions until the stateful
+    behavior is explicitly approved for the production orchestration path.
+    """
+    client = get_shared_genai_client()
+    if client is None:
+        return None
+    return get_text_generation_provider(client, use_interactions=use_interactions)
 
 
 logger = logging.getLogger("webhook_agent.agent")

@@ -56,3 +56,31 @@ class TestSearchTool:
                 assert "[Pytest Docs](https://docs.pytest.org)" in res
                 assert ctx.state["search_count"] == 1
                 assert mock_client_cls.call_args.kwargs["http_options"].timeout == 15000
+
+    def test_search_execution_uses_interactions_when_enabled(self, monkeypatch):
+        ctx = MagicMock()
+        ctx.state = {}
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        monkeypatch.setenv("GEMINI_API_USE_INTERACTIONS", "true")
+
+        mock_interaction = MagicMock()
+        mock_interaction.output_text = "Pytest is a testing framework for Python."
+        mock_interaction.steps = [
+            MagicMock(
+                type="google_search_result",
+                result=[MagicMock(title="Pytest Docs", uri="https://docs.pytest.org")],
+            )
+        ]
+
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.interactions.create.return_value = mock_interaction
+            mock_client_cls.return_value = mock_client
+
+            res = google_search_grounding_tool(ctx, "pytest tutorial")
+
+            assert "Pytest is a testing framework for Python." in res
+            assert "[Pytest Docs](https://docs.pytest.org)" in res
+            assert ctx.state["search_count"] == 1
+            mock_client.interactions.create.assert_called_once()
+            mock_client.models.generate_content.assert_not_called()
