@@ -50,7 +50,7 @@ def test_synthesize_conflict_resolution_with_markers() -> None:
 @pytest.mark.webhook_agent
 def test_text_generation_provider_defaults_to_generate_content() -> None:
     mock_client = MagicMock()
-    provider = get_text_generation_provider(mock_client, use_interactions=False)
+    provider = get_text_generation_provider(mock_client)
 
     assert isinstance(provider, GenerateContentProvider)
 

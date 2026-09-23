@@ -200,19 +200,12 @@ def get_shared_genai_client() -> Any:
         return None
 
 
-def get_shared_text_generation_provider(
-    *,
-    use_interactions: bool | None = None,
-) -> Any | None:
-    """Return the shared provider adapter while keeping legacy generation as the default.
-
-    The main agent workflow remains opt-in for Interactions until the stateful
-    behavior is explicitly approved for the production orchestration path.
-    """
+def get_shared_text_generation_provider() -> Any | None:
+    """Return the shared provider adapter for the default generateContent path."""
     client = get_shared_genai_client()
     if client is None:
         return None
-    return get_text_generation_provider(client, use_interactions=use_interactions)
+    return get_text_generation_provider(client)
 
 
 logger = logging.getLogger("webhook_agent.agent")
@@ -1412,13 +1405,11 @@ def _enforce_verdict(
 
         try:
             for c in pr.get_review_comments():
-                existing_comments_data.append(
-                    {
-                        "path": getattr(c, "path", ""),
-                        "line": getattr(c, "line", None) or getattr(c, "original_line", None),
-                        "body": getattr(c, "body", ""),
-                    }
-                )
+                existing_comments_data.append({
+                    "path": getattr(c, "path", ""),
+                    "line": getattr(c, "line", None) or getattr(c, "original_line", None),
+                    "body": getattr(c, "body", ""),
+                })
         except Exception as comm_err:
             logger.debug("Could not fetch existing PR review comments: %s", comm_err)
     else:

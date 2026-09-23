@@ -19,7 +19,7 @@ def _normalize_text(value: Any) -> str:
 
 
 def _extract_citations(response: Any) -> list[str]:
-    """Collect search citations from either generateContent or Interactions responses."""
+    """Collect search citations from the provider response payload."""
     citations: list[str] = []
     seen: set[str] = set()
 
@@ -61,11 +61,10 @@ def _extract_citations(response: Any) -> list[str]:
 
 @dataclass(frozen=True)
 class TextGenerationResult:
-    """Normalized result shared by legacy and Interactions providers."""
+    """Normalized result returned by the active text-generation provider."""
 
     text: str
     total_tokens: int = 0
-    interaction_id: str | None = None
     citations: list[str] = field(default_factory=list)
 
 
@@ -122,10 +121,8 @@ class GenerateContentProvider:
 
 def get_text_generation_provider(
     client: Client,
-    *,
-    use_interactions: bool | None = None,
 ) -> TextGenerationProvider:
-    """Return the legacy Gemini provider for the app-owned static prompt flow."""
+    """Return the active Gemini provider for the app-owned static prompt flow."""
     return GenerateContentProvider(client)
 
 
