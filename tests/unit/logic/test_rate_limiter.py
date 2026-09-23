@@ -112,3 +112,67 @@ def test_extract_rate_limit_details_from_adk_error() -> None:
     assert extracted["quota_value"] == "15"
     assert extracted["retry_after_seconds"] == 45.5
     assert extracted["reason"] == "RATE_LIMIT_EXCEEDED"
+
+
+@pytest.mark.unit
+def test_extract_rate_limit_details_from_google_dict_response() -> None:
+    from google.adk.models.google_llm import _ResourceExhaustedError
+    from google.genai.errors import ClientError
+
+    from webhook_agent.logic.rate_limiter import extract_rate_limit_details
+
+    # Exact structure returned by google.genai.errors.ClientError in production
+    real_response_json = {
+        "error": {
+            "code": 429,
+            "message": "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-3.5-flash-lite\nPlease retry in 48.54272619s.",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.Help",
+                    "links": [{"description": "Learn more", "url": "https://ai.google.dev"}],
+                },
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                        {
+                            "quotaDimensions": {
+                                "location": "global",
+                                "model": "gemini-3.5-flash-lite",
+                            },
+                            "quotaId": "GenerateContentInputTokensPerModelPerMinute-FreeTier",
+                            "quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_input_token_count",
+                            "quotaValue": "250000",
+                        }
+                    ],
+                },
+                {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "48s",
+                },
+            ],
+        }
+    }
+
+    ce = ClientError(code=429, response_json=real_response_json)
+    adk_error = _ResourceExhaustedError(ce)
+
+    extracted = extract_rate_limit_details(adk_error)
+    assert extracted["code"] == 429
+    assert (
+        extracted["quota_limit"]
+        == "generativelanguage.googleapis.com/generate_content_free_tier_input_token_count"
+    )
+    assert extracted["quota_value"] == "250000"
+    assert extracted["retry_after_seconds"] == 48.0
+
+
+@pytest.mark.unit
+def test_extract_rate_limit_details_from_message_regex() -> None:
+    from webhook_agent.logic.rate_limiter import extract_rate_limit_details
+
+    raw_exc = RuntimeError(
+        "Resource exhausted: Quota exceeded for model gemini-3.5-flash-lite. Please retry in 37.5s."
+    )
+    extracted = extract_rate_limit_details(raw_exc)
+    assert extracted["retry_after_seconds"] == 37.5

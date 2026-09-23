@@ -37,3 +37,37 @@ def test_get_adk_model_paid_tier_default(monkeypatch: pytest.MonkeyPatch) -> Non
     model = get_adk_model(tier="paid", api_key="test_key")
     assert isinstance(model, RateLimitedGemini)
     assert model.model == "gemini-3.8-flash"
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_rate_limited_gemini_retries_on_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify RateLimitedGemini catches 429 and retries in-flight without aborting."""
+    from collections.abc import AsyncGenerator
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    model = RateLimitedGemini(model="gemini-3.5-flash-lite", client_kwargs={"api_key": "test_key"})
+
+    attempts = 0
+
+    async def mock_super_gen(*args: Any, **kwargs: Any) -> AsyncGenerator[Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: Please retry in 0.1s.")
+        yield MagicMock(text="success")
+
+    monkeypatch.setattr(Gemini, "generate_content_async", mock_super_gen)
+
+    llm_request = MagicMock()
+    llm_request.contents = ["hello"]
+    llm_request._rate_limit_checked = True
+
+    responses = []
+    async for resp in model.generate_content_async(llm_request):
+        responses.append(resp)
+
+    assert len(responses) == 1
+    assert responses[0].text == "success"
+    assert attempts == 2
