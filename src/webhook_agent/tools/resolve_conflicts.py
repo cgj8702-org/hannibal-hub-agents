@@ -18,6 +18,7 @@ from typing import Any
 
 from google.genai import Client
 
+from webhook_agent.logic.genai_provider import get_text_generation_provider
 from webhook_agent.logic.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.resolve_conflicts")
@@ -77,28 +78,18 @@ def _synthesize_conflict_resolution(
             )
 
     try:
-        response = genai_client.models.generate_content(
-            model=target_model,
-            contents=prompt,
-        )
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            raw_tok = getattr(response.usage_metadata, "total_token_count", 0) or getattr(
-                response.usage_metadata, "total_tokens", 0
-            )
-            try:
-                total_tokens = int(raw_tok)
-            except (TypeError, ValueError):
-                total_tokens = 0
-            if total_tokens > 0 and run_in_bg_loop is not None:
-                with contextlib.suppress(Exception):
-                    run_in_bg_loop(
-                        rpm_waiter.record_actual_tokens(
-                            model=target_model,
-                            actual_tokens=total_tokens,
-                        )
+        provider = get_text_generation_provider(genai_client)
+        generation = provider.generate(model=target_model, prompt=prompt)
+        if generation.total_tokens > 0 and run_in_bg_loop is not None:
+            with contextlib.suppress(Exception):
+                run_in_bg_loop(
+                    rpm_waiter.record_actual_tokens(
+                        model=target_model,
+                        actual_tokens=generation.total_tokens,
                     )
+                )
 
-        resolved_text = response.text or ""
+        resolved_text = generation.text
         if resolved_text.startswith("```"):
             lines = resolved_text.splitlines()
             if lines and lines[0].startswith("```"):
