@@ -1405,11 +1405,13 @@ def _enforce_verdict(
 
         try:
             for c in pr.get_review_comments():
-                existing_comments_data.append({
-                    "path": getattr(c, "path", ""),
-                    "line": getattr(c, "line", None) or getattr(c, "original_line", None),
-                    "body": getattr(c, "body", ""),
-                })
+                existing_comments_data.append(
+                    {
+                        "path": getattr(c, "path", ""),
+                        "line": getattr(c, "line", None) or getattr(c, "original_line", None),
+                        "body": getattr(c, "body", ""),
+                    }
+                )
         except Exception as comm_err:
             logger.debug("Could not fetch existing PR review comments: %s", comm_err)
     else:
@@ -2562,11 +2564,13 @@ Clean dev/docs PRs return risks: [].
                         is_503_high_demand = (
                             "503" in err_s or "unavailable" in err_s or "high demand" in err_s
                         )
-                        retry_delay = (
-                            0.5
-                            if is_503_high_demand
-                            else min(rate_details.get("retry_after_seconds") or 2.0, 10.0)
-                        )
+                        parsed_retry = rate_details.get("retry_after_seconds")
+                        if is_503_high_demand:
+                            retry_delay = 0.5
+                        elif parsed_retry is not None and parsed_retry > 0:
+                            retry_delay = min(float(parsed_retry) + 0.5, 65.0)
+                        else:
+                            retry_delay = min(2.0 * (attempt + 1), 15.0)
                         logger.warning(
                             "Transient error on attempt %d/%d (trace: %s): %s. Active model failover -> %s (delay: %.1fs)",
                             attempt + 1,

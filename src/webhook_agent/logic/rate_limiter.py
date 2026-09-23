@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -409,47 +410,91 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
     }
 
     # 1. Target underlying cause if ADK wrapped ClientError in _ResourceExhaustedError
-    target = getattr(exc, "__cause__", exc) or exc
+    candidates: list[Any] = []
+    curr: Any = exc
+    visited: set[int] = set()
+    while curr is not None and id(curr) not in visited:
+        visited.add(id(curr))
+        for attr in ("response_json", "details", "raw_response"):
+            val = getattr(curr, attr, None)
+            if val:
+                candidates.append(val)
+        curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
 
     # 2. Inspect raw RPC details (QuotaFailure, RetryInfo, ErrorInfo)
-    raw_details = getattr(target, "response_json", None) or getattr(target, "details", None)
-    if isinstance(raw_details, list):
-        for item in raw_details:
-            if isinstance(item, dict):
-                # QuotaFailure metadata
-                if "metadata" in item and isinstance(item["metadata"], dict):
-                    meta = item["metadata"]
-                    if "quota_limit" in meta:
-                        details["quota_limit"] = meta.get("quota_limit")
-                    if "quota_limit_value" in meta:
-                        details["quota_value"] = meta.get("quota_limit_value")
+    items_to_scan: list[dict[str, Any]] = []
+    for cand in candidates:
+        if isinstance(cand, list):
+            items_to_scan.extend([i for i in cand if isinstance(i, dict)])
+        elif isinstance(cand, dict):
+            err = cand.get("error")
+            if isinstance(err, dict):
+                if isinstance(err.get("details"), list):
+                    items_to_scan.extend([i for i in err["details"] if isinstance(i, dict)])
+                items_to_scan.append(err)
+            if isinstance(cand.get("details"), list):
+                items_to_scan.extend([i for i in cand["details"] if isinstance(i, dict)])
+            items_to_scan.append(cand)
 
-                # ErrorInfo reason
-                if "reason" in item:
-                    details["reason"] = item.get("reason")
+    for item in items_to_scan:
+        # QuotaFailure metadata
+        if "metadata" in item and isinstance(item["metadata"], dict):
+            meta = item["metadata"]
+            if "quota_limit" in meta:
+                details["quota_limit"] = meta.get("quota_limit")
+            if "quota_limit_value" in meta:
+                details["quota_value"] = meta.get("quota_limit_value")
 
-                # RetryInfo cooldown delay (e.g. "60s" or 60.0)
-                if "retryDelay" in item or "retry_delay" in item:
-                    delay = item.get("retryDelay") or item.get("retry_delay")
-                    if isinstance(delay, str) and delay.endswith("s"):
-                        with contextlib.suppress(ValueError):
-                            details["retry_after_seconds"] = float(delay[:-1])
-                    elif isinstance(delay, (int, float)):
-                        details["retry_after_seconds"] = float(delay)
+        # QuotaFailure violations
+        if "violations" in item and isinstance(item["violations"], list):
+            for v in item["violations"]:
+                if isinstance(v, dict):
+                    if "quotaValue" in v and not details["quota_value"]:
+                        details["quota_value"] = v.get("quotaValue")
+                    if "quotaMetric" in v and not details["quota_limit"]:
+                        details["quota_limit"] = v.get("quotaMetric")
 
-    # 3. Inspect HTTP response headers (e.g. Retry-After, x-ratelimit-reset)
-    response = getattr(target, "response", None)
+        # ErrorInfo reason
+        if "reason" in item and not details["reason"]:
+            details["reason"] = item.get("reason")
+
+        # RetryInfo cooldown delay (e.g. "60s", "48.5s", or 60.0)
+        for delay_key in ("retryDelay", "retry_delay", "retryAfter", "retry_after"):
+            if delay_key in item and details["retry_after_seconds"] is None:
+                delay = item.get(delay_key)
+                if isinstance(delay, str):
+                    delay_clean = delay.rstrip("s").strip()
+                    with contextlib.suppress(ValueError):
+                        details["retry_after_seconds"] = float(delay_clean)
+                elif isinstance(delay, (int, float)):
+                    details["retry_after_seconds"] = float(delay)
+
+    # 3. String Regex fallback across message and stringified exception
+    if details["retry_after_seconds"] is None:
+        target = getattr(exc, "__cause__", exc) or exc
+        search_blob = f"{details['message']} {target!s}"
+        match = re.search(
+            r"(?:[Pp]lease retry in|retryDelay['\":\s]+|retry_delay['\":\s]+)\s*['\"]?([0-9.]+)\s*s?",
+            search_blob,
+        )
+        if match:
+            with contextlib.suppress(ValueError):
+                details["retry_after_seconds"] = float(match.group(1))
+
+    # 4. Inspect HTTP response headers (e.g. Retry-After, x-ratelimit-reset)
+    target = getattr(exc, "__cause__", exc) or exc
+    response = getattr(target, "response", None) or getattr(exc, "response", None)
     if response and hasattr(response, "headers"):
         headers = dict(response.headers)
         details["headers"] = headers
 
         retry_after = headers.get("retry-after") or headers.get("Retry-After")
-        if retry_after:
+        if retry_after and details["retry_after_seconds"] is None:
             with contextlib.suppress(ValueError):
                 details["retry_after_seconds"] = float(retry_after)
 
         limit_req = headers.get("x-ratelimit-limit-requests")
-        if limit_req:
+        if limit_req and not details["quota_value"]:
             details["quota_value"] = limit_req
 
     return details
