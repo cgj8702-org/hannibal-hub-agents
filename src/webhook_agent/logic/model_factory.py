@@ -6,6 +6,7 @@ to unify model instantiation, rate limiting, and API key handling across agents.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator
@@ -64,8 +65,49 @@ class RateLimitedGemini(Gemini):
                     exc,
                 )
 
-        async for response in super().generate_content_async(llm_request, stream=stream):
-            yield response
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            yielded_any = False
+            try:
+                async for response in super().generate_content_async(llm_request, stream=stream):
+                    yielded_any = True
+                    yield response
+                return
+            except Exception as exc:
+                if yielded_any:
+                    raise
+
+                from webhook_agent.logic.rate_limiter import extract_rate_limit_details
+
+                rate_details = extract_rate_limit_details(exc)
+                err_s = str(exc).lower()
+                is_rate_limit = (
+                    "429" in err_s
+                    or "resource_exhausted" in err_s
+                    or "quota" in err_s
+                    or rate_details.get("code") == 429
+                )
+                is_503 = "503" in err_s or "unavailable" in err_s or "high demand" in err_s
+                if (is_rate_limit or is_503) and attempt < max_attempts - 1:
+                    parsed_retry = rate_details.get("retry_after_seconds")
+                    if is_503:
+                        retry_delay = 0.5
+                    elif parsed_retry is not None and parsed_retry > 0:
+                        retry_delay = min(float(parsed_retry) + 0.5, 65.0)
+                    else:
+                        retry_delay = min(2.0 * (attempt + 1), 15.0)
+
+                    logger.warning(
+                        "⚠️ Model '%s' encountered transient error in ADK node (attempt %d/%d): %s. In-flight pause for %.1fs before retrying...",
+                        model_name,
+                        attempt + 1,
+                        max_attempts,
+                        exc,
+                        retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise
 
 
 def get_adk_model(
