@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from webhook_agent.comment_poster import build_github_review_comments
 from webhook_agent.formatter import (
     extract_json_payload,
@@ -33,6 +35,8 @@ from webhook_agent.logic.review_budget import (
 from webhook_agent.schemas import IssueItem
 from webhook_agent.tools.diff_tools import check_window, walk_right_side
 from webhook_agent.webhook_agent import _enforce_verdict
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
 def test_unescaped_quote_repair():

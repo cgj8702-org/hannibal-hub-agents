@@ -10,6 +10,8 @@ from github import GithubException
 
 from webhook_agent.proactive_service import ProactiveEvaluator
 
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 
 class TestProactiveEvaluator:
     def test_evaluate_open_prs_propagates_authentication_failure(self):
