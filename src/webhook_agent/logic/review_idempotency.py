@@ -15,12 +15,13 @@ from .constants import DEFAULT_FIRESTORE_PROJECT
 
 logger = logging.getLogger("review_idempotency")
 
+firestore: Any = None
 try:
-    from google.cloud import firestore  # type: ignore[attr-defined]
+    from google.cloud import firestore as _firestore
 
+    firestore = _firestore
     _HAS_FIRESTORE = True
 except ImportError:
-    firestore = None
     _HAS_FIRESTORE = False
 
 
@@ -76,6 +77,26 @@ class ReviewClaimRegistry:
                     logger.warning("Could not initialize review claim registry: %s", exc)
         return self._db
 
+    def _claim_local(
+        self,
+        key: str,
+        token: str,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+        github_review_exists: bool,
+    ) -> ReviewClaim | None:
+        with self._local_lock:
+            existing = self._local_claims.get(key)
+            if existing and existing[0] == "submitted":
+                return None
+            if github_review_exists:
+                self._local_claims[key] = ("submitted", 0.0, token)
+                return None
+            if existing and existing[0] == "processing" and existing[1] > now.timestamp():
+                return None
+            self._local_claims[key] = ("processing", lease_until.timestamp(), token)
+            return ReviewClaim(key, token)
+
     def claim(
         self,
         repo_name: str,
@@ -91,15 +112,7 @@ class ReviewClaimRegistry:
         db = self._get_db()
 
         if db is None:
-            with self._local_lock:
-                existing = self._local_claims.get(key)
-                if github_review_exists:
-                    self._local_claims[key] = ("submitted", 0.0, token)
-                    return None
-                if existing and existing[0] == "processing" and existing[1] > now.timestamp():
-                    return None
-                self._local_claims[key] = ("processing", lease_until.timestamp(), token)
-                return ReviewClaim(key, token)
+            return self._claim_local(key, token, now, lease_until, github_review_exists)
 
         document = db.collection(self.collection_name).document(key)
         transaction = db.transaction()
@@ -128,9 +141,14 @@ class ReviewClaimRegistry:
             )
             return True
 
-        if transaction_claim(transaction):
-            return ReviewClaim(key, token)
-        return None
+        try:
+            if transaction_claim(transaction):
+                return ReviewClaim(key, token)
+            return None
+        except Exception as exc:
+            logger.warning("Review claim transaction unavailable; using local fallback: %s", exc)
+            self._db = None
+            return self._claim_local(key, token, now, lease_until, github_review_exists)
 
     def mark_submitted(self, claim: ReviewClaim, review_id: str, review_url: str) -> None:
         """Mark a successful GitHub submission as complete."""

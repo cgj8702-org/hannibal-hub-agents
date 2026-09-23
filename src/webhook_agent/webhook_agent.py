@@ -949,6 +949,20 @@ _REVIEW_LOCKS: dict[str, threading.Lock] = {}
 _REVIEW_LOCKS_GUARD = threading.Lock()
 
 
+def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
+    """Return whether an event is allowed to initiate a formal code review."""
+    return (
+        canonical
+        in {
+            "pull_request.opened",
+            "pull_request.reopened",
+            "pull_request.synchronize",
+            "pull_request_review_requested",
+        }
+        or "/review" in comment_body.lower()
+    )
+
+
 def _review_lock(target_key: str) -> threading.Lock:
     """Return the process-local lock used to serialize one PR's submissions."""
     with _REVIEW_LOCKS_GUARD:
@@ -1722,6 +1736,10 @@ def review(
     """
     repo_name = _get_repo_full_name(ctx)
     target_key = f"{repo_name}#{pr_number}"
+    session_state = getattr(ctx, "state", None)
+    if isinstance(session_state, dict) and session_state.get("formal_review_eligible") is False:
+        return "Skipped: event is not eligible for a formal code review."
+
     if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
         return (
             f"Error: Review/comment rate limit exceeded for #{pr_number} "
@@ -2627,6 +2645,12 @@ Clean dev/docs PRs return risks: [].
                     )["review_mode"] = (
                         "sync" if canonical == "pull_request.synchronize" else "initial"
                     )
+                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
+                        user_id, {}
+                    )["formal_review_eligible"] = _is_formal_review_eligible(
+                        canonical,
+                        comment_body,
+                    )
 
                     # Execute the ADK runner with current model
                     await _execute_agent()
@@ -2732,10 +2756,7 @@ Clean dev/docs PRs return risks: [].
         comment_body = (
             (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
         )
-        is_pr_review_event = (
-            canonical.startswith(("pull_request.", "pull_request_review"))
-            or "/review" in comment_body
-        )
+        is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
         has_review_action = any(r.tool == "review" for r in results)
 
         if is_pr_review_event and not has_review_action:

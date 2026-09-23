@@ -120,6 +120,11 @@ class TestRouteEvent:
         ev = _make_normalized("label", action="created")
         assert self.processor.route_event(ev) == "label.created"
 
+    def test_label_event_is_not_formal_review_eligible(self):
+        from webhook_agent.webhook_agent import _is_formal_review_eligible
+
+        assert _is_formal_review_eligible("label.created") is False
+
     def test_label_deleted(self):
         ev = _make_normalized("label", action="deleted")
         assert self.processor.route_event(ev) == "label.deleted"
