@@ -133,7 +133,14 @@ This project uses `uv` for lightning-fast dependency management:
 ```bash
 # Sync dependencies and set up the virtual environment
 uv sync
+
+# Install the tracked pre-commit hook for this clone
+./scripts/install-git-hooks.sh
 ```
+
+The installer configures `core.hooksPath=.githooks` locally. The official hook then runs
+`scripts/ruff-all.sh` for every commit and re-stages only Python files that were already
+staged. It never adds an unstaged Python file to the commit.
 
 ### 2. Running Tests
 Run the full test suite (including token optimization, proactive evaluator, state graph, and worker tests):

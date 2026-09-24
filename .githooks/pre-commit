@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Official local commit gate for maintainers and shell-capable agents.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "[pre-commit] Running lint, formatting, and type checks..."
+bash scripts/ruff-all.sh
+
+# Re-stage only Python files that were already staged.
+while IFS= read -r -d '' FILE; do
+    git add -- "$FILE"
+done < <(git diff --cached --name-only --diff-filter=d -z -- '*.py')
+
+echo "[OK] Pre-commit checks passed."
