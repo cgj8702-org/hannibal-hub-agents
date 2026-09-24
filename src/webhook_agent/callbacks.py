@@ -4,6 +4,7 @@ Provides native ADK lifecycle callbacks for:
 - Pre-flight free count_tokens API metering, Free Tier TPM chunking (<15k), and rate limit waiting (before_model_callback).
 - Post-call token usage auditing (after_model_callback).
 - State pre-population with PR metadata and active tier (before_agent_callback).
+- Workflow edge routing from the classified PR scope (router_after_agent_callback).
 - Tool parameter validation & sanitization (before_tool_callback).
 - Self-healing error recovery (on_tool_error_callback).
 """
@@ -35,6 +36,14 @@ MUTATING_TOOLS: set[str] = {
     "auto_fix_pr_review_feedback",
     "mark_ready_for_review",
 }
+
+
+# Workflow edge routes emitted by the `pr_router` node. These strings are the
+# contract between `router_after_agent_callback` and the `Edge(route=...)`
+# declarations on the WebhookAgent `Workflow` graph.
+ROUTE_CORE_BACKEND = "core_backend"
+ROUTE_MINOR_FIX = "minor_fix"
+ROUTE_DEV_DOCS = "dev_docs"
 
 
 def _check_pr_closed_short_circuit(state: Any) -> None:
@@ -74,6 +83,39 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
         active_tier,
         agent_name,
     )
+
+
+def normalize_pr_scope_route(raw_scope: Any) -> str:
+    """Map a raw `pr_scope` classification onto a workflow edge route.
+
+    Unrecognized or missing classifications fall back to `core_backend` so an
+    unreliable router never skips the code audit.
+    """
+    scope = str(raw_scope or "").strip().lower()
+    if "dev_docs" in scope or "doc" in scope:
+        return ROUTE_DEV_DOCS
+    if "minor_fix" in scope or "fix" in scope:
+        return ROUTE_MINOR_FIX
+    return ROUTE_CORE_BACKEND
+
+
+async def router_after_agent_callback(callback_context: CallbackContext) -> None:
+    """Emit the PR scope route so the workflow can skip `code_auditor` for docs-only PRs.
+
+    ADK only propagates a route through an event actually emitted by the node,
+    and `Event` is emitted here solely because a state delta exists, so the
+    `pr_scope_route` write is what carries `actions.route` to the workflow
+    scheduler. Never move the write behind a condition.
+    """
+    route = normalize_pr_scope_route(callback_context.state.get("pr_scope"))
+    callback_context.actions.route = route
+    callback_context.state["pr_scope_route"] = route
+    logger.info(
+        "🧭 pr_router scope=%r -> workflow route '%s'",
+        callback_context.state.get("pr_scope"),
+        route,
+    )
+    return None
 
 
 async def before_model_callback(
