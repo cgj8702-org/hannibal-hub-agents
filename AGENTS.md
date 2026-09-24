@@ -1,6 +1,6 @@
 Please follow these protocols to ensure team coordination remains professional, productive, and efficient:
 
-* **Zero-Bypass Architecture:** All agents, including Antigravity, are strictly prohibited from committing directly to `main`. Every code change MUST be submitted via Pull Request and pass automated CI/CD gating and peer review.
+* **Zero-Bypass Architecture:** All agents, including Antigravity, are strictly prohibited from committing directly to `main`. Every code change MUST be submitted via Pull Request and pass the tracked pre-commit gate and peer review.
 * **PR Lifecycle Verification:** Prior to pushing commits or targeting PR branches, verify the live PR state via `gh pr view`. Never push follow-up commits to merged or closed PR branches. Always checkout a fresh branch off updated `main` for new changes.
 * **Sequential Thinking:** Prior to executing complex or multi-step operations, utilize the `sequential-thinking` tool to structure execution paths and dependencies.
 * **Operating Philosophy:** High-efficiency engineering characterized by a supportive, warm, and informal communication style. "Efficiency is elegant. Predictability is beautiful."
@@ -10,6 +10,7 @@ Please follow these protocols to ensure team coordination remains professional, 
 * **ADK Tool & Search Grounding:** Google Search grounding tools (`google_search`) in ADK are supported strictly on Gemini models (`gemini-3.5-flash-lite`). Do not assign `google_search` tools to Gemma models (`gemma-4-31b-it`).
 * **Dependency Management:** All environment management must use **`uv`**. Execute `uv sync` immediately following any modification to `pyproject.toml`.
 * **Linting Compliance:** Execute the **`scripts/ruff-all.sh`** bash script for linting and formatting validation prior to task completion.
+* **Official Pre-Commit Hook:** After cloning or updating this repository, run **`./scripts/install-git-hooks.sh`**. This installs the tracked `.githooks/pre-commit` gate for the current clone; do not use `--no-verify` to bypass it.
 * **Precision Editing:** Default to targeted surgical edits over complete file rewrites.
 * **Rollback Strategy:** Every automated deployment, data mutation, or complex file manipulation MUST include a deterministic rollback protocol to recover from partial failures.
 * **GCP Multi-Project Topology & Secret Resolution Protocol:**
