@@ -71,3 +71,35 @@ async def test_rate_limited_gemini_retries_on_429(monkeypatch: pytest.MonkeyPatc
     assert len(responses) == 1
     assert responses[0].text == "success"
     assert attempts == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_rate_limited_gemini_propagates_503_for_model_failover(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 503 must reach the outer orchestrator instead of retrying the same model."""
+    from collections.abc import AsyncGenerator
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    model = RateLimitedGemini(model="gemini-3.5-flash-lite", client_kwargs={"api_key": "test_key"})
+    attempts = 0
+
+    async def mock_super_gen(*args: Any, **kwargs: Any) -> AsyncGenerator[Any]:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("503 UNAVAILABLE: high demand")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(Gemini, "generate_content_async", mock_super_gen)
+
+    llm_request = MagicMock()
+    llm_request.contents = ["hello"]
+    llm_request._rate_limit_checked = True
+
+    with pytest.raises(RuntimeError, match="503 UNAVAILABLE"):
+        async for _ in model.generate_content_async(llm_request):
+            pass
+
+    assert attempts == 1

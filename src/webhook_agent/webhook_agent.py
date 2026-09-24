@@ -1946,6 +1946,7 @@ class WebhookAgent:
         self._model_chain = get_model_chain()
         self._chain_index = 0
         self._current_model_name = self._model_chain[self._chain_index]
+        self._attempted_model_names = {self._normalize_model_name(self._current_model_name)}
         self._fallback_triggered = False
 
         # Ensure API key is resolved and propagated to env vars before model init
@@ -2087,40 +2088,50 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             memory_service=self._memory_service,
         )
 
+    @staticmethod
+    def _normalize_model_name(model_name: str) -> str:
+        return model_name.replace("models/", "").strip().lower()
+
     def _advance_model_chain(self, error: Exception | None = None) -> str | None:
-        """Cascade to next model in TPM descending chain on rate limit or server error."""
-        # Mark current model depleted with smart metric-aware cooldown parsing
+        """Cascade once to the next untried model, or return None when exhausted."""
+        failed_model = self._normalize_model_name(self._current_model_name)
+        self._attempted_model_names.add(failed_model)
         _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name, error=error)
 
-        # Refresh model chain to get available non-depleted models
         full_chain = get_model_chain()
-        curr_norm = self._current_model_name.replace("models/", "").strip().lower()
-        available = [m for m in full_chain if m.replace("models/", "").strip().lower() != curr_norm]
-        self._model_chain = available if available else full_chain
+        available = [
+            model
+            for model in full_chain
+            if self._normalize_model_name(model) not in self._attempted_model_names
+        ]
+        self._model_chain = available
         self._chain_index = 0
 
-        if self._model_chain:
-            next_model = self._model_chain[0]
-            logger.warning(
-                "⚠️ Cascading model chain from %s -> %s",
-                self._current_model_name,
-                next_model,
-            )
-            self._current_model_name = next_model
-            new_model_instance = get_adk_model(
-                model_name=next_model,
-                api_key=get_active_api_key(),
-            )
-            self._pr_router.model = new_model_instance
-            self._code_auditor.model = new_model_instance
-            self._verdict_agent.model = new_model_instance
-            self._runner = Runner(
-                app=self._app,
-                session_service=self._session_service,
-                memory_service=self._memory_service,
-            )
-            return next_model
-        return None
+        if not self._model_chain:
+            logger.error("All configured models have been attempted for this agent run")
+            return None
+
+        next_model = self._model_chain[0]
+        logger.warning(
+            "⚠️ Cascading model chain from %s -> %s",
+            self._current_model_name,
+            next_model,
+        )
+        self._current_model_name = next_model
+        self._attempted_model_names.add(self._normalize_model_name(next_model))
+        new_model_instance = get_adk_model(
+            model_name=next_model,
+            api_key=get_active_api_key(),
+        )
+        self._pr_router.model = new_model_instance
+        self._code_auditor.model = new_model_instance
+        self._verdict_agent.model = new_model_instance
+        self._runner = Runner(
+            app=self._app,
+            session_service=self._session_service,
+            memory_service=self._memory_service,
+        )
+        return next_model
 
     def _create_fallback_agent(self, error: Exception | None = None) -> None:
         """Switch to fallback model when primary model is unavailable."""
@@ -2615,6 +2626,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         async def _run() -> None:
             nonlocal results, final_session
             last_error = None
+            self._attempted_model_names = {self._normalize_model_name(self._current_model_name)}
 
             # Try with retry and optional fallback model
             for attempt in range(_MAX_RETRIES):
@@ -2746,7 +2758,9 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                     last_error = e
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                         rate_details = extract_rate_limit_details(e)
-                        self._advance_model_chain(error=e)
+                        next_model = self._advance_model_chain(error=e)
+                        if next_model is None:
+                            break
                         err_s = str(e).lower()
                         is_503_high_demand = (
                             "503" in err_s or "unavailable" in err_s or "high demand" in err_s

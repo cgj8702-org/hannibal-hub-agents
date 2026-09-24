@@ -241,6 +241,43 @@ class TestWebhookAgentModelChain:
         assert agent._code_auditor.model.model == next_model
         assert agent._current_model_name != initial_model
 
+    def test_advance_model_chain_does_not_recycle_depleted_models(self, monkeypatch):
+        """A single agent run must never select a model that already failed."""
+        from types import SimpleNamespace
+
+        from webhook_agent import webhook_agent as module
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        chain = [
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemma-4-31b-it",
+            "gemma-4-26b-a4b-it",
+        ]
+        agent = WebhookAgent.__new__(WebhookAgent)
+        agent._current_model_name = chain[0]
+        agent._attempted_model_names = {chain[0]}
+        agent._model_chain = chain
+        agent._chain_index = 0
+        agent._pr_router = SimpleNamespace(model=None)
+        agent._code_auditor = SimpleNamespace(model=None)
+        agent._verdict_agent = SimpleNamespace(model=None)
+        agent._app = MagicMock()
+        agent._session_service = MagicMock()
+        agent._memory_service = MagicMock()
+
+        monkeypatch.setattr(module, "get_model_chain", lambda: chain)
+        monkeypatch.setattr(module, "_DEPLETED_MODEL_REGISTRY", MagicMock())
+        monkeypatch.setattr(module, "get_adk_model", lambda **kwargs: MagicMock())
+        monkeypatch.setattr(module, "Runner", MagicMock())
+        selected = [agent._current_model_name]
+
+        while next_model := agent._advance_model_chain(RuntimeError("500 INTERNAL")):
+            selected.append(next_model)
+
+        assert selected == chain
+        assert selected.count("gemini-3.5-flash-lite") == 1
+
 
 class TestDynamicModelRouting:
     def setup_method(self):
