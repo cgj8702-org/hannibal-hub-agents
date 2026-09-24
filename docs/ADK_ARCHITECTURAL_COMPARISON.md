@@ -88,29 +88,41 @@ ADK 2.0 replaces linear sequences with a directed graph composed of **Nodes** an
 ```
 
 #### Modern Workflow Implementation:
+Routes are *emitted*, not predicated: `pr_router` writes its classification onto
+the node's event via `EventActions.route` (`router_after_agent_callback`), and
+the scheduler follows the matching edge.
+
 ```python
-from google.adk.workflow import Workflow
+from google.adk.workflow import DEFAULT_ROUTE, START, Edge, Workflow
 
 webhook_workflow = Workflow(
     name="webhook_agent",
     edges=[
-        ("START", self._pr_router),
-        # Conditional Edge: Only run code auditor if router says code audit is needed
-        (
-            self._pr_router,
-            self._code_auditor,
-            lambda state: state.get("pr_scope") not in ("docs_only", "trivial_chore"),
+        (START, self._pr_router),
+        # Conditional edge: docs-only PRs skip straight to verdict generation.
+        Edge(
+            from_node=self._pr_router,
+            to_node=self._verdict_agent,
+            route=ROUTE_DEV_DOCS,
         ),
-        # Docs or trivial PRs skip straight to structured verdict generation
-        (
-            self._pr_router,
-            self._verdict_agent,
-            lambda state: state.get("pr_scope") in ("docs_only", "trivial_chore"),
+        # DEFAULT_ROUTE is the fail-safe: `minor_fix`, `core_backend`, an
+        # unrecognized scope, or a router that emitted no route at all still
+        # run the full audit.
+        Edge(
+            from_node=self._pr_router,
+            to_node=self._code_auditor,
+            route=DEFAULT_ROUTE,
         ),
         (self._code_auditor, self._verdict_agent),
     ],
 )
 ```
+
+`router_after_agent_callback` also writes `pr_scope_route` to state, because ADK
+only emits the event carrying `actions.route` when the callback produces a state
+delta. `verdict_agent` reads its inputs through optional template placeholders
+(`{pr_scope?}`, `{code_review_analysis?}`) so the skipped-audit path renders
+without raising `KeyError`.
 
 ---
 

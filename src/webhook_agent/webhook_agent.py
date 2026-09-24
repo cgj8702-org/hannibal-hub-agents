@@ -31,7 +31,7 @@ from google.adk.apps import App
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.workflow import START, Workflow
+from google.adk.workflow import DEFAULT_ROUTE, START, Edge, Workflow
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
@@ -51,12 +51,14 @@ from webhook_agent.logic.rate_limiter import (
 from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
 from .callbacks import (
+    ROUTE_DEV_DOCS,
     after_model_callback,
     after_tool_callback,
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
     on_tool_error_callback,
+    router_after_agent_callback,
 )
 from .comment_poster import build_github_review_comments
 from .formatter import (
@@ -1967,6 +1969,9 @@ class WebhookAgent:
             before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
+            # Emits the workflow route consumed by the `Edge(route=...)` wiring
+            # below so docs-only PRs bypass the deep code audit.
+            after_agent_callback=router_after_agent_callback,
         )
 
         self._code_auditor = LlmAgent(
@@ -2014,17 +2019,19 @@ class WebhookAgent:
             model=model_instance,
             include_contents="none",
             description="Produces structured AuditVerdict JSON output.",
+            # `{...?}` keeps the template renderable when the docs-only route
+            # skips `code_auditor` and never writes `code_review_analysis`.
             instruction="""You are the Chief Auditor synthesizing final verdicts for Pull Requests.
 Evaluate the classified PR scope and the code auditor's technical findings:
 
 ### PR Scope
-{pr_scope}
+{pr_scope?}
 
 ### Audit Analysis & Findings
-{code_review_analysis}
+{code_review_analysis?}
 
 Synthesize these findings into an AuditVerdict structured JSON payload matching the schema.
-Clean dev/docs PRs return risks: [].
+Clean dev/docs PRs return risks: [], including when the audit analysis section is empty.
 """,
             output_schema=AuditVerdict,
             output_key="audit_verdict",
@@ -2033,11 +2040,24 @@ Clean dev/docs PRs return risks: [].
             after_model_callback=after_model_callback,
         )
 
+        # Dynamic edge routing: `pr_router` emits a route from
+        # `router_after_agent_callback`, so docs-only PRs flow straight to
+        # `verdict_agent` while every other scope (including an unrecognized or
+        # missing route) falls through DEFAULT_ROUTE into the full code audit.
         self._agent = Workflow(
             name="webhook_agent",
             edges=[
                 (START, self._pr_router),
-                (self._pr_router, self._code_auditor),
+                Edge(
+                    from_node=self._pr_router,
+                    to_node=self._verdict_agent,
+                    route=ROUTE_DEV_DOCS,
+                ),
+                Edge(
+                    from_node=self._pr_router,
+                    to_node=self._code_auditor,
+                    route=DEFAULT_ROUTE,
+                ),
                 (self._code_auditor, self._verdict_agent),
             ],
         )
