@@ -82,17 +82,11 @@ class RateLimitedGemini(Gemini):
                 rate_details = extract_rate_limit_details(exc)
                 err_s = str(exc).lower()
                 is_rate_limit = (
-                    "429" in err_s
-                    or "resource_exhausted" in err_s
-                    or "quota" in err_s
-                    or rate_details.get("code") == 429
+                    "429" in err_s or "resource_exhausted" in err_s or "quota exceeded" in err_s
                 )
-                is_503 = "503" in err_s or "unavailable" in err_s or "high demand" in err_s
-                if (is_rate_limit or is_503) and attempt < max_attempts - 1:
+                if is_rate_limit and attempt < max_attempts - 1:
                     parsed_retry = rate_details.get("retry_after_seconds")
-                    if is_503:
-                        retry_delay = 0.5
-                    elif parsed_retry is not None and parsed_retry > 0:
+                    if parsed_retry is not None and parsed_retry > 0:
                         retry_delay = min(float(parsed_retry) + 0.5, 65.0)
                     else:
                         retry_delay = min(2.0 * (attempt + 1), 15.0)
