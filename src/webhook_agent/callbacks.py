@@ -100,19 +100,24 @@ def normalize_pr_scope_route(raw_scope: Any) -> str:
 
 
 async def router_after_agent_callback(callback_context: CallbackContext) -> None:
-    """Emit the PR scope route so the workflow can skip `code_auditor` for docs-only PRs.
+    """Emit a fail-closed workflow route, preferring deterministic file safety data.
 
     ADK only propagates a route through an event actually emitted by the node,
-    and `Event` is emitted here solely because a state delta exists, so the
-    `pr_scope_route` write is what carries `actions.route` to the workflow
+    and ``Event`` is emitted here solely because a state delta exists, so the
+    ``pr_scope_route`` write is what carries ``actions.route`` to the workflow
     scheduler. Never move the write behind a condition.
     """
-    route = normalize_pr_scope_route(callback_context.state.get("pr_scope"))
+    deterministic_scope = callback_context.state.get("deterministic_pr_scope")
+    if deterministic_scope in {ROUTE_DEV_DOCS, ROUTE_MINOR_FIX, ROUTE_CORE_BACKEND}:
+        route = str(deterministic_scope)
+    else:
+        route = normalize_pr_scope_route(callback_context.state.get("pr_scope"))
     callback_context.actions.route = route
     callback_context.state["pr_scope_route"] = route
     logger.info(
-        "🧭 pr_router scope=%r -> workflow route '%s'",
+        "🧭 pr_router scope=%r deterministic_scope=%r -> workflow route '%s'",
         callback_context.state.get("pr_scope"),
+        deterministic_scope,
         route,
     )
     return None

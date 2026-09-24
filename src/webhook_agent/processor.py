@@ -183,12 +183,15 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             )
             return
 
+        changed_files: list[str] = []
         diff_lines: list[str] = []
         for f in pr.get_files():
+            changed_files.append(f.filename)
             patch = f.patch or "No patch available (binary/renamed/empty)."
             diff_lines.append(f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}")
 
         if diff_lines:
+            raw["changed_files"] = changed_files
             raw_diff = "\n".join(diff_lines)
             filtered = filter_review_diff(raw_diff)
             raw["pr_diff"] = filtered.filtered_diff or raw_diff

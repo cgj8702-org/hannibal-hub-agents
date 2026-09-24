@@ -28,6 +28,7 @@ from github import Github
 from google.adk.agents import LlmAgent
 from google.adk.agents.context import Context
 from google.adk.apps import App
+from google.adk.events import Event, EventActions
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -73,6 +74,7 @@ from .formatter import (
 )
 from .logic.diff_filter import filter_review_diff
 from .logic.review_idempotency import review_claim_registry
+from .logic.scope_router import build_deterministic_scope_context
 from .memory_service import InMemoryMemoryService
 from .sanitizer_plugin import PromptSanitizerPlugin
 from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
@@ -1961,8 +1963,12 @@ class WebhookAgent:
             model=model_instance,
             description="Inspects modified files and classifies PR scope (dev_docs, minor_fix, core_backend).",
             instruction=(
-                "Analyze the PR diff and modified file list. "
+                "Analyze the PR diff and the explicit deterministic changed-file inventory. "
                 "Classify scope into exactly one of: dev_docs, minor_fix, or core_backend. "
+                "Use dev_docs only when the deterministic safety gate is dev_docs and every "
+                "changed file is documentation. Any source, test, script, hook, workflow, "
+                "configuration, dependency, dev-code, mixed, missing, or unknown file must "
+                "be core_backend or minor_fix. If evidence is unavailable, use core_backend. "
                 "Output only the classification name."
             ),
             output_key="pr_scope",
@@ -2211,9 +2217,17 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         if "commit_diff" in raw:
             parts.append(f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}")
 
-        # Include PR diff (full accumulated state) if available
+        # Include pre-fetched PR diff (full accumulated state) if available.
+        # The deterministic file gate is derived from the complete inventory before
+        # diff filtering so skipped lockfiles/config cannot create a false docs-only route.
         if "pr_diff" in raw:
-            parts.append(f"\nFull PR Diff (Accumulated State):\n{raw['pr_diff']}")
+            scope_context = build_deterministic_scope_context(
+                raw["pr_diff"], raw.get("changed_files")
+            )
+            inventory = ", ".join(scope_context.changed_files) or "unavailable"
+            parts.append(f"\nDeterministic scope safety gate: {scope_context.scope}")
+            parts.append(f"Changed file inventory: {inventory}")
+            parts.append(f"\nFull PR Diff (Accumulated State):\n{scope_context.diff}")
 
         # Include pre-fetched inline comment code context if available
         if "inline_code_context" in raw:
@@ -2590,6 +2604,14 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                                 trace_id[-4:],
                             )
 
+        scope_context = build_deterministic_scope_context(
+            raw.get("pr_diff", ""), raw.get("changed_files")
+        )
+        deterministic_state = {
+            "deterministic_pr_scope": scope_context.scope,
+            "deterministic_changed_files": list(scope_context.changed_files),
+        }
+
         async def _run() -> None:
             nonlocal results, final_session
             last_error = None
@@ -2610,6 +2632,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                             app_name=self._app_name,
                             user_id=user_id,
                             session_id=session_id,
+                            state=deterministic_state,
                         )
                         # Re-fetch the session after creation
                         session = await self._session_service.get_session(
@@ -2621,6 +2644,25 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                             "Created new ADK session %s for user %s",
                             session_id,
                             user_id,
+                        )
+                    if session is None:
+                        raise RuntimeError("Failed to create deterministic ADK session")
+                    if any(
+                        session.state.get(key) != value
+                        for key, value in deterministic_state.items()
+                    ):
+                        await self._session_service.append_event(
+                            session,
+                            Event(
+                                invocation_id=trace_id,
+                                author="webhook_agent_scope_gate",
+                                actions=EventActions(state_delta=deterministic_state),
+                            ),
+                        )
+                        session = await self._session_service.get_session(
+                            app_name=self._app_name,
+                            user_id=user_id,
+                            session_id=session_id,
                         )
 
                     # Deduplication check: if a review was submitted < 30s ago, inject notice
@@ -2657,6 +2699,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                     self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
                         user_id, {}
                     )["repo_full_name"] = repo_full_name
+
                     self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
                         user_id, {}
                     )["sender"] = user_id
@@ -2671,7 +2714,6 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                         canonical,
                         comment_body,
                     )
-
                     # Execute the ADK runner with current model
                     await _execute_agent()
 

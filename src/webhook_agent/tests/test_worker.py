@@ -330,6 +330,45 @@ class TestShouldProcessEvent:
         assert "File: src/main.py" in ev["raw_payload"]["pr_diff"]
         assert "@@ -1 +1 @@" in ev["raw_payload"]["pr_diff"]
 
+    def test_prefetch_preserves_filtered_files_for_deterministic_routing(self):
+        """Filtered lockfiles remain in the safety inventory and force an audit."""
+        from webhook_agent.logic.scope_router import build_deterministic_scope_context
+        from webhook_agent.processor import _prefetch_pr_diff
+
+        class MockFile:
+            def __init__(self, filename, patch):
+                self.filename = filename
+                self.status = "modified"
+                self.patch = patch
+
+        class MockPR:
+            def get_files(self):
+                return [
+                    MockFile("README.md", "@@ -1 +1 @@\n-old\n+new"),
+                    MockFile("uv.lock", "@@ -1 +1 @@\n-old\n+new"),
+                ]
+
+        class MockRepo:
+            def get_pull(self, number):
+                return MockPR()
+
+        class MockGithub:
+            def get_repo(self, name):
+                return MockRepo()
+
+        ev = _make_normalized("pull_request", action="opened")
+        ev["canonical"] = "pull_request.opened"
+        ev["raw_payload"]["pull_request"] = {"number": 123}
+
+        _prefetch_pr_diff(MockGithub(), "org/repo", ev)
+
+        assert ev["raw_payload"]["changed_files"] == ["README.md", "uv.lock"]
+        assert "uv.lock" not in ev["raw_payload"]["pr_diff"]
+        context = build_deterministic_scope_context(
+            ev["raw_payload"]["pr_diff"], ev["raw_payload"]["changed_files"]
+        )
+        assert context.scope == "core_backend"
+
     def test_should_prefetch_diff_guardrail(self):
         """_should_prefetch_diff prevents context bloat on routine comments or non-review events."""
         from webhook_agent.processor import _should_prefetch_diff

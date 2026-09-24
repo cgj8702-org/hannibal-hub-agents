@@ -236,7 +236,7 @@ def test_normalize_pr_scope_route(raw_scope: object, expected_route: str) -> Non
 @pytest.mark.anyio
 async def test_router_after_agent_callback_emits_route_and_state_delta() -> None:
     ctx = MagicMock()
-    ctx.state = {"pr_scope": "dev_docs"}
+    ctx.state = {"pr_scope": "dev_docs", "deterministic_pr_scope": ROUTE_DEV_DOCS}
 
     res = await router_after_agent_callback(ctx)
 
@@ -249,7 +249,21 @@ async def test_router_after_agent_callback_emits_route_and_state_delta() -> None
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 @pytest.mark.anyio
-async def test_router_after_agent_callback_falls_back_to_core_backend() -> None:
+async def test_router_deterministic_safety_gate_overrides_model_dev_docs() -> None:
+    ctx = MagicMock()
+    ctx.state = {"pr_scope": "dev_docs", "deterministic_pr_scope": ROUTE_CORE_BACKEND}
+
+    res = await router_after_agent_callback(ctx)
+
+    assert res is None
+    assert ctx.actions.route == ROUTE_CORE_BACKEND
+    assert ctx.state["pr_scope_route"] == ROUTE_CORE_BACKEND
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_router_falls_back_to_core_backend() -> None:
     ctx = MagicMock()
     ctx.state = {}
 

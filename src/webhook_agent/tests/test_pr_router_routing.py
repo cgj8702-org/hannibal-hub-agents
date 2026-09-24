@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from google.adk.agents import LlmAgent
 from google.adk.apps import App
+from google.adk.events import Event, EventActions
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
@@ -81,7 +82,10 @@ def _build_pipeline(router_text: str, *, with_router_callback: bool = True) -> W
 
 
 async def _run_pipeline(
-    router_text: str, *, with_router_callback: bool = True
+    router_text: str,
+    *,
+    with_router_callback: bool = True,
+    deterministic_pr_scope: str | None = None,
 ) -> tuple[list[str], dict]:
     workflow = _build_pipeline(router_text, with_router_callback=with_router_callback)
     session_service = InMemorySessionService()
@@ -89,7 +93,13 @@ async def _run_pipeline(
         app=App(name=_APP_NAME, root_agent=workflow),
         session_service=session_service,
     )
-    session = await session_service.create_session(app_name=_APP_NAME, user_id="tester")
+    session = await session_service.create_session(
+        app_name=_APP_NAME,
+        user_id="tester",
+        state={"deterministic_pr_scope": deterministic_pr_scope}
+        if deterministic_pr_scope is not None
+        else None,
+    )
 
     authors: list[str] = []
     async for event in runner.run_async(
@@ -109,12 +119,71 @@ async def _run_pipeline(
 
 @pytest.mark.anyio
 async def test_dev_docs_route_skips_code_auditor() -> None:
-    authors, state = await _run_pipeline("dev_docs")
+    authors, state = await _run_pipeline("dev_docs", deterministic_pr_scope=ROUTE_DEV_DOCS)
 
     assert "code_auditor" not in authors
     assert "verdict_agent" in authors
     assert state.get("audit_verdict") is not None
     assert state.get("pr_scope_route") == ROUTE_DEV_DOCS
+
+
+@pytest.mark.anyio
+async def test_deterministic_core_backend_overrides_model_dev_docs() -> None:
+    authors, state = await _run_pipeline("dev_docs", deterministic_pr_scope=ROUTE_CORE_BACKEND)
+
+    assert "code_auditor" in authors
+    assert "verdict_agent" in authors
+    assert state.get("pr_scope_route") == ROUTE_CORE_BACKEND
+
+
+@pytest.mark.anyio
+async def test_scope_gate_refreshes_on_existing_session() -> None:
+    session_service = InMemorySessionService()
+    runner = Runner(
+        app=App(name=_APP_NAME, root_agent=_build_pipeline("dev_docs")),
+        session_service=session_service,
+    )
+    session = await session_service.create_session(
+        app_name=_APP_NAME,
+        user_id="tester",
+        session_id="repo/42",
+        state={"deterministic_pr_scope": ROUTE_CORE_BACKEND},
+    )
+
+    first_authors = [
+        event.author
+        async for event in runner.run_async(
+            user_id="tester",
+            session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text="first")]),
+        )
+        if event.author
+    ]
+    assert "code_auditor" in first_authors
+
+    await session_service.append_event(
+        session,
+        Event(
+            invocation_id="second-turn",
+            actions=EventActions(state_delta={"deterministic_pr_scope": ROUTE_DEV_DOCS}),
+        ),
+    )
+    second_authors = [
+        event.author
+        async for event in runner.run_async(
+            user_id="tester",
+            session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text="second")]),
+        )
+        if event.author
+    ]
+
+    assert "code_auditor" not in second_authors
+    final_session = await session_service.get_session(
+        app_name=_APP_NAME, user_id="tester", session_id=session.id
+    )
+    assert final_session is not None
+    assert final_session.state["pr_scope_route"] == ROUTE_DEV_DOCS
 
 
 @pytest.mark.anyio
@@ -143,6 +212,74 @@ async def test_missing_route_falls_back_to_full_audit() -> None:
     assert "code_auditor" in authors
     assert state.get("audit_verdict") is not None
     assert state.get("pr_scope_route") is None
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.parametrize(
+    ("paths", "expected_route"),
+    [
+        (["README.md", "docs/guide.rst"], "dev_docs"),
+        (["README.md", "src/main.py"], "core_backend"),
+        (["docs/guide.md", "dev/tool.py"], "core_backend"),
+        (["docs/guide.md", "scripts/deploy.sh"], "core_backend"),
+        (["docs/guide.md", ".githooks/pre-commit"], "core_backend"),
+        (["docs/guide.md", ".github/workflows/ci.yml"], "core_backend"),
+        (["docs/guide.md", "tests/unit/test_main.py"], "core_backend"),
+        (["docs/guide.md", "pyproject.toml"], "core_backend"),
+        (["docs/guide.md", "uv.lock"], "core_backend"),
+        (["README.md", "unknown"], "core_backend"),
+        ([], "core_backend"),
+    ],
+)
+def test_deterministic_pr_scope_fails_closed(paths: list[str], expected_route: str) -> None:
+    from webhook_agent.logic.scope_router import deterministic_pr_scope
+
+    assert deterministic_pr_scope(paths) == expected_route
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_deterministic_pr_scope_extracts_paths_from_custom_diff_format() -> None:
+    from webhook_agent.logic.scope_router import deterministic_pr_scope_from_diff
+
+    diff = """File: README.md (modified)
+Patch:
+-old
++new
+----------------------------------------
+File: src/main.py (modified)
+Patch:
+@@ -1 +1 @@
+-old
++new
+----------------------------------------
+"""
+
+    assert deterministic_pr_scope_from_diff(diff) == "core_backend"
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_build_user_message_includes_deterministic_file_inventory() -> None:
+    from webhook_agent.logic.scope_router import build_deterministic_scope_context
+    from webhook_agent.webhook_agent import WebhookAgent
+
+    context = build_deterministic_scope_context("File: README.md (modified)\nPatch:\n-old\n+new\n")
+    agent = WebhookAgent(dry_run=True)
+    message = agent._build_user_message(
+        {
+            "canonical": "pull_request.opened",
+            "raw_payload": {
+                "pull_request": {"number": 1, "title": "Update docs"},
+                "pr_diff": context.diff,
+            },
+        }
+    )
+
+    text = message.parts[0].text or ""
+    assert "Deterministic scope safety gate: dev_docs" in text
+    assert "Changed file inventory: README.md" in text
 
 
 def test_webhook_agent_wires_router_routes_and_default_fallthrough() -> None:
