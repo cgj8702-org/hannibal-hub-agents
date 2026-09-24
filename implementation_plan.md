@@ -1,3 +1,5 @@
+> **Historical artifact:** This plan is retained for context and is not the current repository implementation plan.
+
 # 🏛️ Implementation Plan: Hannibal Hub Agents Roadmap & Issue #104 Refactor
 
 Overhaul `implementation_plan.md` to remove hallucinated abstractions and ground all active engineering tasks strictly in **Issue #104** and current repository state.

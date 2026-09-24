@@ -32,7 +32,11 @@ This approach is particularly effective because of the following benefits:
 
 This function handles signature verification and **payload normalization** at the edge. By normalizing the data before it hits Pub/Sub, the downstream worker can remain unchanged.
 
-**Deployment Note:** When deploying this function, set the **Entry point** to `github_webhook_router`.
+**Deployment Note:** When deploying this function, set the **Entry point** to `github_webhook_router`. The deployed service is configured from the Cloud Console; the source below is the repository's reference copy, not the authoritative deployed revision. Confirm the deployed source and its secret handling before making security claims about the live router.
+
+**Secret Resolution:** The worker resolves credentials from environment variables first, then falls back to Google Secret Manager using the `WEBHOOK_PAID_PROJECT` project (default: `cgj8702-webhook-agent`). The router receives `WEBHOOK_SECRET` through its deployed service configuration; do not treat this reference file as proof of the live deployment revision.
+
+**Review Idempotency:** Durable cross-worker PR review claims are handled downstream by `webhook_agent.logic.review_idempotency`. Firestore is enabled with `ENABLE_REVIEW_IDEMPOTENCY=1`; if unavailable, the code falls back to process-local claims for development and tests.
 
 **`main.py`**:
 
