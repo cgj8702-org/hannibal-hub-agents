@@ -26,5 +26,6 @@ DEFAULT_PUBSUB_SUBSCRIPTION = f"projects/{DEFAULT_PUBSUB_PROJECT}/subscriptions/
 DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks-dead-letter"
 
 # --- Operational Policy Defaults ---
-DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"
+# Fail closed: automated mutations require an explicit opt-in.
+DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "0"
 DEFAULT_WEBHOOK_TIER = "free"

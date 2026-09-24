@@ -1,3 +1,5 @@
+> **Historical artifact:** This report is retained for audit history and is not a current lint/type-check report.
+
 ASYNC240 Async functions should not perform blocking os.path operations
    --> dev/model_sync.py:130:8
     |

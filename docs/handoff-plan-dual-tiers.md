@@ -1,3 +1,5 @@
+> **Historical artifact:** This handoff plan is retained for context and is not current implementation guidance.
+
 # Handoff Plan: Porting Dual-Tier Model Registry & Tier-Aware Rate Limiting to `hannibal-hub-agents`
 
 This document serves as an exhaustive, self-contained handoff specification for an agent or maintainer working inside the sandboxed `hannibal-hub-agents` repository. It provides complete code patterns, architecture diagrams, data schemas, and step-by-step instructions to replicate the Dual-Tier (Free & Paid) Model Registry and Rate Limiter engine built in `hannibal-hub`.

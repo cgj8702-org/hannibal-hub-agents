@@ -9,9 +9,4 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "monthly"
-
-  - package-ecosystem: "docker" # See documentation for possible values
-    directory: "/rag_service" # Location of package manifests
-    schedule:
-      interval: "monthly"
       
