@@ -21,7 +21,6 @@ def test_audit_schema_clean_pr() -> None:
     verdict = AuditVerdict(
         verdict="APPROVE",
         confidence=5.0,
-        pr_type="dev_docs",
         summary="Clean documentation update.",
         risks=[],
     )
@@ -98,7 +97,6 @@ def test_comment_poster_out_of_diff_pruning() -> None:
     verdict = AuditVerdict(
         verdict="REQUEST_CHANGES",
         confidence=4.5,
-        pr_type="core_backend",
         summary="Backend audit findings.",
         risks=risks,
     )

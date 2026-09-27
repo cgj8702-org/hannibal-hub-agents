@@ -2026,10 +2026,7 @@ class WebhookAgent:
             # `{...?}` keeps the template renderable when the docs-only route
             # skips `code_auditor` and never writes `code_review_analysis`.
             instruction="""You are the Chief Auditor synthesizing final verdicts for Pull Requests.
-Evaluate the classified PR scope and the code auditor's technical findings:
-
-### PR Scope
-{pr_scope?}
+Evaluate the code auditor's technical findings:
 
 ### Audit Analysis & Findings
 {code_review_analysis?}

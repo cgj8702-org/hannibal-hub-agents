@@ -7,17 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from webhook_agent.callbacks import (
-    ROUTE_CORE_BACKEND,
-    ROUTE_DEV_DOCS,
-    ROUTE_MINOR_FIX,
     after_model_callback,
     after_tool_callback,
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
-    normalize_pr_scope_route,
     on_tool_error_callback,
-    router_after_agent_callback,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -203,67 +198,3 @@ async def test_after_tool_callback_dict_truncation() -> None:
     res = await after_tool_callback(tool, args, ctx, dict_response)
     assert isinstance(res, dict)
     assert res == dict_response
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-@pytest.mark.parametrize(
-    ("raw_scope", "expected_route"),
-    [
-        ("dev_docs", ROUTE_DEV_DOCS),
-        ("docs_only", ROUTE_DEV_DOCS),
-        ("Documentation", ROUTE_DEV_DOCS),
-        ("minor_fix", ROUTE_MINOR_FIX),
-        ("fix", ROUTE_MINOR_FIX),
-        ("core_backend", ROUTE_CORE_BACKEND),
-        ("trivial_chore", ROUTE_CORE_BACKEND),
-        ("", ROUTE_CORE_BACKEND),
-        (None, ROUTE_CORE_BACKEND),
-        (["core_backend"], ROUTE_CORE_BACKEND),
-    ],
-)
-def test_normalize_pr_scope_route(raw_scope: object, expected_route: str) -> None:
-    assert normalize_pr_scope_route(raw_scope) == expected_route
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-@pytest.mark.anyio
-async def test_router_after_agent_callback_emits_route_and_state_delta() -> None:
-    ctx = MagicMock()
-    ctx.state = {"pr_scope": "dev_docs", "deterministic_pr_scope": ROUTE_DEV_DOCS}
-
-    res = await router_after_agent_callback(ctx)
-
-    assert res is None
-    assert ctx.actions.route == ROUTE_DEV_DOCS
-    # The state write is what forces ADK to emit the event carrying the route.
-    assert ctx.state["pr_scope_route"] == ROUTE_DEV_DOCS
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-@pytest.mark.anyio
-async def test_router_normalizes_pr_scope() -> None:
-    ctx = MagicMock()
-    ctx.state = {"pr_scope": "dev_docs"}
-
-    res = await router_after_agent_callback(ctx)
-
-    assert res is None
-    assert ctx.actions.route == ROUTE_DEV_DOCS
-    assert ctx.state["pr_scope_route"] == ROUTE_DEV_DOCS
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-@pytest.mark.anyio
-async def test_router_falls_back_to_core_backend() -> None:
-    ctx = MagicMock()
-    ctx.state = {}
-
-    res = await router_after_agent_callback(ctx)
-
-    assert res is None
-    assert ctx.actions.route == ROUTE_CORE_BACKEND
-    assert ctx.state["pr_scope_route"] == ROUTE_CORE_BACKEND
