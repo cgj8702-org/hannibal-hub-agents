@@ -38,9 +38,8 @@ MUTATING_TOOLS: set[str] = {
 }
 
 
-# Workflow edge routes emitted by the `pr_router` node. These strings are the
-# contract between `router_after_agent_callback` and the `Edge(route=...)`
-# declarations on the WebhookAgent `Workflow` graph.
+# Workflow edge routes emitted for scope routing. These strings are the
+# contract for edge route declarations on the WebhookAgent `Workflow` graph.
 ROUTE_CORE_BACKEND = "core_backend"
 ROUTE_MINOR_FIX = "minor_fix"
 ROUTE_DEV_DOCS = "dev_docs"
