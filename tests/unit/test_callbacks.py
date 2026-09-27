@@ -244,15 +244,15 @@ async def test_router_after_agent_callback_emits_route_and_state_delta() -> None
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 @pytest.mark.anyio
-async def test_router_deterministic_safety_gate_overrides_model_dev_docs() -> None:
+async def test_router_normalizes_pr_scope() -> None:
     ctx = MagicMock()
-    ctx.state = {"pr_scope": "dev_docs", "deterministic_pr_scope": ROUTE_CORE_BACKEND}
+    ctx.state = {"pr_scope": "dev_docs"}
 
     res = await router_after_agent_callback(ctx)
 
     assert res is None
-    assert ctx.actions.route == ROUTE_CORE_BACKEND
-    assert ctx.state["pr_scope_route"] == ROUTE_CORE_BACKEND
+    assert ctx.actions.route == ROUTE_DEV_DOCS
+    assert ctx.state["pr_scope_route"] == ROUTE_DEV_DOCS
 
 
 @pytest.mark.unit

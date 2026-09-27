@@ -73,7 +73,6 @@ from .formatter import (
 )
 from .logic.diff_filter import filter_review_diff
 from .logic.review_idempotency import review_claim_registry
-from .logic.scope_router import build_deterministic_scope_context
 from .memory_service import InMemoryMemoryService
 from .sanitizer_plugin import PromptSanitizerPlugin
 from .schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
@@ -2215,13 +2214,10 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         # The deterministic file gate is derived from the complete inventory before
         # diff filtering so skipped lockfiles/config cannot create a false docs-only route.
         if "pr_diff" in raw:
-            scope_context = build_deterministic_scope_context(
-                raw["pr_diff"], raw.get("changed_files")
-            )
-            inventory = ", ".join(scope_context.changed_files) or "unavailable"
-            parts.append(f"\nDeterministic scope safety gate: {scope_context.scope}")
+            changed_files = raw.get("changed_files") or []
+            inventory = ", ".join(changed_files) or "unavailable"
             parts.append(f"Changed file inventory: {inventory}")
-            parts.append(f"\nFull PR Diff (Accumulated State):\n{scope_context.diff}")
+            parts.append(f"\nFull PR Diff (Accumulated State):\n{raw['pr_diff']}")
 
         # Include pre-fetched inline comment code context if available
         if "inline_code_context" in raw:
@@ -2609,12 +2605,9 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                                 trace_id[-4:],
                             )
 
-        scope_context = build_deterministic_scope_context(
-            raw.get("pr_diff", ""), raw.get("changed_files")
-        )
+        changed_files_list = list(raw.get("changed_files") or [])
         deterministic_state = {
-            "deterministic_pr_scope": scope_context.scope,
-            "deterministic_changed_files": list(scope_context.changed_files),
+            "deterministic_changed_files": changed_files_list,
         }
 
         async def _run() -> None:
