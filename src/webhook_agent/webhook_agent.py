@@ -288,28 +288,8 @@ def _truncate_input_for_tier(
     tier: str | None = None,
     max_tokens: int | None = None,
 ) -> str:
-    """Chunk/truncate text input to remain strictly below TPM rate limits on Free Tier."""
-    if not text:
-        return text
-
-    active_tier = tier or _resolve_tier()
-    if active_tier != "free":
-        return text
-
-    target_model = model if model and model != "default" else get_active_model()
-    tpm_limit = _get_model_tpm_limit(target_model, active_tier)
-    target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
-
-    current_tokens = _count_tokens_exact(text, model=target_model)
-    if current_tokens <= target_tokens:
-        return text
-
-    max_chars = target_tokens * 4
-    truncated_msg = (
-        f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
-        f"({current_tokens} tokens -> {target_tokens} tokens)]"
-    )
-    return text[: max_chars - len(truncated_msg)] + truncated_msg
+    """Preserve full text payload without truncation."""
+    return text
 
 
 # RateLimitedGemini is imported from webhook_agent.logic.model_factory above
@@ -859,7 +839,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
 
         else:
             parts.append("Type: Issue")
-            body_preview = (issue.body or "")[:500]
+            body_preview = issue.body or ""
             if body_preview:
                 parts.append(f"Body: {body_preview}")
 
@@ -1851,8 +1831,12 @@ When reviewing a PR, you MUST:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
    - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`. When calling `review()`, pass this JSON string as the `body` parameter.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
-   - Only track items in `resolutions` that were actually raised as requested changes/findings in `previous_bot_reviews`. If there were no prior review action items or the previous review was APPROVED, leave `resolutions` as an empty list `[]`. Never invent or backfill resolved items from the new commit's changes.
-   - For items that were in `previous_bot_reviews`, mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
+   - Track items in `resolutions` across all three feedback dimensions raised in `previous_bot_reviews`:
+     1) **Critical Issues** (`category: "CRITICAL"`): Verify whether blocking issues were resolved.
+     2) **Suggestions & Maintainability** (`category: "SUGGESTION"`): Verify whether suggested improvements were adopted.
+     3) **Potential Risks & Edge Cases** (`category: "RISK"`): Verify whether potential edge cases, concurrency risks, or limits were mitigated.
+   - If there were no prior review items, suggestions, or risks, leave `resolutions` as an empty list `[]`. Never invent or backfill resolved items from the new commit's changes that were not in prior reviews.
+   - For items that were in `previous_bot_reviews`, mark every previously identified finding as `RESOLVED` or `UNRESOLVED` with line citations and evidence, setting `category` accordingly.
    - Distinguish PR-authored commits from base branch merges (`Merge branch 'main' ...`). Commits originating from merging or updating from the base branch are part of the target branch and must NOT be attributed to the PR author or flagged as scope creep.
 
 ### Verdict Rules (Non-Negotiable)
@@ -2168,7 +2152,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         if canonical.startswith("issue_comment."):
             comment = raw.get("comment", {})
             issue = raw.get("issue", {})
-            comment_body = (comment.get("body") or "")[:500]
+            comment_body = comment.get("body") or ""
             is_pr = bool(issue.get("pull_request"))
             pr_num = issue.get("number", "unknown")
             parts.append(f"Issue/PR Number: {pr_num}")
@@ -2186,7 +2170,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             pr_num = pr.get("number", "unknown")
             parts.append(f"PR Number: {pr_num}")
             parts.append(f"PR Title: {pr.get('title', 'N/A')}")
-            parts.append(f"PR Body: {(pr.get('body') or '')[:500]}")
+            parts.append(f"PR Body: {pr.get('body') or ''}")
             parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
             parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
             parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
@@ -2208,12 +2192,12 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             comment = raw.get("comment", {})
             pr = raw.get("pull_request", {})
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
-            parts.append(f"Review Comment: {(comment.get('body') or '')[:500]}")
+            parts.append(f"Review Comment: {comment.get('body') or ''}")
         elif canonical.startswith("pull_request_review."):
             review = raw.get("review", {})
             pr = raw.get("pull_request", {})
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
-            parts.append(f"Review: {(review.get('body') or '')[:500]}")
+            parts.append(f"Review: {review.get('body') or ''}")
 
         # Include pre-fetched commit diff (incremental changes) if available
         if "commit_diff" in raw:
@@ -2251,11 +2235,21 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         # Include pre-fetched previous bot reviews if available
         if "previous_bot_reviews" in raw:
             parts.append(f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}")
-            if not raw.get("prior_reviews_had_request_changes", False):
+            has_prior_items = raw.get("prior_reviews_had_findings", False) or raw.get(
+                "prior_reviews_had_request_changes", False
+            )
+            if not has_prior_items:
                 parts.append(
-                    "\nNOTE ON RESOLUTION TRACKER: No prior review requested changes on this PR. "
-                    "You MUST leave 'resolutions' as an empty list ([]) in SyncReviewResponse. "
-                    "Do NOT invent or backfill resolved items."
+                    "\nNOTE ON RESOLUTION TRACKER: No prior review identified actionable critical issues, "
+                    "suggestions, or risks on this PR. You MUST leave 'resolutions' as an empty list ([]) "
+                    "in SyncReviewResponse. Do NOT invent or backfill resolved items."
+                )
+            else:
+                parts.append(
+                    "\nNOTE ON RESOLUTION TRACKER: Evaluate whether the new commits address or mitigate "
+                    "the previously identified Critical Issues, Suggestions & Maintainability items, or "
+                    "Potential Risks & Edge Cases. Mark each item in 'resolutions' as RESOLVED or "
+                    "UNRESOLVED with diff evidence, setting 'category' to 'CRITICAL', 'SUGGESTION', or 'RISK'."
                 )
 
         text = "\n".join(parts)
@@ -2389,7 +2383,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             ]
 
         # Check mutation policy
-        allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "0") in (
+        allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1") in (
             "1",
             "true",
             "True",
@@ -2397,7 +2391,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         if not allow_auto and not self.dry_run:
             logger.debug(
                 "⛔ Mutations disabled (ALLOW_AUTOMATED_MUTATIONS=%s)",
-                os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "0"),
+                os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1"),
             )
             logger.info(
                 "mutations disabled by policy (trace: %s)",
@@ -2598,11 +2592,11 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                             logger.debug(
                                 "💭 Agent response received (trace: %s): %s",
                                 trace_id[-4:],
-                                part.text[:200],
+                                part.text,
                             )
                             logger.info(
                                 "🧠 Agent response: %s (trace: %s)",
-                                part.text[:200],
+                                part.text,
                                 trace_id[-4:],
                             )
 

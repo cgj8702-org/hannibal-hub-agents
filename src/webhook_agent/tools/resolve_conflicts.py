@@ -367,7 +367,7 @@ def resolve_merge_conflicts(
                 "success": False,
                 "detail": f"Conflict resolution failed unit test verification gate for PR #{pr_number}.",
                 "resolved_files": resolved_files,
-                "test_output": pytest_res.stdout[:1000],
+                "test_output": pytest_res.stdout,
             }
 
         # 7. Commit & Push

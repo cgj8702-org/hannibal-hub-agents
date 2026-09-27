@@ -8,9 +8,17 @@
 
 ### 2. Resolution Tracker
 
-* Verification status of previously requested changes:
-  * ✅ **[RESOLVED]** `[file:line]`: [Description of resolved item verified in diff]
-  * 🔴 **[UNRESOLVED]** `[file:line]`: [Description of unresolved item]
+* Verification status of previously identified findings across all review dimensions:
+
+#### 🔴 Critical Issues
+* ✅ **[RESOLVED]** `[file:line]`: [Description of resolved critical issue verified in diff]
+* 🔴 **[UNRESOLVED]** `[file:line]`: [Description of unresolved critical issue]
+
+#### 🟡 Suggestions & Maintainability
+* ✅ **[RESOLVED]** `[file:line]`: [Description of addressed suggestion verified in diff]
+
+#### 🛡️ Risks & Edge Cases
+* ✅ **[RESOLVED]** `[file:line]`: [Description of mitigated risk verified in diff]
 
 ---
 

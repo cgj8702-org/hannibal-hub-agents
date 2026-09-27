@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
+import sys
 
 from google.adk.agents.context import Context
 from google.adk.tools import FunctionTool
@@ -42,8 +44,9 @@ def search_codebase(
         return "Error: Empty search query provided."
 
     repo_dir = os.getcwd()
+    rg_path = shutil.which("rg") or os.path.join(sys.prefix, "bin", "rg")
 
-    cmd = ["rg", "--no-heading", "--line-number", "--color=never", "--max-count=20"]
+    cmd = [rg_path, "--no-heading", "--line-number", "--color=never", "--max-count=20"]
     if file_pattern and file_pattern.strip():
         cmd.extend(["-g", file_pattern.strip()])
 

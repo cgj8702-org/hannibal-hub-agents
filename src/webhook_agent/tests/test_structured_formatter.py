@@ -6,6 +6,7 @@ from webhook_agent.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
     normalize_code_review_dict,
+    normalize_sync_review_dict,
     render_code_review_markdown,
     render_sync_review_markdown,
 )
@@ -725,3 +726,121 @@ def test_reproduce_pr_155_mangled_formatting():
     assert "* `src/webhook_agent/flawed_feature.py:9`" in rendered_md
     assert "* `src/webhook_agent/flawed_feature.py:21`" in rendered_md
     assert "* `src/webhook_agent/flawed_feature.py:22`" in rendered_md
+
+
+def test_sync_review_three_tier_resolution_rendering():
+    """Verify that multi-tier resolutions render with clear category subheadings."""
+    sync_resp = SyncReviewResponse(
+        summary="Addressed review feedback across all dimensions.",
+        resolutions=[
+            SyncResolutionItem(
+                item_description="Null check missing in auth.py",
+                status="RESOLVED",
+                evidence="auth.py:L45 added guard statement",
+                category="CRITICAL",
+            ),
+            SyncResolutionItem(
+                item_description="Extract helper function for token parsing",
+                status="RESOLVED",
+                evidence="token.py:L12 extracted parse_token_claims",
+                category="SUGGESTION",
+            ),
+            SyncResolutionItem(
+                item_description="Concurrency race condition on cache dict",
+                status="RESOLVED",
+                evidence="proactive_service.py:L18 added threading.Lock",
+                category="RISK",
+            ),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        confidence=5,
+    )
+    verdict = calculate_sync_verdict(sync_resp)
+    assert verdict == "APPROVE"
+
+    md = render_sync_review_markdown(sync_resp, verdict)
+    assert "#### 🔴 Critical Issues" in md
+    assert "#### 🟡 Suggestions & Maintainability" in md
+    assert "#### 🛡️ Risks & Edge Cases" in md
+    assert "Null check missing in auth.py" in md
+    assert "Extract helper function for token parsing" in md
+    assert "Concurrency race condition on cache dict" in md
+
+
+def test_sync_review_unresolved_suggestion_does_not_block_approval():
+    """Verify that an unresolved optional suggestion does not force REQUEST_CHANGES."""
+    sync_resp = SyncReviewResponse(
+        summary="Resolved critical bug, left optional style suggestion for later.",
+        resolutions=[
+            SyncResolutionItem(
+                item_description="Crash on empty list",
+                status="RESOLVED",
+                evidence="Fixed with guard check",
+                category="CRITICAL",
+            ),
+            SyncResolutionItem(
+                item_description="Consider renaming variable x to count",
+                status="UNRESOLVED",
+                evidence="Deferred to future refactoring",
+                category="SUGGESTION",
+            ),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        confidence=5,
+    )
+    verdict = calculate_sync_verdict(sync_resp)
+    assert verdict == "APPROVE"
+
+
+def test_sync_review_unresolved_critical_blocks_approval():
+    """Verify that an unresolved critical issue forces REQUEST_CHANGES."""
+    sync_resp = SyncReviewResponse(
+        summary="Partial fixes applied.",
+        resolutions=[
+            SyncResolutionItem(
+                item_description="Severe memory leak in connection pool",
+                status="UNRESOLVED",
+                evidence="Still unclosed",
+                category="CRITICAL",
+            ),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        confidence=5,
+    )
+    verdict = calculate_sync_verdict(sync_resp)
+    assert verdict == "REQUEST_CHANGES"
+
+
+def test_normalize_sync_review_dict_preserves_categories():
+    """Verify that normalize_sync_review_dict coerces categories accurately."""
+    raw_data = {
+        "summary": "Sync update",
+        "resolutions": [
+            {
+                "item_description": "Crit 1",
+                "status": "resolved",
+                "evidence": "Fixed",
+                "category": "critical",
+            },
+            {
+                "item_description": "Sugg 1",
+                "status": "resolved",
+                "evidence": "Refactored",
+                "category": "maintainability_suggestion",
+            },
+            {
+                "item_description": "Risk 1",
+                "status": "resolved",
+                "evidence": "Locked",
+                "category": "edge_case_risk",
+            },
+        ],
+    }
+    normalized = normalize_sync_review_dict(raw_data)
+    resolutions = normalized["resolutions"]
+    assert resolutions[0]["category"] == "CRITICAL"
+    assert resolutions[1]["category"] == "SUGGESTION"
+    assert resolutions[2]["category"] == "RISK"

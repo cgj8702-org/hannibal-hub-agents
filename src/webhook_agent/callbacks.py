@@ -252,41 +252,9 @@ async def on_tool_error_callback(
     return None
 
 
-MAX_TOOL_CHARS = 12_000  # ~3,000 tokens safe ceiling
-
-
 async def after_tool_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext, tool_response: Any
 ) -> Any:
-    """Enforce token safety on tool returns."""
+    """Pass tool response directly without truncation."""
     _check_pr_closed_short_circuit(tool_context.state)
-    if isinstance(tool_response, str) and len(tool_response) > MAX_TOOL_CHARS:
-        excess = len(tool_response) - MAX_TOOL_CHARS
-        logger.info(
-            "⚠️ Tool '%s' output exceeded %d chars (%d chars); truncating with notice",
-            tool.name,
-            MAX_TOOL_CHARS,
-            len(tool_response),
-        )
-        return (
-            tool_response[:MAX_TOOL_CHARS]
-            + f"\n\n[... Truncated {excess} characters (~{excess // 4} tokens) from {tool.name} to preserve token quota. Use line ranges or specific paths to view more ...]"
-        )
-
-    if isinstance(tool_response, dict):
-        for k, v in list(tool_response.items()):
-            if isinstance(v, str) and len(v) > MAX_TOOL_CHARS:
-                excess = len(v) - MAX_TOOL_CHARS
-                logger.info(
-                    "⚠️ Tool '%s' response['%s'] exceeded %d chars (%d chars); truncating with notice",
-                    tool.name,
-                    k,
-                    MAX_TOOL_CHARS,
-                    len(v),
-                )
-                tool_response[k] = (
-                    v[:MAX_TOOL_CHARS]
-                    + f"\n\n[... Truncated {excess} characters (~{excess // 4} tokens) from {tool.name}['{k}'] to preserve token quota ...]"
-                )
-
     return tool_response
