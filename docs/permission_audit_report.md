@@ -1,3 +1,5 @@
+> **Historical artifact:** This permission audit is a dated snapshot and is not a current permission inventory.
+
 # 🔐 GitHub App Permission Audit Report — Past 24 Hours
 
 **Generated:** 2026-08-11 22:15 EDT

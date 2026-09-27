@@ -1,3 +1,5 @@
+> **Historical artifact:** This plan is retained for context and is not the current repository implementation plan.
+
 # Dynamic Model Router Improvement Plan
 
 > Comparing `hannibal-hub-agents` event-type-based model routing vs `adk-samples` patterns and proposing a Hybrid Model Routing Architecture.

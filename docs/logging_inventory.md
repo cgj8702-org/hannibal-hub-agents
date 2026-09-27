@@ -1,4 +1,6 @@
-# 🪵 Telemetry Logging Inventory (`hannibal-hub-agents`)
+> **Historical artifact:** This logging inventory is a dated snapshot; regenerate it before treating its paths, line numbers, or deleted modules as current.
+
+# 🪵 Telemetry Logging Inventory
 
 Complete audit catalog of all logging calls across `src/` in the `hannibal-hub-agents` repository.
 

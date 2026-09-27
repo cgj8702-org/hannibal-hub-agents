@@ -18,6 +18,8 @@ from pathlib import Path
 from google.adk.agents.context import Context
 from google.genai import Client
 
+from webhook_agent.logic.constants import DEFAULT_ALLOW_AUTOMATED_MUTATIONS
+
 logger = logging.getLogger("webhook_agent.auto_fix")
 
 
@@ -68,7 +70,7 @@ def auto_fix_pr_feedback(
     Checks policy rules, parses requested changes, applies fixes, verifies tests,
     and commits/pushes the changes to origin.
     """
-    if os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1") not in (
+    if os.environ.get("ALLOW_AUTOMATED_MUTATIONS", DEFAULT_ALLOW_AUTOMATED_MUTATIONS) not in (
         "1",
         "true",
         "True",

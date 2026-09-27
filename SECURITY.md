@@ -19,9 +19,9 @@ We take security seriously. If you discover a security vulnerability in Hannibal
 
 This project implements several security measures:
 
-1. **HMAC Signature Verification** - All incoming webhooks are verified at the router level
-2. **Short-lived Tokens** - GitHub App installation tokens are cached and rotated hourly
-3. **Policy Gates** - `ALLOW_AUTOMATED_MUTATIONS` prevents unexpected automated changes
+1. **Webhook Authentication at the Edge** - The deployed Cloud Run router is configured with `WEBHOOK_SECRET` and is intended to verify GitHub's `X-Hub-Signature-256` before publishing events. The router source is currently documented in [`cloud_run_function.md`](cloud_run_function.md) but is not version-controlled in this repository; verify the deployed implementation before relying on this claim.
+2. **Short-lived Tokens** - GitHub App installation tokens are cached locally until shortly before their GitHub-issued `expires_at` time, then refreshed; there is no independent hourly rotation schedule in this repository.
+3. **Policy Gates** - `ALLOW_AUTOMATED_MUTATIONS` fails closed (`0`) and requires an explicit opt-in (`1`, `true`, or `True`) for automated changes.
 4. **Least Privilege Tooling** - Agent tool schemas are scoped to specific event types
 
 ## Supported Versions

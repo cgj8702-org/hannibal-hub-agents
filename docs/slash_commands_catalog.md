@@ -10,7 +10,6 @@ This document provides a comprehensive technical catalog, routing reference, and
 | **`/fix`** | `/fix`, `/auto`, `/fix-it` | Pull Request | `auto_fix_pr_review_feedback` | Executes in isolated Git Worktree, runs ruff and pytest verification before pushing. |
 | **`/resolve`** | `/resolve` | Pull Request | `resolve_merge_conflicts` | Uses ephemeral worktree and Gemini generative code block synthesis for merge conflict resolution. |
 | **`/create`** | `/create` | Pull Request | `get_pr_diff`, `update_pr_description` | Auto-fills PR descriptions and summaries based on commit history. |
-| **`/implement`** | `/implement`, `/feature` | Issue / Issue Comment | `AgentCore` / Agent execution | Extracts instruction and initiates autonomous feature implementation workflow. |
 
 ---
 
@@ -50,12 +49,6 @@ This document provides a comprehensive technical catalog, routing reference, and
   1. Prefetches commit history summary via `_prefetch_commit_history`.
   2. Generates comprehensive description.
 - **Risk Analysis**: Empty commit messages lead to sparse descriptions.
-
-### 5. `/implement` / `/feature`
-- **Purpose**: Triggers end-to-end feature implementation from issue descriptions.
-- **Workflow**:
-  1. `_preexecute_implement_command` extracts instruction text.
-  2. Delegated to `AgentCore` execution loop.
 
 ---
 

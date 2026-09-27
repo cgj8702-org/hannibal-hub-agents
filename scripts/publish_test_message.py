@@ -23,7 +23,7 @@ def main() -> None:
     if not topic:
         raise SystemExit("PUBSUB_TOPIC must be set in the environment")
 
-    # Normalized event payload matching the shape produced by app.py::normalize_payload
+    # Normalized event payload matching the deployed Cloud Run router envelope.
     # This exercises: route_event -> "pull_request.opened", should_process_event -> True,
     # and agent core rule-based planning -> add_comment action
     payload = {
