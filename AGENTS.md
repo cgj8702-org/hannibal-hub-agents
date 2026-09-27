@@ -9,10 +9,8 @@ Please follow these protocols to ensure team coordination remains professional, 
 * **GitHub App Identity:** GitHub App installation tokens represent integrations and cannot access user-specific endpoints like `GET /user`. Always use `BOT_LOGIN` (`"hannibal-hub-agents[bot]"`) or bot login matching for bot checks.
 * **ADK Tool & Search Grounding:** Google Search grounding tools (`google_search`) in ADK are supported strictly on Gemini models (`gemini-3.5-flash-lite`). Do not assign `google_search` tools to Gemma models (`gemma-4-31b-it`).
 * **Dependency Management:** All environment management must use **`uv`**. Execute `uv sync` immediately following any modification to `pyproject.toml`.
-* **Linting Compliance:** Execute the **`scripts/ruff-all.sh`** bash script for linting and formatting validation prior to task completion.
 * **Official Pre-Commit Hook:** After cloning or updating this repository, run **`./scripts/install-git-hooks.sh`**. This installs the tracked `.githooks/pre-commit` gate for the current clone; do not use `--no-verify` to bypass it.
 * **Precision Editing:** Default to targeted surgical edits over complete file rewrites.
-* **Rollback Strategy:** Every automated deployment, data mutation, or complex file manipulation MUST include a deterministic rollback protocol to recover from partial failures.
 * **GCP Multi-Project Topology & Secret Resolution Protocol:**
   - **Compute Host (VM):** GCE VM instance `hannibal-hub-free` (`us-east1-d`) hosted on GCP project **`chatbot-project-hannibal`**. Runs `systemctl --user restart hannibal-webhook-agent`.
   - **Webhook Free Project (`gen-lang-client-0615466973`):** API quota for free-tier PR review webhooks (`WEBHOOK_FREE_KEY`).

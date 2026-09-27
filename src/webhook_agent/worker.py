@@ -129,12 +129,12 @@ def main() -> int:
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    PROACTIVE_SWEEP_INTERVAL_SECONDS = 1800  # 30 minutes
+    PROACTIVE_SWEEP_INTERVAL_SECONDS = 300  # 5 minutes
     last_proactive_sweep = 0.0
 
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
-        # Periodic Proactive Agent Sweep (Every 30 minutes)
+        # Periodic Proactive Agent Sweep (Every 5 minutes)
         import time
 
         now = time.time()
@@ -151,10 +151,26 @@ def main() -> int:
                 )
                 target_repos = [r.strip() for r in repos_env.split(",") if r.strip()]
 
+                def _publish_reconciliation(payload: dict[str, Any]) -> None:
+                    from webhook_agent.logic.constants import DEFAULT_PUBSUB_TOPIC
+
+                    topic = os.environ.get("PUBSUB_TOPIC", DEFAULT_PUBSUB_TOPIC)
+                    data = json.dumps(payload).encode("utf-8")
+                    publisher.publish(topic, data)
+                    logger.info(
+                        "📢 Dispatched proactive reconciliation event to %s for PR #%s",
+                        topic,
+                        payload.get("raw_payload", {}).get("number"),
+                    )
+
                 def _run_sweeps(repos: list[str]) -> None:
                     for repo_name in repos:
                         try:
-                            evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                            evaluator = ProactiveEvaluator(
+                                processor.gh,
+                                repo_name,
+                                on_unreviewed_pr=_publish_reconciliation,
+                            )
                             evaluator.evaluate_open_prs()
                         except GithubException as sweep_err:
                             if sweep_err.status != 401:
@@ -170,7 +186,11 @@ def main() -> int:
                             )
                             processor.invalidate_github_client()
                             try:
-                                evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                                evaluator = ProactiveEvaluator(
+                                    processor.gh,
+                                    repo_name,
+                                    on_unreviewed_pr=_publish_reconciliation,
+                                )
                                 evaluator.evaluate_open_prs()
                             except Exception as retry_err:
                                 logger.warning(
