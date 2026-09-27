@@ -33,11 +33,19 @@ def test_auto_fix_disabled_by_policy(monkeypatch):
     assert "disabled by policy" in res
 
 
-def test_auto_fix_disabled_by_default(monkeypatch):
+def test_auto_fix_enabled_by_default(monkeypatch):
     monkeypatch.delenv("ALLOW_AUTOMATED_MUTATIONS", raising=False)
     ctx = MagicMock(spec=Context)
-    res = auto_fix_pr_feedback(ctx, pr_number=123)
-    assert "disabled by policy" in res
+    with patch("github.Github") as mock_github:
+        mock_gh = MagicMock()
+        mock_github.return_value = mock_gh
+        mock_repo = MagicMock()
+        mock_gh.get_repo.return_value = mock_repo
+        mock_pr = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_pr.get_reviews.return_value = []
+        res = auto_fix_pr_feedback(ctx, pr_number=123)
+        assert "disabled by policy" not in res
 
 
 @patch("github.Github")

@@ -36,6 +36,7 @@ from google.adk.workflow import DEFAULT_ROUTE, START, Edge, Workflow
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
+from webhook_agent.logic.constants import DEFAULT_ALLOW_AUTOMATED_MUTATIONS
 from webhook_agent.logic.genai_provider import get_text_generation_provider
 from webhook_agent.logic.model_factory import RateLimitedGemini, get_adk_model
 from webhook_agent.logic.plugins import (
@@ -2385,7 +2386,9 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             ]
 
         # Check mutation policy
-        allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1") in (
+        allow_auto = os.environ.get(
+            "ALLOW_AUTOMATED_MUTATIONS", DEFAULT_ALLOW_AUTOMATED_MUTATIONS
+        ) in (
             "1",
             "true",
             "True",
