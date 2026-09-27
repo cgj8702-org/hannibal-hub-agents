@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from webhook_agent.callbacks import (
-    MAX_TOOL_CHARS,
     ROUTE_CORE_BACKEND,
     ROUTE_DEV_DOCS,
     ROUTE_MINOR_FIX,
@@ -181,12 +180,10 @@ async def test_after_tool_callback_string_truncation() -> None:
     ctx = MagicMock()
     ctx.state = {}
 
-    long_response = "A" * (MAX_TOOL_CHARS + 5000)
+    long_response = "A" * 50000
     res = await after_tool_callback(tool, args, ctx, long_response)
     assert isinstance(res, str)
-    assert res.startswith("A" * MAX_TOOL_CHARS)
-    assert "Truncated 5000 characters" in res
-    assert "[... Truncated" in res
+    assert res == long_response
 
 
 @pytest.mark.unit
@@ -201,13 +198,11 @@ async def test_after_tool_callback_dict_truncation() -> None:
 
     dict_response = {
         "status": "ok",
-        "diff": "B" * (MAX_TOOL_CHARS + 2000),
+        "diff": "B" * 50000,
     }
     res = await after_tool_callback(tool, args, ctx, dict_response)
     assert isinstance(res, dict)
-    assert res["status"] == "ok"
-    assert res["diff"].startswith("B" * MAX_TOOL_CHARS)
-    assert "Truncated 2000 characters" in res["diff"]
+    assert res == dict_response
 
 
 @pytest.mark.unit

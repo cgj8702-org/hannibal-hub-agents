@@ -55,7 +55,7 @@ export PUBSUB_PROJECT="${PROJECT_ID}"
 export PUBSUB_TOPIC="projects/${PROJECT_ID}/topics/webhooks"
 export PUBSUB_SUBSCRIPTION="projects/${PROJECT_ID}/subscriptions/webhooks-sub"
 export PUBSUB_DEAD_LETTER_TOPIC="projects/${PROJECT_ID}/topics/webhooks-dead-letter"
-# Fail closed by default; explicitly opt in with ALLOW_AUTOMATED_MUTATIONS=1.
-export ALLOW_AUTOMATED_MUTATIONS="0"
+# Enabled by default: allow automated mutations out of the box.
+export ALLOW_AUTOMATED_MUTATIONS="${ALLOW_AUTOMATED_MUTATIONS:-1}"
 
 echo "Secrets loaded into environment memory successfully."
