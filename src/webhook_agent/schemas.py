@@ -72,6 +72,25 @@ class IssueItem(BaseModel):
         )
         return s.rstrip()
 
+    def to_markdown(self, prefix: str = "") -> str:
+        """Render IssueItem into clean GitHub Markdown bullet point with code block formatting."""
+        loc = f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`"
+        prefix_str = f"{prefix} " if prefix else ""
+        item_str = f"* {prefix_str}{loc}: {self.description}"
+        if self.suggested_fix and self.suggested_fix.strip():
+            fix = self.suggested_fix.strip()
+            if "```" in fix:
+                indented = "\n".join(f"    {line}" for line in fix.splitlines())
+                item_str += f"\n  * *Suggested Fix*:\n{indented}"
+            elif "\n" in fix:
+                indented = "\n".join(f"    {line}" for line in fix.splitlines())
+                item_str += f"\n  * *Suggested Fix*:\n    ```\n{indented}\n    ```"
+            else:
+                if not (fix.startswith("`") and fix.endswith("`")):
+                    fix = f"`{fix}`"
+                item_str += f"\n  * *Suggested Fix*: {fix}"
+        return item_str
+
 
 class SyncResolutionItem(BaseModel):
     """Resolution status of a previously requested review item in incremental commit diff."""
@@ -124,6 +143,73 @@ class CodeReviewResponse(BaseModel):
         cleaned = clean_field_string(v)
         return cleaned if cleaned else "Autonomous PR code review report."
 
+    def to_markdown(self, verdict: str | None = None) -> str:
+        """Render CodeReviewResponse into clean, modern GitHub Markdown."""
+        verdict_str = verdict or self.verdict or "COMMENT"
+        verdict_badge = f"`{verdict_str}`"
+
+        critical_lines: list[str] = []
+        if self.critical_issues:
+            for issue in self.critical_issues:
+                critical_lines.append(issue.to_markdown())
+        else:
+            critical_lines.append("* *None found.*")
+
+        minor_lines: list[str] = []
+        if self.minor_suggestions:
+            for suggestion in self.minor_suggestions:
+                minor_lines.append(suggestion.to_markdown())
+        else:
+            minor_lines.append("* *None found.*")
+
+        risk_lines: list[str] = []
+        if self.risks_and_edge_cases:
+            for item in self.risks_and_edge_cases:
+                risk_lines.append(f"* **Risk:** {item.risk}")
+                if item.recommendation and item.recommendation.strip():
+                    risk_lines.append(f"  * *Recommendation*: {item.recommendation.strip()}")
+            risk_block = "\n".join(risk_lines).strip()
+        else:
+            risk_block = "* *None identified for this PR scope.*"
+
+        markdown_parts = [
+            f"## 🛡️ Code Review: {verdict_badge}",
+            "",
+            "### 1. Executive Summary",
+            "",
+            f"* **Summary & Justification:** {self.executive_summary}",
+            "",
+            "---",
+            "",
+            "### 2. Action Items",
+            "",
+            "#### 🔴 Critical (Must Fix Before Merge)",
+            "\n".join(critical_lines),
+            "",
+            "#### 🟡 Suggestions & Maintainability",
+            "\n".join(minor_lines),
+            "",
+            "---",
+            "",
+            "### 3. Potential Risks & Edge Cases",
+            "",
+            risk_block,
+        ]
+
+        if self.context_gaps:
+            gaps_str = ", ".join(self.context_gaps)
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "### 4. Verification Notes",
+                    f"* **Context Gaps:** {gaps_str}",
+                ]
+            )
+
+        return "\n".join(markdown_parts) + "\n"
+
 
 class SyncReviewResponse(BaseModel):
     """Structured Pydantic model for incremental PR synchronization re-reviews."""
@@ -154,3 +240,67 @@ class SyncReviewResponse(BaseModel):
     def sanitize_summary(cls, v: Any) -> Any:
         cleaned = clean_field_string(v)
         return cleaned if cleaned else "Pull request synchronization review update."
+
+    def to_markdown(self, verdict: str | None = None, has_prior_reviews: bool = True) -> str:
+        """Render SyncReviewResponse into clean, modern GitHub Markdown."""
+        if not has_prior_reviews:
+            cr_data = {
+                "executive_summary": self.summary or "Autonomous PR code review report.",
+                "confidence": self.confidence,
+                "verdict": self.verdict or verdict,
+                "critical_issues": [item.model_dump() for item in self.critical_issues],
+                "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],
+                "risks_and_edge_cases": [],
+            }
+            cr_obj = CodeReviewResponse.model_validate(cr_data)
+            return cr_obj.to_markdown(verdict)
+
+        verdict_str = verdict or self.verdict or "COMMENT"
+        verdict_badge = f"`{verdict_str}`"
+
+        res_lines: list[str] = []
+        if self.resolutions:
+            for item in self.resolutions:
+                icon = "✅" if item.status == "RESOLVED" else "🔴"
+                res_lines.append(
+                    f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                )
+        else:
+            res_lines.append("* *No prior review items tracked.*")
+
+        crit_lines: list[str] = []
+        if self.critical_issues:
+            for issue in self.critical_issues:
+                crit_lines.append(issue.to_markdown(prefix="🔴"))
+        else:
+            crit_lines.append("* *None found.*")
+
+        minor_lines: list[str] = []
+        if self.minor_suggestions:
+            for issue in self.minor_suggestions:
+                minor_lines.append(issue.to_markdown(prefix="🟡"))
+        else:
+            minor_lines.append("* *None found.*")
+
+        return f"""## ⚡ Code Review Update: {verdict_badge}
+
+### 1. Synchronization Summary
+
+* **Update Summary:** {self.summary}
+
+---
+
+### 2. Resolution Tracker
+
+{chr(10).join(res_lines)}
+
+---
+
+### 3. New Findings (Introduced in Update)
+
+#### 🔴 Critical (Must Fix Before Merge)
+{chr(10).join(crit_lines)}
+
+#### 🟡 Suggestions & Maintainability
+{chr(10).join(minor_lines)}
+"""
