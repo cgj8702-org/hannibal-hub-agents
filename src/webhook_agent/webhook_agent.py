@@ -32,7 +32,7 @@ from google.adk.events import Event, EventActions
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.workflow import DEFAULT_ROUTE, START, Edge, Workflow
+from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 from google.genai.errors import ServerError as GenAIServerError
 
@@ -53,14 +53,12 @@ from webhook_agent.logic.rate_limiter import (
 from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
 from .callbacks import (
-    ROUTE_DEV_DOCS,
     after_model_callback,
     after_tool_callback,
     before_agent_callback,
     before_model_callback,
     before_tool_callback,
     on_tool_error_callback,
-    router_after_agent_callback,
 )
 from .comment_poster import build_github_review_comments
 from .formatter import (
@@ -1976,27 +1974,11 @@ class WebhookAgent:
         )
         PromptSanitizerPlugin()
 
-        self._pr_router = LlmAgent(
-            name="pr_router",
-            model=model_instance,
-            description="Inspects modified files and classifies PR scope (dev_docs, minor_fix, core_backend).",
-            instruction=(
-                "Analyze the PR diff and the explicit deterministic changed-file inventory. "
-                "Classify scope into exactly one of: dev_docs, minor_fix, or core_backend. "
-                "Use dev_docs only when the deterministic safety gate is dev_docs and every "
-                "changed file is documentation. Any source, test, script, hook, workflow, "
-                "configuration, dependency, dev-code, mixed, missing, or unknown file must "
-                "be core_backend or minor_fix. If evidence is unavailable, use core_backend. "
-                "Output only the classification name."
-            ),
-            output_key="pr_scope",
-            before_agent_callback=before_agent_callback,
-            before_model_callback=before_model_callback,
-            after_model_callback=after_model_callback,
-            # Emits the workflow route consumed by the `Edge(route=...)` wiring
-            # below so docs-only PRs bypass the deep code audit.
-            after_agent_callback=router_after_agent_callback,
-        )
+        # Streamlined workflow: START -> code_auditor -> verdict_agent
+        # Eliminates the pr_router LLM node pass to save 1 model call and ~30k input tokens.
+        from types import SimpleNamespace
+
+        self._pr_router = SimpleNamespace(model=model_instance)
 
         self._code_auditor = LlmAgent(
             name="code_auditor",
@@ -2066,24 +2048,10 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             after_model_callback=after_model_callback,
         )
 
-        # Dynamic edge routing: `pr_router` emits a route from
-        # `router_after_agent_callback`, so docs-only PRs flow straight to
-        # `verdict_agent` while every other scope (including an unrecognized or
-        # missing route) falls through DEFAULT_ROUTE into the full code audit.
         self._agent = Workflow(
             name="webhook_agent",
             edges=[
-                (START, self._pr_router),
-                Edge(
-                    from_node=self._pr_router,
-                    to_node=self._verdict_agent,
-                    route=ROUTE_DEV_DOCS,
-                ),
-                Edge(
-                    from_node=self._pr_router,
-                    to_node=self._code_auditor,
-                    route=DEFAULT_ROUTE,
-                ),
+                (START, self._code_auditor),
                 (self._code_auditor, self._verdict_agent),
             ],
         )

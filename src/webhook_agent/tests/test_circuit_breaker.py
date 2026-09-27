@@ -28,7 +28,7 @@ async def test_circuit_breaker_success() -> None:
 
 @pytest.mark.anyio
 async def test_circuit_breaker_trips_on_transient_failures() -> None:
-    cb = CircuitBreaker(failure_threshold=2, recovery_timeout=5.0, base_delay=0.01, max_retries=1)
+    cb = CircuitBreaker(failure_threshold=2, recovery_timeout=5.0, base_delay=0.01, max_retries=0)
     assert cb.state == CircuitState.CLOSED
 
     async def failing_func() -> None:
@@ -37,7 +37,7 @@ async def test_circuit_breaker_trips_on_transient_failures() -> None:
     with pytest.raises(ConnectionError):
         await cb.call_async(failing_func)
 
-    assert cb.state in (CircuitState.CLOSED, CircuitState.OPEN)
+    assert cb.state == CircuitState.CLOSED
 
     with pytest.raises(ConnectionError):
         await cb.call_async(failing_func)
