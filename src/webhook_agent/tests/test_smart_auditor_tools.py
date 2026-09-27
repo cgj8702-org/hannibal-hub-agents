@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 from webhook_agent.formatter import (
     CodeReviewResponse,
-    _format_suggested_fix_markdown,
     render_code_review_markdown,
 )
 from webhook_agent.schemas import IssueItem
@@ -49,18 +48,25 @@ def test_codebase_search_tool():
 
 
 def test_format_suggested_fix_markdown_single_line():
-    """Verify single-line suggested fix formatting with backticks."""
-    fix_str = "x = y + 1"
-    formatted = _format_suggested_fix_markdown(fix_str)
-    assert formatted == "\n  * *Suggested Fix*: `x = y + 1`"
+    """Verify single-line suggested fix formatting with backticks on IssueItem."""
+    item = IssueItem(
+        path="src/main.py", line=10, description="Test issue", suggested_fix="x = y + 1"
+    )
+    formatted = item.to_markdown()
+    assert "* *Suggested Fix*: `x = y + 1`" in formatted
 
 
 def test_format_suggested_fix_markdown_multi_line():
-    """Verify multi-line suggested fix formatting with markdown code fence."""
-    fix_str = "if x:\n    return True\nreturn False"
-    formatted = _format_suggested_fix_markdown(fix_str)
+    """Verify multi-line suggested fix formatting with markdown code fence on IssueItem."""
+    item = IssueItem(
+        path="src/main.py",
+        line=10,
+        description="Test issue",
+        suggested_fix="if x:\n    return True\nreturn False",
+    )
+    formatted = item.to_markdown()
     assert "```" in formatted
-    assert "  * *Suggested Fix*:" in formatted
+    assert "* *Suggested Fix*:" in formatted
     assert "    if x:" in formatted
 
 

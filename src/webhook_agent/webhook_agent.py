@@ -125,37 +125,51 @@ __all__ = [
 # onto it via asyncio.run_coroutine_threadsafe.
 _BG_LOOP: asyncio.AbstractEventLoop | None = None
 _BG_LOOP_THREAD: threading.Thread | None = None
+_BG_LOOP_LOCK = threading.RLock()
 _GENAI_CLIENT: Any = None
 
 
 def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
     global _BG_LOOP, _BG_LOOP_THREAD
-    if _BG_LOOP and _BG_LOOP.is_running():
+    with _BG_LOOP_LOCK:
+        if _BG_LOOP and _BG_LOOP.is_running():
+            return _BG_LOOP
+
+        loop = asyncio.new_event_loop()
+
+        def _loop_worker() -> None:
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_forever()
+            except Exception:
+                logger.exception("Background event loop crashed")
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=_loop_worker, name="adk-bg-loop", daemon=True)
+        thread.start()
+        start_deadline = time.time() + 5.0
+        while not loop.is_running() and time.time() < start_deadline:
+            time.sleep(0.01)
+        _BG_LOOP = loop
+        _BG_LOOP_THREAD = thread
         return _BG_LOOP
-
-    loop = asyncio.new_event_loop()
-
-    def _loop_worker() -> None:
-        asyncio.set_event_loop(loop)
-        loop.run_forever()
-
-    thread = threading.Thread(target=_loop_worker, name="adk-bg-loop", daemon=True)
-    thread.start()
-    # Wait briefly for the background thread to start the loop to avoid
-    # a race where run_coroutine_threadsafe is called before run_forever()
-    # begins. This prevents scheduling onto a non-running loop which can
-    # manifest as transport/loop shutdown races in httpx/anyio.
-    start_deadline = time.time() + 2.0
-    while not loop.is_running() and time.time() < start_deadline:
-        time.sleep(0.01)
-    _BG_LOOP = loop
-    _BG_LOOP_THREAD = thread
-    return _BG_LOOP
 
 
 def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
-    """Schedule coroutine on the background loop and wait for result."""
+    """Schedule coroutine on the background loop and wait for result.
+
+    Guards against self-deadlock when called re-entrantly from within the background loop thread.
+    """
     loop = _ensure_bg_loop()
+
+    # Prevent thread self-deadlock if invoked from inside the background loop thread
+    if threading.current_thread() == _BG_LOOP_THREAD:
+        import nest_asyncio
+
+        nest_asyncio.apply(loop)
+        return loop.run_until_complete(coro)
+
     future: Future[Any] = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
         # Wait for result; use a 600s timeout to allow complex multi-step reasoning
@@ -169,19 +183,8 @@ def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
         raise
 
 
-async def _create_genai_client_async(api_key: str) -> Any:
-    """Create a google.genai Client on the background loop thread."""
-    from google.genai import Client
-
-    # Construct the client synchronously on the background loop to bind any
-    # async transports to that loop's lifecycle.
-    return Client(api_key=api_key)
-
-
 def get_shared_genai_client() -> Any:
-    """Return a process-wide cached google.genai Client, creating it on the
-    background loop if needed. Returns None if no API key is configured.
-    """
+    """Return a process-wide cached google.genai Client. Returns None if no API key is configured."""
     global _GENAI_CLIENT
     if _GENAI_CLIENT is not None:
         return _GENAI_CLIENT
@@ -196,11 +199,10 @@ def get_shared_genai_client() -> Any:
         return None
 
     try:
-        # Create client on background loop so httpx/anyio transports attach to
-        # the long-lived loop rather than ephemeral per-event loops.
-        client = run_in_bg_loop(_create_genai_client_async(api_key))
-        _GENAI_CLIENT = client
-        logger.info("Shared GenAI client created and cached on background loop")
+        from google.genai import Client
+
+        _GENAI_CLIENT = Client(api_key=api_key)
+        logger.info("Shared GenAI client created and cached successfully")
         return _GENAI_CLIENT
     except Exception as exc:
         logger.exception("Failed to create shared GenAI client: %s", exc)
