@@ -20,11 +20,31 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("hannibal_rate_limiter")
+
+
+class RateLimitExceededError(Exception):
+    """Raised when required rate limit or token wait exceeds the configured maximum wait threshold."""
+
+    def __init__(
+        self,
+        model: str,
+        wait_time: float,
+        max_wait: float,
+        limit_type: str = "rpm",
+    ) -> None:
+        self.model = model
+        self.wait_time = wait_time
+        self.max_wait = max_wait
+        self.limit_type = limit_type
+        super().__init__(
+            f"Model '{model}' {limit_type.upper()} rate limit exceeded: "
+            f"requires {wait_time:.1f}s wait, exceeding max_wait of {max_wait:.1f}s."
+        )
 
 
 def _resolve_registry_path() -> Path:
@@ -231,6 +251,7 @@ class RPMWaiter:
         default_limit: int = 10,
         window: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], Awaitable[Any]] | None = None,
     ):
         self.default_limit = default_limit
         self.window = window
@@ -238,6 +259,7 @@ class RPMWaiter:
         self.token_histories: dict[str, list[Any]] = collections.defaultdict(list)
         self.lock = asyncio.Lock()
         self.clock = clock
+        self.sleeper = sleeper
         self.registry_path = registry_path or _resolve_registry_path()
         self.model_limits = _load_rate_limits(self.registry_path)
 
@@ -252,6 +274,7 @@ class RPMWaiter:
         rpm_override: int | None = None,
         estimated_tokens: int = 0,
         tier: str | None = None,
+        max_wait: float | None = None,
     ) -> None:
         """Check RPM/TPM limits for the given model, sleeping to respect them.
 
@@ -260,9 +283,11 @@ class RPMWaiter:
             rpm_override: Optional explicit RPM limit (bypasses registry).
             estimated_tokens: Estimated input+output tokens for TPM accounting.
             tier: Active tier ("free" or "paid"). Resolved from env if omitted.
+            max_wait: Optional max wait threshold in seconds. Fast-fails if exceeded.
 
         Raises:
             ValueError: If the model has 0 RPM/RPD quota on the active tier.
+            RateLimitExceededError: If required wait exceeds max_wait.
         """
         wait_time = 0.0
 
@@ -309,7 +334,7 @@ class RPMWaiter:
             # 1. RPM Check (bursts allowed up to limit)
             wait_rpm = 0.0
             if len(history) >= rpm_limit:
-                oldest_ts = history[0]
+                oldest_ts = history[len(history) - rpm_limit]
                 wait_rpm = max(0.1, (oldest_ts + self.window) - now)
                 logger.info(
                     "RPM THROTTLE (%s): Used %d/%d. Sleeping %.1fs...",
@@ -362,13 +387,29 @@ class RPMWaiter:
 
             wait_time = max(wait_rpm, wait_tpm)
 
+            if max_wait is not None and wait_time > max_wait:
+                limit_type = "tpm" if wait_tpm > wait_rpm else "rpm"
+                logger.warning(
+                    "FAST FAIL RATE LIMIT (%s): Required wait %.1fs exceeds max_wait %.1fs. Failing over.",
+                    norm_model,
+                    wait_time,
+                    max_wait,
+                )
+                raise RateLimitExceededError(
+                    model=norm_model,
+                    wait_time=wait_time,
+                    max_wait=max_wait,
+                    limit_type=limit_type,
+                )
+
             # Reserve slot
             history.append(now + wait_time)
             if estimated_tokens > 0:
                 token_history.append([now + wait_time, estimated_tokens, False])
 
         if wait_time > 0:
-            await asyncio.sleep(wait_time)
+            sleeper_func = self.sleeper or asyncio.sleep
+            await sleeper_func(wait_time)
 
     async def record_actual_tokens(self, model: str = "default", actual_tokens: int = 0) -> None:
         """Update or record real token usage returned in the provider API response."""
@@ -391,6 +432,7 @@ class RPMWaiter:
                 token_history.append([now, actual_tokens, True])
 
 
+RateLimiter = RPMWaiter
 rpm_waiter = RPMWaiter()
 
 
