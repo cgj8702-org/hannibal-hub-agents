@@ -44,28 +44,50 @@ def search_codebase(
         return "Error: Empty search query provided."
 
     repo_dir = os.getcwd()
-    rg_path = shutil.which("rg") or os.path.join(sys.prefix, "bin", "rg")
+    rg_binary = shutil.which("rg") or os.path.join(sys.prefix, "bin", "rg")
+    has_rg = os.path.isfile(rg_binary) and os.access(rg_binary, os.X_OK)
 
-    cmd = [rg_path, "--no-heading", "--line-number", "--color=never", "--max-count=20"]
-    if file_pattern and file_pattern.strip():
-        cmd.extend(["-g", file_pattern.strip()])
+    output_lines: list[str] = []
 
-    cmd.extend([query.strip(), repo_dir])
+    if has_rg:
+        cmd = [
+            rg_binary,
+            "--no-heading",
+            "--line-number",
+            "--color=never",
+            "--max-count=20",
+            "-g",
+            "!.venv/*",
+            "-g",
+            "!.git/*",
+            "-g",
+            "!__pycache__/*",
+            "-g",
+            "!node_modules/*",
+            "-g",
+            "!*.pyc",
+        ]
+        if file_pattern and file_pattern.strip():
+            cmd.extend(["-g", file_pattern.strip()])
 
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        output_lines = res.stdout.splitlines() if res.stdout else []
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as exc:
-        logger.warning("ripgrep search failed (%s), falling back to python search", exc)
-        output_lines = []
+        cmd.extend([query.strip(), repo_dir])
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            output_lines = res.stdout.splitlines() if res.stdout else []
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as exc:
+            logger.debug(
+                "ripgrep search skipped or timed out (%s), falling back to python search", exc
+            )
+            output_lines = []
 
     if not output_lines:
-        # Fallback to simple python grep if rg wasn't installed or failed
+        # Fallback to fast python search ignoring virtual environments and build dirs
         output_lines = []
         q = query.strip()
-        for root, _dirs, files in os.walk(repo_dir):
-            if ".git" in root or "__pycache__" in root or ".venv" in root:
-                continue
+        skip_dirs = {".git", "__pycache__", ".venv", "node_modules", ".pytest_cache", ".mypy_cache"}
+        for root, dirs, files in os.walk(repo_dir):
+            dirs[:] = [d for d in dirs if d not in skip_dirs and not d.endswith(".egg-info")]
             for f in files:
                 if file_pattern and not f.endswith(file_pattern.lstrip("*")):
                     continue
