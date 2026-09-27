@@ -31,7 +31,7 @@ class AuditVerdict(BaseModel):
         ge=0.0, le=5.0, description="Auditor confidence score from 0.0 to 5.0"
     )
     pr_type: Literal["dev_docs", "minor_fix", "core_backend"] = Field(
-        description="PR scope classification output from pr_router"
+        description="PR scope classification output"
     )
     summary: str = Field(description="Executive summary of audit findings and code quality")
     risks: list[RiskItem] = Field(
