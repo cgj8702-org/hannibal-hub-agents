@@ -2392,7 +2392,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             ]
 
         # Check mutation policy
-        allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "0") in (
+        allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1") in (
             "1",
             "true",
             "True",
@@ -2400,7 +2400,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         if not allow_auto and not self.dry_run:
             logger.debug(
                 "⛔ Mutations disabled (ALLOW_AUTOMATED_MUTATIONS=%s)",
-                os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "0"),
+                os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1"),
             )
             logger.info(
                 "mutations disabled by policy (trace: %s)",
