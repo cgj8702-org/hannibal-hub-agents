@@ -252,7 +252,7 @@ async def on_tool_error_callback(
     return None
 
 
-MAX_TOOL_CHARS = 12_000  # ~3,000 tokens safe ceiling
+MAX_TOOL_CHARS = 120_000  # ~30,000 tokens safe ceiling
 
 
 async def after_tool_callback(
