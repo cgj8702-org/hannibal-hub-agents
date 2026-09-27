@@ -180,13 +180,10 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
 
 
 def truncate_log_payload(val: Any, max_length: int = 300) -> str:
-    """Truncate long string representations (diffs, JSON, tool output) for clean Cloud Logging output."""
+    """Return full payload string without truncation for Cloud Logging output."""
     if val is None:
         return ""
-    text = str(val)
-    if len(text) <= max_length:
-        return text
-    return f"{text[:max_length]}... [truncated {len(text) - max_length} chars]"
+    return str(val)
 
 
 def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
@@ -236,11 +233,15 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
 
 def calculate_sync_verdict(review: SyncReviewResponse) -> str:
     """Calculate sync re-review verdict mechanically from resolutions and new issues."""
-    unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
-    if unresolved or len(review.critical_issues) > 0:
+    unresolved_critical = [
+        r
+        for r in review.resolutions
+        if r.status == "UNRESOLVED" and getattr(r, "category", "CRITICAL") == "CRITICAL"
+    ]
+    if unresolved_critical or len(review.critical_issues) > 0:
         logger.info(
-            "Sync verdict: REQUEST_CHANGES (unresolved=%d, critical=%d)",
-            len(unresolved),
+            "Sync verdict: REQUEST_CHANGES (unresolved_critical=%d, critical=%d)",
+            len(unresolved_critical),
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"

@@ -286,28 +286,8 @@ def _truncate_input_for_tier(
     tier: str | None = None,
     max_tokens: int | None = None,
 ) -> str:
-    """Chunk/truncate text input to remain strictly below TPM rate limits on Free Tier."""
-    if not text:
-        return text
-
-    active_tier = tier or _resolve_tier()
-    if active_tier != "free":
-        return text
-
-    target_model = model if model and model != "default" else get_active_model()
-    tpm_limit = _get_model_tpm_limit(target_model, active_tier)
-    target_tokens = max_tokens or min(15000, max(1000, int(tpm_limit * 0.85)))
-
-    current_tokens = _count_tokens_exact(text, model=target_model)
-    if current_tokens <= target_tokens:
-        return text
-
-    max_chars = target_tokens * 4
-    truncated_msg = (
-        f"\n\n[Content truncated to {target_tokens} tokens for Free Tier TPM limit "
-        f"({current_tokens} tokens -> {target_tokens} tokens)]"
-    )
-    return text[: max_chars - len(truncated_msg)] + truncated_msg
+    """Preserve full text payload without truncation."""
+    return text
 
 
 # RateLimitedGemini is imported from webhook_agent.logic.model_factory above
@@ -857,7 +837,7 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
 
         else:
             parts.append("Type: Issue")
-            body_preview = (issue.body or "")[:500]
+            body_preview = issue.body or ""
             if body_preview:
                 parts.append(f"Body: {body_preview}")
 
@@ -2181,7 +2161,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         if canonical.startswith("issue_comment."):
             comment = raw.get("comment", {})
             issue = raw.get("issue", {})
-            comment_body = (comment.get("body") or "")[:500]
+            comment_body = comment.get("body") or ""
             is_pr = bool(issue.get("pull_request"))
             pr_num = issue.get("number", "unknown")
             parts.append(f"Issue/PR Number: {pr_num}")
@@ -2199,7 +2179,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             pr_num = pr.get("number", "unknown")
             parts.append(f"PR Number: {pr_num}")
             parts.append(f"PR Title: {pr.get('title', 'N/A')}")
-            parts.append(f"PR Body: {(pr.get('body') or '')[:500]}")
+            parts.append(f"PR Body: {pr.get('body') or ''}")
             parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
             parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
             parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
@@ -2221,12 +2201,12 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             comment = raw.get("comment", {})
             pr = raw.get("pull_request", {})
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
-            parts.append(f"Review Comment: {(comment.get('body') or '')[:500]}")
+            parts.append(f"Review Comment: {comment.get('body') or ''}")
         elif canonical.startswith("pull_request_review."):
             review = raw.get("review", {})
             pr = raw.get("pull_request", {})
             parts.append(f"PR Number: {pr.get('number', 'unknown')}")
-            parts.append(f"Review: {(review.get('body') or '')[:500]}")
+            parts.append(f"Review: {review.get('body') or ''}")
 
         # Include pre-fetched commit diff (incremental changes) if available
         if "commit_diff" in raw:
@@ -2621,11 +2601,11 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                             logger.debug(
                                 "💭 Agent response received (trace: %s): %s",
                                 trace_id[-4:],
-                                part.text[:200],
+                                part.text,
                             )
                             logger.info(
                                 "🧠 Agent response: %s (trace: %s)",
-                                part.text[:200],
+                                part.text,
                                 trace_id[-4:],
                             )
 

@@ -352,7 +352,7 @@ def _prefetch_commit_history(gh: Github, repo_name: str, payload: dict[str, Any]
             commit_summaries.append(f"- `{sha}` ({author}): {msg}")
 
         if commit_summaries:
-            raw["commit_history_summary"] = "\n".join(commit_summaries[:10])
+            raw["commit_history_summary"] = "\n".join(commit_summaries)
             logger.info(
                 "Pre-fetched commit history summary (%d commits) for /create PR #%d",
                 len(commit_summaries),
@@ -491,13 +491,13 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
                     )
                 ) and not ("None found" in body and "None identified" in body):
                     had_prior_findings = True
-                body_clean = body[:3000]
+                body_clean = body
                 bot_reviews.append(f"Review (State: {state}):\n{body_clean}")
 
         raw["prior_reviews_had_request_changes"] = had_request_changes
         raw["prior_reviews_had_findings"] = had_prior_findings or had_request_changes
         if bot_reviews:
-            raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews[-3:])
+            raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews)
             logger.info(
                 "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s) for PR #%d",
                 len(bot_reviews),

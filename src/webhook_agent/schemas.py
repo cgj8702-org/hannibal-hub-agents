@@ -613,7 +613,21 @@ class SyncReviewResponse(BaseModel):
                     ev = str(
                         item.get("evidence") or item.get("details") or "Verified in commit diff."
                     ).strip()
-                    clean_res.append({"item_description": desc, "status": status, "evidence": ev})
+                    raw_cat = str(item.get("category") or "CRITICAL").strip().upper()
+                    if "SUGG" in raw_cat or "MAINT" in raw_cat:
+                        norm_cat = "SUGGESTION"
+                    elif "RISK" in raw_cat or "EDGE" in raw_cat:
+                        norm_cat = "RISK"
+                    else:
+                        norm_cat = "CRITICAL"
+                    clean_res.append(
+                        {
+                            "item_description": desc,
+                            "status": status,
+                            "evidence": ev,
+                            "category": norm_cat,
+                        }
+                    )
         normalized["resolutions"] = clean_res
 
         raw_crit = normalized.get("critical_issues") or normalized.get("new_critical_issues")
@@ -800,11 +814,46 @@ class SyncReviewResponse(BaseModel):
 
         res_lines: list[str] = []
         if self.resolutions:
-            for item in self.resolutions:
-                icon = "✅" if item.status == "RESOLVED" else "🔴"
-                res_lines.append(
-                    f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
-                )
+            crit_res = [
+                r for r in self.resolutions if getattr(r, "category", "CRITICAL") == "CRITICAL"
+            ]
+            sugg_res = [
+                r for r in self.resolutions if getattr(r, "category", "CRITICAL") == "SUGGESTION"
+            ]
+            risk_res = [r for r in self.resolutions if getattr(r, "category", "CRITICAL") == "RISK"]
+
+            has_categories = any(
+                getattr(r, "category", "CRITICAL") in ("SUGGESTION", "RISK")
+                for r in self.resolutions
+            )
+            if not has_categories:
+                for item in self.resolutions:
+                    icon = "✅" if item.status == "RESOLVED" else "🔴"
+                    res_lines.append(
+                        f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                    )
+            else:
+                if crit_res:
+                    res_lines.append("#### 🔴 Critical Issues")
+                    for item in crit_res:
+                        icon = "✅" if item.status == "RESOLVED" else "🔴"
+                        res_lines.append(
+                            f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                        )
+                if sugg_res:
+                    res_lines.append("#### 🟡 Suggestions & Maintainability")
+                    for item in sugg_res:
+                        icon = "✅" if item.status == "RESOLVED" else "🟡"
+                        res_lines.append(
+                            f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                        )
+                if risk_res:
+                    res_lines.append("#### 🛡️ Risks & Edge Cases")
+                    for item in risk_res:
+                        icon = "✅" if item.status == "RESOLVED" else "🛡️"
+                        res_lines.append(
+                            f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                        )
         else:
             res_lines.append("* *No prior review items tracked.*")
 

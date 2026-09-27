@@ -413,17 +413,16 @@ class TestShouldProcessEvent:
         assert "Addresses #104" in sanitized
 
     def test_truncate_log_payload(self):
-        """truncate_log_payload caps long payload strings for clean Cloud Logging output."""
+        """truncate_log_payload returns full payload strings for Cloud Logging output without truncation."""
         from webhook_agent.formatter import truncate_log_payload
 
         short_msg = "Short message"
         assert truncate_log_payload(short_msg, 300) == "Short message"
 
         long_msg = "A" * 500
-        truncated = truncate_log_payload(long_msg, 100)
-        assert len(truncated) < 500
-        assert truncated.startswith("A" * 100)
-        assert "... [truncated 400 chars]" in truncated
+        output = truncate_log_payload(long_msg, 100)
+        assert len(output) == 500
+        assert output == long_msg
 
     def test_logger_hierarchy_named_loggers(self):
         """All webhook agent modules use unified 'webhook_agent.*' logger namespace."""
