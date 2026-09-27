@@ -1975,10 +1975,7 @@ class WebhookAgent:
         PromptSanitizerPlugin()
 
         # Streamlined workflow: START -> code_auditor -> verdict_agent
-        # Eliminates the pr_router LLM node pass to save 1 model call and ~30k input tokens.
-        from types import SimpleNamespace
-
-        self._pr_router = SimpleNamespace(model=model_instance)
+        # Eliminates the router LLM node pass to save 1 model call and ~30k input tokens.
 
         self._code_auditor = LlmAgent(
             name="code_auditor",
@@ -2110,7 +2107,6 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             model_name=next_model,
             api_key=get_active_api_key(),
         )
-        self._pr_router.model = new_model_instance
         self._code_auditor.model = new_model_instance
         self._verdict_agent.model = new_model_instance
         self._runner = Runner(
@@ -2546,7 +2542,6 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
                 model_name=selected_model,
                 api_key=get_active_api_key(),
             )
-            self._pr_router.model = new_model_instance
             self._code_auditor.model = new_model_instance
             self._verdict_agent.model = new_model_instance
 

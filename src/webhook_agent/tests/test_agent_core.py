@@ -259,7 +259,6 @@ class TestWebhookAgentModelChain:
         agent._attempted_model_names = {chain[0]}
         agent._model_chain = chain
         agent._chain_index = 0
-        agent._pr_router = SimpleNamespace(model=None)
         agent._code_auditor = SimpleNamespace(model=None)
         agent._verdict_agent = SimpleNamespace(model=None)
         agent._app = MagicMock()
