@@ -1,16 +1,14 @@
 """Codebase search tool for Webhook Agent.
 
-Allows the auditor agent to search the codebase to answer its own questions, verify call sites,
-check imports, and inspect environment variable usages before generating final reviews.
+Allows the auditor agent to search the codebase using pure Python filesystem traversal,
+verifying call sites, checking imports, and inspecting variable usages without external binaries.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import shutil
-import subprocess
-import sys
+import re
 
 from google.adk.agents.context import Context
 from google.adk.tools import FunctionTool
@@ -18,6 +16,17 @@ from google.adk.tools import FunctionTool
 logger = logging.getLogger("webhook_agent.codebase_search")
 
 MAX_SEARCH_RESULTS = 20
+SKIP_DIRS = {
+    ".git",
+    "__pycache__",
+    ".venv",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".build",
+    "dist",
+    "build",
+}
 
 
 def search_codebase(
@@ -44,65 +53,50 @@ def search_codebase(
         return "Error: Empty search query provided."
 
     repo_dir = os.getcwd()
-    rg_path = shutil.which("rg") or os.path.join(sys.prefix, "bin", "rg")
-
-    cmd = [rg_path, "--no-heading", "--line-number", "--color=never", "--max-count=20"]
-    if file_pattern and file_pattern.strip():
-        cmd.extend(["-g", file_pattern.strip()])
-
-    cmd.extend([query.strip(), repo_dir])
-
+    q = query.strip()
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        output_lines = res.stdout.splitlines() if res.stdout else []
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as exc:
-        logger.warning("ripgrep search failed (%s), falling back to python search", exc)
-        output_lines = []
+        query_regex = re.compile(q)
+    except re.error:
+        query_regex = None
 
-    if not output_lines:
-        # Fallback to simple python grep if rg wasn't installed or failed
-        output_lines = []
-        q = query.strip()
-        for root, _dirs, files in os.walk(repo_dir):
-            if ".git" in root or "__pycache__" in root or ".venv" in root:
+    pattern_clean = (
+        file_pattern.strip().lstrip("*") if file_pattern and file_pattern.strip() else None
+    )
+
+    output_lines: list[str] = []
+
+    for root, dirs, files in os.walk(repo_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
+        for f in files:
+            if pattern_clean and not f.endswith(pattern_clean):
                 continue
-            for f in files:
-                if file_pattern and not f.endswith(file_pattern.lstrip("*")):
-                    continue
-                path = os.path.join(root, f)
-                rel_path = os.path.relpath(path, repo_dir)
-                try:
-                    with open(path, encoding="utf-8", errors="ignore") as fh:
-                        for idx, line in enumerate(fh, 1):
-                            if q in line:
-                                output_lines.append(f"{rel_path}:{idx}:{line.rstrip()}")
-                                if len(output_lines) >= MAX_SEARCH_RESULTS:
-                                    break
-                except Exception:
-                    pass
-                if len(output_lines) >= MAX_SEARCH_RESULTS:
-                    break
+            path = os.path.join(root, f)
+            rel_path = os.path.relpath(path, repo_dir)
+            try:
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    for idx, line in enumerate(fh, 1):
+                        matched = (q in line) or (
+                            query_regex is not None and query_regex.search(line) is not None
+                        )
+                        if matched:
+                            output_lines.append(f"`{rel_path}:{idx}`: {line.strip()}")
+                            if len(output_lines) >= MAX_SEARCH_RESULTS:
+                                break
+            except Exception:
+                pass
+            if len(output_lines) >= MAX_SEARCH_RESULTS:
+                break
 
     if not output_lines:
-        return f"No matches found in codebase for query: '{query.strip()}'."
-
-    truncated = output_lines[:MAX_SEARCH_RESULTS]
-    formatted = []
-    for entry in truncated:
-        parts = entry.split(":", 2)
-        if len(parts) == 3:
-            rel_path = os.path.relpath(parts[0], repo_dir)
-            formatted.append(f"`{rel_path}:{parts[1]}`: {parts[2].strip()}")
-        else:
-            formatted.append(entry)
+        return f"No matches found in codebase for query: '{q}'."
 
     count_str = (
-        f"Showing top {len(formatted)} matches"
+        f"Showing top {len(output_lines)} matches"
         if len(output_lines) >= MAX_SEARCH_RESULTS
-        else f"Found {len(formatted)} matches"
+        else f"Found {len(output_lines)} matches"
     )
-    return f"### 🔍 Codebase Search Results for '{query.strip()}' ({count_str}):\n\n" + "\n".join(
-        f"* {item}" for item in formatted
+    return f"### 🔍 Codebase Search Results for '{q}' ({count_str}):\n\n" + "\n".join(
+        f"* {item}" for item in output_lines
     )
 
 
