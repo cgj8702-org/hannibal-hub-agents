@@ -81,11 +81,28 @@ class SyncResolutionItem(BaseModel):
         description="Whether the issue is RESOLVED or UNRESOLVED"
     )
     evidence: str = Field(description="Line citation or diff evidence verifying resolution")
+    category: Literal["CRITICAL", "SUGGESTION", "RISK"] = Field(
+        default="CRITICAL",
+        description="Category of the prior finding: CRITICAL, SUGGESTION, or RISK",
+    )
 
     @field_validator("item_description", "evidence", mode="before")
     @classmethod
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def sanitize_category(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v_upper = v.strip().upper()
+            if "CRIT" in v_upper:
+                return "CRITICAL"
+            if "SUGG" in v_upper or "MAINT" in v_upper:
+                return "SUGGESTION"
+            if "RISK" in v_upper or "EDGE" in v_upper:
+                return "RISK"
+        return "CRITICAL"
 
 
 class CodeReviewResponse(BaseModel):

@@ -1843,8 +1843,12 @@ When reviewing a PR, you MUST:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
    - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`. When calling `review()`, pass this JSON string as the `body` parameter.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
-   - Only track items in `resolutions` that were actually raised as requested changes/findings in `previous_bot_reviews`. If there were no prior review action items or the previous review was APPROVED, leave `resolutions` as an empty list `[]`. Never invent or backfill resolved items from the new commit's changes.
-   - For items that were in `previous_bot_reviews`, mark every previously requested issue as `RESOLVED` or `UNRESOLVED` with line citations and evidence.
+   - Track items in `resolutions` across all three feedback dimensions raised in `previous_bot_reviews`:
+     1) **Critical Issues** (`category: "CRITICAL"`): Verify whether blocking issues were resolved.
+     2) **Suggestions & Maintainability** (`category: "SUGGESTION"`): Verify whether suggested improvements were adopted.
+     3) **Potential Risks & Edge Cases** (`category: "RISK"`): Verify whether potential edge cases, concurrency risks, or limits were mitigated.
+   - If there were no prior review items, suggestions, or risks, leave `resolutions` as an empty list `[]`. Never invent or backfill resolved items from the new commit's changes that were not in prior reviews.
+   - For items that were in `previous_bot_reviews`, mark every previously identified finding as `RESOLVED` or `UNRESOLVED` with line citations and evidence, setting `category` accordingly.
    - Distinguish PR-authored commits from base branch merges (`Merge branch 'main' ...`). Commits originating from merging or updating from the base branch are part of the target branch and must NOT be attributed to the PR author or flagged as scope creep.
 
 ### Verdict Rules (Non-Negotiable)
@@ -2260,11 +2264,21 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
         # Include pre-fetched previous bot reviews if available
         if "previous_bot_reviews" in raw:
             parts.append(f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}")
-            if not raw.get("prior_reviews_had_request_changes", False):
+            has_prior_items = raw.get("prior_reviews_had_findings", False) or raw.get(
+                "prior_reviews_had_request_changes", False
+            )
+            if not has_prior_items:
                 parts.append(
-                    "\nNOTE ON RESOLUTION TRACKER: No prior review requested changes on this PR. "
-                    "You MUST leave 'resolutions' as an empty list ([]) in SyncReviewResponse. "
-                    "Do NOT invent or backfill resolved items."
+                    "\nNOTE ON RESOLUTION TRACKER: No prior review identified actionable critical issues, "
+                    "suggestions, or risks on this PR. You MUST leave 'resolutions' as an empty list ([]) "
+                    "in SyncReviewResponse. Do NOT invent or backfill resolved items."
+                )
+            else:
+                parts.append(
+                    "\nNOTE ON RESOLUTION TRACKER: Evaluate whether the new commits address or mitigate "
+                    "the previously identified Critical Issues, Suggestions & Maintainability items, or "
+                    "Potential Risks & Edge Cases. Mark each item in 'resolutions' as RESOLVED or "
+                    "UNRESOLVED with diff evidence, setting 'category' to 'CRITICAL', 'SUGGESTION', or 'RISK'."
                 )
 
         text = "\n".join(parts)

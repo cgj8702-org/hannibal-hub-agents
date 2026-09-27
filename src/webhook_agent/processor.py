@@ -472,6 +472,7 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
 
         bot_reviews: list[str] = []
         had_request_changes = False
+        had_prior_findings = False
         for r in pr.get_reviews():
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
@@ -479,16 +480,29 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
                 state = getattr(r, "state", "COMMENT")
                 if state == "CHANGES_REQUESTED":
                     had_request_changes = True
-                body_snippet = (r.body or "")[:300].replace("\n", " ")
-                bot_reviews.append(f"- State: {state} | Body: {body_snippet}")
+                body = (r.body or "").strip()
+                if any(
+                    marker in body
+                    for marker in (
+                        "Critical",
+                        "Suggestions",
+                        "Risks & Edge Cases",
+                        "Action Items",
+                    )
+                ) and not ("None found" in body and "None identified" in body):
+                    had_prior_findings = True
+                body_clean = body[:3000]
+                bot_reviews.append(f"Review (State: {state}):\n{body_clean}")
 
         raw["prior_reviews_had_request_changes"] = had_request_changes
+        raw["prior_reviews_had_findings"] = had_prior_findings or had_request_changes
         if bot_reviews:
-            raw["previous_bot_reviews"] = "\n".join(bot_reviews[-3:])
+            raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews[-3:])
             logger.info(
-                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s) for PR #%d",
+                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s) for PR #%d",
                 len(bot_reviews),
                 had_request_changes,
+                raw["prior_reviews_had_findings"],
                 pr_number,
             )
     except Exception as exc:

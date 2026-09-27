@@ -565,7 +565,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
         )
 
     raw_res = normalized.get("resolutions")
-    clean_res: list[dict[str, str]] = []
+    clean_res: list[dict[str, Any]] = []
     if isinstance(raw_res, list):
         for item in raw_res:
             if isinstance(item, str) and item.strip():
@@ -574,6 +574,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                         "item_description": item.strip(),
                         "status": "RESOLVED",
                         "evidence": "Verified in incremental commit diff.",
+                        "category": "CRITICAL",
                     }
                 )
             elif isinstance(item, dict):
@@ -590,11 +591,21 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
                 ev = str(
                     item.get("evidence") or item.get("details") or "Verified in commit diff."
                 ).strip()
+                cat_raw = str(item.get("category") or "CRITICAL").strip().upper()
+                if "CRIT" in cat_raw:
+                    clean_cat = "CRITICAL"
+                elif "SUGG" in cat_raw or "MAINT" in cat_raw:
+                    clean_cat = "SUGGESTION"
+                elif "RISK" in cat_raw or "EDGE" in cat_raw:
+                    clean_cat = "RISK"
+                else:
+                    clean_cat = "CRITICAL"
                 clean_res.append(
                     {
                         "item_description": desc,
                         "status": status,
                         "evidence": ev,
+                        "category": clean_cat,
                     }
                 )
     normalized["resolutions"] = clean_res
@@ -810,20 +821,28 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
     """Calculate sync re-review verdict mechanically from resolutions and new issues.
 
     Rules:
-    - ANY unresolved finding -> REQUEST_CHANGES
+    - ANY unresolved critical finding -> REQUEST_CHANGES
     - ANY critical issue -> REQUEST_CHANGES
     - Explicit review.verdict == "REQUEST_CHANGES" -> REQUEST_CHANGES
     - Summary flags unaddressed critical issues or breaking modifications -> REQUEST_CHANGES
     - Confidence < 4 or explicit review.verdict == "COMMENT" -> COMMENT
-    - All items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
+    - All blocking items RESOLVED, 0 critical issues, confidence >= 4 -> APPROVE
     """
-    unresolved = [r for r in review.resolutions if r.status == "UNRESOLVED"]
+    unresolved_blocking = [
+        r
+        for r in review.resolutions
+        if r.status == "UNRESOLVED"
+        and (
+            getattr(r, "category", "CRITICAL") == "CRITICAL"
+            or any(kw in (r.item_description or "").lower() for kw in BREAKING_RISK_KEYWORDS)
+        )
+    ]
     has_critical = len(review.critical_issues) > 0
 
-    if unresolved or has_critical:
+    if unresolved_blocking or has_critical:
         logger.info(
-            "Sync verdict: REQUEST_CHANGES (unresolved=%d, critical=%d)",
-            len(unresolved),
+            "Sync verdict: REQUEST_CHANGES (unresolved_blocking=%d, critical=%d)",
+            len(unresolved_blocking),
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
@@ -1180,11 +1199,44 @@ def render_sync_review_markdown(
 
     res_lines: list[str] = []
     if review.resolutions:
-        for item in review.resolutions:
-            icon = "✅" if item.status == "RESOLVED" else "🔴"
-            res_lines.append(
-                f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
-            )
+        crit_res = [
+            r for r in review.resolutions if getattr(r, "category", "CRITICAL") == "CRITICAL"
+        ]
+        sugg_res = [r for r in review.resolutions if getattr(r, "category", "") == "SUGGESTION"]
+        risk_res = [r for r in review.resolutions if getattr(r, "category", "") == "RISK"]
+
+        if sugg_res or risk_res:
+            if crit_res:
+                res_lines.append("#### 🔴 Critical Issues")
+                for item in crit_res:
+                    icon = "✅" if item.status == "RESOLVED" else "🔴"
+                    res_lines.append(
+                        f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                    )
+            if sugg_res:
+                if crit_res:
+                    res_lines.append("")
+                res_lines.append("#### 🟡 Suggestions & Maintainability")
+                for item in sugg_res:
+                    icon = "✅" if item.status == "RESOLVED" else "🔴"
+                    res_lines.append(
+                        f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                    )
+            if risk_res:
+                if crit_res or sugg_res:
+                    res_lines.append("")
+                res_lines.append("#### 🛡️ Risks & Edge Cases")
+                for item in risk_res:
+                    icon = "✅" if item.status == "RESOLVED" else "🔴"
+                    res_lines.append(
+                        f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                    )
+        else:
+            for item in review.resolutions:
+                icon = "✅" if item.status == "RESOLVED" else "🔴"
+                res_lines.append(
+                    f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
+                )
     else:
         res_lines.append("* *No prior review items tracked.*")
 
