@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn>=0.30.0",
     "google-adk==2.9.2",
     "ripgrep>=15.1.0",
+    "nest-asyncio>=1.6.0",
 ]
 
 [dependency-groups]
@@ -156,6 +157,7 @@ module = [
     "google.genai.*",
     "httpx.*",
     "jwt.*",
+    "nest_asyncio.*",
     "pdfplumber.*",
     "pypdf.*",
     "pydantic.*",
