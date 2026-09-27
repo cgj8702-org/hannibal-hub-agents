@@ -400,10 +400,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 17
+        assert len(tool_names) == 19
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 13 API primitives + get_current_time + diff tools + search tool."""
+        """Tool names should match the 13 API primitives + get_current_time + diff tools + search tools + sequential thinking."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -429,6 +429,8 @@ class TestToolRegistration:
                 "get_pr_diff_file_map",
                 "verify_line_reference",
                 "google_search_grounding_tool",
+                "search_codebase",
+                "sequential_thinking",
             ]
         )
         assert tool_names == expected

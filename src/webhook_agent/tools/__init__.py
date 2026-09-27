@@ -7,6 +7,7 @@ from .diff_tools import (
 )
 from .resolve_conflicts import resolve_merge_conflicts
 from .search_tool import google_search_grounding_tool
+from .sequential_thinking import sequential_thinking_tool
 
 __all__ = [
     "get_pr_diff_file_map_tool",
@@ -14,5 +15,6 @@ __all__ = [
     "resolve_merge_conflicts",
     "search_codebase",
     "search_codebase_tool",
+    "sequential_thinking_tool",
     "verify_line_reference_tool",
 ]
