@@ -135,6 +135,8 @@ class DiffFilterResult:
     skipped_files: dict[str, str]
     is_reviewable: bool
     budget: int
+    ast_risk_score: float = 0.0
+    ast_impact_counts: dict[str, int] = field(default_factory=dict)
 
 
 def split_diff_into_sections(diff_text: str) -> list[DiffSection]:
@@ -158,7 +160,6 @@ def split_diff_into_sections(diff_text: str) -> list[DiffSection]:
             if current is not None:
                 sections.append(current)
             file_part = line[6:].strip()
-            # Handle "File: src/main.py (modified)"
             path = file_part.split(" (")[0].strip()
             current = DiffSection(path=path, lines=[line])
             continue
@@ -217,6 +218,8 @@ def filter_review_diff(
             skipped_files={},
             is_reviewable=False,
             budget=0,
+            ast_risk_score=0.0,
+            ast_impact_counts={},
         )
 
     sections = split_diff_into_sections(diff_text)
@@ -228,12 +231,10 @@ def filter_review_diff(
     reviewable_lines = 0
 
     for sec in sections:
-        # Check if excluded by PR file list
         if allowed_set is not None and sec.path not in allowed_set:
             skipped_files[sec.path] = "not in PR files"
             continue
 
-        # Check skip patterns (lockfiles, vendored code, binary files)
         reason = skip_reason(sec.path, sec.churn)
         if reason is not None:
             skipped_files[sec.path] = reason
@@ -243,7 +244,6 @@ def filter_review_diff(
         kept_files.append(sec.path)
         reviewable_lines += sec.churn
 
-    # Assemble filtered diff up to max_bytes
     out_lines: list[str] = []
     current_bytes = 0
     for sec in kept_sections:
@@ -261,6 +261,9 @@ def filter_review_diff(
     is_reviewable = bool(kept_files and reviewable_lines > 0)
     budget = budget_for(reviewable_lines) if is_reviewable else 0
 
+    from .ast_analyzer import analyze_diff_hunks
+    ast_res = analyze_diff_hunks(filtered_text)
+
     return DiffFilterResult(
         filtered_diff=filtered_text,
         reviewable_lines=reviewable_lines,
@@ -268,4 +271,6 @@ def filter_review_diff(
         skipped_files=skipped_files,
         is_reviewable=is_reviewable,
         budget=budget,
+        ast_risk_score=ast_res.risk_score,
+        ast_impact_counts=ast_res.impact_counts,
     )
