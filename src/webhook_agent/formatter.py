@@ -1069,6 +1069,29 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     return data
 
 
+def _format_suggested_fix_markdown(suggested_fix: str | None) -> str:
+    """Format a suggested fix into clean, properly-fenced Markdown."""
+    if not suggested_fix or not suggested_fix.strip():
+        return ""
+    fix = suggested_fix.strip()
+
+    # If it already contains markdown code fences
+    if "```" in fix:
+        lines = fix.splitlines()
+        indented = "\n".join(f"    {line}" for line in lines)
+        return f"\n  * *Suggested Fix*:\n{indented}"
+
+    # If multi-line code snippet
+    if "\n" in fix:
+        indented = "\n".join(f"    {line}" for line in fix.splitlines())
+        return f"\n  * *Suggested Fix*:\n    ```\n{indented}\n    ```"
+
+    # Single-line snippet
+    if not (fix.startswith("`") and fix.endswith("`")):
+        fix = f"`{fix}`"
+    return f"\n  * *Suggested Fix*: {fix}"
+
+
 def render_code_review_markdown(review: CodeReviewResponse, verdict: str | None = None) -> str:
     """Render CodeReviewResponse into clean, modern GitHub Markdown."""
     if verdict is None:
@@ -1080,9 +1103,9 @@ def render_code_review_markdown(review: CodeReviewResponse, verdict: str | None 
     if review.critical_issues:
         for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            item_str = f"* {loc}: {issue.description}"
-            if issue.suggested_fix and issue.suggested_fix.strip():
-                item_str += f"\n  * *Suggested Fix*: {issue.suggested_fix.strip()}"
+            item_str = f"* {loc}: {issue.description}" + _format_suggested_fix_markdown(
+                issue.suggested_fix
+            )
             critical_lines.append(item_str)
     else:
         critical_lines.append("* *None found.*")
@@ -1095,9 +1118,9 @@ def render_code_review_markdown(review: CodeReviewResponse, verdict: str | None 
                 if suggestion.line
                 else f"`{suggestion.path}`"
             )
-            item_str = f"* {loc}: {suggestion.description}"
-            if suggestion.suggested_fix and suggestion.suggested_fix.strip():
-                item_str += f"\n  * *Suggested Fix*: {suggestion.suggested_fix.strip()}"
+            item_str = f"* {loc}: {suggestion.description}" + _format_suggested_fix_markdown(
+                suggestion.suggested_fix
+            )
             minor_lines.append(item_str)
     else:
         minor_lines.append("* *None found.*")
@@ -1192,9 +1215,9 @@ def render_sync_review_markdown(
     if review.critical_issues:
         for issue in review.critical_issues:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            item_str = f"* 🔴 {loc}: {issue.description}"
-            if issue.suggested_fix and issue.suggested_fix.strip():
-                item_str += f"\n  * *Suggested Fix*: {issue.suggested_fix.strip()}"
+            item_str = f"* 🔴 {loc}: {issue.description}" + _format_suggested_fix_markdown(
+                issue.suggested_fix
+            )
             crit_lines.append(item_str)
     else:
         crit_lines.append("* *None found.*")
@@ -1203,9 +1226,9 @@ def render_sync_review_markdown(
     if review.minor_suggestions:
         for issue in review.minor_suggestions:
             loc = f"`{issue.path}:{issue.line}`" if issue.line else f"`{issue.path}`"
-            item_str = f"* 🟡 {loc}: {issue.description}"
-            if issue.suggested_fix and issue.suggested_fix.strip():
-                item_str += f"\n  * *Suggested Fix*: {issue.suggested_fix.strip()}"
+            item_str = f"* 🟡 {loc}: {issue.description}" + _format_suggested_fix_markdown(
+                issue.suggested_fix
+            )
             minor_lines.append(item_str)
     else:
         minor_lines.append("* *None found.*")
