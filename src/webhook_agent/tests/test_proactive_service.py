@@ -59,11 +59,11 @@ class TestProactiveEvaluator:
 
     @pytest.fixture(autouse=True)
     def clear_cache(self):
-        from webhook_agent.proactive_service import _RECONCILED_PR_CACHE
+        from webhook_agent.proactive_service import clear_reconciliation_cache
 
-        _RECONCILED_PR_CACHE.clear()
+        clear_reconciliation_cache()
         yield
-        _RECONCILED_PR_CACHE.clear()
+        clear_reconciliation_cache()
 
     def test_approval_without_inline_comments_does_not_trigger_reminder(self):
         mock_gh = MagicMock()
@@ -286,3 +286,24 @@ class TestProactiveEvaluator:
         second_results = evaluator.evaluate_open_prs()
         assert second_results == []
         assert callback.call_count == 1
+
+    def test_concurrent_threads_reconciliation_claim_is_thread_safe(self):
+        import concurrent.futures
+
+        from webhook_agent.proactive_service import try_claim_reconciliation
+
+        cache_key = "cgj8702-org/hannibal-hub#300#abcdef1"
+        now_ts = 1000000.0
+        results: list[bool] = []
+
+        def worker():
+            return try_claim_reconciliation(cache_key, now_ts)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(worker) for _ in range(20)]
+            for f in concurrent.futures.as_completed(futures):
+                results.append(f.result())
+
+        # Exactly 1 thread successfully claimed the reconciliation slot
+        assert results.count(True) == 1
+        assert results.count(False) == 19

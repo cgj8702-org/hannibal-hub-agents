@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -16,21 +17,35 @@ UNREVIEWED_PR_THRESHOLD_SECONDS = 300  # 5 minutes
 RECONCILED_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 _RECONCILED_PR_CACHE: dict[str, float] = {}
+_RECONCILIATION_LOCK = threading.Lock()
 
 
-def _is_recently_reconciled(cache_key: str, now_ts: float) -> bool:
-    """Check if a PR head commit has already been reconciled recently."""
-    expired = [
-        k for k, ts in _RECONCILED_PR_CACHE.items() if now_ts - ts > RECONCILED_CACHE_TTL_SECONDS
-    ]
-    for k in expired:
-        _RECONCILED_PR_CACHE.pop(k, None)
-    return cache_key in _RECONCILED_PR_CACHE
+def try_claim_reconciliation(cache_key: str, now_ts: float) -> bool:
+    """Atomically check and claim reconciliation for a PR head commit.
+
+    Guards against concurrent thread execution across background sweeps and
+    worker routines. Returns True if the claim was successfully acquired.
+    """
+    with _RECONCILIATION_LOCK:
+        expired = [
+            k
+            for k, ts in list(_RECONCILED_PR_CACHE.items())
+            if now_ts - ts > RECONCILED_CACHE_TTL_SECONDS
+        ]
+        for k in expired:
+            _RECONCILED_PR_CACHE.pop(k, None)
+
+        if cache_key in _RECONCILED_PR_CACHE:
+            return False
+
+        _RECONCILED_PR_CACHE[cache_key] = now_ts
+        return True
 
 
-def _mark_reconciled(cache_key: str, now_ts: float) -> None:
-    """Record a PR head commit as reconciled to prevent duplicate dispatches."""
-    _RECONCILED_PR_CACHE[cache_key] = now_ts
+def clear_reconciliation_cache() -> None:
+    """Atomically reset the reconciliation cache (used primarily for test isolation)."""
+    with _RECONCILIATION_LOCK:
+        _RECONCILED_PR_CACHE.clear()
 
 
 def build_synthetic_pr_opened_event(pr: Any, repo_name: str) -> dict[str, Any]:
@@ -145,8 +160,7 @@ class ProactiveEvaluator:
             head_sha = getattr(head, "sha", "") or ""
             cache_key = f"{self.repo_name}#{pr_number}#{head_sha}"
             now_ts = now.timestamp()
-            if not _is_recently_reconciled(cache_key, now_ts):
-                _mark_reconciled(cache_key, now_ts)
+            if try_claim_reconciliation(cache_key, now_ts):
                 event_payload = build_synthetic_pr_opened_event(pr, self.repo_name)
                 if callable(self.on_unreviewed_pr):
                     try:
