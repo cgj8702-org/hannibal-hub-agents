@@ -612,12 +612,16 @@ def get_model_chain() -> list[str]:
             "gemini-3.6-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
         ]
     else:
         default_primary = "gemini-3.5-flash-lite"
         default_chain = [
             default_primary,
             "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemma-4-31b-it",
             "gemma-4-26b-a4b-it",
         ]

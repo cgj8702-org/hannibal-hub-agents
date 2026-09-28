@@ -84,6 +84,18 @@ class RateLimitedGemini(Gemini):
                 is_rate_limit = (
                     "429" in err_s or "resource_exhausted" in err_s or "quota exceeded" in err_s
                 )
+                if is_rate_limit:
+                    try:
+                        from webhook_agent.logic.firestore_registry import (
+                            firestore_depleted_registry,
+                        )
+
+                        firestore_depleted_registry.mark_depleted(model_name, error=exc)
+                    except Exception as dep_err:
+                        logger.debug(
+                            "Failed to mark model '%s' as depleted: %s", model_name, dep_err
+                        )
+
                 if is_rate_limit and attempt < max_attempts - 1:
                     parsed_retry = rate_details.get("retry_after_seconds")
                     if parsed_retry is not None and parsed_retry > 0:
@@ -92,7 +104,7 @@ class RateLimitedGemini(Gemini):
                         retry_delay = min(2.0 * (attempt + 1), 15.0)
 
                     logger.warning(
-                        "⚠️ Model '%s' encountered transient error in ADK node (attempt %d/%d): %s. In-flight pause for %.1fs before retrying...",
+                        "⚠️ Model '%s' hit quota/rate-limit in ADK node (attempt %d/%d): %s. Marked depleted. Pausing %.1fs before retrying fallback...",
                         model_name,
                         attempt + 1,
                         max_attempts,
