@@ -27,9 +27,6 @@ class AuditVerdict(BaseModel):
     verdict: Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"] = Field(
         description="Final review verdict for the Pull Request"
     )
-    confidence: float = Field(
-        ge=0.0, le=5.0, description="Auditor confidence score from 0.0 to 5.0"
-    )
     summary: str = Field(description="Executive summary of audit findings and code quality")
     risks: list[RiskItem] = Field(
         default_factory=list,

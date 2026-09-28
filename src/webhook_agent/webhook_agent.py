@@ -92,17 +92,11 @@ def calculate_verdict(
     """Calculates PR review verdict cleanly.
 
     Rules:
-    - If has_critical or (scores and any(s <= 2 for s in scores.values())): REQUEST_CHANGES
+    - If has_critical: REQUEST_CHANGES
     - Otherwise: APPROVE
     """
     if has_critical:
         return "REQUEST_CHANGES"
-    if scores:
-        if any(s <= 2 for s in scores.values()):
-            return "REQUEST_CHANGES"
-        avg_score = sum(scores.values()) / len(scores)
-        if avg_score < 3.5:
-            return "REQUEST_CHANGES"
     return "APPROVE"
 
 
