@@ -4,7 +4,6 @@ Provides native ADK lifecycle callbacks for:
 - Pre-flight free count_tokens API metering, Free Tier TPM chunking (<15k), and rate limit waiting (before_model_callback).
 - Post-call token usage auditing (after_model_callback).
 - State pre-population with PR metadata and active tier (before_agent_callback).
-- Workflow edge routing from the classified PR scope (router_after_agent_callback).
 - Tool parameter validation & sanitization (before_tool_callback).
 - Self-healing error recovery (on_tool_error_callback).
 """

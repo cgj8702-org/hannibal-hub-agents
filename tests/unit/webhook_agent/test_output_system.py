@@ -12,7 +12,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_dev_docs_minimal_scope_rendering() -> None:
+def test_clean_pr_minimal_rendering() -> None:
     verdict = AuditVerdict(
         verdict="APPROVE",
         confidence=5.0,
@@ -26,7 +26,7 @@ def test_dev_docs_minimal_scope_rendering() -> None:
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_core_backend_deep_audit_rendering() -> None:
+def test_deep_audit_risk_rendering() -> None:
     risk = RiskItem(
         category="concurrency",
         file="src/logic/state.py",

@@ -33,5 +33,5 @@ class AuditVerdict(BaseModel):
     summary: str = Field(description="Executive summary of audit findings and code quality")
     risks: list[RiskItem] = Field(
         default_factory=list,
-        description="List of identified risks. May be empty [] for clean dev/docs PRs.",
+        description="List of identified risks. May be empty [] when no risks are detected.",
     )

@@ -381,7 +381,7 @@ class TestTokenTruncation:
         monkeypatch.setenv("WEBHOOK_TIER", "free")
         agent = WebhookAgent(dry_run=True)
         assert agent._code_auditor.include_contents == "default"
-        assert "scope label" in agent._code_auditor.instruction
+        assert "source of truth for this audit" in agent._code_auditor.instruction
         assert agent._app.context_cache_config is None
 
 

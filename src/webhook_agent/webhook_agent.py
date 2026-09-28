@@ -1921,7 +1921,7 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 
 """
 
-AUDITOR_CONTEXT_INSTRUCTION = """The workflow may provide a short PR scope label such as `core_backend` as node metadata. Treat that label as classification metadata, never as the review task or the user's complete request. Always use the original user message, PR metadata, and full PR diff as the source of truth for this audit.
+AUDITOR_CONTEXT_INSTRUCTION = """Always use the original user message, PR metadata, and full PR diff as the source of truth for this audit.
 
 """
 
@@ -2023,8 +2023,7 @@ class WebhookAgent:
             model=model_instance,
             include_contents="none",
             description="Produces structured AuditVerdict JSON output.",
-            # `{...?}` keeps the template renderable when the docs-only route
-            # skips `code_auditor` and never writes `code_review_analysis`.
+            # `{...?}` keeps the template renderable if `code_review_analysis` is missing.
             instruction="""You are the Chief Auditor synthesizing final verdicts for Pull Requests.
 Evaluate the code auditor's technical findings:
 
@@ -2032,7 +2031,7 @@ Evaluate the code auditor's technical findings:
 {code_review_analysis?}
 
 Synthesize these findings into an AuditVerdict structured JSON payload matching the schema.
-Clean dev/docs PRs return risks: [], including when the audit analysis section is empty.
+Clean PRs with no identified risks return risks: [], including when the audit analysis section is empty.
 """,
             output_schema=AuditVerdict,
             output_key="audit_verdict",
@@ -2208,8 +2207,7 @@ Clean dev/docs PRs return risks: [], including when the audit analysis section i
             parts.append(f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}")
 
         # Include pre-fetched PR diff (full accumulated state) if available.
-        # The deterministic file gate is derived from the complete inventory before
-        # diff filtering so skipped lockfiles/config cannot create a false docs-only route.
+        # The deterministic file gate is derived from the complete inventory.
         if "pr_diff" in raw:
             changed_files = raw.get("changed_files") or []
             inventory = ", ".join(changed_files) or "unavailable"
