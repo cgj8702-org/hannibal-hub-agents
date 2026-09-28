@@ -1,4 +1,4 @@
-"""Unit tests for mathematical PR review verdict calculator."""
+"""Unit tests for PR review verdict calculator."""
 
 import pytest
 
@@ -9,27 +9,11 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_calculate_verdict_low_score_triggers_request_changes() -> None:
-    scores = {"correctness": 2, "readability": 5, "architecture": 5}
-    assert calculate_verdict(scores) == "REQUEST_CHANGES"
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
-def test_calculate_verdict_low_average_triggers_request_changes() -> None:
-    scores = {"correctness": 3, "readability": 3, "architecture": 3}
-    assert calculate_verdict(scores) == "REQUEST_CHANGES"
-
-
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_calculate_verdict_has_critical_triggers_request_changes() -> None:
-    scores = {"correctness": 5, "readability": 5, "architecture": 5}
-    assert calculate_verdict(scores, has_critical=True) == "REQUEST_CHANGES"
+    assert calculate_verdict(has_critical=True) == "REQUEST_CHANGES"
 
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_calculate_verdict_high_scores_and_confidence_approves() -> None:
-    scores = {"correctness": 5, "readability": 4, "architecture": 4}
-    assert calculate_verdict(scores) == "APPROVE"
+def test_calculate_verdict_clean_approves() -> None:
+    assert calculate_verdict(has_critical=False) == "APPROVE"

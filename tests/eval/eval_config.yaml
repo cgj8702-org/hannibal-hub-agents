@@ -5,7 +5,7 @@ dataset_path: tests/eval/datasets/pr_reviews.json
 
 metrics:
   - name: zero_hallucinated_risks
-    description: Measures whether clean dev/docs PRs return risks as an empty list [].
+    description: Measures whether clean PRs return risks as an empty list [].
     threshold: 1.0
 
   - name: diff_grounding_accuracy

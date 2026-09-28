@@ -27,14 +27,8 @@ class AuditVerdict(BaseModel):
     verdict: Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"] = Field(
         description="Final review verdict for the Pull Request"
     )
-    confidence: float = Field(
-        ge=0.0, le=5.0, description="Auditor confidence score from 0.0 to 5.0"
-    )
-    pr_type: Literal["dev_docs", "minor_fix", "core_backend"] = Field(
-        description="PR scope classification output"
-    )
     summary: str = Field(description="Executive summary of audit findings and code quality")
     risks: list[RiskItem] = Field(
         default_factory=list,
-        description="List of identified risks. May be empty [] for clean dev/docs PRs.",
+        description="List of identified risks. May be empty [] when no risks are detected.",
     )

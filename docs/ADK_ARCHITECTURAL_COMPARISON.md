@@ -56,7 +56,7 @@ filterwarnings = [
    Short-circuiting requires hacky exception throwing rather than clean graph termination.
 
 ### The ADK 2.0 Solution: Graph-Based `Workflow`
-ADK 2.0 replaces linear sequences with a directed graph composed of **Nodes** and **Edges** (`from google.adk.workflow import Workflow`).
+ADK 2.0 structures execution as a directed graph composed of **Nodes** and **Edges** (`from google.adk.workflow import Workflow`).
 
 ```
               ┌─────────┐
@@ -64,65 +64,34 @@ ADK 2.0 replaces linear sequences with a directed graph composed of **Nodes** an
               └────┬────┘
                    │
                    ▼
-         ┌───────────────────┐
-         │    _pr_router     │
-         └─────────┬─────────┘
-                   │
-         Is code audit needed?
-        ╱                     ╲
-      YES                      NO (docs / chores / trivial)
-      ╱                         ╲
-     ▼                           ▼
-┌──────────────────┐             │
-│  _code_auditor   │             │
-│ (17 tools / AST) │             │
-└────────┬─────────┘             │
-         │                       │
-         └───────────┬───────────┘
-                     │
-                     ▼
-          ┌─────────────────────┐
-          │   _verdict_agent    │
-          │ (AuditVerdict JSON) │
-          └─────────────────────┘
+        ┌──────────────────┐
+        │  _code_auditor   │
+        │ (17 tools / AST) │
+        └────────┬─────────┘
+                 │
+                 ▼
+      ┌─────────────────────┐
+      │   _verdict_agent    │
+      │ (AuditVerdict JSON) │
+      └─────────────────────┘
 ```
 
 #### Modern Workflow Implementation:
-Routes are *emitted*, not predicated: `pr_router` writes its classification onto
-the node's event via `EventActions.route` (`router_after_agent_callback`), and
-the scheduler follows the matching edge.
+Nodes execute sequentially through explicit graph edges:
 
 ```python
-from google.adk.workflow import DEFAULT_ROUTE, START, Edge, Workflow
+from google.adk.workflow import START, Workflow
 
 webhook_workflow = Workflow(
     name="webhook_agent",
     edges=[
-        (START, self._pr_router),
-        # Conditional edge: docs-only PRs skip straight to verdict generation.
-        Edge(
-            from_node=self._pr_router,
-            to_node=self._verdict_agent,
-            route=ROUTE_DEV_DOCS,
-        ),
-        # DEFAULT_ROUTE is the fail-safe: `minor_fix`, `core_backend`, an
-        # unrecognized scope, or a router that emitted no route at all still
-        # run the full audit.
-        Edge(
-            from_node=self._pr_router,
-            to_node=self._code_auditor,
-            route=DEFAULT_ROUTE,
-        ),
+        (START, self._code_auditor),
         (self._code_auditor, self._verdict_agent),
     ],
 )
 ```
 
-`router_after_agent_callback` also writes `pr_scope_route` to state, because ADK
-only emits the event carrying `actions.route` when the callback produces a state
-delta. `verdict_agent` reads its inputs through optional template placeholders
-(`{pr_scope?}`, `{code_review_analysis?}`) so the skipped-audit path renders
-without raising `KeyError`.
+`verdict_agent` reads its inputs through template placeholders (`{code_review_analysis?}`) to synthesize structured JSON output.
 
 ---
 

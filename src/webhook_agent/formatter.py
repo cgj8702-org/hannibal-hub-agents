@@ -207,7 +207,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
-    """Calculate PR review verdict mechanically from structured issues and confidence."""
+    """Calculate PR review verdict mechanically from structured issues."""
     if len(review.critical_issues) > 0:
         logger.info(
             "Mechanical verdict: REQUEST_CHANGES (%d critical issues)",
@@ -223,9 +223,6 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
             logger.info("Mechanical verdict: REQUEST_CHANGES (breaking risk flagged: %s)", r.risk)
             return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
-        return "COMMENT"
-    if review.confidence is not None and review.confidence < 4:
-        logger.info("Mechanical verdict: COMMENT (confidence=%d < 4)", review.confidence)
         return "COMMENT"
     logger.info("Mechanical verdict: APPROVE (0 critical issues)")
     return "APPROVE"
