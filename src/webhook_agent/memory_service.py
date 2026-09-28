@@ -56,7 +56,7 @@ class InMemoryMemoryService(BaseMemoryService):
                     parts.append(part.text)
         return " ".join(parts) if parts else ""
 
-    def add_memory(  # type: ignore[override]
+    async def add_memory(
         self,
         *,
         app_name: str,
@@ -94,7 +94,7 @@ class InMemoryMemoryService(BaseMemoryService):
             app_name,
         )
 
-    def add_events_to_memory(  # type: ignore[override]
+    async def add_events_to_memory(
         self,
         *,
         app_name: str,
@@ -128,23 +128,23 @@ class InMemoryMemoryService(BaseMemoryService):
             )
 
         if memories:
-            self.add_memory(
+            await self.add_memory(
                 app_name=app_name,
                 user_id=user_id,
                 memories=memories,
                 custom_metadata=custom_metadata,
             )
 
-    def add_session_to_memory(self, session: Session) -> None:  # type: ignore[override]
+    async def add_session_to_memory(self, session: Session) -> None:
         """Store all events from a session as memories."""
-        self.add_events_to_memory(
+        await self.add_events_to_memory(
             app_name=session.app_name,
             user_id=session.user_id,
             events=session.events,
             session_id=session.id,
         )
 
-    def search_memory(  # type: ignore[override]
+    async def search_memory(
         self,
         *,
         app_name: str,

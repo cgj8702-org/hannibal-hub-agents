@@ -23,9 +23,9 @@ import signal
 import sys
 from typing import Any
 
+import google.cloud.pubsub_v1 as pubsub_v1
 from github import GithubException
 from google.api_core import exceptions as gcp_exceptions
-from google.cloud import pubsub_v1  # type: ignore[attr-defined]
 
 from .processor import WebhookProcessor
 

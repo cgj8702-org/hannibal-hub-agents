@@ -1,26 +1,3 @@
-# 🤖 Pull Request Description Template
-
-Use this template when creating or editing pull request descriptions in the Hannibal Hub Agents repository.
-
----
-
-## 📋 Title Format
-
-```
-[type] Brief description of changes
-```
-
-**Types:**
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation changes
-- `refactor:` Code refactoring
-- `test:` Test additions/updates
-- `chore:` Maintenance tasks
-- `security:` Security-related changes
-
----
-
 ## 🗒️ Description
 
 ### What
@@ -39,8 +16,8 @@ Use this template when creating or editing pull request descriptions in the Hann
 ### Test Commands
 ```bash
 uv sync
-./scripts/ruff-all.sh
-uv run pytest src/webhook_agent/tests/
+uv run mypy src/webhook_agent
+uv run pytest
 ```
 
 ### Test Results
@@ -49,8 +26,6 @@ uv run pytest src/webhook_agent/tests/
 ---
 
 ## 📦 Configuration Impact
-
-If this PR introduces or modifies configuration:
 
 - [ ] Update README.md environment variables
 - [ ] Update pyproject.toml if adding dependencies
@@ -69,5 +44,5 @@ If this PR introduces or modifies configuration:
 
 ## 🔗 Related
 
-- Closes #`_______`
-- References #`_______`
+- Closes #
+- References #

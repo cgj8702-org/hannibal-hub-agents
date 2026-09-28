@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import concurrent.futures
+import asyncio
 
 import pytest
 from google.adk.memory.base_memory_service import MemoryEntry
@@ -21,16 +21,20 @@ def test_in_memory_service_basic_add_and_search() -> None:
         content=Content(parts=[{"text": "Hello world from sub-agent"}]),
     )
 
-    service.add_memory(
-        app_name="test_app",
-        user_id="user_123",
-        memories=[entry],
+    asyncio.run(
+        service.add_memory(
+            app_name="test_app",
+            user_id="user_123",
+            memories=[entry],
+        )
     )
 
-    resp = service.search_memory(
-        app_name="test_app",
-        user_id="user_123",
-        query="sub-agent",
+    resp = asyncio.run(
+        service.search_memory(
+            app_name="test_app",
+            user_id="user_123",
+            query="sub-agent",
+        )
     )
 
     assert len(resp.memories) == 1
@@ -38,40 +42,42 @@ def test_in_memory_service_basic_add_and_search() -> None:
 
 
 def test_in_memory_service_multithreaded_concurrency() -> None:
-    """Verify thread-safety of InMemoryMemoryService under heavy concurrent thread access."""
+    """Verify thread-safety of InMemoryMemoryService under heavy concurrent access."""
     service = InMemoryMemoryService()
-    num_threads = 20
-    entries_per_thread = 50
+    num_workers = 20
+    entries_per_worker = 50
 
-    def worker_task(thread_idx: int) -> None:
-        for i in range(entries_per_thread):
+    async def worker_task(worker_idx: int) -> None:
+        for i in range(entries_per_worker):
             entry = MemoryEntry(
-                id=f"thread-{thread_idx}-mem-{i}",
-                author=f"thread-{thread_idx}",
+                id=f"worker-{worker_idx}-mem-{i}",
+                author=f"worker-{worker_idx}",
                 content=Content(
-                    parts=[{"text": f"Concurrent log item {i} from thread {thread_idx}"}]
+                    parts=[{"text": f"Concurrent log item {i} from worker {worker_idx}"}]
                 ),
             )
-            service.add_memory(
+            await service.add_memory(
                 app_name="test_app",
                 user_id="concurrent_user",
                 memories=[entry],
             )
             # Interleave search operations concurrently
-            _ = service.search_memory(
+            _ = await service.search_memory(
                 app_name="test_app",
                 user_id="concurrent_user",
                 query="Concurrent",
             )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(worker_task, idx) for idx in range(num_threads)]
-        for f in concurrent.futures.as_completed(futures):
-            f.result()  # Should complete with 0 exceptions
+    async def run_all() -> None:
+        await asyncio.gather(*(worker_task(idx) for idx in range(num_workers)))
 
-    resp = service.search_memory(
-        app_name="test_app",
-        user_id="concurrent_user",
-        query="Concurrent",
+    asyncio.run(run_all())
+
+    resp = asyncio.run(
+        service.search_memory(
+            app_name="test_app",
+            user_id="concurrent_user",
+            query="Concurrent",
+        )
     )
     assert len(resp.memories) <= 10
