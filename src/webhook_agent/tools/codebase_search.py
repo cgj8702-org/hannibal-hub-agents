@@ -79,7 +79,7 @@ def search_codebase(
                             query_regex is not None and query_regex.search(line) is not None
                         )
                         if matched:
-                            output_lines.append(f"`{rel_path}:{idx}`: {line.strip()}")
+                            output_lines.append(f"`{rel_path}:{idx}`: {line.rstrip()}")
                             if len(output_lines) >= MAX_SEARCH_RESULTS:
                                 break
             except Exception:
