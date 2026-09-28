@@ -625,7 +625,6 @@ dependencies = [
     { name = "pygithub" },
     { name = "pyjwt" },
     { name = "pytz" },
-    { name = "ripgrep" },
     { name = "tenacity" },
     { name = "uvicorn" },
 ]
@@ -654,7 +653,6 @@ requires-dist = [
     { name = "pygithub", specifier = ">=2.9.1" },
     { name = "pyjwt", specifier = ">=2.10.0" },
     { name = "pytz", specifier = ">=2026.2" },
-    { name = "ripgrep", specifier = ">=15.1.0" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "uvicorn", specifier = ">=0.30.0" },
 ]
@@ -1358,16 +1356,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ac/c3/e2a2b89f2d3e2179abd6d00ebd70bff6273f37fb3e0cc209f48b39d00cbf/requests-2.34.2.tar.gz", hash = "sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed", size = 142856, upload-time = "2026-05-14T19:25:27.735Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl", hash = "sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0", size = 73075, upload-time = "2026-05-14T19:25:26.443Z" },
-]
-
-[[package]]
-name = "ripgrep"
-version = "15.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1e/18/0740869cfcee3b9671d601aec90541cc68e342794cecf02c6eec7ee12f19/ripgrep-15.1.0.tar.gz", hash = "sha256:3b4793859cd25c57ffd894b59ba9155636616b4084a1c12d0b9e819c16931ebf", size = 488918, upload-time = "2026-05-24T04:02:30.224Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/42/994bb17dc45399f60bc850c9ea295b9638eb7abee9ec26cc386a2ebc264d/ripgrep-15.1.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:3f99a068cea48d10ffc6b3c43bef37b684e1ba449d4ae57b0f96c4521f8d923f", size = 2072593, upload-time = "2026-05-24T04:02:26.66Z" },
-    { url = "https://files.pythonhosted.org/packages/29/5c/951baee5033a25e9b79df51b378276fd0b3a88c7aba9665d50178e9738c1/ripgrep-15.1.0-py3-none-manylinux_2_39_x86_64.whl", hash = "sha256:9b9bbd02a7f2c3e88882f9a9df416da8e272957071ba8ab59a7a7f06813643cf", size = 7817112, upload-time = "2026-05-24T04:02:28.625Z" },
 ]
 
 [[package]]
