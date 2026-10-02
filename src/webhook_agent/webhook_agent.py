@@ -1379,7 +1379,7 @@ def _enforce_verdict(
     cleaned_body = body.strip()
     req_event = (event or "").strip().upper()
     is_caller_request_changes = req_event == "REQUEST_CHANGES"
-    is_body_request_changes = (req_event != "APPROVE") and bool(
+    is_body_request_changes = bool(
         re.search(
             r"##\s*(?:🛡️|⚡)?\s*Code Review(?:\s*Update)?:\s*`?REQUEST_CHANGES`?",
             body,
@@ -1975,6 +1975,8 @@ class WebhookAgent:
         # Streamlined workflow: START -> code_auditor -> verdict_agent
         # Eliminates the router LLM node pass to save 1 model call and ~30k input tokens.
 
+        auditor_thinking_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "1024"))
+
         self._code_auditor = LlmAgent(
             name="code_auditor",
             model=model_instance,
@@ -1985,7 +1987,7 @@ class WebhookAgent:
             planner=BuiltInPlanner(
                 thinking_config=genai_types.ThinkingConfig(
                     include_thoughts=False,
-                    thinking_budget=-1,
+                    thinking_budget=auditor_thinking_budget,
                 )
             ),
             before_agent_callback=before_agent_callback,
@@ -1996,18 +1998,8 @@ class WebhookAgent:
             on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
-                write_file,
                 get_issue,
                 get_commit_diff,
-                update_issue,
-                add_comment,
-                open_pr,
-                update_branch_from_base,
-                resolve_pr_conflicts,
-                auto_fix_pr_review_feedback,
-                mark_ready_for_review,
-                merge_pr,
-                review,
                 get_current_time,
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,

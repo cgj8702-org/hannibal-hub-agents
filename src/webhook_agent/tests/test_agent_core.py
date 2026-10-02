@@ -399,10 +399,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 19
+        assert len(tool_names) == 9
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 13 API primitives + get_current_time + diff tools + search tools + sequential thinking."""
+        """Tool names should match the 9 audit-only inspection and grounding tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -412,18 +412,8 @@ class TestToolRegistration:
         expected = sorted(
             [
                 "read_file",
-                "write_file",
                 "get_issue",
                 "get_commit_diff",
-                "update_issue",
-                "add_comment",
-                "open_pr",
-                "update_branch_from_base",
-                "resolve_pr_conflicts",
-                "auto_fix_pr_review_feedback",
-                "mark_ready_for_review",
-                "merge_pr",
-                "review",
                 "get_current_time",
                 "get_pr_diff_file_map",
                 "verify_line_reference",
@@ -435,7 +425,7 @@ class TestToolRegistration:
         assert tool_names == expected
 
     def test_no_removed_tools_present(self):
-        """Removed tools should not be registered."""
+        """Removed and mutation tools should not be registered on the auditor."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -452,8 +442,30 @@ class TestToolRegistration:
             "get_pr_diff",
             "update_pr_description",
             "create_issue",
+            # Pruned mutation tools
+            "write_file",
+            "update_issue",
+            "add_comment",
+            "open_pr",
+            "update_branch_from_base",
+            "resolve_pr_conflicts",
+            "auto_fix_pr_review_feedback",
+            "mark_ready_for_review",
+            "merge_pr",
+            "review",
         }
         assert tool_names.isdisjoint(removed), f"Found removed tools: {tool_names & removed}"
+
+    def test_code_auditor_bounded_thinking_budget(self, monkeypatch):
+        """Auditor thinking budget must default to 1024 or respect AUDITOR_THINKING_BUDGET."""
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent_default = WebhookAgent(dry_run=True)
+        assert agent_default._code_auditor.planner.thinking_config.thinking_budget == 1024
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "2048")
+        agent_custom = WebhookAgent(dry_run=True)
+        assert agent_custom._code_auditor.planner.thinking_config.thinking_budget == 2048
 
 
 # ---------------------------------------------------------------------------
