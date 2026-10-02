@@ -1,6 +1,6 @@
 #!/bin/bash
-# Ruff-All: Clinical Linting, Formatting & Type Checking
-# Usage: bash scripts/ruff-all.sh
+# Clinical Linting, Formatting & Type Checking
+# Usage: run via .githooks/pre-commit
 
 echo "› Running Ruff Linter (Safe auto-fixes only)..."
 if ! uv run ruff check --fix; then

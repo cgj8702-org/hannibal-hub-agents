@@ -193,12 +193,12 @@ src/
 | **Phase 1** | **Workspace Cleanup** | Remove `src/token_optimized_agent/` and associated unit tests. Clean up `pyproject.toml`. |
 | **Phase 2** | **App & Caching Promotion** | Promote `webhook_agent` from bare `Runner` to `App` with `ContextCacheConfig`. |
 | **Phase 3** | **Context & Scope Isolation** | Add `include_contents="none"` to secondary sub-agents, wire `truncate_tool_output_callback`. |
-| **Phase 4** | **Verification & Benchmarking** | Validate full pytest test suite, run `ruff-all.sh`, and verify zero test regressions. |
+| **Phase 4** | **Verification & Benchmarking** | Validate full pytest test suite, run pre-commit checks, and verify zero test regressions. |
 
 ---
 
 ## 4. Verification Standards
 
 1. **Automated Unit Tests:** `uv run pytest -q` must achieve 100% pass rate.
-2. **Linting Compliance:** `bash scripts/ruff-all.sh` must report clean formatting and 0 errors.
+2. **Linting Compliance:** Pre-commit checks must report clean formatting and 0 errors.
 3. **Zero-Bypass PR Deployment:** Changes must be submitted via pull request under author identity `cgj8702-agents <cgj8702-agents@users.noreply.github.com>` and approved by `hannibal-hub-agents[bot]`.

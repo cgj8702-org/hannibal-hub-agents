@@ -13,7 +13,6 @@
 ### Test Commands
 ```bash
 uv sync
-./scripts/ruff-all.sh
 uv run pytest
 ```
 
@@ -26,4 +25,4 @@ uv run pytest
 
 - [ ] Secrets and credentials checked (no hardcoded keys)
 - [ ] Authentication and authorization boundaries intact
-- [ ] PR passes local linting (`./scripts/ruff-all.sh`) and tests (`pytest`)
+- [ ] PR passes local pre-commit checks and tests (`pytest`)

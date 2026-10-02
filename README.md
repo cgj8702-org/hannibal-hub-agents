@@ -45,7 +45,7 @@ flowchart TD
 │   ├── setup_vm_user_service.sh   # VM user-space systemd service setup script
 │   ├── hannibal-webhook-agent.service # User-space systemd unit file template
 │   ├── publish_test_message.py    # Test webhook payload publisher
-│   └── ruff-all.sh          # Clinical linting & formatting validation script
+│   └── install-git-hooks.sh       # Pre-commit hook installer for lint & type validation
 ├── src/
 │   ├── webhook_agent/         # Core Webhook Orchestrator Package
 │       ├── worker.py        # Pub/Sub subscriber entry point and main polling loop
@@ -94,9 +94,9 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
 4. **Programmatic `/resolve` Git Worktree Conflict Resolution**:
    - Triggered programmatically when a user comments `/resolve`.
-   - Clones the PR into an isolated Git Worktree (`/tmp/worktrees/pr_X_...`), merges `origin/main` cleanly, synthesizes conflict resolution via LLM, verifies `pytest` & `ruff-all.sh`, configures `http.extraheader` bearer token auth, and pushes the updated branch automatically.
+   - Clones the PR into an isolated Git Worktree (`/tmp/worktrees/pr_X_...`), merges `origin/main` cleanly, synthesizes conflict resolution via LLM, verifies `pytest` & pre-commit checks, configures `http.extraheader` bearer token auth, and pushes the updated branch automatically.
 5. **Autonomous `/fix` Review-Fix Tool (`auto_fix_pr_review_feedback`)**:
-   - Triggered by `/fix`, `/auto`, or `/fix-it` slash commands. Clones the PR in an isolated Git Worktree (`/tmp/worktrees/pr_X_fix/`), applies surgical fixes, verifies `pytest` & `ruff-all.sh`, and pushes the resolved commit automatically.
+   - Triggered by `/fix`, `/auto`, or `/fix-it` slash commands. Clones the PR in an isolated Git Worktree (`/tmp/worktrees/pr_X_fix/`), applies surgical fixes, verifies `pytest` & pre-commit checks, and pushes the resolved commit automatically.
 6. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
    - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through Flash-Lite and Gemma tiers.
@@ -122,7 +122,7 @@ uv sync
 ```
 
 The installer configures `core.hooksPath=.githooks` locally. The official hook then runs
-`scripts/ruff-all.sh` for every commit and re-stages only Python files that were already
+pre-commit linting and type checks for every commit and re-stages only Python files that were already
 staged. It never adds an unstaged Python file to the commit.
 
 ### 2. Running Tests

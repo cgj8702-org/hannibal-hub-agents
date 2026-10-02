@@ -2,7 +2,7 @@
 
 Provides surgical, race-condition-free merge conflict resolution inside an
 ephemeral Git Worktree (/tmp/worktrees/pr_X_...) using Gemini generative code block
-synthesis, linter gating (scripts/ruff-all.sh), and unit test verification (pytest).
+synthesis, pre-commit hook validation, and unit test verification (pytest).
 """
 
 from __future__ import annotations

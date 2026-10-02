@@ -568,8 +568,7 @@ Following the audit of commit `92890df`, add `add_comment` and `get_commit_diff`
    - **Also fix the pre-existing `_FALLBACK_MODEL` double-definition** in `webhook_agent.py` (lines 228 and 671 define it with different defaults — the second shadows the first).
 10. **[TEST] Verify Pytest Suite & Ruff Hygiene**:
     - Port unit test `tests/unit/logic/test_rate_limiter.py` (create the `tests/unit/logic/` directory — it does not exist yet).
-    - **Add `pytest-anyio` to dev dependencies** (the source test uses `@pytest.mark.anyio`).
-    - Run `scripts/ruff-all.sh` (the script is at `scripts/ruff-all.sh`, NOT `.agents/scripts/ruff-all.sh`).
+    - Verify pre-commit checks and formatting cleanly pass.
 
 ---
 
@@ -582,8 +581,7 @@ Following the audit of commit `92890df`, add `add_comment` and `get_commit_diff`
 PYTHONPATH=src uv run python -m pytest tests/unit/logic/test_rate_limiter.py
 
 # Ensure zero linting errors
-# NOTE: correct path is scripts/ruff-all.sh (not .agents/scripts/)
-scripts/ruff-all.sh
+.githooks/pre-commit
 ```
 
 ### Manual Verification
