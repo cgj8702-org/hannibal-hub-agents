@@ -50,7 +50,6 @@ from webhook_agent.logic.rate_limiter import (
     rpm_waiter,
 )
 
-from .audit_schema import AuditVerdict
 from .bot_identity import _is_bot_event
 from .callbacks import (
     after_model_callback,
@@ -1972,8 +1971,8 @@ class WebhookAgent:
         )
         PromptSanitizerPlugin()
 
-        # Streamlined workflow: START -> code_auditor -> verdict_agent
-        # Eliminates the router LLM node pass to save 1 model call and ~30k input tokens.
+        # Streamlined workflow: START -> code_auditor
+        # Single-pass high-velocity auditor eliminating redundant sub-agent hops.
 
         auditor_thinking_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "1024"))
 
@@ -2000,6 +1999,7 @@ class WebhookAgent:
                 read_file,
                 get_issue,
                 get_commit_diff,
+                review,
                 get_current_time,
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,
@@ -2009,33 +2009,10 @@ class WebhookAgent:
             ],
         )
 
-        self._verdict_agent = LlmAgent(
-            name="verdict_agent",
-            model=model_instance,
-            include_contents="none",
-            description="Produces structured AuditVerdict JSON output.",
-            # `{...?}` keeps the template renderable if `code_review_analysis` is missing.
-            instruction="""You are the Chief Auditor synthesizing final verdicts for Pull Requests.
-Evaluate the code auditor's technical findings:
-
-### Audit Analysis & Findings
-{code_review_analysis?}
-
-Synthesize these findings into an AuditVerdict structured JSON payload matching the schema.
-Clean PRs with no identified risks return risks: [], including when the audit analysis section is empty.
-""",
-            output_schema=AuditVerdict,
-            output_key="audit_verdict",
-            before_agent_callback=before_agent_callback,
-            before_model_callback=before_model_callback,
-            after_model_callback=after_model_callback,
-        )
-
         self._agent = Workflow(
             name="webhook_agent",
             edges=[
                 (START, self._code_auditor),
-                (self._code_auditor, self._verdict_agent),
             ],
         )
 
@@ -2094,7 +2071,6 @@ Clean PRs with no identified risks return risks: [], including when the audit an
             api_key=get_active_api_key(),
         )
         self._code_auditor.model = new_model_instance
-        self._verdict_agent.model = new_model_instance
         self._runner = Runner(
             app=self._app,
             session_service=self._session_service,
@@ -2542,7 +2518,6 @@ Clean PRs with no identified risks return risks: [], including when the audit an
                 api_key=get_active_api_key(),
             )
             self._code_auditor.model = new_model_instance
-            self._verdict_agent.model = new_model_instance
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
@@ -2831,10 +2806,19 @@ Clean PRs with no identified risks return risks: [], including when the audit an
             # 1. Safely extract review payload from session state or emitted text
             review_payload = ""
             if final_session and final_session.state:
-                raw_verdict = final_session.state.get("audit_verdict")
                 raw_analysis = final_session.state.get("code_review_analysis")
+                raw_verdict = final_session.state.get("audit_verdict")
 
-                if raw_verdict:
+                if raw_analysis:
+                    if hasattr(raw_analysis, "model_dump_json"):
+                        review_payload = raw_analysis.model_dump_json()
+                    elif isinstance(raw_analysis, dict):
+                        import json
+
+                        review_payload = json.dumps(raw_analysis)
+                    else:
+                        review_payload = str(raw_analysis)
+                elif raw_verdict:
                     if hasattr(raw_verdict, "model_dump_json"):
                         review_payload = raw_verdict.model_dump_json()
                     elif isinstance(raw_verdict, dict):
@@ -2843,8 +2827,6 @@ Clean PRs with no identified risks return risks: [], including when the audit an
                         review_payload = json.dumps(raw_verdict)
                     else:
                         review_payload = str(raw_verdict)
-                elif raw_analysis:
-                    review_payload = str(raw_analysis)
 
             if not review_payload and emitted_texts:
                 full_text = "\n\n".join(emitted_texts)
