@@ -67,7 +67,7 @@ Plus `handoff-plan-dual-tiers.md` uses `FREE_KEY`/`PAID_KEY` naming while `load_
 - `github-pr-manager` (Aug 1): instructs template selection from `.github/PULL_REQUEST_TEMPLATE/dev_|prod_pull_request_template.md` — both **deleted Jul 28** (`4eee24f` consolidated to one template); also references `rag_service/`.
 - `github-bot-identity` (Jul 28): says PRs **MUST** be authored by `Hannibal-Hub-Agents[bot]`; AGENTS.md now fixes `BOT_LOGIN = "hannibal-hub-agents[bot]"` and reserves bot commits for autonomous VM workers (`cgj8702-agents` for interactive). Its footer says "Last Updated: 2026-07-02" — already false when committed. Both skills hardcode machine path `/home/carly/git-credential-github-app.py` (exists locally, but it's a host-specific path in a repo doc).
 
-**8. Two test trees, no arbiter.** `src/webhook_agent/tests/` (Jul 1 era, **182** test fns, still edited Sep 23) vs `tests/unit/` (Sep 13 era, **54** fns) + `tests/eval/` scaffold. README and the PR template reference only the src-inner tree; AGENTS.md is silent; no `testpaths`; no CI. Conventions will keep forking.
+**8. Two test trees, no arbiter.** [RESOLVED Oct 2, 2026: Consolidated all tests into `tests/unit/webhook_agent/`, eliminated `src/webhook_agent/tests/`, and configured `testpaths = ["tests"]` in `pyproject.toml`.]
 
 **9. Governance doc duplication.** `AGENTS.md` and `GEMINI.md` are **byte-identical** (4321 b each). Two copies of the constitution = guaranteed future drift.
 
@@ -80,7 +80,7 @@ Plus `handoff-plan-dual-tiers.md` uses `FREE_KEY`/`PAID_KEY` naming while `load_
 | `.vscode/bootstrap.sh` | Jul 1–2 | Sets commit email `299140917+cgj8702-agents@…` vs AGENTS.md's `cgj8702-agents@users.noreply.github.com` (gitignored, but it *configures* agents, so the drift leaks into commits) |
 | `main.py` | Jul 1 | Sets `logging.basicConfig(level=DEBUG)` globally — the exact hygiene class Issue #104 targeted |
 | `scripts/publish_test_message.py` (last touched Jul 31) | Jul 1 | Comment cites payload "produced by `app.py::normalize_payload`" — `app.py` decommissioned **Jul 3** |
-| `src/webhook_agent/tests/fixtures/*.json` | Jul 28 | Zero references from any test file |
+| `tests/fixtures/*.json` | Jul 28 | Zero references from any test file (relocated to `tests/fixtures/`) |
 | `webhook-router.yaml` | Jul 29 | Gitignored console dump of the deployed router; verified namespace `1036232021761` = project number of `cgj8702-webhook-agent` (gcloud), so consistent with AGENTS.md — but a frozen snapshot (`maxScale: 1`, `invoker-iam-disabled: true`) that will silently lie as the service evolves |
 | `permission_audit_report.md` | Aug 11 | Historically accurate; items #2/#3 since mitigated; #4 ("Event loop is closed") has **no visible fix artifact** (zero `aclose` hits in `src/`) |
 | `hannibal-hub-pr-conversations-last-10.md` | Sep 23 | **81 KB / 1591 lines** of *another repo's* PR conversation dump, tracked, referenced nowhere |

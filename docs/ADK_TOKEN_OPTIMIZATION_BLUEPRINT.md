@@ -199,6 +199,6 @@ src/
 
 ## 4. Verification Standards
 
-1. **Automated Unit Tests:** `uv run pytest src/webhook_agent/tests/ -q` must achieve 100% pass rate.
+1. **Automated Unit Tests:** `uv run pytest -q` must achieve 100% pass rate.
 2. **Linting Compliance:** `bash scripts/ruff-all.sh` must report clean formatting and 0 errors.
 3. **Zero-Bypass PR Deployment:** Changes must be submitted via pull request under author identity `cgj8702-agents <cgj8702-agents@users.noreply.github.com>` and approved by `hannibal-hub-agents[bot]`.
