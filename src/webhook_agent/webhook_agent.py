@@ -1915,6 +1915,7 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 - Do NOT perform a human architectural code review - evaluate version bumps and lockfile changes.
 - Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
 - If lockfile changes modify unrelated packages or introduce breaking dependency corruption unexpectedly, you MUST select `REQUEST_CHANGES`, set `verdict: "REQUEST_CHANGES"`, and add a blocking entry directly under `critical_issues`. NEVER place breaking lockfile corruption solely in `risks_and_edge_cases`.
+- **Transitive Dependencies**: If a package bump in `uv.lock` triggers accompanying version bumps in direct or transitive dependencies (e.g. `librt` or `ast-serialize` accompanying `mypy`), and these packages are in the dependency graph of the primary package, they are REQUIRED transitive dependencies. Do NOT flag valid transitive dependency updates as unauthorized scope creep or critical issues.
 - **Base branch syncs and merge commits**: Commits merged from the base branch (`main`) into a PR branch (e.g., via GitHub's 'Update branch' button or `git merge main`) belong to the base branch. Do NOT attribute base branch changes or merge commits to the PR author or flag them as scope violations.
 
 """
@@ -2211,6 +2212,23 @@ Clean PRs with no identified risks return risks: [], including when the audit an
             inventory = ", ".join(changed_files) or "unavailable"
             parts.append(f"Changed file inventory: {inventory}")
             parts.append(f"\nFull PR Diff (Accumulated State):\n{raw['pr_diff']}")
+
+            # Ground transitive dependency updates when uv.lock is modified
+            if any(f.endswith("uv.lock") for f in changed_files):
+                try:
+                    from .logic.dependency_tree import build_dependency_grounding_context
+                    from .logic.lockfile_validator import parse_bumped_packages_from_diff
+
+                    bumps = parse_bumped_packages_from_diff(raw["pr_diff"])
+                    bumped_names = [b["name"] for b in bumps]
+                    grounding_block = build_dependency_grounding_context(
+                        bumped_packages=bumped_names,
+                        lockfile_text=raw["pr_diff"],
+                    )
+                    if grounding_block:
+                        parts.append(f"\n{grounding_block}")
+                except Exception as grounding_err:
+                    logger.debug("Could not build dependency grounding block: %s", grounding_err)
 
         # Include pre-fetched inline comment code context if available
         if "inline_code_context" in raw:
