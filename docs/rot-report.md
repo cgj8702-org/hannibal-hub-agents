@@ -127,7 +127,7 @@ Want me to start executing? Toggle to **Act mode** and tell me where to begin �
 
 ## Remediation Checklist
 
-**Status:** 17 complete · 9 remaining
+**Status:** 26 complete · 0 remaining
 
 The original audit is preserved above. This checklist records verified work and remaining follow-up items.
 
@@ -149,22 +149,22 @@ The original audit is preserved above. This checklist records verified work and 
   - [x] `docs/model_router_improvement_plan.md`
   - [x] `docs/handoff-plan-dual-tiers.md`
   - [x] `docs/permission_audit_report.md`
-- [ ] Regenerate or archive `docs/logging_inventory.md` and verify its source references.
+- [x] Regenerate or archive `docs/logging_inventory.md` and verify its source references.
 - [x] Remove retired commands from `docs/slash_commands_catalog.md`.
 - [x] Document current Secret Manager and review-idempotency behavior in `cloud_run_function.md`.
 - [x] Remove the obsolete `/rag_service` Dependabot entry.
 - [x] Correct the stale `publish_test_message.py` comment.
-- [ ] Decide whether test fixtures are active or should be removed/archived.
+- [x] Decide whether test fixtures are active or should be removed/archived.
 
 ### Governance and repository hygiene
 
-- [ ] Refresh the GitHub identity and PR-management skills.
-- [ ] Document the relationship between `AGENTS.md` and `GEMINI.md`.
-- [ ] Document the canonical test layout and update test commands.
-- [ ] Document the purpose and execution status of `tests/eval/`.
-- [ ] Move the large PR-conversation dump to an explicitly historical archive.
-- [ ] Align the bootstrap email with the current commit-author policy.
-- [ ] Re-run the oldest-file audit after the decommission and refactor waves.
+- [x] Refresh the GitHub identity and PR-management skills.
+- [x] Document the relationship between `AGENTS.md` and `GEMINI.md`.
+- [x] Document the canonical test layout and update test commands.
+- [x] Document the purpose and execution status of `tests/eval/`.
+- [x] Move the large PR-conversation dump to an explicitly historical archive.
+- [x] Align the bootstrap email with the current commit-author policy.
+- [x] Re-run the oldest-file audit after the decommission and refactor waves.
 
 ### Verification
 

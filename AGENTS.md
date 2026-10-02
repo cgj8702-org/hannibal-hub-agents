@@ -1,3 +1,5 @@
+<!-- Canonical Agent Constitution: Keep AGENTS.md and GEMINI.md in parity. AGENTS.md serves agent runtimes, while GEMINI.md provides root instructions for Gemini/Antigravity developer tooling. -->
+
 Please follow these protocols to ensure team coordination remains professional, productive, and efficient:
 
 * **Zero-Bypass Architecture:** All agents, including Antigravity, are strictly prohibited from committing directly to `main`. Every code change MUST be submitted via Pull Request and pass the tracked pre-commit gate and peer review.

@@ -36,7 +36,6 @@ flowchart TD
 ```
 ├── .agents/skills/          # Localized agent operational skills
 │   ├── gcloud-logging/      # GCP logging inspection protocol & project matrix
-│   ├── github-bot-identity/ # Bot identity authentication & credentials switch
 │   └── github-pr-manager/   # End-to-end GitHub PR lifecycle management
 ├── .github/workflows/
 │   └── deploy.yml           # Automated CI/CD deployment to VM via IAP SSH
@@ -64,10 +63,11 @@ flowchart TD
 │       ├── tools/           # Isolated Git Worktree tools (/fix & /resolve execution)
 │       │   ├── auto_fix.py          # Isolated Git Worktree auto-fix tool
 │       │   └── resolve_conflicts.py # Ephemeral Git Worktree merge conflict resolution tool
-│       ├── templates/       # Local prompt & code review templates
-│       └── tests/           # Pytest test suite & fixtures
+│       └── templates/       # Local prompt & code review templates
 ├── tests/
-│   └── unit/                # Unit tests for token optimization, callbacks, & logic
+│   ├── eval/                # Continuous quality evaluation datasets & configs
+│   ├── fixtures/            # Sample webhook payloads & review event fixtures
+│   └── unit/                # Unified test suite (webhook_agent, logic, callbacks)
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 ├── README.md                # Repository documentation
@@ -99,7 +99,7 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Triggered by `/fix`, `/auto`, or `/fix-it` slash commands. Clones the PR in an isolated Git Worktree (`/tmp/worktrees/pr_X_fix/`), applies surgical fixes, verifies `pytest` & `ruff-all.sh`, and pushes the resolved commit automatically.
 6. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
-   - Uses `gemini-3.5-flash-lite`, `gemma-4-31b-it`, and `gemma-4-26b-a4b-it`.
+   - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through Flash-Lite and Gemma tiers.
    - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
 7. **Resolution Tracking & Re-Review Templates**:
    - Tracks **`[RESOLVED]`** vs **`[UNRESOLVED]`** items across commits using structured schema validation.
@@ -126,7 +126,7 @@ The installer configures `core.hooksPath=.githooks` locally. The official hook t
 staged. It never adds an unstaged Python file to the commit.
 
 ### 2. Running Tests
-Run the full test suite (including token optimization, proactive evaluator, state graph, and worker tests):
+Run the full test suite (including token optimization, proactive evaluator, ADK AgentCore, and worker tests):
 
 ```bash
 uv run pytest
