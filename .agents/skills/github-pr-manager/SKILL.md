@@ -20,7 +20,7 @@ Before you run ANY `gh` commands for managing Pull Requests, you MUST ensure you
 ```bash
 gh auth switch --user cgj8702-agents
 ```
-If you need further details on identity management, refer to the `github-bot-identity` skill.
+Per `AGENTS.md`, interactive pair programming commits and PR submissions MUST be authored by machine user `cgj8702-agents <cgj8702-agents@users.noreply.github.com>`. The `hannibal-hub-agents[bot]` identity is reserved exclusively for autonomous background workers running on the GCE VM.
 
 ---
 
@@ -87,11 +87,11 @@ git status
 **Description**: Prepare and submit the Pull Request.
 
 1. **Identity Preparation (MANDATORY)**: Run `gh auth switch --user cgj8702-agents` to ensure you are acting as the bot identity.
-2. **Select Template**: Choose from `.github/PULL_REQUEST_TEMPLATE/` — use `dev_pull_request_template.md` for changes limited to `dev/` tooling/scripts, or `prod_pull_request_template.md` for changes to `src/`, `rag_service/`, or production-impacting code.
-2. **Draft Content**: Generate the title (Conventional Commit format: `type(scope): description`) and the markdown body.
-3. **Temporary File Creation**: Write the drafted body to a temporary file.
-4. **Preflight**: Run `uv sync && uv run ruff check .`.
-  5. **Submit**: Use the Bot Submission protocol (see Special Protocols).
+2. **Select Template**: Format the PR body using the official `.github/PULL_REQUEST_TEMPLATE.md` structure (Summary & Justification, Action Items, and Verification).
+3. **Draft Content**: Generate the title (Conventional Commit format: `type(scope): description`) and the markdown body.
+4. **Temporary File Creation**: Write the drafted body to a temporary file.
+5. **Preflight**: Run `uv run pytest`.
+6. **Submit**: Use the Bot Submission protocol (see Special Protocols).
 
 **Validation**: Confirm the PR was successfully created and provide the direct link to the user.
 
@@ -110,14 +110,14 @@ git status
 1. **Retrieve Feedback**: `gh pr view <number> --comments`.
 2. **Summarize**: Distinguish between resolved threads (✅) and open threads; seek user guidance on which to address.
 3. **Implement**: Switch to the feature branch (`git checkout <headRefName>`), apply surgical edits.
-4. **Verify & Resolve**: Run `uv run ruff check .`, commit, and use `gh pr comment <number> --resolve <thread_id>`.
+4. **Verify & Resolve**: Commit, and use `gh pr comment <number> --resolve <thread_id>`.
 
 ### Phase 5: Finalization & Merging
 
 **Description**: Merge the PR and clean up.
 
 1. **Final Validation**: Ensure all tests pass and all review threads are resolved.
-2. **Merge**: `gh pr merge <number> --merge --delete-branch`.
+2. **Merge**: `gh pr merge <number> --squash --delete-branch` (squash merge is the repo standard).
 3. **Cleanup**: `git checkout main` and `git pull origin main`.
 
 ---
@@ -132,7 +132,7 @@ git status
 ### 🛠️ Engineering Rigor
 - **Safety First**: **NEVER push to `main`**. This is the highest priority.
 - **No Auto-Fixing**: Always seek user guidance before initiating code changes to address PR comments.
-- **Template Compliance**: Choose the correct PR template — **dev** for `dev/` changes, **prod** for `src/`/`rag_service/` changes.
+- **Template Compliance**: Align PR body with `.github/PULL_REQUEST_TEMPLATE.md`.
 
 ### 🎀 Repo Hygiene (Bestie Protocol)
 - **Conventional Commits**: Use `type(scope): description` format for all commit messages.
