@@ -147,7 +147,7 @@ def auto_fix_pr_feedback(
 
         # 4. Verify baseline tests & linter pass before fix application
         ruff_res = subprocess.run(
-            ["./scripts/ruff-all.sh"],
+            ["uv", "run", "ruff", "check", "."],
             cwd=worktree_path,
             capture_output=True,
             text=True,

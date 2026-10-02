@@ -378,7 +378,6 @@ def _format_pr_body_schema(body: str) -> str:
 ## 🧪 Testing & Verification
 ```bash
 uv sync
-./scripts/ruff-all.sh
 uv run pytest
 ```
 - [x] All unit and integration tests passed (`uv run pytest`).

@@ -35,5 +35,5 @@ This project implements several security measures:
 See [AGENTS.md](AGENTS.md) for development security protocols:
 - Never commit secrets or credentials
 - Use environment variables for sensitive configuration
-- Run `./scripts/ruff-all.sh` before submitting PRs
+- Install and pass the tracked pre-commit hook (`./scripts/install-git-hooks.sh`) before submitting PRs
 - All changes require PR review (zero-bypass architecture)

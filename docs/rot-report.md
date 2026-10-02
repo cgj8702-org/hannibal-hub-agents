@@ -27,7 +27,7 @@ Most rot is concentrated exactly where you'd predict: everything written **befor
 
 ## 🔴 Tier 1 — Live contradictions (these matter today)
 
-**1. The mandated lint gate is RED right now.** `scripts/ruff-all.sh` (AGENTS.md's required pre-completion check) fails:
+**1. The mandated lint gate is RED right now.** The pre-commit gate (AGENTS.md's required pre-completion check) fails:
 ```
 src/webhook_agent/logic/firestore_registry.py:18: error: Unused "type: ignore" comment  [unused-ignore]
 src/webhook_agent/logic/firestore_registry.py:22: error: Incompatible types in assignment  [assignment]
@@ -101,8 +101,8 @@ Also noted: `docs/review_rules.md` / `review_voice.md` are referenced by no code
 ## 🛠️ Proposed remediation plan (for Act mode)
 
 **P0 — make truth enforceable (highest leverage)**
-1. Fix the 2 mypy errors in `logic/firestore_registry.py`; re-run `ruff-all.sh` to green.
-2. Add `.github/workflows/ci.yml` running `ruff-all.sh` + `uv run pytest` on PRs — makes AGENTS.md's "automated gating" claim real (this alone prevents every future T1-style regression).
+1. Fix the 2 mypy errors in `logic/firestore_registry.py`; re-run the pre-commit gate to green.
+2. Add `.github/workflows/ci.yml` running pre-commit checks + `uv run pytest` on PRs — makes AGENTS.md's "automated gating" claim real (this alone prevents every future T1-style regression).
 3. Unify `ALLOW_AUTOMATED_MUTATIONS` to fail-closed in all four sites (single constant in `logic/constants.py`).
 4. Pick one model-chain source of truth: correct `docs/MODEL_CHAIN.md` to code reality (`WEBHOOK_TIER` cascade incl. metadata+Firestore; real defaults), demote `src/webhook_agent/MODEL_CHAIN.md` to a pointer, fix README's model list.
 
