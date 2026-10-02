@@ -1050,3 +1050,50 @@ class TestBaseBranchMergeSync:
         assert worker_module is not None
         logger = logging.getLogger("google_genai.models")
         assert logger.level == logging.ERROR
+
+    def test_process_event_deterministic_fast_path_approves_clean_dependabot_pr(self):
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        mock_gh = MagicMock()
+        mock_repo = MagicMock()
+        mock_pr = MagicMock()
+        mock_gh.get_repo.return_value = mock_repo
+        mock_repo.get_pull.return_value = mock_pr
+
+        processor._gh = mock_gh
+        payload = {
+            "canonical": "pull_request.opened",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "dependabot[bot]"},
+            "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+            "raw_payload": {
+                "sender": {"login": "dependabot[bot]"},
+                "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+                "pull_request": {
+                    "number": 195,
+                    "state": "open",
+                    "head": {"ref": "dependabot/uv/pypdf-6.19.0", "sha": "1234567"},
+                },
+                "changed_files": ["uv.lock"],
+                "pr_diff": (
+                    "diff --git a/uv.lock b/uv.lock\n"
+                    '[[package]]\nname = "pypdf"\n-version = "6.16.1"\n+version = "6.19.0"\n'
+                ),
+            },
+        }
+
+        processor._agent_core = MagicMock()
+
+        with patch("webhook_agent.webhook_agent._submit_formal_review") as mock_submit_review:
+            mock_submit_review.return_value = ("Approved PR #195", True)
+            with patch.dict(os.environ, {"DRY_RUN": "0"}):
+                processor.process_event(payload)
+
+            # Verified that fast-path submitted review without invoking agent.run
+            mock_submit_review.assert_called_once()
+            call_kwargs = mock_submit_review.call_args[1]
+            assert call_kwargs["event"] == "APPROVE"
+            assert "pypdf" in call_kwargs["body"]
+            processor._agent_core.run.assert_not_called()
