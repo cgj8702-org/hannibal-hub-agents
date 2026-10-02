@@ -848,6 +848,67 @@ class WebhookProcessor:
                 )
                 return
 
+        # Deterministic Fast-Path for automated Dependabot / lockfile PRs
+        if not dry_run and is_pr_event and pr_number is not None:
+            try:
+                from .logic.lockfile_validator import (
+                    is_pure_dependency_pr,
+                    render_deterministic_approval_markdown,
+                    validate_lockfile_diff,
+                )
+                from .webhook_agent import _submit_formal_review
+
+                sender_login = (
+                    (payload.get("sender") or {}).get("login", "")
+                    or (raw.get("sender") or {}).get("login", "")
+                    or ""
+                )
+                head_branch = (pr_data.get("head") or {}).get("ref", "")
+                changed_files = raw.get("changed_files") or []
+                pr_diff = raw.get("pr_diff") or ""
+
+                if is_pure_dependency_pr(sender_login, head_branch, changed_files):
+                    logger.info(
+                        "⚡ Evaluating deterministic fast-path for PR %s#%s (%d changed files)",
+                        repo_name,
+                        pr_number,
+                        len(changed_files),
+                    )
+                    val_res = validate_lockfile_diff(pr_diff, changed_files)
+                    if val_res.should_approve:
+                        pr_num_int = int(pr_number)
+                        repo = gh.get_repo(repo_name)
+                        pr = repo.get_pull(pr_num_int)
+                        approval_body = render_deterministic_approval_markdown(val_res, pr_num_int)
+                        target_key = f"{repo_name}#{pr_number}"
+                        status_msg, submitted = _submit_formal_review(
+                            pr=pr,
+                            body=approval_body,
+                            event="APPROVE",
+                            target_key=target_key,
+                        )
+                        logger.info(
+                            "⚡ Fast-Path: Deterministically approved dependency PR %s#%s: %s (submitted=%s)",
+                            repo_name,
+                            pr_number,
+                            status_msg,
+                            submitted,
+                        )
+                        return
+                    else:
+                        logger.info(
+                            "⚡ Fast-Path: Dependency PR %s#%s bypassed to full agent audit: %s (%s)",
+                            repo_name,
+                            pr_number,
+                            val_res.summary,
+                            val_res.rejection_reason,
+                        )
+            except Exception as fast_path_err:
+                logger.warning(
+                    "Deterministic fast-path evaluation encountered error, falling back to agent: %s",
+                    fast_path_err,
+                )
+
         results = agent.run(payload, repo_name, gh_client=gh)
         if results:
             for r in results:
