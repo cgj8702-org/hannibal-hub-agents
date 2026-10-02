@@ -1,17 +1,30 @@
 #!/usr/bin/env bash
 # Official local commit gate for maintainers and shell-capable agents.
 
-set -euo pipefail
+set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-echo "[pre-commit] Running lint, formatting, and type checks..."
-bash scripts/ruff-all.sh
+# Check if any Python files are staged for commit
+STAGED_PY_FILES=$(git diff --cached --name-only --diff-filter=d -- '*.py')
 
-# Re-stage only Python files that were already staged.
-while IFS= read -r -d '' FILE; do
-    git add -- "$FILE"
-done < <(git diff --cached --name-only --diff-filter=d -z -- '*.py')
+if [[ -n "$STAGED_PY_FILES" ]]; then
+    echo "[pre-commit] Python files staged. Running lint, formatting, and type checks..."
+    if ! bash scripts/ruff-all.sh; then
+        echo "[!] Commit rejected. scripts/ruff-all.sh found unfixable issues." >&2
+        exit 1
+    fi
+
+    # Re-stage only Python files that were already staged.
+    while IFS= read -r -d '' FILE; do
+        if ! git add -- "$FILE"; then
+            echo "[!] Commit rejected. Failed to re-stage Python file: $FILE" >&2
+            exit 1
+        fi
+    done < <(git diff --cached --name-only --diff-filter=d -z -- '*.py')
+else
+    echo "[pre-commit] No staged Python files detected. Skipping lint, formatting, and type checks."
+fi
 
 echo "[OK] Pre-commit checks passed."
