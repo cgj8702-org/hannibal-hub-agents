@@ -119,7 +119,7 @@ async def before_model_callback(
         tier=active_tier,
     )
     with contextlib.suppress(Exception):
-        llm_request._rate_limit_checked = True  # type: ignore[attr-defined]
+        setattr(llm_request, "_rate_limit_checked", True)  # noqa: B010
 
     callback_context.state["prompt_tokens"] = exact_tokens
     callback_context.state["active_model"] = target_model

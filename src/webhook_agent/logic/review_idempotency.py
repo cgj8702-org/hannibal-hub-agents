@@ -17,7 +17,7 @@ logger = logging.getLogger("review_idempotency")
 
 firestore: Any = None
 try:
-    from google.cloud import firestore as _firestore
+    import google.cloud.firestore as _firestore
 
     firestore = _firestore
     _HAS_FIRESTORE = True
