@@ -89,7 +89,7 @@ After PR submission, `hannibal-hub-agents[bot]` (the webhook auditor) automatica
 
 **Step A — Wait for and read the auditor's review:**
 ```bash
-gh pr view <number> --comments
+gh pr view <number> --reviews
 ```
 
 **Step B — Address Critical items:**
@@ -109,7 +109,7 @@ If the auditor flags 🟡 **Suggestions** or **Potential Risks & Edge Cases**, p
 **Step D — Wait for re-review:**
 After pushing fixes, the auditor automatically re-reviews. Wait for it and read the new review:
 ```bash
-gh pr view <number> --comments
+gh pr view <number> --reviews
 ```
 Repeat Steps B–D until the auditor returns **APPROVE**.
 
@@ -135,9 +135,8 @@ gh pr view <number> --json state -q '.state'   # Should return "MERGED"
 |---|---|
 | Switch identity | `gh auth switch --user cgj8702-agents` |
 | Check PR state | `gh pr view <n> --json state -q '.state'` |
-| Read auditor review | `gh pr view <n> --comments` |
+| Read auditor review | `gh pr view <n> --reviews` |
 | Test suite | `uv run pytest` |
 | Create PR | `gh pr create --title "..." --body-file <file>` |
 | Squash merge | `gh pr merge <n> --squash --delete-branch` |
 | Sync main | `git checkout main && git pull origin main` |
-
