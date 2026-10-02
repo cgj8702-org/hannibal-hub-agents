@@ -125,10 +125,6 @@ class SyncResolutionItem(BaseModel):
 
 
 BREAKING_RISK_KEYWORDS = (
-    "environment marker",
-    "marker deletion",
-    "dropping marker",
-    "dropped marker",
     "unauthorized modification",
     "unintended modification",
     "lockfile corruption",
@@ -170,16 +166,9 @@ def is_not_cheap_finding(verify_steps: str) -> bool:
 
 
 def has_genuine_summary_risk(summary: str | None) -> bool:
-    """Check if summary mentions blocking or unaddressed risks without negation."""
-    if not summary:
-        return False
-    summary_lower = summary.lower()
-    for kw in SUMMARY_RISK_KEYWORDS:
-        if kw in summary_lower:
-            negation_pattern = rf"\b(?:no|none|not|without|zero)\s+[\w\s]{{0,25}}\b{re.escape(kw)}"
-            if re.search(negation_pattern, summary_lower):
-                continue
-            return True
+    """Check if summary mentions blocking or unaddressed risks without negation or resolution."""
+    # Summary scraping was deprecated to prevent false-positive critical issue synthesis.
+    # Reviews must explicitly place blocking issues in critical_issues or mark resolutions as UNRESOLVED.
     return False
 
 
@@ -375,19 +364,6 @@ class CodeReviewResponse(BaseModel):
                             or "Address breaking change or unintended modification.",
                         }
                     )
-
-        exec_summary_lower = str(normalized["executive_summary"]).lower()
-        if any(kw in exec_summary_lower for kw in BREAKING_RISK_KEYWORDS) and not clean_crit:
-            clean_crit.append(
-                {
-                    "path": "uv.lock"
-                    if ("lock" in exec_summary_lower or "marker" in exec_summary_lower)
-                    else "codebase",
-                    "line": None,
-                    "description": normalized["executive_summary"],
-                    "suggested_fix": "Resolve breaking lockfile or dependency modifications.",
-                }
-            )
 
         if normalized.get("verdict") == "REQUEST_CHANGES" and not clean_crit:
             crit_desc = clean_risks[0]["risk"] if clean_risks else normalized["executive_summary"]
@@ -763,10 +739,7 @@ class SyncReviewResponse(BaseModel):
                             clean_crit.append(issue_dict)
 
         if (
-            (
-                normalized.get("verdict") == "REQUEST_CHANGES"
-                or has_genuine_summary_risk(normalized["summary"])
-            )
+            normalized.get("verdict") == "REQUEST_CHANGES"
             and not clean_crit
             and not [r for r in clean_res if r.get("status") == "UNRESOLVED"]
         ):

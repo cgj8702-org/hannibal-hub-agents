@@ -1914,7 +1914,7 @@ When reviewing Dependabot PRs (`sender: dependabot[bot]` or branch starting with
 - Focus on **dependency security, version scope, and lockfile integrity**.
 - Do NOT perform a human architectural code review - evaluate version bumps and lockfile changes.
 - Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
-- If lockfile changes modify unrelated packages or drop environment markers unexpectedly, you MUST select `REQUEST_CHANGES`, set `verdict: "REQUEST_CHANGES"`, and add a blocking entry directly under `critical_issues`. NEVER place breaking lockfile corruption solely in `risks_and_edge_cases`.
+- If lockfile changes modify unrelated packages or introduce breaking dependency corruption unexpectedly, you MUST select `REQUEST_CHANGES`, set `verdict: "REQUEST_CHANGES"`, and add a blocking entry directly under `critical_issues`. NEVER place breaking lockfile corruption solely in `risks_and_edge_cases`.
 - **Base branch syncs and merge commits**: Commits merged from the base branch (`main`) into a PR branch (e.g., via GitHub's 'Update branch' button or `git merge main`) belong to the base branch. Do NOT attribute base branch changes or merge commits to the PR author or flag them as scope violations.
 
 """
