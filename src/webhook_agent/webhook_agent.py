@@ -2800,7 +2800,7 @@ class WebhookAgent:
             (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
         )
         is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
-        has_review_action = any(r.tool == "review" for r in results)
+        has_review_action = any(r.tool == "review" and r.success for r in results)
 
         if is_pr_review_event and not has_review_action:
             # 1. Safely extract review payload from session state or emitted text
