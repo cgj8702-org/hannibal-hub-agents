@@ -33,6 +33,7 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
+testpaths = ["tests"]
 addopts = "--strict-markers"
 norecursedirs = ["_archive", ".*", "dev", "docs"]
 markers = [
@@ -135,7 +136,6 @@ disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
 module = [
-    "webhook_agent.tests.*",
     "tests.*",
 ]
 ignore_errors = true
