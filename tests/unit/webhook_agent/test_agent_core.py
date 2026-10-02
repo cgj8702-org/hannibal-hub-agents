@@ -260,7 +260,6 @@ class TestWebhookAgentModelChain:
         agent._model_chain = chain
         agent._chain_index = 0
         agent._code_auditor = SimpleNamespace(model=None)
-        agent._verdict_agent = SimpleNamespace(model=None)
         agent._app = MagicMock()
         agent._session_service = MagicMock()
         agent._memory_service = MagicMock()
@@ -399,10 +398,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 9
+        assert len(tool_names) == 10
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 9 audit-only inspection and grounding tools."""
+        """Tool names should match the 10 audit-only inspection, grounding, and review tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -414,6 +413,7 @@ class TestToolRegistration:
                 "read_file",
                 "get_issue",
                 "get_commit_diff",
+                "review",
                 "get_current_time",
                 "get_pr_diff_file_map",
                 "verify_line_reference",
@@ -452,7 +452,6 @@ class TestToolRegistration:
             "auto_fix_pr_review_feedback",
             "mark_ready_for_review",
             "merge_pr",
-            "review",
         }
         assert tool_names.isdisjoint(removed), f"Found removed tools: {tool_names & removed}"
 
