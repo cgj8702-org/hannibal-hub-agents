@@ -332,7 +332,7 @@ def test_enforce_verdict_with_sync_review_containing_critical_issues_key():
 
 def test_parse_text_review_approval_bullets_not_critical():
     """Verify Issue #110 fix: text reviews with score/approval bullets under Critical do NOT create fake critical issues or force REQUEST_CHANGES."""
-    text_review = """## 🛡️ Code Review: `REQUEST_CHANGES`
+    text_review = """## 🛡️ Code Review: `APPROVE`
 
 ### 1. Executive Summary
 
@@ -511,14 +511,31 @@ def test_calculate_sync_verdict_respects_explicit_verdict_and_unaddressed_summar
     )
     assert calculate_sync_verdict(sync_explicit) == "REQUEST_CHANGES"
 
-    sync_summary = SyncReviewResponse(
+    sync_unresolved = SyncReviewResponse(
+        summary="Prior critical findings remain unaddressed.",
+        confidence=5,
+        resolutions=[
+            SyncResolutionItem(
+                item_description="Fix vulnerability in endpoint",
+                status="UNRESOLVED",
+                evidence="Still present",
+                category="CRITICAL",
+            )
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+    )
+    assert calculate_sync_verdict(sync_unresolved) == "REQUEST_CHANGES"
+
+    # Summary scraping is deprecated: summary text alone without unresolved items or explicit verdict approves
+    sync_summary_only = SyncReviewResponse(
         summary="Prior critical findings remain unaddressed.",
         confidence=5,
         resolutions=[],
         critical_issues=[],
         minor_suggestions=[],
     )
-    assert calculate_sync_verdict(sync_summary) == "REQUEST_CHANGES"
+    assert calculate_sync_verdict(sync_summary_only) == "APPROVE"
 
     # Test negated blocking keywords does NOT force REQUEST_CHANGES
     sync_negated = SyncReviewResponse(
