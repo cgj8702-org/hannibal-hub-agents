@@ -78,8 +78,14 @@ from webhook_agent.webhook_types import ActionResult
 logger = logging.getLogger("webhook_agent.core.agent_definition")
 
 # Retry configuration for transient server errors
-_MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
-_FALLBACK_MODEL = os.environ.get("GEMMA_MODEL_FALLBACK", "gemini-3.5-flash-lite")
+_MAX_RETRIES = int(
+    os.environ.get("PRIMARY_MODEL_MAX_RETRIES") or os.environ.get("GEMMA_MODEL_MAX_RETRIES") or "5"
+)
+_FALLBACK_MODEL = (
+    os.environ.get("PRIMARY_MODEL_FALLBACK")
+    or os.environ.get("GEMMA_MODEL_FALLBACK")
+    or "gemini-3.5-flash-lite"
+)
 
 # Bot identity — used for writeback policy
 BOT_LOGIN = "hannibal-hub-agents[bot]"

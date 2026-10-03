@@ -228,6 +228,14 @@ class TestWebhookAgentModelChain:
         assert "gemini-3.7-flash" in paid_chain
         assert "gemini-3.6-flash" in paid_chain
 
+    def test_primary_model_env_override(self, monkeypatch):
+        """get_model_chain respects PRIMARY_MODEL environment variable."""
+        from webhook_agent.webhook_agent import get_model_chain
+
+        monkeypatch.setenv("PRIMARY_MODEL", "custom-model-override")
+        chain = get_model_chain()
+        assert chain[0] == "custom-model-override"
+
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""
         from webhook_agent.webhook_agent import WebhookAgent
