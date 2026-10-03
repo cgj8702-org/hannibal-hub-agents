@@ -381,6 +381,27 @@ class TestTokenTruncation:
         text = msg.parts[0].text
         assert "D" * 60000 in text
 
+    def test_build_user_message_injects_deterministic_compiler_dossier(self):
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        event_data = {
+            "canonical": "pull_request.opened",
+            "sender": {"login": "test-user"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 1,
+                    "title": "PR with Python code",
+                },
+                "pr_diff": "diff --git a/src/webhook_agent/tools/ast_tools.py b/src/webhook_agent/tools/ast_tools.py",
+                "changed_files": ["src/webhook_agent/tools/ast_tools.py"],
+            },
+        }
+        msg = agent._build_user_message(event_data)
+        text = msg.parts[0].text
+        assert "Deterministic Pre-Audit Compiler Findings" in text
+        assert "AST Verification for 'src/webhook_agent/tools/ast_tools.py'" in text
+
     def test_code_auditor_preserves_review_context_and_disables_caching(self, monkeypatch):
         """The auditor retains PR context; enables caching for Gemini 3+ and disables for Gemma."""
         from webhook_agent.webhook_agent import WebhookAgent
@@ -932,7 +953,7 @@ class TestReviewDismissalOrdering:
 
         valid_body = (
             '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
-            '"minor_suggestions": [], "risks_and_edge_cases": [], "context_gaps": []}'
+            '"minor_suggestions": [], "risks_and_edge_cases": [], "verified_invariants": [{"invariant": "Locking order preserved", "path": "src/core.py", "line": 10, "evidence": "Tested"}], "context_gaps": []}'
         )
         res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
         assert "Error submitting review: GitHub API 503" in res
@@ -968,7 +989,7 @@ class TestReviewDismissalOrdering:
 
         valid_body = (
             '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
-            '"minor_suggestions": [], "risks_and_edge_cases": [], "context_gaps": []}'
+            '"minor_suggestions": [], "risks_and_edge_cases": [], "verified_invariants": [{"invariant": "Locking order preserved", "path": "src/core.py", "line": 10, "evidence": "Tested"}], "context_gaps": []}'
         )
         res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
         assert "Submitted review (APPROVE)" in res

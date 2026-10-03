@@ -779,6 +779,36 @@ def review(
                 f"PR {repo_name}#{pr_number} is closed or merged. Skipping review submission."
             )
 
+        # Mandatory Investigation Gate: PRs modifying Python code MUST run verify_python_ast before submitting review
+        state_dict = session_state if isinstance(session_state, dict) else {}
+        skip_gate = state_dict.get("skip_investigation_gate", False)
+        if not skip_gate:
+            changed_files: list[str] = []
+            if "deterministic_changed_files" in state_dict:
+                changed_files = list(state_dict.get("deterministic_changed_files") or [])
+            else:
+                try:
+                    for f in pr.get_files():
+                        fn = getattr(f, "filename", None)
+                        if isinstance(fn, str):
+                            changed_files.append(fn)
+                except Exception as files_err:
+                    logger.debug("Could not inspect PR files for investigation gate: %s", files_err)
+
+            modifies_python = any(f.endswith(".py") for f in changed_files)
+            if modifies_python:
+                tools_executed = state_dict.get("tools_executed", [])
+                tools_set = (
+                    set(tools_executed) if isinstance(tools_executed, (list, set, tuple)) else set()
+                )
+                if "verify_python_ast" not in tools_set:
+                    return (
+                        "Error: Review submission rejected. This PR modifies Python code, but the mandatory AST "
+                        "integrity and defect verification tool ('verify_python_ast') was not executed. You MUST call "
+                        "'verify_python_ast(file_path=...)' on the modified Python files to audit syntax, AST defects, "
+                        "and structural risks before calling review()."
+                    )
+
         # Pre-submission finding validation: force LLM self-correction if payload has boilerplate or missing line numbers
         from webhook_agent.formatter import extract_json_payload
         from webhook_agent.schemas import CodeReviewResponse, SyncReviewResponse
@@ -860,14 +890,37 @@ def review(
                     "REQUEST_CHANGES event specified, but critical_issues is empty. "
                     "You must provide at least one actionable critical issue with exact path, line, and replacement code, or set event to APPROVE."
                 )
+        elif effective_event == "APPROVE":
+            verified_invariants = getattr(review_obj, "verified_invariants", []) or []
+            if not verified_invariants:
+                invalid_findings.append(
+                    "APPROVE event specified, but 'verified_invariants' is empty. "
+                    "An APPROVE verdict strictly requires at least one concrete invariant, edge case, or contract verified in the code "
+                    "with exact 'path', positive integer 'line', and concrete 'evidence'. "
+                    "If no invariant was verified, change the verdict to COMMENT or REQUEST_CHANGES."
+                )
+            else:
+                for inv in verified_invariants:
+                    p = (inv.path or "").strip().lower()
+                    if not p or p in ("codebase", "unknown"):
+                        invalid_findings.append(
+                            f"Verified invariant '{inv.invariant[:50]}' lacks exact file path (got '{inv.path}')"
+                        )
+                    if inv.line is None or inv.line <= 0:
+                        invalid_findings.append(
+                            f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}' lacks valid line number (got '{inv.line}')"
+                        )
+                    if not (inv.evidence or "").strip():
+                        invalid_findings.append(
+                            f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}:{inv.line}' lacks concrete evidence"
+                        )
 
         if invalid_findings:
             error_details = "; ".join(invalid_findings)
             logger.warning("Rejecting invalid review tool call: %s", error_details)
             return (
-                f"Error: Review submission rejected. Every critical issue and suggestion must specify an exact file 'path' from the diff, "
-                f"a valid positive integer 'line' number, and concrete replacement code in 'suggested_fix'. Invalid findings: {error_details}. "
-                "Please re-examine the diff and call review() again with precise file paths, line numbers, and actionable replacement code in suggested_fix."
+                f"Error: Review submission rejected. Invalid findings: {error_details}. "
+                "Please re-examine the diff and call review() again with precise file paths, line numbers, actionable replacement code in suggested_fix, and verified invariant proofs."
             )
 
         result, _submitted = _submit_formal_review(
