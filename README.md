@@ -1,6 +1,6 @@
 # 🤖 Hannibal Hub Agents: Distributed GitHub App Webhook Orchestrator
 
-A unified, event-driven service that handles GitHub webhooks via a serverless router, queues event processing asynchronously using **Google Cloud Pub/Sub**, and runs an agentic workflow powered by **Gemma 4**, **Google GenAI**, & **Google ADK** to safely orchestrate GitHub repository reviews, conflict resolutions, and proactive code health sweeps.
+A unified, event-driven service that handles GitHub webhooks via a serverless router, queues event processing asynchronously using **Google Cloud Pub/Sub**, and runs an agentic workflow powered by **Gemini 3.8 / 3.5 Flash**, **Google GenAI**, & **Google ADK** to safely orchestrate GitHub repository reviews, conflict resolutions, and proactive code health sweeps.
 
 ---
 
@@ -71,7 +71,7 @@ flowchart TD
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 ├── README.md                # Repository documentation
-└── cloud_run_function.md    # Serverless webhook router implementation guide
+└── webhook-router.yaml      # Cloud Run serverless router configuration
 ```
 
 ---
