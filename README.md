@@ -71,7 +71,7 @@ flowchart TD
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 ├── README.md                # Repository documentation
-└── webhook-router.yaml      # Cloud Run serverless router configuration
+└── webhook-router.yaml      # Cloud Run serverless router configuration (local/untracked)
 ```
 
 ---
