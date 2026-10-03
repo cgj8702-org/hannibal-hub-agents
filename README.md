@@ -48,11 +48,13 @@ flowchart TD
 │   └── install-git-hooks.sh       # Pre-commit hook installer for lint & type validation
 ├── src/
 │   ├── webhook_agent/         # Core Webhook Orchestrator Package
+│       ├── core/            # Core ADK WebhookAgent definition, loop helpers, and GitHub tools
+│       ├── logic/           # Model chain routing, writeback policy, and rate limiting
+│       ├── review/          # Code review verdict enforcement, scorecard parsing, and guarded submission
 │       ├── worker.py        # Pub/Sub subscriber entry point and main polling loop
 │       ├── processor.py     # Event routing, deduplication, 👀 reaction, & AgentCore delegation
 │       ├── agent_core.py    # ADK agent wrapper & execution entry point
-│       ├── webhook_agent.py # ADK-powered WebhookAgent with tool execution & writeback policy
-│       ├── logic/           # Routing, model, rate-limit, and idempotency helpers
+│       ├── webhook_agent.py # Thin backwards-compatible façade re-exporting core agent and tools
 │       ├── proactive_service.py # Proactive PR evaluator for stale threads, conflicts, & CI runs
 │       ├── schemas.py       # Pydantic response models & universal markdown string field validators
 │       ├── formatter.py     # GitHub Flavored Markdown renderer for code reviews & sync reviews
@@ -70,8 +72,7 @@ flowchart TD
 │   └── unit/                # Unified test suite (webhook_agent, logic, callbacks)
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
-├── README.md                # Repository documentation
-└── webhook-router.yaml      # Cloud Run serverless router configuration (local/untracked)
+└── README.md                # Repository documentation
 ```
 
 ---

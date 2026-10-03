@@ -143,10 +143,15 @@ def get_model_chain() -> list[str]:
         ]
 
     # Support PRIMARY_MODEL with fallback to legacy GEMMA_MODEL
-    primary = os.environ.get(
+    raw_primary = os.environ.get(
         "PRIMARY_MODEL",
         os.environ.get("GEMMA_MODEL", default_primary),
     )
+    clean_primary = raw_primary.strip() if raw_primary else ""
+    if clean_primary.startswith("models/"):
+        clean_primary = clean_primary.removeprefix("models/").strip()
+    primary = clean_primary or default_primary
+
     chain = [primary] + [m for m in default_chain if m != primary]
     deduped = list(dict.fromkeys(chain))
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)

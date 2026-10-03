@@ -364,23 +364,6 @@ class CodeReviewResponse(BaseModel):
                             or "Address breaking change or unintended modification.",
                         }
                     )
-
-        if normalized.get("verdict") == "REQUEST_CHANGES" and not clean_crit:
-            crit_desc = clean_risks[0]["risk"] if clean_risks else normalized["executive_summary"]
-            crit_fix = (
-                clean_risks[0]["recommendation"]
-                if clean_risks
-                else "Address requested changes before merge."
-            )
-            clean_crit.append(
-                {
-                    "path": "codebase",
-                    "line": None,
-                    "description": crit_desc,
-                    "suggested_fix": crit_fix,
-                }
-            )
-
         normalized["critical_issues"] = clean_crit
 
         raw_minor = normalized.get("minor_suggestions")
@@ -737,21 +720,6 @@ class SyncReviewResponse(BaseModel):
                             clean_minor.append(issue_dict)
                         else:
                             clean_crit.append(issue_dict)
-
-        if (
-            normalized.get("verdict") == "REQUEST_CHANGES"
-            and not clean_crit
-            and not [r for r in clean_res if r.get("status") == "UNRESOLVED"]
-        ):
-            clean_crit.append(
-                {
-                    "path": "codebase",
-                    "line": None,
-                    "description": normalized["summary"],
-                    "suggested_fix": "Address unaddressed review findings or breaking changes before merge.",
-                }
-            )
-
         normalized["critical_issues"] = clean_crit
         normalized["minor_suggestions"] = clean_minor
 

@@ -412,8 +412,7 @@ def test_verdict_override_safety_rejects_upgrade_of_caller_request_changes():
     rendered_md, verdict, _inline_comments = _enforce_verdict(json_payload, "REQUEST_CHANGES")
     assert verdict == "REQUEST_CHANGES"
     assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
-    crit_section = rendered_md.split("#### 🔴 Critical")[1].split("#### 🟡")[0]
-    assert "* *None found.*" not in crit_section
+    assert "Dropping sys_platform marker breaks non-Windows platforms." in rendered_md
 
 
 def test_verdict_override_safety_rejects_upgrade_of_titled_request_changes():

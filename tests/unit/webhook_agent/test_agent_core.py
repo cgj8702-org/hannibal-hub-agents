@@ -228,6 +228,14 @@ class TestWebhookAgentModelChain:
         assert "gemini-3.7-flash" in paid_chain
         assert "gemini-3.6-flash" in paid_chain
 
+    def test_primary_model_env_override(self, monkeypatch):
+        """get_model_chain respects PRIMARY_MODEL environment variable."""
+        from webhook_agent.webhook_agent import get_model_chain
+
+        monkeypatch.setenv("PRIMARY_MODEL", "custom-model-override")
+        chain = get_model_chain()
+        assert chain[0] == "custom-model-override"
+
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""
         from webhook_agent.webhook_agent import WebhookAgent
@@ -913,7 +921,11 @@ class TestReviewDismissalOrdering:
         mock_pr.merged = False
         mock_pr.create_review.side_effect = RuntimeError("GitHub API 503")
 
-        res = review(ctx, pr_number=42, body="New review body", event="APPROVE")
+        valid_body = (
+            '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
+            '"minor_suggestions": [], "risks_and_edge_cases": [], "context_gaps": []}'
+        )
+        res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
         assert "Error submitting review: GitHub API 503" in res
         mock_existing.dismiss.assert_not_called()
 
@@ -945,7 +957,11 @@ class TestReviewDismissalOrdering:
         mock_pr.create_review.return_value = mock_new
         mock_pr.get_reviews.return_value = [mock_prior, mock_new]
 
-        res = review(ctx, pr_number=42, body="Approved!", event="APPROVE")
+        valid_body = (
+            '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
+            '"minor_suggestions": [], "risks_and_edge_cases": [], "context_gaps": []}'
+        )
+        res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
         assert "Submitted review (APPROVE)" in res
         mock_prior.dismiss.assert_called_once_with(
             "Superseded by fresh code review on latest commit."
