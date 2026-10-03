@@ -779,6 +779,97 @@ def review(
                 f"PR {repo_name}#{pr_number} is closed or merged. Skipping review submission."
             )
 
+        # Pre-submission finding validation: force LLM self-correction if payload has boilerplate or missing line numbers
+        from webhook_agent.formatter import extract_json_payload
+        from webhook_agent.schemas import CodeReviewResponse, SyncReviewResponse
+
+        parsed_data = extract_json_payload(body)
+        if not parsed_data or not isinstance(parsed_data, dict):
+            return (
+                "Error: Review submission rejected. The 'body' argument must be a valid JSON string conforming "
+                "to the CodeReviewResponse (for initial reviews) or SyncReviewResponse (for synchronization reviews) "
+                "schema. Please format your review findings as JSON and call review() again."
+            )
+
+        # Check review type and parse into schema
+        is_sync = "resolutions" in parsed_data or (
+            "summary" in parsed_data and "executive_summary" not in parsed_data
+        )
+        review_obj: SyncReviewResponse | CodeReviewResponse
+        try:
+            if is_sync:
+                review_obj = SyncReviewResponse.model_validate(parsed_data)
+                critical_list = review_obj.critical_issues
+                minor_list = review_obj.minor_suggestions
+                resolutions_list = review_obj.resolutions
+            else:
+                review_obj = CodeReviewResponse.model_validate(parsed_data)
+                critical_list = review_obj.critical_issues
+                minor_list = review_obj.minor_suggestions
+                resolutions_list = []
+        except Exception as val_err:
+            return (
+                f"Error: Review submission rejected due to schema validation error: {val_err}. "
+                "Please fix the schema fields and call review() again."
+            )
+
+        # Enforce non-boilerplate and concrete path/line/suggested_fix
+        forbidden_boilerplate = (
+            "address requested changes",
+            "address unaddressed",
+            "address breaking change",
+            "address unintended modification",
+        )
+        invalid_findings: list[str] = []
+
+        all_issues = [("critical", item) for item in critical_list] + [
+            ("suggestion", item) for item in minor_list
+        ]
+        for kind, issue in all_issues:
+            p = (issue.path or "").strip().lower()
+            if not p or p in ("codebase", "unknown"):
+                invalid_findings.append(
+                    f"{kind} issue '{issue.description[:50]}...' lacks exact file path (got '{issue.path}')"
+                )
+            if issue.line is None or issue.line <= 0:
+                invalid_findings.append(
+                    f"{kind} issue on '{issue.path}' lacks valid line number (got '{issue.line}')"
+                )
+            fix = (issue.suggested_fix or "").strip().lower()
+            if not fix:
+                invalid_findings.append(
+                    f"{kind} issue on '{issue.path}:{issue.line}' lacks concrete suggested_fix replacement code"
+                )
+            elif any(bp in fix for bp in forbidden_boilerplate):
+                invalid_findings.append(
+                    f"{kind} issue on '{issue.path}:{issue.line}' has generic boilerplate suggested_fix ('{issue.suggested_fix}')"
+                )
+
+        # Check REQUEST_CHANGES without actionable issues
+        effective_event = (event or getattr(review_obj, "verdict", None) or "COMMENT").upper()
+        if effective_event == "REQUEST_CHANGES":
+            if is_sync:
+                has_unresolved = any(r.status == "UNRESOLVED" for r in resolutions_list)
+                if not critical_list and not has_unresolved:
+                    invalid_findings.append(
+                        "REQUEST_CHANGES event specified, but critical_issues is empty and no prior items are UNRESOLVED. "
+                        "You must provide concrete critical_issues with path, line, and replacement code, or set event to APPROVE."
+                    )
+            elif not critical_list:
+                invalid_findings.append(
+                    "REQUEST_CHANGES event specified, but critical_issues is empty. "
+                    "You must provide at least one actionable critical issue with exact path, line, and replacement code, or set event to APPROVE."
+                )
+
+        if invalid_findings:
+            error_details = "; ".join(invalid_findings)
+            logger.warning("Rejecting invalid review tool call: %s", error_details)
+            return (
+                f"Error: Review submission rejected. Every critical issue and suggestion must specify an exact file 'path' from the diff, "
+                f"a valid positive integer 'line' number, and concrete replacement code in 'suggested_fix'. Invalid findings: {error_details}. "
+                "Please re-examine the diff and call review() again with precise file paths, line numbers, and actionable replacement code in suggested_fix."
+            )
+
         result, _submitted = _submit_formal_review(
             pr,
             body,

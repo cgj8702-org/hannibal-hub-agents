@@ -24,7 +24,7 @@ from webhook_agent.formatter import (
 from webhook_agent.logic.diff_filter import filter_review_diff
 from webhook_agent.logic.review_idempotency import review_claim_registry
 from webhook_agent.logic.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
-from webhook_agent.schemas import CodeReviewResponse, IssueItem, SyncReviewResponse
+from webhook_agent.schemas import CodeReviewResponse, SyncReviewResponse
 
 logger = logging.getLogger("webhook_agent.review_enforcer")
 
@@ -263,25 +263,6 @@ def _enforce_verdict(
                             "Safety Guardrail: Prevented mechanical upgrade of REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
                         )
                         enforced_verdict = "REQUEST_CHANGES"
-                        if not cr_obj.critical_issues:
-                            crit_desc = (
-                                cr_obj.risks_and_edge_cases[0].risk
-                                if cr_obj.risks_and_edge_cases
-                                else cr_obj.executive_summary
-                            )
-                            crit_fix = (
-                                cr_obj.risks_and_edge_cases[0].recommendation
-                                if cr_obj.risks_and_edge_cases
-                                else "Address requested changes before merge."
-                            )
-                            cr_obj.critical_issues.append(
-                                IssueItem(
-                                    path="codebase",
-                                    line=None,
-                                    description=crit_desc,
-                                    suggested_fix=crit_fix,
-                                )
-                            )
                     rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
                     inline_comments = []
                     if diff_text:
@@ -327,25 +308,6 @@ def _enforce_verdict(
                 "Safety Guardrail: Prevented mechanical upgrade of text REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
             )
             enforced_verdict = "REQUEST_CHANGES"
-            if not cr_obj.critical_issues:
-                crit_desc = (
-                    cr_obj.risks_and_edge_cases[0].risk
-                    if cr_obj.risks_and_edge_cases
-                    else cr_obj.executive_summary
-                )
-                crit_fix = (
-                    cr_obj.risks_and_edge_cases[0].recommendation
-                    if cr_obj.risks_and_edge_cases
-                    else "Address requested changes before merge."
-                )
-                cr_obj.critical_issues.append(
-                    IssueItem(
-                        path="codebase",
-                        line=None,
-                        description=crit_desc,
-                        suggested_fix=crit_fix,
-                    )
-                )
         rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
         inline_comments = []
         if diff_text:

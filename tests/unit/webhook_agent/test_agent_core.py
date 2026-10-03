@@ -921,7 +921,11 @@ class TestReviewDismissalOrdering:
         mock_pr.merged = False
         mock_pr.create_review.side_effect = RuntimeError("GitHub API 503")
 
-        res = review(ctx, pr_number=42, body="New review body", event="APPROVE")
+        valid_body = (
+            '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
+            '"minor_suggestions": [], "risks_and_edge_cases": [], "context_gaps": []}'
+        )
+        res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
         assert "Error submitting review: GitHub API 503" in res
         mock_existing.dismiss.assert_not_called()
 
@@ -953,7 +957,11 @@ class TestReviewDismissalOrdering:
         mock_pr.create_review.return_value = mock_new
         mock_pr.get_reviews.return_value = [mock_prior, mock_new]
 
-        res = review(ctx, pr_number=42, body="Approved!", event="APPROVE")
+        valid_body = (
+            '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
+            '"minor_suggestions": [], "risks_and_edge_cases": [], "context_gaps": []}'
+        )
+        res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
         assert "Submitted review (APPROVE)" in res
         mock_prior.dismiss.assert_called_once_with(
             "Superseded by fresh code review on latest commit."
