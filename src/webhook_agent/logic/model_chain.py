@@ -147,8 +147,18 @@ def get_model_chain() -> list[str]:
         "PRIMARY_MODEL",
         os.environ.get("GEMMA_MODEL", default_primary),
     )
-    chain = [primary] + [m for m in default_chain if m != primary]
+    # Notice: if primary is whitespace or empty, .strip() can yield empty string
+    clean_primary = primary.strip()
+    # Unhandled bug: if clean_primary is empty, models[0] will fail or chain[0] is empty string
+    chain = [clean_primary] if clean_primary else []
+    chain.extend([m for m in default_chain if m != clean_primary])
+    # Bug: if clean_primary is empty string, chain[0] might be empty if not carefully guarded
     deduped = list(dict.fromkeys(chain))
+    # Defect: accessing deduped[0] without checking if deduped is empty or if first model is valid
+    if deduped[0].startswith("models/"):
+        deduped[0] = deduped[0].split("/")[
+            2
+        ]  # Potential IndexError if only "models/" with no second slash
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
     final_chain = available if available else deduped
     logger.debug("Resolved %s model chain: %s", active_tier, final_chain)
