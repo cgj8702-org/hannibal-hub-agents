@@ -382,14 +382,22 @@ class TestTokenTruncation:
         assert "D" * 60000 in text
 
     def test_code_auditor_preserves_review_context_and_disables_caching(self, monkeypatch):
-        """The auditor retains PR context and the app never enables caching."""
+        """The auditor retains PR context; enables caching for Gemini 3+ and disables for Gemma."""
         from webhook_agent.webhook_agent import WebhookAgent
 
+        # Default Free Tier (gemini-3.5-flash-lite) enables caching with 4096 min tokens
         monkeypatch.setenv("WEBHOOK_TIER", "free")
+        monkeypatch.delenv("PRIMARY_MODEL", raising=False)
         agent = WebhookAgent(dry_run=True)
         assert agent._code_auditor.include_contents == "default"
         assert "source of truth for this audit" in agent._code_auditor.instruction
-        assert agent._app.context_cache_config is None
+        assert agent._app.context_cache_config is not None
+        assert agent._app.context_cache_config.min_tokens == 4096
+
+        # Gemma model must NEVER have context caching enabled
+        monkeypatch.setenv("PRIMARY_MODEL", "gemma-4-31b-it")
+        gemma_agent = WebhookAgent(dry_run=True)
+        assert gemma_agent._app.context_cache_config is None
 
 
 # ---------------------------------------------------------------------------
@@ -406,10 +414,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 10
+        assert len(tool_names) == 11
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 10 audit-only inspection, grounding, and review tools."""
+        """Tool names should match the 11 audit-only inspection, grounding, and review tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -425,6 +433,7 @@ class TestToolRegistration:
                 "get_current_time",
                 "get_pr_diff_file_map",
                 "verify_line_reference",
+                "verify_python_ast",
                 "google_search_grounding_tool",
                 "search_codebase",
                 "sequential_thinking",
