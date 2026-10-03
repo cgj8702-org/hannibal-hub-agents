@@ -36,7 +36,6 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 
-from webhook_agent.logic.constants import DEFAULT_ALLOW_AUTOMATED_MUTATIONS
 from webhook_agent.logic.genai_provider import get_text_generation_provider
 from webhook_agent.logic.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
@@ -58,6 +57,13 @@ from webhook_agent.logic.rate_limiter import (
     extract_rate_limit_details,
     get_active_api_key,
     rpm_waiter,
+)
+from webhook_agent.logic.writeback_policy import (
+    _COMMENT_RATE_LIMITER,
+    CommentRateLimiter,
+    _is_formal_review_eligible,
+    _review_lock,
+    evaluate_writeback_policy,
 )
 
 from .bot_identity import _is_bot_event
@@ -701,55 +707,8 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Rate Limiting & Safety Guardrails
+# Rate Limiting & Safety Guardrails (Re-exported from webhook_agent.logic.writeback_policy)
 # ---------------------------------------------------------------------------
-
-
-class CommentRateLimiter:
-    """Sliding window rate limiter to prevent comment spam per issue/PR."""
-
-    def __init__(self, max_comments: int = 3, window_seconds: float = 60.0) -> None:
-        self.max_comments = max_comments
-        self.window_seconds = window_seconds
-        self._history: dict[str, list[float]] = {}
-
-    def is_allowed(self, target_key: str) -> bool:
-        now = time.time()
-        cutoff = now - self.window_seconds
-        timestamps = [t for t in self._history.get(target_key, []) if t > cutoff]
-        self._history[target_key] = timestamps
-        return len(timestamps) < self.max_comments
-
-    def record(self, target_key: str) -> None:
-        now = time.time()
-        if target_key not in self._history:
-            self._history[target_key] = []
-        self._history[target_key].append(now)
-
-
-_COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
-_REVIEW_LOCKS: dict[str, threading.Lock] = {}
-_REVIEW_LOCKS_GUARD = threading.Lock()
-
-
-def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
-    """Return whether an event is allowed to initiate a formal code review."""
-    return (
-        canonical
-        in {
-            "pull_request.opened",
-            "pull_request.reopened",
-            "pull_request.synchronize",
-            "pull_request_review_requested",
-        }
-        or "/review" in comment_body.lower()
-    )
-
-
-def _review_lock(target_key: str) -> threading.Lock:
-    """Return the process-local lock used to serialize one PR's submissions."""
-    with _REVIEW_LOCKS_GUARD:
-        return _REVIEW_LOCKS.setdefault(target_key, threading.Lock())
 
 
 def update_issue(
@@ -2038,139 +1997,17 @@ class WebhookAgent:
             if event_data.get("repository")
             else "unknown"
         )
-
-        # Check writeback policy for bot-authored events
         canonical = event_data.get("canonical", "")
 
-        logger.debug(
-            "🔍 Checking writeback policy: canonical=%s, dry_run=%s, trace=%s",
-            canonical,
-            self.dry_run,
-            trace_id[-4:],
+        # Check writeback policy (bot-authored, read-only, closed PR, mutations disabled, dry-run)
+        policy_actions = evaluate_writeback_policy(
+            event_data=event_data,
+            dry_run=self.dry_run,
+            trace_id=trace_id,
+            is_bot_event_fn=_is_bot_event,
         )
-
-        if _is_bot_event(event_data):
-            sender = event_data.get("sender", {})
-            logger.debug(
-                "🤖 Bot event detected: sender=%s, canonical=%s",
-                sender.get("login", "unknown"),
-                canonical,
-            )
-            logger.info(
-                "writeback blocked: bot-originated event '%s' (trace: %s)",
-                canonical,
-                trace_id[-4:],
-            )
-            return [
-                ActionResult(
-                    tool="plan",
-                    success=False,
-                    detail=f"writeback policy: bot-originated event '{canonical}' blocked",
-                )
-            ]
-
-        # Check read-only events
-        read_only_events: set[str] = {
-            "ping",
-            "unknown",
-        }
-        if canonical in read_only_events:
-            logger.debug(
-                "📖 Read-only event detected: canonical=%s",
-                canonical,
-            )
-            logger.info(
-                "writeback policy: event '%s' is read-only (trace: %s)",
-                canonical,
-                trace_id[-4:],
-            )
-            return [
-                ActionResult(
-                    tool="plan",
-                    success=False,
-                    detail=f"writeback policy: event '{canonical}' is read-only",
-                )
-            ]
-
-        # Short-circuit execution if PR is closed or merged
-        raw = event_data.get("raw_payload") or {}
-        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
-        if isinstance(raw.get("issue"), dict) and not pr_data:
-            pr_data = raw.get("issue") or {}
-
-        repo_name = (
-            event_data.get("repo_name") or (raw.get("repository") or {}).get("full_name") or ""
-        )
-        pr_number = pr_data.get("number") if isinstance(pr_data, dict) else None
-
-        try:
-            from .cancellation import pr_closed_registry
-        except ImportError:
-            from webhook_agent.cancellation import pr_closed_registry
-
-        is_registry_closed = bool(
-            repo_name and pr_number and pr_closed_registry.is_closed(repo_name, int(pr_number))
-        )
-
-        raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
-        pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
-        merged_at_val = pr_data.get("merged_at") if isinstance(pr_data, dict) else None
-        is_merged = (
-            pr_data.get("merged") is True
-            or (isinstance(merged_at_val, str) and bool(merged_at_val.strip()))
-            if isinstance(pr_data, dict)
-            else False
-        )
-        if pr_state == "closed" or is_merged or is_registry_closed:
-            logger.info(
-                "🔒 PR is closed or merged (state=%s, merged=%s, registry=%s); short-circuiting execution",
-                pr_state,
-                is_merged,
-                is_registry_closed,
-            )
-            return [
-                ActionResult(
-                    tool="skip_closed_pr",
-                    success=True,
-                    detail=f"PR is closed/merged (state={pr_state}, merged={is_merged}, registry={is_registry_closed}); agent execution skipped.",
-                )
-            ]
-
-        # Check mutation policy
-        allow_auto = os.environ.get(
-            "ALLOW_AUTOMATED_MUTATIONS", DEFAULT_ALLOW_AUTOMATED_MUTATIONS
-        ) in (
-            "1",
-            "true",
-            "True",
-        )
-        if not allow_auto and not self.dry_run:
-            logger.debug(
-                "⛔ Mutations disabled (ALLOW_AUTOMATED_MUTATIONS=%s)",
-                os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1"),
-            )
-            logger.info(
-                "mutations disabled by policy (trace: %s)",
-                trace_id[-4:],
-            )
-            return [
-                ActionResult(
-                    tool="plan",
-                    success=False,
-                    detail="mutations are disabled by policy",
-                )
-            ]
-
-        if self.dry_run:
-            logger.debug("🧪 Dry-run mode enabled")
-            logger.info("dry-run mode (trace: %s)", trace_id[-4:])
-            return [
-                ActionResult(
-                    tool="plan",
-                    success=True,
-                    detail="dry-run: would process event through ADK agent",
-                )
-            ]
+        if policy_actions is not None:
+            return policy_actions
 
         logger.debug(
             "✅ All policy checks passed, building session context (trace: %s)",
@@ -2657,3 +2494,20 @@ class WebhookAgent:
             )
 
         return results
+
+
+__all__ = [
+    "_COMMENT_RATE_LIMITER",
+    "_DEPLETED_MODEL_REGISTRY",
+    "CommentRateLimiter",
+    "DepletedModelRegistry",
+    "_count_tokens_exact",
+    "_get_model_tpm_limit",
+    "_is_formal_review_eligible",
+    "_is_transient_error",
+    "_review_lock",
+    "_select_model_for_event",
+    "evaluate_writeback_policy",
+    "get_active_model",
+    "get_model_chain",
+]
