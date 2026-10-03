@@ -149,45 +149,110 @@ async def before_model_callback(
     return None
 
 
+def _extract_total_tokens(llm_response: LlmResponse) -> int:
+    """Extract total token count resiliently across SDK object and dictionary schemas."""
+    usage = getattr(llm_response, "usage_metadata", None)
+    if not usage:
+        return 0
+
+    # 1. Attribute access (Pydantic / SDK dataclass)
+    for attr in ("total_token_count", "total_tokens"):
+        val = getattr(usage, attr, None)
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+
+    # 2. Dictionary access (serialized JSON / dict payload)
+    if isinstance(usage, dict):
+        for key in ("total_token_count", "total_tokens"):
+            val = usage.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                return int(val)
+
+    return 0
+
+
+def _extract_cached_tokens(llm_response: LlmResponse) -> int:
+    """Extract cached token count resiliently across all Google GenAI / Vertex AI SDK variants."""
+    usage = getattr(llm_response, "usage_metadata", None)
+    if usage:
+        # 1. Direct attribute access
+        for attr in ("cached_content_token_count", "cached_tokens", "cache_token_count"):
+            val = getattr(usage, attr, None)
+            if isinstance(val, (int, float)) and val > 0:
+                return int(val)
+
+        # 2. Dictionary-like access
+        if isinstance(usage, dict):
+            for key in ("cached_content_token_count", "cached_tokens", "cache_token_count"):
+                val = usage.get(key)
+                if isinstance(val, (int, float)) and val > 0:
+                    return int(val)
+
+        # 3. Check nested cache_tokens_details (found in google-genai / Vertex AI schemas)
+        details = getattr(usage, "cache_tokens_details", None)
+        if isinstance(usage, dict) and not details:
+            details = usage.get("cache_tokens_details")
+        if details:
+            for attr in ("cached_tokens", "cached_content_token_count", "token_count"):
+                val = (
+                    getattr(details, attr, None)
+                    if not isinstance(details, dict)
+                    else details.get(attr)
+                )
+                if isinstance(val, (int, float)) and val > 0:
+                    return int(val)
+
+    return 0
+
+
 async def after_model_callback(
     callback_context: CallbackContext, llm_response: LlmResponse
 ) -> LlmResponse | None:
     """Record token usage metadata and sanitize hallucinated tool prefixes after Gemini responds."""
-    if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
-        total_tokens_val = getattr(
-            llm_response.usage_metadata, "total_token_count", None
-        ) or getattr(llm_response.usage_metadata, "total_tokens", None)
-        total_tokens = int(total_tokens_val) if isinstance(total_tokens_val, (int, float)) else 0
+    total_tokens = _extract_total_tokens(llm_response)
+    cached_tokens = _extract_cached_tokens(llm_response)
 
-        cached_val = getattr(llm_response.usage_metadata, "cached_content_token_count", None)
-        cached_tokens = int(cached_val) if isinstance(cached_val, (int, float)) else 0
+    # Track cache utilization from either token metrics or active CacheMetadata
+    cache_meta = getattr(llm_response, "cache_metadata", None)
+    active_cache_name = getattr(cache_meta, "cache_name", None) if cache_meta else None
+
+    if total_tokens > 0:
         callback_context.state["total_tokens"] = total_tokens
-        if cached_tokens > 0:
-            callback_context.state["cached_content_tokens"] = cached_tokens
-            logger.info(
-                "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
-                cached_tokens,
-                callback_context.state.get("active_model", "gemini-3"),
-            )
-        logger.debug(
-            "after_model_callback: recorded total_tokens=%d cached_tokens=%d",
-            total_tokens,
+    if cached_tokens > 0:
+        callback_context.state["cached_content_tokens"] = cached_tokens
+        logger.info(
+            "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
             cached_tokens,
+            callback_context.state.get("active_model", "gemini-3"),
+        )
+    elif active_cache_name:
+        callback_context.state["active_cache_name"] = active_cache_name
+        logger.info(
+            "💎 [Gemini Context Cache Reused] Active cache %s attached for model %s",
+            active_cache_name,
+            callback_context.state.get("active_model", "gemini-3"),
         )
 
-        if total_tokens > 0:
-            target_model = callback_context.state.get("active_model")
-            if not target_model:
-                try:
-                    from webhook_agent.webhook_agent import get_active_model
+    logger.debug(
+        "after_model_callback: recorded total_tokens=%d cached_tokens=%d cache_name=%s",
+        total_tokens,
+        cached_tokens,
+        active_cache_name,
+    )
 
-                    target_model = get_active_model()
-                except ImportError:
-                    target_model = "gemini-3.8-flash"
-            await rpm_waiter.record_actual_tokens(
-                model=target_model,
-                actual_tokens=int(total_tokens),
-            )
+    if total_tokens > 0:
+        target_model = callback_context.state.get("active_model")
+        if not target_model:
+            try:
+                from webhook_agent.webhook_agent import get_active_model
+
+                target_model = get_active_model()
+            except ImportError:
+                target_model = "gemini-3.8-flash"
+        await rpm_waiter.record_actual_tokens(
+            model=target_model,
+            actual_tokens=int(total_tokens),
+        )
 
     # Sanitize hallucinated 'github:' tool prefixes from LLM response before ADK tool lookup
     if hasattr(llm_response, "content") and llm_response.content:
