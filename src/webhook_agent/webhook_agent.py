@@ -1,10 +1,11 @@
-"""ADK-powered webhook agent that replaces the Gemma planner.
+"""ADK-powered webhook agent for GitHub PR code review.
 
 This module defines the ADK agent with all GitHub tools as Python functions,
 and provides a synchronous interface for the existing webhook pipeline.
 
 The agent uses:
-- Gemma-4-31b-it via ADK's Gemini model wrapper
+- Tier-aware Gemini models via RateLimitedGemini (free: gemini-3.5-flash-lite, paid: gemini-3.8-flash)
+- ADK Workflow graph engine wrapped in App with pruning plugins
 - InMemoryMemoryService for in-memory conversation memory
 - InMemorySessionService for per-PR conversation context
 - Plain Python functions as tools (ADK auto-generates JSON schemas)
@@ -587,12 +588,15 @@ def get_model_chain() -> list[str]:
     """Build ordered list of fallback models sorted by capacity and tier.
 
     Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
+    See docs/MODEL_CHAIN.md for the canonical reference.
 
     Free Tier Chain:
         1. gemini-3.5-flash-lite (500 RPD / 250k TPM)
         2. gemini-3.1-flash-lite (500 RPD / 250k TPM)
-        3. gemma-4-31b-it (14,400 RPD / 16k TPM)
-        4. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM)
+        3. gemini-2.5-flash (20 RPD / 250k TPM)
+        4. gemini-2.5-flash-lite (20 RPD / 250k TPM)
+        5. gemma-4-31b-it (14,400 RPD / 16k TPM)
+        6. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM)
 
     Paid Tier Chain:
         1. gemini-3.8-flash (10,000 RPD / 2M TPM)
@@ -600,6 +604,8 @@ def get_model_chain() -> list[str]:
         3. gemini-3.6-flash (10,000 RPD / 2M TPM)
         4. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
         5. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
+        6. gemini-2.5-flash (10,000 RPD / 1M TPM)
+        7. gemini-2.5-flash-lite (1,000,000 RPD / 4M TPM)
     """
     active_tier = _resolve_tier()
     if active_tier == "paid":
@@ -1925,10 +1931,6 @@ AUDITOR_CONTEXT_INSTRUCTION = """Always use the original user message, PR metada
 # ---------------------------------------------------------------------------
 # WebhookAgent class
 # ---------------------------------------------------------------------------
-
-
-# Retry configuration for transient server errors
-_MAX_RETRIES = int(os.environ.get("GEMMA_MODEL_MAX_RETRIES", "5"))
 
 
 class WebhookAgent:
