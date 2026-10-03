@@ -121,6 +121,29 @@ async def before_model_callback(
     with contextlib.suppress(Exception):
         setattr(llm_request, "_rate_limit_checked", True)  # noqa: B010
 
+    # Context Caching Model Guard: Strictly only Gemini 3+ models support context caching.
+    # Gemma models (e.g. gemma-4-31b-it) and pre-Gemini-3 models do NOT support caching.
+    from webhook_agent.logic.model_chain import is_gemini_3_plus
+
+    if not is_gemini_3_plus(target_model):
+        if hasattr(llm_request, "cache_config"):
+            llm_request.cache_config = None
+        if hasattr(llm_request, "cache_metadata"):
+            llm_request.cache_metadata = None
+        if hasattr(llm_request, "cacheable_contents_token_count"):
+            llm_request.cacheable_contents_token_count = None
+    else:
+        # For Gemini 3+, ensure context cache config is active with 4096-token floor
+        if getattr(llm_request, "cache_config", None) is None:
+            with contextlib.suppress(Exception):
+                from google.adk.agents.context_cache_config import ContextCacheConfig
+
+                llm_request.cache_config = ContextCacheConfig(
+                    min_tokens=4096,
+                    ttl_seconds=1800,
+                    cache_intervals=10,
+                )
+
     callback_context.state["prompt_tokens"] = exact_tokens
     callback_context.state["active_model"] = target_model
     return None
@@ -131,11 +154,26 @@ async def after_model_callback(
 ) -> LlmResponse | None:
     """Record token usage metadata and sanitize hallucinated tool prefixes after Gemini responds."""
     if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
-        total_tokens = getattr(llm_response.usage_metadata, "total_token_count", 0) or getattr(
-            llm_response.usage_metadata, "total_tokens", 0
-        )
+        total_tokens_val = getattr(
+            llm_response.usage_metadata, "total_token_count", None
+        ) or getattr(llm_response.usage_metadata, "total_tokens", None)
+        total_tokens = int(total_tokens_val) if isinstance(total_tokens_val, (int, float)) else 0
+
+        cached_val = getattr(llm_response.usage_metadata, "cached_content_token_count", None)
+        cached_tokens = int(cached_val) if isinstance(cached_val, (int, float)) else 0
         callback_context.state["total_tokens"] = total_tokens
-        logger.debug("after_model_callback: recorded total_tokens=%d", total_tokens)
+        if cached_tokens > 0:
+            callback_context.state["cached_content_tokens"] = cached_tokens
+            logger.info(
+                "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
+                cached_tokens,
+                callback_context.state.get("active_model", "gemini-3"),
+            )
+        logger.debug(
+            "after_model_callback: recorded total_tokens=%d cached_tokens=%d",
+            total_tokens,
+            cached_tokens,
+        )
 
         if total_tokens > 0:
             target_model = callback_context.state.get("active_model")

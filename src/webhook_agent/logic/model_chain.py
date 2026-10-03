@@ -304,3 +304,26 @@ def _is_transient_error(error: Exception) -> bool:
         or "clienterror" in err_type
         or "servererror" in err_type
     )
+
+
+def is_gemini_3_plus(model_name: str | None) -> bool:
+    """Check if a model is Gemini 3+ and supports explicit context caching.
+
+    Gemma models (e.g. gemma-4-31b-it) and pre-Gemini-3 models do not support
+    context caching. Context caching must only be enabled for Gemini 3+ models.
+    """
+    if not model_name:
+        return False
+    clean = model_name.replace("models/", "").strip().lower()
+    if "gemma" in clean:
+        return False
+    import re
+
+    match = re.search(r"gemini-(\d+(?:\.\d+)?)", clean)
+    if match:
+        try:
+            version = float(match.group(1))
+            return version >= 3.0
+        except ValueError:
+            return False
+    return False

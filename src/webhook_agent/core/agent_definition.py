@@ -13,6 +13,7 @@ from typing import Any
 
 from github import Github
 from google.adk.agents import LlmAgent
+from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps import App
 from google.adk.events import Event, EventActions
 from google.adk.planners import BuiltInPlanner
@@ -46,6 +47,7 @@ from webhook_agent.logic.model_chain import (
     _is_transient_error,
     _select_model_for_event,
     get_active_model,
+    is_gemini_3_plus,
 )
 from webhook_agent.logic.model_factory import get_adk_model
 from webhook_agent.logic.plugins import (
@@ -66,6 +68,7 @@ from webhook_agent.memory_service import InMemoryMemoryService
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools import resolve_conflicts as resolve_conflicts_module
+from webhook_agent.tools.ast_tools import verify_python_ast_tool
 from webhook_agent.tools.codebase_search import search_codebase_tool
 from webhook_agent.tools.diff_tools import (
     get_pr_diff_file_map_tool,
@@ -176,7 +179,9 @@ Your core mission is to protect repository hygiene, audit code changes with clin
    - All final review action items MUST be concrete, verified technical assertions with exact file and line citations.
 4. **Code Snippet & Backtick Formatting**:
    - All code snippets in `suggested_fix` or inline recommendations MUST be properly wrapped in backticks (`code`) for single-line expressions or valid markdown code blocks (```python ... ```) for multi-line code.
-5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `sequential_thinking`, `read_file`, `review`, etc.) without any prefix.
+5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `sequential_thinking`, `read_file`, `review`, `verify_python_ast`, etc.) without any prefix.
+6. **AST & Structural Integrity Verification**:
+   - For Python file modifications, call `verify_python_ast` to check syntax correctness, verify AST node integrity, and catch structural defects (bare excepts, mutable default arguments, unreachable statements) before submitting reviews.
 
 ---
 
@@ -335,6 +340,7 @@ class WebhookAgent:
                 get_current_time,
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,
+                verify_python_ast_tool,
                 google_search_grounding_tool,
                 search_codebase_tool,
                 sequential_thinking_tool,
@@ -351,9 +357,22 @@ class WebhookAgent:
         self._history_pruning_plugin = WebhookHistoryPruningPlugin(max_events=12)
         self._tool_pruning_plugin = ToolOutputPruningPlugin()
 
+        # Context Caching: strictly only for Gemini 3+ models (min 4096 tokens).
+        # Gemma models (e.g. gemma-4-31b-it) do NOT support context caching.
+        context_cache_config = (
+            ContextCacheConfig(
+                min_tokens=4096,
+                ttl_seconds=1800,
+                cache_intervals=10,
+            )
+            if is_gemini_3_plus(self._current_model_name)
+            else None
+        )
+
         self._app = App(
             name=self._app_name,
             root_agent=self._agent,
+            context_cache_config=context_cache_config,
             plugins=[
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,
@@ -409,6 +428,18 @@ class WebhookAgent:
             api_key=get_active_api_key(),
         )
         self._code_auditor.model = new_model_instance
+
+        # Dynamically toggle context caching based on model family:
+        # Strictly enable only for Gemini 3+ models; disable for Gemma / legacy models.
+        if is_gemini_3_plus(next_model):
+            self._app.context_cache_config = ContextCacheConfig(
+                min_tokens=4096,
+                ttl_seconds=1800,
+                cache_intervals=10,
+            )
+        else:
+            self._app.context_cache_config = None
+
         runner_cls = getattr(wa_mod, "Runner", Runner)
         self._runner = runner_cls(
             app=self._app,
