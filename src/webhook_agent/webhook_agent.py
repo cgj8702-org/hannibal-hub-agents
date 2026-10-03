@@ -1502,14 +1502,30 @@ def _enforce_verdict(
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
 
                     # Programmatic hallucination guard: clear resolutions if no prior review
-                    # had actionable CHANGES_REQUESTED items
+                    # had actionable items (critical issues, suggestions, or risks)
                     if pr is not None and sync_obj.resolutions:
-                        prior_had_changes = any(
-                            getattr(r, "state", "") == "CHANGES_REQUESTED" for r in bot_reviews
+                        prior_had_findings = any(
+                            getattr(r, "state", "") == "CHANGES_REQUESTED"
+                            or (
+                                any(
+                                    marker in (getattr(r, "body", "") or "")
+                                    for marker in (
+                                        "Critical",
+                                        "Suggestions",
+                                        "Risks & Edge Cases",
+                                        "Action Items",
+                                    )
+                                )
+                                and not (
+                                    "None found" in (getattr(r, "body", "") or "")
+                                    and "None identified" in (getattr(r, "body", "") or "")
+                                )
+                            )
+                            for r in bot_reviews
                         )
-                        if not prior_had_changes:
+                        if not prior_had_findings:
                             logger.warning(
-                                "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior CHANGES_REQUESTED reviews exist)",
+                                "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior actionable findings exist in bot reviews)",
                                 len(sync_obj.resolutions),
                             )
                             sync_obj.resolutions = []

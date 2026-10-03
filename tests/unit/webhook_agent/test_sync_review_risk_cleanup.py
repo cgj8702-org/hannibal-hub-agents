@@ -96,3 +96,46 @@ def test_code_review_response_no_synthetic_critical_from_summary() -> None:
 
     cr_obj = CodeReviewResponse.model_validate(data)
     assert len(cr_obj.critical_issues) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_sync_review_preserves_resolutions_from_approved_review_with_suggestions() -> None:
+    """Ensure resolutions addressing suggestions from an APPROVED prior review are preserved."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.webhook_agent import _enforce_verdict
+
+    mock_pr = MagicMock()
+    mock_review = MagicMock()
+    mock_review.state = "APPROVED"
+    mock_review.body = (
+        "## 🛡️ Code Review: `APPROVE`\n\n"
+        "#### 🟡 Suggestions & Maintainability\n"
+        "* `README.md:74`: Clarify that webhook-router.yaml is local/untracked.\n"
+    )
+    mock_review.user.login = "hannibal-hub-agents[bot]"
+    mock_pr.get_reviews.return_value = [mock_review]
+    mock_pr.get_files.return_value = []
+    mock_pr.get_review_comments.return_value = []
+
+    review_json = (
+        '{"summary": "Addressed documentation suggestions.", '
+        '"resolutions": [{'
+        '  "item_description": "Clarify that webhook-router.yaml is local/untracked in README.md:74", '
+        '  "status": "RESOLVED", '
+        '  "evidence": "Added (local/untracked) annotation.", '
+        '  "category": "SUGGESTION"'
+        "}], "
+        '"critical_issues": [], '
+        '"minor_suggestions": []}'
+    )
+
+    rendered_body, verdict, _comments = _enforce_verdict(
+        review_json, "APPROVE", pr=mock_pr, review_mode="sync"
+    )
+    assert verdict == "APPROVE"
+    assert "Clarify that webhook-router.yaml is local/untracked" in rendered_body
+    assert "✅" in rendered_body
+    assert "RESOLVED" in rendered_body
+    assert "No prior review items tracked" not in rendered_body
