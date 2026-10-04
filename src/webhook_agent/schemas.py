@@ -124,6 +124,28 @@ class SyncResolutionItem(BaseModel):
         return "CRITICAL"
 
 
+class VerifiedInvariant(BaseModel):
+    """A concrete invariant, boundary condition, or contract verified during audit."""
+
+    invariant: str = Field(
+        description="The specific invariant, contract, or boundary condition verified."
+    )
+    path: str = Field(description="Exact file path where the invariant is maintained or tested.")
+    line: int = Field(description="Exact line number demonstrating invariant preservation.")
+    evidence: str = Field(
+        description="Concrete technical explanation or test citation proving preservation."
+    )
+
+    @field_validator("invariant", "path", "evidence", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: Any) -> Any:
+        return clean_field_string(v)
+
+    def to_markdown(self) -> str:
+        loc = f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`"
+        return f"* **Invariant**: {self.invariant} ({loc})\n  *Evidence*: {self.evidence}"
+
+
 BREAKING_RISK_KEYWORDS = (
     "unauthorized modification",
     "unintended modification",
@@ -196,6 +218,10 @@ class CodeReviewResponse(BaseModel):
     risks_and_edge_cases: list[RiskItem] = Field(
         default_factory=list,
         description="Key risks or edge cases identified during analysis",
+    )
+    verified_invariants: list[VerifiedInvariant] = Field(
+        default_factory=list,
+        description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
     )
     context_gaps: list[str] = Field(
         default_factory=list,
@@ -417,6 +443,28 @@ class CodeReviewResponse(BaseModel):
                         )
         normalized["minor_suggestions"] = clean_minor
 
+        raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
+        clean_inv: list[dict[str, Any]] = []
+        if isinstance(raw_inv, list):
+            for item in raw_inv:
+                if isinstance(item, BaseModel):
+                    item = item.model_dump()
+                if isinstance(item, dict):
+                    inv_text = str(item.get("invariant") or item.get("description") or "").strip()
+                    path_val = str(item.get("path") or "").strip()
+                    line_val = item.get("line")
+                    evid_val = str(item.get("evidence") or item.get("proof") or "").strip()
+                    if inv_text:
+                        clean_inv.append(
+                            {
+                                "invariant": inv_text,
+                                "path": path_val,
+                                "line": line_val if isinstance(line_val, int) else None,
+                                "evidence": evid_val,
+                            }
+                        )
+        normalized["verified_invariants"] = clean_inv
+
         raw_gaps = normalized.get("context_gaps")
         normalized["context_gaps"] = (
             [str(g) for g in raw_gaps if g] if isinstance(raw_gaps, list) else []
@@ -483,6 +531,20 @@ class CodeReviewResponse(BaseModel):
             risk_block,
         ]
 
+        if self.verified_invariants:
+            inv_lines = [item.to_markdown() for item in self.verified_invariants]
+            inv_block = "\n".join(inv_lines)
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "### 🛡️ Verified Invariants & Edge Cases",
+                    "",
+                    inv_block,
+                ]
+            )
+
         if self.context_gaps:
             gaps_str = ", ".join(self.context_gaps)
             markdown_parts.extend(
@@ -517,6 +579,10 @@ class SyncReviewResponse(BaseModel):
     minor_suggestions: list[IssueItem] = Field(
         default_factory=list,
         description="Non-blocking minor suggestions or maintainability notes introduced in this update",
+    )
+    verified_invariants: list[VerifiedInvariant] = Field(
+        default_factory=list,
+        description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
     )
     confidence: int | None = Field(
         default=None, description="Optional legacy auditor confidence rating"
@@ -723,6 +789,28 @@ class SyncReviewResponse(BaseModel):
         normalized["critical_issues"] = clean_crit
         normalized["minor_suggestions"] = clean_minor
 
+        raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
+        clean_inv: list[dict[str, Any]] = []
+        if isinstance(raw_inv, list):
+            for item in raw_inv:
+                if isinstance(item, BaseModel):
+                    item = item.model_dump()
+                if isinstance(item, dict):
+                    inv_text = str(item.get("invariant") or item.get("description") or "").strip()
+                    path_val = str(item.get("path") or "").strip()
+                    line_val = item.get("line")
+                    evid_val = str(item.get("evidence") or item.get("proof") or "").strip()
+                    if inv_text:
+                        clean_inv.append(
+                            {
+                                "invariant": inv_text,
+                                "path": path_val,
+                                "line": line_val if isinstance(line_val, int) else None,
+                                "evidence": evid_val,
+                            }
+                        )
+        normalized["verified_invariants"] = clean_inv
+
         conf = normalized.get("confidence")
         if not isinstance(conf, int) or not (1 <= conf <= 5):
             normalized["confidence"] = 5
@@ -746,6 +834,7 @@ class SyncReviewResponse(BaseModel):
                 "critical_issues": [item.model_dump() for item in self.critical_issues],
                 "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],
                 "risks_and_edge_cases": [],
+                "verified_invariants": [item.model_dump() for item in self.verified_invariants],
             }
             cr_obj = CodeReviewResponse.model_validate(cr_data)
             return cr_obj.to_markdown(verdict)
@@ -812,6 +901,13 @@ class SyncReviewResponse(BaseModel):
         else:
             minor_lines.append("* *None found.*")
 
+        inv_section = ""
+        if self.verified_invariants:
+            inv_lines = [item.to_markdown() for item in self.verified_invariants]
+            inv_section = (
+                f"\n---\n\n### 🛡️ Verified Invariants & Edge Cases\n\n{chr(10).join(inv_lines)}\n"
+            )
+
         return f"""## ⚡ Code Review Update: {verdict_badge}
 
 ### 1. Synchronization Summary
@@ -833,4 +929,4 @@ class SyncReviewResponse(BaseModel):
 
 #### 🟡 Suggestions & Maintainability
 {chr(10).join(minor_lines)}
-"""
+{inv_section}"""

@@ -32,7 +32,8 @@ logger = logging.getLogger("webhook_agent.formatter")
 FINDING_KEYS = (
     "path|line|body|window|verify_steps|description|suggested_fix|executive_summary|"
     "risk|recommendation|summary|resolutions|critical_issues|minor_suggestions|"
-    "risks_and_edge_cases|context_gaps|verdict|status|evidence|item_description|title"
+    "risks_and_edge_cases|context_gaps|verdict|status|evidence|item_description|title|"
+    "verified_invariants|invariant"
 )
 
 STRING_FIELD_OPEN = re.compile(rf'"(?:{FINDING_KEYS})"\s*:\s*"')

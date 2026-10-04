@@ -65,6 +65,7 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     callback_context.state["active_tier"] = active_tier
     callback_context.state["review_submitted_in_this_turn"] = False
     callback_context.state["mutating_tool_executed_in_this_turn"] = False
+    callback_context.state.setdefault("tools_executed", [])
     agent_name = getattr(callback_context, "agent_name", None) or getattr(
         getattr(callback_context, "agent", None), "name", "unknown_agent"
     )
@@ -280,6 +281,14 @@ async def before_tool_callback(
     if "pr_number" in args and isinstance(args["pr_number"], str):
         with contextlib.suppress(ValueError):
             args["pr_number"] = int(args["pr_number"])
+
+    # Track executed tools in session state for downstream audit gates
+    tools_executed = tool_context.state.setdefault("tools_executed", [])
+    if isinstance(tools_executed, list):
+        if tool.name not in tools_executed:
+            tools_executed.append(tool.name)
+    elif isinstance(tools_executed, set):
+        tools_executed.add(tool.name)
 
     return None
 

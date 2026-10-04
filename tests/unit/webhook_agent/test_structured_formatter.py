@@ -231,6 +231,7 @@ def test_normalize_code_review_dict_edge_cases():
         "risks_and_edge_cases": [],
         "critical_issues": [],
         "minor_suggestions": [],
+        "verified_invariants": [],
         "context_gaps": [],
     }
 

@@ -181,7 +181,7 @@ Your core mission is to protect repository hygiene, audit code changes with clin
    - All code snippets in `suggested_fix` or inline recommendations MUST be properly wrapped in backticks (`code`) for single-line expressions or valid markdown code blocks (```python ... ```) for multi-line code.
 5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `sequential_thinking`, `read_file`, `review`, `verify_python_ast`, etc.) without any prefix.
 6. **AST & Structural Integrity Verification**:
-   - For Python file modifications, call `verify_python_ast` to check syntax correctness, verify AST node integrity, and catch structural defects (bare excepts, mutable default arguments, unreachable statements) before submitting reviews.
+   - For Python file modifications, call `verify_python_ast` to check syntax correctness, verify AST node integrity, and catch structural defects (bare excepts, mutable default arguments, unreachable statements) before submitting reviews. This is a mandatory gate enforced by `review()`.
 
 ---
 
@@ -198,12 +198,14 @@ When reviewing a PR, you MUST:
      2) **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
      3) **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
      4) **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
-   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `context_gaps`. When calling `review()`, pass this JSON string as the `body` parameter. Do NOT pass raw Markdown into `review()`; the system deterministically renders clean GitHub Markdown from your validated JSON.
+   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `verified_invariants`, `context_gaps`. When calling `review()`, pass this JSON string as the `body` parameter. Do NOT pass raw Markdown into `review()`; the system deterministically renders clean GitHub Markdown from your validated JSON.
+   - For an `APPROVE` verdict, you MUST include at least one concrete invariant, edge case, or contract in `verified_invariants` with exact `path`, positive integer `line`, and clinical `evidence`.
    - For each actionable bug or improvement in `critical_issues` or `minor_suggestions`, specify the exact `path`, `line`, and clinical replacement code in `suggested_fix`. This enables native GitHub Suggested Change inline review comments (` ```suggestion `).
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
-   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`. When calling `review()`, pass this JSON string as the `body` parameter.
+   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `verified_invariants`. When calling `review()`, pass this JSON string as the `body` parameter.
+   - For an `APPROVE` verdict, you MUST include at least one concrete invariant, edge case, or contract in `verified_invariants` with exact `path`, positive integer `line`, and clinical `evidence`.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
    - Track items in `resolutions` across all three feedback dimensions raised in `previous_bot_reviews`:
      1) **Critical Issues** (`category: "CRITICAL"`): Verify whether blocking issues were resolved.
@@ -223,6 +225,8 @@ These rules override your judgment. Apply them mechanically based on your findin
   2) Any finding lacks a positive integer `line` number (> 0).
   3) Any finding lacks concrete code in `suggested_fix` or uses generic boilerplate (e.g. "Address requested changes before merge").
   4) You pass `REQUEST_CHANGES` without at least one actionable critical issue (or an UNRESOLVED item in sync reviews).
+  5) The PR modifies Python files (`.py`), but you did not execute `verify_python_ast` before calling `review()`.
+  6) You pass `APPROVE`, but `verified_invariants` is missing or empty. An `APPROVE` verdict strictly requires at least one concrete invariant/boundary condition with exact `path`, positive integer `line`, and concrete `evidence`. If no invariant is verified, change verdict to `COMMENT` or `REQUEST_CHANGES`.
   If `review()` returns an error, examine the rejection details, locate the exact file and line from the diff, provide real replacement code, and call `review()` again.
 
 ### Critical Thinking & Anti-Sycophancy Requirements
@@ -567,6 +571,31 @@ class WebhookAgent:
                         parts.append(f"\n{grounding_block}")
                 except Exception as grounding_err:
                     logger.debug("Could not build dependency grounding block: %s", grounding_err)
+
+            # Option 3: Deterministic Pre-Review Compiler Dossier
+            # Run AST integrity analysis on modified Python files
+            py_files = [f for f in changed_files if f.endswith(".py")]
+            if py_files:
+                try:
+                    from webhook_agent.tools.ast_tools import verify_python_ast
+
+                    dossier_items: list[str] = []
+                    for py_file in py_files[:5]:
+                        ast_res = verify_python_ast(file_path=py_file)
+                        if not ast_res.startswith("Error: No code snippet provided and file"):
+                            dossier_items.append(ast_res)
+                    if dossier_items:
+                        dossier_text = "\n\n".join(dossier_items)
+                        parts.append(
+                            f"\n### 🔍 Deterministic Pre-Audit Compiler Findings\n"
+                            f"The deterministic AST integrity engine pre-audited modified Python files:\n\n"
+                            f"{dossier_text}\n\n"
+                            f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
+                        )
+                except Exception as ast_err:
+                    logger.debug(
+                        "Could not build deterministic pre-audit compiler dossier: %s", ast_err
+                    )
 
         # Include pre-fetched inline comment code context if available
         if "inline_code_context" in raw:
