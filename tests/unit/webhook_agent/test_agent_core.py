@@ -402,6 +402,26 @@ class TestTokenTruncation:
         assert "Deterministic Pre-Audit Compiler Findings" in text
         assert "AST Verification for 'src/webhook_agent/tools/ast_tools.py'" in text
 
+    def test_build_user_message_injects_symbol_impact_dossier(self):
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        event_data = {
+            "canonical": "pull_request.opened",
+            "sender": {"login": "test-user"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 1,
+                    "title": "PR modifying callable",
+                },
+                "pr_diff": "diff --git a/src/webhook_agent/tools/symbol_tools.py b/src/webhook_agent/tools/symbol_tools.py",
+                "changed_files": ["src/webhook_agent/tools/symbol_tools.py"],
+            },
+        }
+        msg = agent._build_user_message(event_data)
+        text = msg.parts[0].text
+        assert "Deterministic Pre-Audit Compiler Findings" in text
+
     def test_code_auditor_preserves_review_context_and_disables_caching(self, monkeypatch):
         """The auditor retains PR context; enables caching for Gemini 3+ and disables for Gemma."""
         from webhook_agent.webhook_agent import WebhookAgent
@@ -435,10 +455,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 11
+        assert len(tool_names) == 12
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 11 audit-only inspection, grounding, and review tools."""
+        """Tool names should match the 12 audit-only inspection, grounding, and review tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -455,6 +475,7 @@ class TestToolRegistration:
                 "get_pr_diff_file_map",
                 "verify_line_reference",
                 "verify_python_ast",
+                "check_symbol_impact",
                 "google_search_grounding_tool",
                 "search_codebase",
                 "sequential_thinking",

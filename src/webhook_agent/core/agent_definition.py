@@ -76,6 +76,7 @@ from webhook_agent.tools.diff_tools import (
 )
 from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.tools.sequential_thinking import sequential_thinking_tool
+from webhook_agent.tools.symbol_tools import check_symbol_impact_tool
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
@@ -179,9 +180,11 @@ Your core mission is to protect repository hygiene, audit code changes with clin
    - All final review action items MUST be concrete, verified technical assertions with exact file and line citations.
 4. **Code Snippet & Backtick Formatting**:
    - All code snippets in `suggested_fix` or inline recommendations MUST be properly wrapped in backticks (`code`) for single-line expressions or valid markdown code blocks (```python ... ```) for multi-line code.
-5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `sequential_thinking`, `read_file`, `review`, `verify_python_ast`, etc.) without any prefix.
+5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `sequential_thinking`, `read_file`, `review`, `verify_python_ast`, `check_symbol_impact`, etc.) without any prefix.
 6. **AST & Structural Integrity Verification**:
    - For Python file modifications, call `verify_python_ast` to check syntax correctness, verify AST node integrity, and catch structural defects (bare excepts, mutable default arguments, unreachable statements) before submitting reviews. This is a mandatory gate enforced by `review()`.
+7. **Cross-File Contract & Symbol Impact Verification**:
+   - When callable definitions, function signatures, or classes are modified, use `check_symbol_impact` to scan the repository for downstream call sites. Verify that external callers in other files are not broken by added required arguments, renamed parameters, or dropped exports.
 
 ---
 
@@ -345,6 +348,7 @@ class WebhookAgent:
                 get_pr_diff_file_map_tool,
                 verify_line_reference_tool,
                 verify_python_ast_tool,
+                check_symbol_impact_tool,
                 google_search_grounding_tool,
                 search_codebase_tool,
                 sequential_thinking_tool,
@@ -591,6 +595,25 @@ class WebhookAgent:
                             f"The deterministic AST integrity engine pre-audited modified Python files:\n\n"
                             f"{dossier_text}\n\n"
                             f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
+                        )
+
+                    # Cross-File Symbol Dependency & Breaking Signature Graph
+                    from webhook_agent.logic.symbol_graph import SymbolImpactAnalyzer
+
+                    sym_analyzer = SymbolImpactAnalyzer()
+                    impact_reports = sym_analyzer.analyze_modified_files(changed_files)
+                    impact_blocks = [
+                        r.to_markdown()
+                        for r in impact_reports
+                        if r.broken_call_sites or (r.sig_diff and r.sig_diff.is_breaking)
+                    ]
+                    if impact_blocks:
+                        impact_text = "\n\n".join(impact_blocks)
+                        parts.append(
+                            f"\n### 🕸️ Cross-File Contract & Symbol Impact Analysis\n"
+                            f"The static symbol dependency engine detected contract alterations and cross-file callers:\n\n"
+                            f"{impact_text}\n\n"
+                            f"Verify whether external callers are broken and enforce Dimension 4 (Contract Integrity)."
                         )
                 except Exception as ast_err:
                     logger.debug(
