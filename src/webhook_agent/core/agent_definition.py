@@ -76,6 +76,7 @@ from webhook_agent.tools.diff_tools import (
 )
 from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.tools.symbol_tools import check_symbol_impact_tool
+from webhook_agent.tools.test_impact_tools import check_test_coverage_tool
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
@@ -187,6 +188,8 @@ Your core mission is to protect repository hygiene, audit code changes with clin
    - The deterministic symbol impact analyzer already maps modified signatures against the repository call graph and embeds breaking alterations in your prompt. Call `check_symbol_impact` only if an unlisted symbol requires additional checking.
 8. **Fast-Pass Review Velocity (1 to 2 Turns Target)**:
    - Maximize audit velocity and conserve API rate limits. Evaluate the pre-compiled dossier, diff, and contract impact, then call `review()` directly. Avoid chatty or exploratory tool loops unless inspecting an external file strictly required for grounding.
+9. **Test Coverage & Regression Invariants**:
+   - The deterministic test impact engine has scanned matching test suites under `tests/`. Verify whether modified symbols have unit test coverage. If coverage is verified, cite the test cases in `verified_invariants`. If coverage is missing, provide a concrete unit test recommendation under `minor_suggestions` using the recommended test stub.
 
 ---
 
@@ -351,6 +354,7 @@ class WebhookAgent:
                 verify_line_reference_tool,
                 verify_python_ast_tool,
                 check_symbol_impact_tool,
+                check_test_coverage_tool,
                 google_search_grounding_tool,
                 search_codebase_tool,
             ],
@@ -617,6 +621,15 @@ class WebhookAgent:
                             f"{impact_text}\n\n"
                             f"Verify whether external callers are broken and enforce Dimension 4 (Contract Integrity)."
                         )
+
+                    # Test Impact & Coverage Verification
+                    from webhook_agent.logic.test_impact import TestImpactAnalyzer
+
+                    test_analyzer = TestImpactAnalyzer()
+                    test_report = test_analyzer.analyze(changed_files)
+                    if test_report.coverages:
+                        test_md = test_report.to_markdown()
+                        parts.append(f"\n{test_md}")
                 except Exception as ast_err:
                     logger.debug(
                         "Could not build deterministic pre-audit compiler dossier: %s", ast_err

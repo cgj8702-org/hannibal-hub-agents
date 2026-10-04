@@ -455,10 +455,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 11
+        assert len(tool_names) == 12
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 11 audit-only inspection, grounding, and review tools."""
+        """Tool names should match the 12 audit-only inspection, grounding, and review tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -476,6 +476,7 @@ class TestToolRegistration:
                 "verify_line_reference",
                 "verify_python_ast",
                 "check_symbol_impact",
+                "check_test_coverage",
                 "google_search_grounding_tool",
                 "search_codebase",
             ]
