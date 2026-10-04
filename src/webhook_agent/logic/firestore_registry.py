@@ -74,23 +74,44 @@ class FirestoreDepletedModelRegistry:
         metric_type = "DEFAULT (1h)"
 
         if error is not None:
+            # Walk cause/context chain to capture nested exceptions (e.g. ServerError inside DynamicNodeFailError)
+            err_parts = []
+            curr: Any = error
+            visited: set[int] = set()
+            while curr is not None and id(curr) not in visited:
+                visited.add(id(curr))
+                err_parts.append(str(curr))
+                curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
+            error_str = " ".join(err_parts).lower()
+
             details = extract_rate_limit_details(error)
             retry_after = details.get("retry_after_seconds")
-            quota_limit = details.get("quota_limit") or ""
-            error_str = str(error).lower()
+            quota_limit = (details.get("quota_limit") or "").lower()
 
             # Daily quota exhaustion takes priority — the retryDelay from 429
             # responses is misleadingly short (14-59s) even for daily limits.
-            if "perday" in quota_limit.lower() or "perday" in error_str:
+            if "perday" in quota_limit or "dayperproject" in quota_limit or "perday" in error_str:
                 cooldown = 86400.0
                 metric_type = "RPD (24h)"
             elif (
-                "perminute" in quota_limit.lower()
+                "perminute" in quota_limit
+                or "tokensperminute" in quota_limit
+                or "minuteperproject" in quota_limit
                 or "perminute" in error_str
                 or "tokensperminute" in error_str
+                or "429" in error_str
+                or "resource_exhausted" in error_str
             ):
                 cooldown = 60.0
                 metric_type = "RPM/TPM (60s)"
+            elif (
+                "503" in error_str
+                or "unavailable" in error_str
+                or "high demand" in error_str
+                or "overloaded" in error_str
+            ):
+                cooldown = 120.0
+                metric_type = "503 HIGH DEMAND (120s)"
             elif isinstance(retry_after, (int, float)) and retry_after > 0:
                 cooldown = max(float(retry_after), 120.0)
                 metric_type = f"EXACT ({cooldown:.0f}s)"

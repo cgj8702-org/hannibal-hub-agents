@@ -40,7 +40,16 @@ class DepletedModelRegistry:
         metric_type = "DEFAULT (1h)"
 
         if error is not None:
-            err_str = str(error).lower()
+            # Walk cause/context chain to capture nested exceptions
+            err_parts = []
+            curr: Any = error
+            visited: set[int] = set()
+            while curr is not None and id(curr) not in visited:
+                visited.add(id(curr))
+                err_parts.append(str(curr))
+                curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
+            err_str = " ".join(err_parts).lower()
+
             if "perday" in err_str or "dayperproject" in err_str:
                 cooldown = 86400.0
                 metric_type = "RPD (24h)"
@@ -49,10 +58,16 @@ class DepletedModelRegistry:
                 or "minuteperproject" in err_str
                 or "tokensperminute" in err_str
                 or "429" in err_str
+                or "resource_exhausted" in err_str
             ):
                 cooldown = 60.0
                 metric_type = "RPM/TPM (60s)"
-            elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
+            elif (
+                "503" in err_str
+                or "unavailable" in err_str
+                or "high demand" in err_str
+                or "overloaded" in err_str
+            ):
                 cooldown = 120.0
                 metric_type = "503 HIGH DEMAND (120s)"
 
