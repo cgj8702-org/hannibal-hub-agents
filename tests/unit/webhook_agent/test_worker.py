@@ -1097,3 +1097,145 @@ class TestBaseBranchMergeSync:
             assert call_kwargs["event"] == "APPROVE"
             assert "pypdf" in call_kwargs["body"]
             processor._agent_core.run.assert_not_called()
+
+    def test_process_event_in_flight_deduplication_skips_duplicate_webhook(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.proactive_service import clear_reconciliation_cache
+
+        clear_reconciliation_cache()
+
+        processor = WebhookProcessor()
+        mock_gh = MagicMock()
+        mock_repo = MagicMock()
+        mock_pr = MagicMock()
+        mock_gh.get_repo.return_value = mock_repo
+        mock_repo.get_pull.return_value = mock_pr
+
+        processor._gh = mock_gh
+        processor._agent_core = MagicMock()
+        processor._agent_core.run.return_value = []
+
+        payload1 = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-unique-1",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "test-developer"},
+            "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 310,
+                    "state": "open",
+                    "head": {"ref": "feat/branch-1", "sha": "commit_sha_12345"},
+                }
+            },
+        }
+
+        # First delivery acquires claim and executes agent.run
+        processor.process_event(payload1)
+        assert processor._agent_core.run.call_count == 1
+
+        payload2 = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-unique-2",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "test-developer"},
+            "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 310,
+                    "state": "open",
+                    "head": {"ref": "feat/branch-1", "sha": "commit_sha_12345"},
+                }
+            },
+        }
+
+        # Duplicate delivery with different delivery_id for the same commit is skipped
+        processor.process_event(payload2)
+        assert processor._agent_core.run.call_count == 1
+
+    def test_process_event_proactive_reconciliation_is_not_self_suppressed(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.proactive_service import (
+            build_reconciliation_cache_key,
+            clear_reconciliation_cache,
+            try_claim_reconciliation,
+        )
+
+        clear_reconciliation_cache()
+
+        processor = WebhookProcessor()
+        processor._gh = MagicMock()
+        processor._agent_core = MagicMock()
+        processor._agent_core.run.return_value = []
+
+        # Simulate proactive sweep acquiring claim prior to event dispatch
+        cache_key = build_reconciliation_cache_key(
+            "cgj8702-org/hannibal-hub", 311, "sha_proactive_99"
+        )
+        assert try_claim_reconciliation(cache_key) is True
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "proactive-reconcile-311-sha_pro",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "test-developer"},
+            "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 311,
+                    "state": "open",
+                    "head": {"ref": "feat/reconcile-test", "sha": "sha_proactive_99"},
+                }
+            },
+        }
+
+        # Synthetic proactive delivery is not rejected by processor's in-flight check
+        processor.process_event(payload)
+        assert processor._agent_core.run.call_count == 1
+
+    def test_process_event_releases_claim_on_agent_exception(self):
+        from unittest.mock import MagicMock
+
+        import pytest
+
+        from webhook_agent.proactive_service import (
+            build_reconciliation_cache_key,
+            clear_reconciliation_cache,
+            is_reconciliation_claimed,
+        )
+
+        clear_reconciliation_cache()
+
+        processor = WebhookProcessor()
+        processor._gh = MagicMock()
+        processor._agent_core = MagicMock()
+        processor._agent_core.run.side_effect = RuntimeError("Simulated crash")
+
+        cache_key = build_reconciliation_cache_key("cgj8702-org/hannibal-hub", 312, "sha_crash_555")
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-crash-1",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "test-developer"},
+            "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 312,
+                    "state": "open",
+                    "head": {"ref": "feat/crash-test", "sha": "sha_crash_555"},
+                }
+            },
+        }
+
+        with pytest.raises(RuntimeError, match="Simulated crash"):
+            processor.process_event(payload)
+
+        # Claim must have been released upon error
+        assert is_reconciliation_claimed(cache_key) is False

@@ -83,209 +83,82 @@ class TestProactiveEvaluator:
         assert evaluator.evaluate_open_prs() == []
         mock_pr.create_issue_comment.assert_not_called()
 
-    def test_unreviewed_pr_younger_than_5_minutes_is_skipped(self):
+    def test_merge_conflict_detected_on_unmergeable_pr(self):
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = MagicMock()
         mock_pr.number = 101
-        mock_pr.mergeable = True
-        mock_pr.draft = False
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=3)
-        mock_pr.get_reviews.return_value = []
+        mock_pr.mergeable = False
+        mock_pr.mergeable_state = "clean"
         mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = []
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
-        results = evaluator.evaluate_open_prs()
-
-        assert results == []
-        callback.assert_not_called()
-
-    def test_unreviewed_pr_older_than_5_minutes_dispatches_reconciliation(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 257
-        mock_pr.title = "retire legacy archiver"
-        mock_pr.body = "clean up old archiver scripts"
-        mock_pr.html_url = "https://github.com/cgj8702-org/hannibal-hub/pull/257"
-        mock_pr.mergeable = True
-        mock_pr.draft = False
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=6)
-        mock_pr.head.sha = "efe59f6c12345"
-        mock_pr.head.ref = "agent/retire-legacy-archiver"
-        mock_pr.base.sha = "main12345"
-        mock_pr.base.ref = "main"
-        mock_pr.user.login = "cgj8702"
-        mock_pr.get_reviews.return_value = []
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = []
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
-        results = evaluator.evaluate_open_prs()
-
-        assert len(results) == 1
-        assert results[0]["pr_number"] == 257
-        assert "unreviewed_pr_reconciled" in results[0]["actions"]
-        callback.assert_called_once()
-        payload = callback.call_args[0][0]
-        assert payload["canonical"] == "pull_request.opened"
-        assert payload["raw_payload"]["pull_request"]["number"] == 257
-        assert payload["raw_payload"]["pull_request"]["head"]["sha"] == "efe59f6c12345"
-
-    def test_unreviewed_pr_older_than_5_minutes_without_callback_records_detection(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 257
-        mock_pr.mergeable = True
-        mock_pr.draft = False
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=6)
-        mock_pr.head.sha = "efe59f6c12345"
-        mock_pr.get_reviews.return_value = []
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_repo.get_pulls.return_value = [mock_pr]
 
         evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
         results = evaluator.evaluate_open_prs()
 
         assert len(results) == 1
-        assert results[0]["pr_number"] == 257
-        assert "unreviewed_pr_detected" in results[0]["actions"]
+        assert results[0]["pr_number"] == 101
+        assert "merge_conflict_detected" in results[0]["actions"]
 
-    def test_unreviewed_pr_with_existing_bot_review_skipped(self):
+    def test_merge_conflict_detected_on_dirty_state(self):
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = MagicMock()
-        mock_pr.number = 258
+        mock_pr.number = 102
         mock_pr.mergeable = True
-        mock_pr.draft = False
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=15)
-        bot_review = MagicMock()
-        bot_review.user.login = "hannibal-hub-agents[bot]"
-        mock_pr.get_reviews.return_value = [bot_review]
+        mock_pr.mergeable_state = "dirty"
         mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_repo.get_pulls.return_value = [mock_pr]
 
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
+        evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
         results = evaluator.evaluate_open_prs()
 
-        assert results == []
-        callback.assert_not_called()
+        assert len(results) == 1
+        assert results[0]["pr_number"] == 102
+        assert "merge_conflict_detected" in results[0]["actions"]
 
-    def test_unreviewed_pr_with_existing_bot_comment_skipped(self):
+    def test_merge_conflict_skipped_if_already_commented(self):
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = MagicMock()
-        mock_pr.number = 258
-        mock_pr.mergeable = True
-        mock_pr.draft = False
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=15)
-        bot_comment = MagicMock()
-        bot_comment.user.login = "hannibal-hub-agents"
-        mock_pr.get_reviews.return_value = []
-        mock_pr.get_issue_comments.return_value = [bot_comment]
-        mock_pr.get_reactions.return_value = []
+        mock_pr.number = 103
+        mock_pr.mergeable = False
+        mock_comment = MagicMock()
+        mock_comment.body = "Unable to automatically resolve merge conflicts for PR #103."
+        mock_pr.get_issue_comments.return_value = [mock_comment]
+        mock_pr.get_review_comments.return_value = []
         mock_repo.get_pulls.return_value = [mock_pr]
 
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
+        evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
         results = evaluator.evaluate_open_prs()
 
         assert results == []
-        callback.assert_not_called()
 
-    def test_unreviewed_pr_with_existing_eyes_reaction_skipped(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 258
-        mock_pr.mergeable = True
-        mock_pr.draft = False
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=15)
-        reaction = MagicMock()
-        reaction.content = "eyes"
-        reaction.user.login = "hannibal-hub-agents[bot]"
-        mock_pr.get_reviews.return_value = []
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = [reaction]
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
-        results = evaluator.evaluate_open_prs()
-
-        assert results == []
-        callback.assert_not_called()
-
-    def test_draft_pr_is_not_reconciled(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 259
-        mock_pr.mergeable = True
-        mock_pr.draft = True
-        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=10)
-        mock_pr.get_reviews.return_value = []
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = []
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
-        results = evaluator.evaluate_open_prs()
-
-        assert results == []
-        callback.assert_not_called()
-
-    def test_reconciled_pr_cache_prevents_duplicate_dispatch(self):
+    def test_unreviewed_pr_does_not_dispatch_synthetic_events_or_llms(self):
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = MagicMock()
         mock_pr.number = 257
         mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
         mock_pr.draft = False
         mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=6)
         mock_pr.head.sha = "efe59f6c12345"
         mock_pr.get_reviews.return_value = []
         mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_reactions.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_repo.get_pulls.return_value = [mock_pr]
 
         callback = MagicMock()
         evaluator = ProactiveEvaluator(
             mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
         )
+        results = evaluator.evaluate_open_prs()
 
-        # First sweep triggers reconciliation
-        first_results = evaluator.evaluate_open_prs()
-        assert len(first_results) == 1
-        assert "unreviewed_pr_reconciled" in first_results[0]["actions"]
-        assert callback.call_count == 1
-
-        # Second sweep is suppressed by cache
-        second_results = evaluator.evaluate_open_prs()
-        assert second_results == []
-        assert callback.call_count == 1
+        assert results == []
+        callback.assert_not_called()
 
     def test_concurrent_threads_reconciliation_claim_is_thread_safe(self):
         import concurrent.futures
@@ -307,3 +180,50 @@ class TestProactiveEvaluator:
         # Exactly 1 thread successfully claimed the reconciliation slot
         assert results.count(True) == 1
         assert results.count(False) == 19
+
+    def test_release_reconciliation_claim_allows_reclaim(self):
+        from webhook_agent.proactive_service import (
+            release_reconciliation_claim,
+            try_claim_reconciliation,
+        )
+
+        key = "cgj8702-org/hannibal-hub#301#1122334"
+        assert try_claim_reconciliation(key) is True
+        assert try_claim_reconciliation(key) is False
+
+        release_reconciliation_claim(key)
+        assert try_claim_reconciliation(key) is True
+
+    def test_is_reconciliation_claimed_checks_without_acquiring(self):
+        from webhook_agent.proactive_service import (
+            is_reconciliation_claimed,
+            try_claim_reconciliation,
+        )
+
+        key = "cgj8702-org/hannibal-hub#302#aabbcc"
+        assert is_reconciliation_claimed(key) is False
+        assert try_claim_reconciliation(key) is True
+        assert is_reconciliation_claimed(key) is True
+
+    def test_build_reconciliation_cache_key_format(self):
+        from webhook_agent.proactive_service import build_reconciliation_cache_key
+
+        assert (
+            build_reconciliation_cache_key("owner/repo", 42, "deadbeef") == "owner/repo#42#deadbeef"
+        )
+
+    def test_webhook_in_flight_claims_deduplication(self):
+        from webhook_agent.proactive_service import (
+            build_reconciliation_cache_key,
+            release_reconciliation_claim,
+            try_claim_reconciliation,
+        )
+
+        key = build_reconciliation_cache_key("cgj8702-org/hannibal-hub", 299, "webhooksha123")
+        assert try_claim_reconciliation(key) is True
+        # Duplicate incoming delivery for the same PR commit fails claim
+        assert try_claim_reconciliation(key) is False
+
+        # After releasing claim, a retry can acquire the claim
+        release_reconciliation_claim(key)
+        assert try_claim_reconciliation(key) is True

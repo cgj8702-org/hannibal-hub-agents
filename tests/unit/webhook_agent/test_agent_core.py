@@ -455,10 +455,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 12
+        assert len(tool_names) == 11
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 12 audit-only inspection, grounding, and review tools."""
+        """Tool names should match the 11 audit-only inspection, grounding, and review tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -478,7 +478,6 @@ class TestToolRegistration:
                 "check_symbol_impact",
                 "google_search_grounding_tool",
                 "search_codebase",
-                "sequential_thinking",
             ]
         )
         assert tool_names == expected
@@ -511,6 +510,7 @@ class TestToolRegistration:
             "auto_fix_pr_review_feedback",
             "mark_ready_for_review",
             "merge_pr",
+            "sequential_thinking",
         }
         assert tool_names.isdisjoint(removed), f"Found removed tools: {tool_names & removed}"
 
@@ -524,6 +524,44 @@ class TestToolRegistration:
         monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "2048")
         agent_custom = WebhookAgent(dry_run=True)
         assert agent_custom._code_auditor.planner.thinking_config.thinking_budget == 2048
+
+    def test_review_accepts_deterministic_precompiled_ast(self):
+        """Deterministic precompiled AST satisfies review gate without runtime tool execution."""
+        from unittest.mock import MagicMock
+
+        from google.adk.tools import ToolContext
+
+        from webhook_agent.core.github_tools import review
+
+        mock_tc = MagicMock(spec=ToolContext)
+        mock_file = MagicMock()
+        mock_file.filename = "src/webhook_agent/core/test_module.py"
+        mock_pr = MagicMock()
+        mock_pr.get_files.return_value = [mock_file]
+        mock_pr.get_reviews.return_value = []
+        mock_gh = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh.get_repo.return_value = mock_repo
+
+        mock_tc.state = {
+            "gh_client": mock_gh,
+            "repo_full_name": "owner/repo",
+            "pr_number": 1,
+            "deterministic_precompiled_ast": True,
+            "tools_executed": [],
+            "dry_run": True,
+        }
+
+        body = (
+            '{"executive_summary": "All good", "critical_issues": [], '
+            '"minor_suggestions": [], "risks_and_edge_cases": [], '
+            '"verified_invariants": [{"invariant": "Precompiled AST integrity holds", '
+            '"path": "src/webhook_agent/core/test_module.py", "line": 10, "evidence": "AST verified"}], '
+            '"context_gaps": []}'
+        )
+        res = review(mock_tc, pr_number=1, event="APPROVE", body=body)
+        assert "Review submission rejected" not in res
 
 
 # ---------------------------------------------------------------------------
@@ -1129,3 +1167,35 @@ class TestReviewIdempotency:
 
         assert sum(submitted for _result, submitted in results) == 1
         assert pr.create_review.call_count == 1
+
+
+class TestRunInBgLoop:
+    def test_run_in_bg_loop_executes_coroutine(self):
+        from webhook_agent.core.loop_helpers import run_in_bg_loop
+
+        async def _sample_coro():
+            return 42
+
+        res = run_in_bg_loop(_sample_coro())
+        assert res == 42
+
+    def test_run_in_bg_loop_cancels_future_on_timeout(self):
+        from concurrent.futures import TimeoutError as FutureTimeoutError
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.core.loop_helpers import run_in_bg_loop
+
+        async def _slow_coro():
+            return "done"
+
+        coro = _slow_coro()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = FutureTimeoutError("Timed out")
+
+        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future):
+            with pytest.raises(FutureTimeoutError):
+                run_in_bg_loop(coro)
+
+        coro.close()
+        # Verified that future.cancel() was called to prevent zombie task
+        mock_future.cancel.assert_called_once()

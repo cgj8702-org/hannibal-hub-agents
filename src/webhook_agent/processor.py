@@ -848,6 +848,38 @@ class WebhookProcessor:
                 )
                 return
 
+        # In-Flight Audit Deduplication: prevent concurrent runs across webhooks & proactive sweeps
+        audit_cache_key: str | None = None
+        if is_pr_event and pr_number is not None:
+            head_sha = (
+                (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
+            )
+            if (
+                canonical
+                in (
+                    "pull_request.opened",
+                    "pull_request.synchronize",
+                    "pull_request.ready_for_review",
+                    "pull_request.reopened",
+                )
+                and head_sha
+            ):
+                from .proactive_service import (
+                    build_reconciliation_cache_key,
+                    try_claim_reconciliation,
+                )
+
+                audit_cache_key = build_reconciliation_cache_key(repo_name, pr_number, head_sha)
+                is_proactive_event = str(delivery_id).startswith("proactive-reconcile-")
+                if not is_proactive_event and not try_claim_reconciliation(audit_cache_key):
+                    logger.info(
+                        "🔒 In-Flight Audit Deduplication: PR %s#%s (commit %s) is already in-flight or reviewed. Skipping duplicate webhook execution.",
+                        repo_name,
+                        pr_number,
+                        head_sha[:7],
+                    )
+                    return
+
         # Deterministic Fast-Path for automated Dependabot / lockfile PRs
         if not dry_run and is_pr_event and pr_number is not None:
             try:
@@ -909,7 +941,14 @@ class WebhookProcessor:
                     fast_path_err,
                 )
 
-        results = agent.run(payload, repo_name, gh_client=gh)
+        try:
+            results = agent.run(payload, repo_name, gh_client=gh)
+        except Exception:
+            if audit_cache_key:
+                from .proactive_service import release_reconciliation_claim
+
+                release_reconciliation_claim(audit_cache_key)
+            raise
         if results:
             for r in results:
                 msg = getattr(r, "detail", None) or getattr(r, "message", str(r))
