@@ -672,6 +672,19 @@ class WebhookAgent:
                     "UNRESOLVED with diff evidence, setting 'category' to 'CRITICAL', 'SUGGESTION', or 'RISK'."
                 )
 
+        if canonical in ("pull_request.opened", "pull_request.synchronize") or (
+            canonical.startswith("issue_comment.") and "/review" in comment_body
+        ):
+            parts.append(
+                "\n### 🚀 ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT\n"
+                "Evaluate the pre-fetched PR diff, AST verification findings, symbol impact analysis, "
+                "and test coverage findings above.\n"
+                "In Turn 1, call the `review()` tool directly with your completed CodeReviewResponse (or SyncReviewResponse) "
+                "JSON payload (event='APPROVE' or 'REQUEST_CHANGES').\n"
+                "Do NOT perform exploratory search or file inspection unless strictly required for a critical invariant. "
+                "Submit your formal review immediately."
+            )
+
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(
             text, max_tokens=get_max_input_tokens(), label="User payload"

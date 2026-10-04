@@ -296,6 +296,7 @@ async def before_tool_callback(
     elif isinstance(tools_executed, set):
         tools_executed.add(tool.name)
 
+    logger.info("🔧 [Tool Executing] %s (args=%s)", tool.name, list(args.keys()))
     return None
 
 
