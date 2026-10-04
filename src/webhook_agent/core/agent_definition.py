@@ -17,7 +17,7 @@ from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps import App
 from google.adk.events import Event, EventActions
 from google.adk.planners import BuiltInPlanner
-from google.adk.runners import Runner
+from google.adk.runners import RunConfig, Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
@@ -76,6 +76,7 @@ from webhook_agent.tools.diff_tools import (
 )
 from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.tools.symbol_tools import check_symbol_impact_tool
+from webhook_agent.tools.test_impact_tools import check_test_coverage_tool
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
@@ -187,6 +188,8 @@ Your core mission is to protect repository hygiene, audit code changes with clin
    - The deterministic symbol impact analyzer already maps modified signatures against the repository call graph and embeds breaking alterations in your prompt. Call `check_symbol_impact` only if an unlisted symbol requires additional checking.
 8. **Fast-Pass Review Velocity (1 to 2 Turns Target)**:
    - Maximize audit velocity and conserve API rate limits. Evaluate the pre-compiled dossier, diff, and contract impact, then call `review()` directly. Avoid chatty or exploratory tool loops unless inspecting an external file strictly required for grounding.
+9. **Test Coverage & Regression Invariants**:
+   - The deterministic test impact engine has scanned matching test suites under `tests/`. Verify whether modified symbols have unit test coverage. If coverage is verified, cite the test cases in `verified_invariants`. If coverage is missing, provide a concrete unit test recommendation under `minor_suggestions` using the recommended test stub.
 
 ---
 
@@ -351,6 +354,7 @@ class WebhookAgent:
                 verify_line_reference_tool,
                 verify_python_ast_tool,
                 check_symbol_impact_tool,
+                check_test_coverage_tool,
                 google_search_grounding_tool,
                 search_codebase_tool,
             ],
@@ -617,6 +621,15 @@ class WebhookAgent:
                             f"{impact_text}\n\n"
                             f"Verify whether external callers are broken and enforce Dimension 4 (Contract Integrity)."
                         )
+
+                    # Test Impact & Coverage Verification
+                    from webhook_agent.logic.test_impact import TestImpactAnalyzer
+
+                    test_analyzer = TestImpactAnalyzer()
+                    test_report = test_analyzer.analyze(changed_files)
+                    if test_report.coverages:
+                        test_md = test_report.to_markdown()
+                        parts.append(f"\n{test_md}")
                 except Exception as ast_err:
                     logger.debug(
                         "Could not build deterministic pre-audit compiler dossier: %s", ast_err
@@ -658,6 +671,19 @@ class WebhookAgent:
                     "Potential Risks & Edge Cases. Mark each item in 'resolutions' as RESOLVED or "
                     "UNRESOLVED with diff evidence, setting 'category' to 'CRITICAL', 'SUGGESTION', or 'RISK'."
                 )
+
+        if canonical in ("pull_request.opened", "pull_request.synchronize") or (
+            canonical.startswith("issue_comment.") and "/review" in comment_body
+        ):
+            parts.append(
+                "\n### 🚀 ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT\n"
+                "Evaluate the pre-fetched PR diff, AST verification findings, symbol impact analysis, "
+                "and test coverage findings above.\n"
+                "In Turn 1, call the `review()` tool directly with your completed CodeReviewResponse (or SyncReviewResponse) "
+                "JSON payload (event='APPROVE' or 'REQUEST_CHANGES').\n"
+                "Do NOT perform exploratory search or file inspection unless strictly required for a critical invariant. "
+                "Submit your formal review immediately."
+            )
 
         text = "\n".join(parts)
         text = _truncate_text_to_token_limit(
@@ -835,63 +861,81 @@ class WebhookAgent:
         final_session = None
 
         async def _execute_agent() -> None:
-            async for event in self._runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=user_message,
-            ):
-                # Handle token recording if usage metadata is available
-                if hasattr(event, "usage_metadata") and event.usage_metadata:
-                    total_tok = getattr(event.usage_metadata, "total_token_count", 0) or getattr(
-                        event.usage_metadata, "total_tokens", 0
-                    )
-                    if total_tok > 0:
-                        await rpm_waiter.record_actual_tokens(
-                            model=self._current_model_name,
-                            actual_tokens=total_tok,
-                        )
-
-                # Handle function response events — these are tool results from ADK
-                if hasattr(event, "get_function_responses"):
-                    responses = event.get_function_responses()
-                    if responses:
-                        logger.debug(
-                            "🔧 Received %d tool responses from ADK",
-                            len(responses),
-                        )
-                        for response in responses:
-                            results.append(
-                                ActionResult(
-                                    tool=str(response.name or ""),
-                                    success=True,
-                                    detail=f"tool executed: {response.response}",
-                                )
-                            )
-
-                # Handle text responses — log the agent's reasoning (filtering out thought tokens)
-                if (
-                    event.content
-                    and event.content.parts
-                    and any(
-                        hasattr(p, "text") and p.text and not getattr(p, "thought", False)
-                        for p in event.content.parts
-                    )
+            max_llm_calls = int(
+                os.environ.get("MAX_AUDITOR_LLM_CALLS")
+                or os.environ.get("ADK_MAX_LLM_CALLS")
+                or "4"
+            )
+            run_config = RunConfig(max_llm_calls=max_llm_calls)
+            try:
+                async for event in self._runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=user_message,
+                    run_config=run_config,
                 ):
-                    for part in event.content.parts:
-                        if getattr(part, "thought", False):
-                            continue
-                        if hasattr(part, "text") and part.text:
-                            emitted_texts.append(part.text)
+                    # Handle token recording if usage metadata is available
+                    if hasattr(event, "usage_metadata") and event.usage_metadata:
+                        total_tok = getattr(
+                            event.usage_metadata, "total_token_count", 0
+                        ) or getattr(event.usage_metadata, "total_tokens", 0)
+                        if total_tok > 0:
+                            await rpm_waiter.record_actual_tokens(
+                                model=self._current_model_name,
+                                actual_tokens=total_tok,
+                            )
+
+                    # Handle function response events — these are tool results from ADK
+                    if hasattr(event, "get_function_responses"):
+                        responses = event.get_function_responses()
+                        if responses:
                             logger.debug(
-                                "💭 Agent response received (trace: %s): %s",
-                                trace_id[-4:],
-                                part.text,
+                                "🔧 Received %d tool responses from ADK",
+                                len(responses),
                             )
-                            logger.info(
-                                "🧠 Agent response: %s (trace: %s)",
-                                part.text,
-                                trace_id[-4:],
-                            )
+                            for response in responses:
+                                results.append(
+                                    ActionResult(
+                                        tool=str(response.name or ""),
+                                        success=True,
+                                        detail=f"tool executed: {response.response}",
+                                    )
+                                )
+
+                    # Handle text responses — log the agent's reasoning (filtering out thought tokens)
+                    if (
+                        event.content
+                        and event.content.parts
+                        and any(
+                            hasattr(p, "text") and p.text and not getattr(p, "thought", False)
+                            for p in event.content.parts
+                        )
+                    ):
+                        for part in event.content.parts:
+                            if getattr(part, "thought", False):
+                                continue
+                            if hasattr(part, "text") and part.text:
+                                emitted_texts.append(part.text)
+                                logger.debug(
+                                    "💭 Agent response received (trace: %s): %s",
+                                    trace_id[-4:],
+                                    part.text,
+                                )
+                                logger.info(
+                                    "🧠 Agent response: %s (trace: %s)",
+                                    part.text,
+                                    trace_id[-4:],
+                                )
+            except Exception as run_err:
+                if "LlmCallsLimitExceededError" in type(run_err).__name__:
+                    logger.warning(
+                        "🛑 Auditor reached max LLM calls limit (%d calls) for trace %s: %s",
+                        max_llm_calls,
+                        trace_id[-4:],
+                        run_err,
+                    )
+                else:
+                    raise
 
         changed_files_list = list(raw.get("changed_files") or [])
         deterministic_state = {
