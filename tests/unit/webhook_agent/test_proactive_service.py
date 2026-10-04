@@ -307,3 +307,68 @@ class TestProactiveEvaluator:
         # Exactly 1 thread successfully claimed the reconciliation slot
         assert results.count(True) == 1
         assert results.count(False) == 19
+
+    def test_release_reconciliation_claim_allows_reclaim(self):
+        from webhook_agent.proactive_service import (
+            release_reconciliation_claim,
+            try_claim_reconciliation,
+        )
+
+        key = "cgj8702-org/hannibal-hub#301#1122334"
+        assert try_claim_reconciliation(key) is True
+        assert try_claim_reconciliation(key) is False
+
+        release_reconciliation_claim(key)
+        assert try_claim_reconciliation(key) is True
+
+    def test_is_reconciliation_claimed_checks_without_acquiring(self):
+        from webhook_agent.proactive_service import (
+            is_reconciliation_claimed,
+            try_claim_reconciliation,
+        )
+
+        key = "cgj8702-org/hannibal-hub#302#aabbcc"
+        assert is_reconciliation_claimed(key) is False
+        assert try_claim_reconciliation(key) is True
+        assert is_reconciliation_claimed(key) is True
+
+    def test_build_reconciliation_cache_key_format(self):
+        from webhook_agent.proactive_service import build_reconciliation_cache_key
+
+        assert (
+            build_reconciliation_cache_key("owner/repo", 42, "deadbeef") == "owner/repo#42#deadbeef"
+        )
+
+    def test_webhook_pre_claim_suppresses_proactive_sweep_reconciliation(self):
+        from webhook_agent.proactive_service import (
+            build_reconciliation_cache_key,
+            try_claim_reconciliation,
+        )
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_pr = MagicMock()
+        mock_pr.number = 299
+        mock_pr.mergeable = True
+        mock_pr.draft = False
+        mock_pr.created_at = datetime.now(UTC) - timedelta(minutes=10)
+        mock_pr.head.sha = "webhooksha123"
+        mock_pr.get_reviews.return_value = []
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_reactions.return_value = []
+        mock_repo.get_pulls.return_value = [mock_pr]
+
+        # Simulate incoming webhook claiming the PR audit first
+        key = build_reconciliation_cache_key("cgj8702-org/hannibal-hub", 299, "webhooksha123")
+        assert try_claim_reconciliation(key) is True
+
+        # Now proactive sweep runs on the mature PR
+        callback = MagicMock()
+        evaluator = ProactiveEvaluator(
+            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
+        )
+        results = evaluator.evaluate_open_prs()
+
+        # Proactive sweep must NOT dispatch a duplicate reconciliation event
+        assert results == []
+        callback.assert_not_called()

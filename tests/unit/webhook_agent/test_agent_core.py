@@ -1129,3 +1129,35 @@ class TestReviewIdempotency:
 
         assert sum(submitted for _result, submitted in results) == 1
         assert pr.create_review.call_count == 1
+
+
+class TestRunInBgLoop:
+    def test_run_in_bg_loop_executes_coroutine(self):
+        from webhook_agent.core.loop_helpers import run_in_bg_loop
+
+        async def _sample_coro():
+            return 42
+
+        res = run_in_bg_loop(_sample_coro())
+        assert res == 42
+
+    def test_run_in_bg_loop_cancels_future_on_timeout(self):
+        from concurrent.futures import TimeoutError as FutureTimeoutError
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.core.loop_helpers import run_in_bg_loop
+
+        async def _slow_coro():
+            return "done"
+
+        coro = _slow_coro()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = FutureTimeoutError("Timed out")
+
+        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future):
+            with pytest.raises(FutureTimeoutError):
+                run_in_bg_loop(coro)
+
+        coro.close()
+        # Verified that future.cancel() was called to prevent zombie task
+        mock_future.cancel.assert_called_once()

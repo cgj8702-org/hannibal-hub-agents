@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Coroutine
 from concurrent.futures import CancelledError, Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from webhook_agent.logic.genai_provider import get_text_generation_provider
@@ -71,7 +72,14 @@ def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
         # Wait for result; use a 600s timeout to allow complex multi-step reasoning
         # and rate-limiter pauses without prematurely failing the delivery.
         return future.result(timeout=600)
+    except (TimeoutError, FutureTimeoutError):
+        future.cancel()
+        logger.error(
+            "⏱️ Timed out waiting for coroutine in background loop (600s); cancelled background task"
+        )
+        raise
     except CancelledError:
+        future.cancel()
         raise
     except Exception:
         # Re-raise after logging to make debugging easier in logs
