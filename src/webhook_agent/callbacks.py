@@ -66,6 +66,12 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     callback_context.state["review_submitted_in_this_turn"] = False
     callback_context.state["mutating_tool_executed_in_this_turn"] = False
     callback_context.state.setdefault("tools_executed", [])
+    if callback_context.state.get("deterministic_precompiled_ast"):
+        tools_executed = callback_context.state["tools_executed"]
+        if "verify_python_ast" not in tools_executed:
+            tools_executed.append("verify_python_ast")
+        if "check_symbol_impact" not in tools_executed:
+            tools_executed.append("check_symbol_impact")
     agent_name = getattr(callback_context, "agent_name", None) or getattr(
         getattr(callback_context, "agent", None), "name", "unknown_agent"
     )

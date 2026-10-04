@@ -75,7 +75,6 @@ from webhook_agent.tools.diff_tools import (
     verify_line_reference_tool,
 )
 from webhook_agent.tools.search_tool import google_search_grounding_tool
-from webhook_agent.tools.sequential_thinking import sequential_thinking_tool
 from webhook_agent.tools.symbol_tools import check_symbol_impact_tool
 from webhook_agent.webhook_types import ActionResult
 
@@ -169,22 +168,25 @@ Your core mission is to protect repository hygiene, audit code changes with clin
 
 ### Reasoning & Grounding Principles
 
-1. **Understand Context**: Analyze user requests, pull request diffs, and codebase structure.
+1. **Understand Context**: Analyze user requests, pull request diffs, pre-compiled AST dossier, and codebase structure.
 2. **Grounding & Codebase Investigation Pre-Check**:
    - Before claiming that code, environment variable defaults, teardown blocks, or unit tests are missing in a PR review:
    - You MUST call `search_codebase` and `read_file` to search and inspect target files first.
-   - Use `sequential_thinking` to step through multi-thought reasoning, formulate hypotheses, test them against codebase searches, and verify logic.
+   - Internalize reasoning via your native thinking capabilities to formulate hypotheses and test them against diffs and codebase context.
 3. **STRICT PROHIBITION ON ASKING QUESTIONS IN OUTPUT**:
    - DO NOT output open questions, speculative queries, or rhetorical prompts (e.g. "Can we verify...", "Is there a reason...", "Should we check...") to the PR author in final review output.
-   - If you have questions about existing code, conventions, default environment variables, or behavior, use `search_codebase` and `read_file` to find the answers yourself during execution, or record them as internal reasoning thoughts via `sequential_thinking`.
+   - If you have questions about existing code, conventions, default environment variables, or behavior, use `search_codebase` and `read_file` to find the answers yourself during execution.
    - All final review action items MUST be concrete, verified technical assertions with exact file and line citations.
 4. **Code Snippet & Backtick Formatting**:
    - All code snippets in `suggested_fix` or inline recommendations MUST be properly wrapped in backticks (`code`) for single-line expressions or valid markdown code blocks (```python ... ```) for multi-line code.
-5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `sequential_thinking`, `read_file`, `review`, `verify_python_ast`, `check_symbol_impact`, etc.) without any prefix.
-6. **AST & Structural Integrity Verification**:
-   - For Python file modifications, call `verify_python_ast` to check syntax correctness, verify AST node integrity, and catch structural defects (bare excepts, mutable default arguments, unreachable statements) before submitting reviews. This is a mandatory gate enforced by `review()`.
+5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `read_file`, `review`, `verify_python_ast`, `check_symbol_impact`, etc.) without any prefix.
+6. **Deterministic AST & Structural Integrity Verification**:
+   - The deterministic pre-audit compiler already executes syntax parsing and AST node validation on modified Python files, embedding findings directly into your prompt.
+   - You do NOT need to call `verify_python_ast` if findings are already provided in the pre-audit compiler dossier. The `review()` tool automatically honors the pre-compiled dossier. Call `verify_python_ast` only if you need to inspect an unlisted Python file.
 7. **Cross-File Contract & Symbol Impact Verification**:
-   - When callable definitions, function signatures, or classes are modified, use `check_symbol_impact` to scan the repository for downstream call sites. Verify that external callers in other files are not broken by added required arguments, renamed parameters, or dropped exports.
+   - The deterministic symbol impact analyzer already maps modified signatures against the repository call graph and embeds breaking alterations in your prompt. Call `check_symbol_impact` only if an unlisted symbol requires additional checking.
+8. **Fast-Pass Review Velocity (1 to 2 Turns Target)**:
+   - Maximize audit velocity and conserve API rate limits. Evaluate the pre-compiled dossier, diff, and contract impact, then call `review()` directly. Avoid chatty or exploratory tool loops unless inspecting an external file strictly required for grounding.
 
 ---
 
@@ -228,7 +230,7 @@ These rules override your judgment. Apply them mechanically based on your findin
   2) Any finding lacks a positive integer `line` number (> 0).
   3) Any finding lacks concrete code in `suggested_fix` or uses generic boilerplate (e.g. "Address requested changes before merge").
   4) You pass `REQUEST_CHANGES` without at least one actionable critical issue (or an UNRESOLVED item in sync reviews).
-  5) The PR modifies Python files (`.py`), but you did not execute `verify_python_ast` before calling `review()`.
+  5) The PR modifies Python files (`.py`), but you neither had pre-compiled AST verification nor executed `verify_python_ast` before calling `review()`.
   6) You pass `APPROVE`, but `verified_invariants` is missing or empty. An `APPROVE` verdict strictly requires at least one concrete invariant/boundary condition with exact `path`, positive integer `line`, and concrete `evidence`. If no invariant is verified, change verdict to `COMMENT` or `REQUEST_CHANGES`.
   If `review()` returns an error, examine the rejection details, locate the exact file and line from the diff, provide real replacement code, and call `review()` again.
 
@@ -254,7 +256,7 @@ These rules override your judgment. Apply them mechanically based on your findin
 - A finding must point to something **DIRECTLY OBSERVABLE** in the diff at the line you anchor it to.
 - Do NOT report that something is absent (e.g. "import is missing", "function is not defined") unless you are reviewing a newly added file in full. In partial diffs, definitions normally exist outside the hunk.
 - Do NOT speculate on issues that require tracing across unshown files, guessing external inputs, or executing code. If a finding cannot be verified from the visible diff lines alone, drop it.
-- **Diff Scan Protocol**: File by file, scan the diff and formulate your thoughts using `sequential_thinking` and `search_codebase`. Then output your final findings as EXACTLY ONE JSON object conforming to `CodeReviewResponse` or `SyncReviewResponse`.
+- **Diff Scan Protocol**: File by file, scan the diff and formulate your thoughts using native reasoning and `search_codebase` if external context is needed. Then output your final findings as EXACTLY ONE JSON object conforming to `CodeReviewResponse` or `SyncReviewResponse`.
 
 ### Dependabot / Dependency PR Protocol (MANDATORY)
 
@@ -351,7 +353,6 @@ class WebhookAgent:
                 check_symbol_impact_tool,
                 google_search_grounding_tool,
                 search_codebase_tool,
-                sequential_thinking_tool,
             ],
         )
 
@@ -596,6 +597,7 @@ class WebhookAgent:
                             f"{dossier_text}\n\n"
                             f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
                         )
+                        event_data["deterministic_precompiled_ast"] = True
 
                     # Cross-File Symbol Dependency & Breaking Signature Graph
                     from webhook_agent.logic.symbol_graph import SymbolImpactAnalyzer
@@ -978,27 +980,26 @@ class WebhookAgent:
 
                     # Set user_state values - they get merged into session.state by InMemorySessionService
                     # This is needed because session copies are returned and our direct mutations wouldn't persist
-                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
-                        user_id, {}
-                    )["gh_client"] = gh_client
-                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
-                        user_id, {}
-                    )["repo_full_name"] = repo_full_name
-
-                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
-                        user_id, {}
-                    )["sender"] = user_id
-                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
-                        user_id, {}
-                    )["review_mode"] = (
+                    user_state_map = self._session_service.user_state.setdefault(
+                        self._app_name, {}
+                    ).setdefault(user_id, {})
+                    user_state_map["gh_client"] = gh_client
+                    user_state_map["repo_full_name"] = repo_full_name
+                    user_state_map["sender"] = user_id
+                    user_state_map["review_mode"] = (
                         "sync" if canonical == "pull_request.synchronize" else "initial"
                     )
-                    self._session_service.user_state.setdefault(self._app_name, {}).setdefault(
-                        user_id, {}
-                    )["formal_review_eligible"] = _is_formal_review_eligible(
+                    user_state_map["formal_review_eligible"] = _is_formal_review_eligible(
                         canonical,
                         comment_body,
                     )
+                    if event_data.get("deterministic_precompiled_ast"):
+                        user_state_map["deterministic_precompiled_ast"] = True
+                        tools_exec = user_state_map.setdefault("tools_executed", [])
+                        if "verify_python_ast" not in tools_exec:
+                            tools_exec.append("verify_python_ast")
+                        if "check_symbol_impact" not in tools_exec:
+                            tools_exec.append("check_symbol_impact")
                     # Execute the ADK runner with current model
                     await _execute_agent()
 

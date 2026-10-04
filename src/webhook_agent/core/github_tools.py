@@ -797,11 +797,12 @@ def review(
 
             modifies_python = any(f.endswith(".py") for f in changed_files)
             if modifies_python:
+                deterministic_precompiled = bool(state_dict.get("deterministic_precompiled_ast"))
                 tools_executed = state_dict.get("tools_executed", [])
                 tools_set = (
                     set(tools_executed) if isinstance(tools_executed, (list, set, tuple)) else set()
                 )
-                if "verify_python_ast" not in tools_set:
+                if not deterministic_precompiled and "verify_python_ast" not in tools_set:
                     return (
                         "Error: Review submission rejected. This PR modifies Python code, but the mandatory AST "
                         "integrity and defect verification tool ('verify_python_ast') was not executed. You MUST call "
