@@ -931,6 +931,10 @@ def review(
             target_key,
             getattr(ctx, "state", None),
         )
+        if _submitted:
+            inv = getattr(ctx, "_invocation_context", None)
+            if inv is not None:
+                inv.end_invocation = True
         return result
     except Exception as e:
         if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(e)):

@@ -17,7 +17,7 @@ from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps import App
 from google.adk.events import Event, EventActions
 from google.adk.planners import BuiltInPlanner
-from google.adk.runners import Runner
+from google.adk.runners import RunConfig, Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
@@ -861,63 +861,81 @@ class WebhookAgent:
         final_session = None
 
         async def _execute_agent() -> None:
-            async for event in self._runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=user_message,
-            ):
-                # Handle token recording if usage metadata is available
-                if hasattr(event, "usage_metadata") and event.usage_metadata:
-                    total_tok = getattr(event.usage_metadata, "total_token_count", 0) or getattr(
-                        event.usage_metadata, "total_tokens", 0
-                    )
-                    if total_tok > 0:
-                        await rpm_waiter.record_actual_tokens(
-                            model=self._current_model_name,
-                            actual_tokens=total_tok,
-                        )
-
-                # Handle function response events — these are tool results from ADK
-                if hasattr(event, "get_function_responses"):
-                    responses = event.get_function_responses()
-                    if responses:
-                        logger.debug(
-                            "🔧 Received %d tool responses from ADK",
-                            len(responses),
-                        )
-                        for response in responses:
-                            results.append(
-                                ActionResult(
-                                    tool=str(response.name or ""),
-                                    success=True,
-                                    detail=f"tool executed: {response.response}",
-                                )
-                            )
-
-                # Handle text responses — log the agent's reasoning (filtering out thought tokens)
-                if (
-                    event.content
-                    and event.content.parts
-                    and any(
-                        hasattr(p, "text") and p.text and not getattr(p, "thought", False)
-                        for p in event.content.parts
-                    )
+            max_llm_calls = int(
+                os.environ.get("MAX_AUDITOR_LLM_CALLS")
+                or os.environ.get("ADK_MAX_LLM_CALLS")
+                or "4"
+            )
+            run_config = RunConfig(max_llm_calls=max_llm_calls)
+            try:
+                async for event in self._runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=user_message,
+                    run_config=run_config,
                 ):
-                    for part in event.content.parts:
-                        if getattr(part, "thought", False):
-                            continue
-                        if hasattr(part, "text") and part.text:
-                            emitted_texts.append(part.text)
+                    # Handle token recording if usage metadata is available
+                    if hasattr(event, "usage_metadata") and event.usage_metadata:
+                        total_tok = getattr(
+                            event.usage_metadata, "total_token_count", 0
+                        ) or getattr(event.usage_metadata, "total_tokens", 0)
+                        if total_tok > 0:
+                            await rpm_waiter.record_actual_tokens(
+                                model=self._current_model_name,
+                                actual_tokens=total_tok,
+                            )
+
+                    # Handle function response events — these are tool results from ADK
+                    if hasattr(event, "get_function_responses"):
+                        responses = event.get_function_responses()
+                        if responses:
                             logger.debug(
-                                "💭 Agent response received (trace: %s): %s",
-                                trace_id[-4:],
-                                part.text,
+                                "🔧 Received %d tool responses from ADK",
+                                len(responses),
                             )
-                            logger.info(
-                                "🧠 Agent response: %s (trace: %s)",
-                                part.text,
-                                trace_id[-4:],
-                            )
+                            for response in responses:
+                                results.append(
+                                    ActionResult(
+                                        tool=str(response.name or ""),
+                                        success=True,
+                                        detail=f"tool executed: {response.response}",
+                                    )
+                                )
+
+                    # Handle text responses — log the agent's reasoning (filtering out thought tokens)
+                    if (
+                        event.content
+                        and event.content.parts
+                        and any(
+                            hasattr(p, "text") and p.text and not getattr(p, "thought", False)
+                            for p in event.content.parts
+                        )
+                    ):
+                        for part in event.content.parts:
+                            if getattr(part, "thought", False):
+                                continue
+                            if hasattr(part, "text") and part.text:
+                                emitted_texts.append(part.text)
+                                logger.debug(
+                                    "💭 Agent response received (trace: %s): %s",
+                                    trace_id[-4:],
+                                    part.text,
+                                )
+                                logger.info(
+                                    "🧠 Agent response: %s (trace: %s)",
+                                    part.text,
+                                    trace_id[-4:],
+                                )
+            except Exception as run_err:
+                if "LlmCallsLimitExceededError" in type(run_err).__name__:
+                    logger.warning(
+                        "🛑 Auditor reached max LLM calls limit (%d calls) for trace %s: %s",
+                        max_llm_calls,
+                        trace_id[-4:],
+                        run_err,
+                    )
+                else:
+                    raise
 
         changed_files_list = list(raw.get("changed_files") or [])
         deterministic_state = {
