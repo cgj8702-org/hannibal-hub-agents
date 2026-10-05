@@ -18,7 +18,7 @@ from pathlib import Path
 from google.adk.agents.context import Context
 from google.genai import Client
 
-from webhook_agent.logic.constants import DEFAULT_ALLOW_AUTOMATED_MUTATIONS
+from webhook_agent.constants import DEFAULT_ALLOW_AUTOMATED_MUTATIONS
 
 logger = logging.getLogger("webhook_agent.auto_fix")
 
@@ -26,7 +26,7 @@ logger = logging.getLogger("webhook_agent.auto_fix")
 def _get_shared_genai_client() -> Client | None:
     """Fallback to retrieve shared GenAI client for LLM fix generation."""
     try:
-        from webhook_agent.logic.rate_limiter import get_active_api_key
+        from webhook_agent.models.rate_limiter import get_active_api_key
 
         key = get_active_api_key()
         if key:
@@ -97,7 +97,7 @@ def auto_fix_pr_feedback(
         # 1. Fetch remote branch details
         from github import Github
 
-        from webhook_agent.logic.rate_limiter import get_active_api_key
+        from webhook_agent.models.rate_limiter import get_active_api_key
 
         token = get_active_api_key()
         gh = Github(token)

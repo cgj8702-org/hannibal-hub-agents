@@ -1,31 +1,40 @@
-"""Centralized non-sensitive infrastructure constants and static defaults.
+"""Backward-compatible re-exports for logic constants.
 
-These constants serve as non-sensitive defaults across the repository,
-allowing the application to run out-of-the-box while still permitting
-environment variable overrides via os.getenv("VAR_NAME", DEFAULT_CONSTANT).
+Canonical constants module is now `webhook_agent.constants`.
 """
 
 from __future__ import annotations
 
-# --- GitHub App Constants ---
-DEFAULT_GITHUB_APP_ID = "4133145"
-DEFAULT_GITHUB_INSTALLATION_ID = "150411146"
-DEFAULT_GITHUB_REPOSITORY = "cgj8702-org/hannibal-hub-agents"
+from webhook_agent.constants import (
+    DEFAULT_ALLOW_AUTOMATED_MUTATIONS,
+    DEFAULT_COMPUTE_HOST_PROJECT,
+    DEFAULT_FEATURE_AGENT_PROJECT,
+    DEFAULT_FIRESTORE_PROJECT,
+    DEFAULT_GITHUB_APP_ID,
+    DEFAULT_GITHUB_INSTALLATION_ID,
+    DEFAULT_GITHUB_REPOSITORY,
+    DEFAULT_PUBSUB_DEAD_LETTER_TOPIC,
+    DEFAULT_PUBSUB_PROJECT,
+    DEFAULT_PUBSUB_SUBSCRIPTION,
+    DEFAULT_PUBSUB_TOPIC,
+    DEFAULT_WEBHOOK_FREE_PROJECT,
+    DEFAULT_WEBHOOK_PAID_PROJECT,
+    DEFAULT_WEBHOOK_TIER,
+)
 
-# --- GCP Multi-Project Identifiers ---
-DEFAULT_PUBSUB_PROJECT = "cgj8702-webhook-agent"
-DEFAULT_FIRESTORE_PROJECT = DEFAULT_PUBSUB_PROJECT
-DEFAULT_WEBHOOK_PAID_PROJECT = "cgj8702-webhook-agent"
-DEFAULT_WEBHOOK_FREE_PROJECT = "gen-lang-client-0615466973"
-DEFAULT_FEATURE_AGENT_PROJECT = "gen-lang-client-0613181237"
-DEFAULT_COMPUTE_HOST_PROJECT = "chatbot-project-hannibal"
-
-# --- PubSub Topic & Subscription Paths ---
-DEFAULT_PUBSUB_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks"
-DEFAULT_PUBSUB_SUBSCRIPTION = f"projects/{DEFAULT_PUBSUB_PROJECT}/subscriptions/webhooks-sub"
-DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks-dead-letter"
-
-# --- Operational Policy Defaults ---
-# Fail open / allowed by default: automated mutations enabled out of the box.
-DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"
-DEFAULT_WEBHOOK_TIER = "free"
+__all__ = [
+    "DEFAULT_ALLOW_AUTOMATED_MUTATIONS",
+    "DEFAULT_COMPUTE_HOST_PROJECT",
+    "DEFAULT_FEATURE_AGENT_PROJECT",
+    "DEFAULT_FIRESTORE_PROJECT",
+    "DEFAULT_GITHUB_APP_ID",
+    "DEFAULT_GITHUB_INSTALLATION_ID",
+    "DEFAULT_GITHUB_REPOSITORY",
+    "DEFAULT_PUBSUB_DEAD_LETTER_TOPIC",
+    "DEFAULT_PUBSUB_PROJECT",
+    "DEFAULT_PUBSUB_SUBSCRIPTION",
+    "DEFAULT_PUBSUB_TOPIC",
+    "DEFAULT_WEBHOOK_FREE_PROJECT",
+    "DEFAULT_WEBHOOK_PAID_PROJECT",
+    "DEFAULT_WEBHOOK_TIER",
+]

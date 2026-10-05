@@ -18,8 +18,8 @@ from typing import Any
 
 from google.genai import Client
 
-from webhook_agent.logic.genai_provider import get_text_generation_provider
-from webhook_agent.logic.rate_limiter import _resolve_tier, rpm_waiter
+from webhook_agent.models.genai_provider import get_text_generation_provider
+from webhook_agent.models.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.resolve_conflicts")
 
@@ -302,7 +302,7 @@ def resolve_merge_conflicts(
                 pass
 
         if genai_client is None:
-            from webhook_agent.logic.rate_limiter import get_active_api_key
+            from webhook_agent.models.rate_limiter import get_active_api_key
 
             active_key = get_active_api_key()
             if active_key:

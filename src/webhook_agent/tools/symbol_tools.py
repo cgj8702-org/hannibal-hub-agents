@@ -6,7 +6,7 @@ import logging
 
 from google.adk.tools import FunctionTool
 
-from webhook_agent.logic.symbol_graph import SymbolImpactAnalyzer
+from webhook_agent.analysis.symbol_graph import SymbolImpactAnalyzer
 
 logger = logging.getLogger("webhook_agent.tools.symbol_tools")
 

@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from .audit_schema import AuditVerdict, RiskItem
-from .logic.duplicate_detector import already_raised, build_exclusions, group_repeated_findings
+from .review.duplicate_detector import already_raised, build_exclusions, group_repeated_findings
 from .schemas import IssueItem
 from .tools.diff_tools import (
     _strip_diff_prefix,

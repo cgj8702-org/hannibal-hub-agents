@@ -19,7 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import BaseTool, ToolContext
 
-from webhook_agent.logic.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
+from webhook_agent.models.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.callbacks")
 
@@ -130,7 +130,7 @@ async def before_model_callback(
 
     # Context Caching Model Guard: Strictly only Gemini 3+ models support context caching.
     # Gemma models (e.g. gemma-4-31b-it) and pre-Gemini-3 models do NOT support caching.
-    from webhook_agent.logic.model_chain import is_gemini_3_plus
+    from webhook_agent.models.model_chain import is_gemini_3_plus
 
     if not is_gemini_3_plus(target_model):
         if hasattr(llm_request, "cache_config"):

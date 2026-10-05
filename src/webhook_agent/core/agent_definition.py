@@ -41,32 +41,32 @@ from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
     run_in_bg_loop,
 )
-from webhook_agent.logic.model_chain import (
+from webhook_agent.logic.plugins import (
+    ToolOutputPruningPlugin,
+    WebhookHistoryPruningPlugin,
+)
+from webhook_agent.memory_service import InMemoryMemoryService
+from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
     _is_transient_error,
     _select_model_for_event,
     get_active_model,
     is_gemini_3_plus,
 )
-from webhook_agent.logic.model_factory import get_adk_model
-from webhook_agent.logic.plugins import (
-    ToolOutputPruningPlugin,
-    WebhookHistoryPruningPlugin,
-)
-from webhook_agent.logic.rate_limiter import (
+from webhook_agent.models.model_factory import get_adk_model
+from webhook_agent.models.rate_limiter import (
     _resolve_tier,
     extract_rate_limit_details,
     get_active_api_key,
     rpm_waiter,
 )
-from webhook_agent.logic.review_checkpoint import review_checkpoint_manager
-from webhook_agent.logic.writeback_policy import (
+from webhook_agent.review.review_enforcer import _submit_formal_review
+from webhook_agent.review.writeback_policy import (
     _is_formal_review_eligible,
     evaluate_writeback_policy,
 )
-from webhook_agent.memory_service import InMemoryMemoryService
-from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
+from webhook_agent.state.review_checkpoint import review_checkpoint_manager
 from webhook_agent.tools import resolve_conflicts as resolve_conflicts_module
 from webhook_agent.tools.codebase_search import search_codebase_tool
 from webhook_agent.tools.search_tool import google_search_grounding_tool
@@ -296,7 +296,7 @@ class WebhookAgent:
 
         # Track current model chain (TPM Descending)
         from webhook_agent import webhook_agent as wa_mod
-        from webhook_agent.logic.model_chain import get_model_chain as default_get_chain
+        from webhook_agent.models.model_chain import get_model_chain as default_get_chain
 
         get_chain_fn = getattr(wa_mod, "get_model_chain", default_get_chain) or default_get_chain
         self._model_chain = get_chain_fn()
@@ -400,7 +400,7 @@ class WebhookAgent:
         depleted_registry = getattr(wa_mod, "_DEPLETED_MODEL_REGISTRY", _DEPLETED_MODEL_REGISTRY)
         depleted_registry.mark_depleted(self._current_model_name, error=error)
 
-        from webhook_agent.logic.model_chain import get_model_chain as default_get_chain
+        from webhook_agent.models.model_chain import get_model_chain as default_get_chain
 
         get_chain_fn = getattr(wa_mod, "get_model_chain", default_get_chain) or default_get_chain
         full_chain = get_chain_fn()
@@ -593,7 +593,7 @@ class WebhookAgent:
                     event_data["deterministic_precompiled_ast"] = True
 
                     # Cross-File Symbol Dependency & Breaking Signature Graph
-                    from webhook_agent.logic.symbol_graph import SymbolImpactAnalyzer
+                    from webhook_agent.analysis.symbol_graph import SymbolImpactAnalyzer
 
                     sym_analyzer = SymbolImpactAnalyzer()
                     impact_reports = sym_analyzer.analyze_modified_files(changed_files)
@@ -612,7 +612,7 @@ class WebhookAgent:
                         )
 
                     # Test Impact & Coverage Verification
-                    from webhook_agent.logic.test_impact import TestImpactAnalyzer
+                    from webhook_agent.analysis.test_impact import TestImpactAnalyzer
 
                     test_analyzer = TestImpactAnalyzer()
                     test_report = test_analyzer.analyze(changed_files)

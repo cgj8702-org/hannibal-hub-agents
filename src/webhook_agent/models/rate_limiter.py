@@ -1,0 +1,542 @@
+"""
+Rate Limiter for Hannibal Hub Agents API calls.
+
+Ported from hannibal-hub with a deliberate tier-resolution adaptation:
+- hannibal-hub resolves tier via CHAT_KEY + HANNIBAL_TIER.
+- hannibal-hub-agents resolves tier via FREE_KEY / PAID_KEY / GEMINI_API_KEY.
+
+Supports:
+- Dual-tier (free/paid) per-model RPM/TPM/RPD limits loaded from the registry.
+- Sliding-window TPM token expiration (multi-request aware).
+- Burst RPM handling up to the model's per-minute limit.
+- Zero-quota fast-fail: models with 0 RPM/RPD on the active tier are rejected.
+"""
+
+import asyncio
+import collections
+import contextlib
+import json
+import logging
+import os
+import re
+import time
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger("hannibal_rate_limiter")
+
+
+class RateLimitExceededError(Exception):
+    """Raised when required rate limit or token wait exceeds the configured maximum wait threshold."""
+
+    def __init__(
+        self,
+        model: str,
+        wait_time: float,
+        max_wait: float,
+        limit_type: str = "rpm",
+    ) -> None:
+        self.model = model
+        self.wait_time = wait_time
+        self.max_wait = max_wait
+        self.limit_type = limit_type
+        super().__init__(
+            f"Model '{model}' {limit_type.upper()} rate limit exceeded: "
+            f"requires {wait_time:.1f}s wait, exceeding max_wait of {max_wait:.1f}s."
+        )
+
+
+def _resolve_registry_path() -> Path:
+    """Resolve the path to gemini_models.json in either assets/registries or src/assets/registries."""
+    candidates = [
+        Path(__file__).resolve().parents[1] / "assets" / "registries" / "gemini_models.json",
+        Path(__file__).resolve().parents[2] / "assets" / "registries" / "gemini_models.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[1]
+
+
+def _load_rate_limits(registry_path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Dynamically load rate limits (rpm and tpm) for free and paid tiers from gemini_models.json."""
+    limits_by_model: dict[str, dict[str, Any]] = {}
+    path = registry_path or _resolve_registry_path()
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "models" in data:
+                for m in data.get("models", []):
+                    if isinstance(m, dict) and "name" in m:
+                        name = m["name"]
+                        rate_limits = m.get("rate_limits", {})
+                        limits_by_model[name] = rate_limits
+                        limits_by_model[name.replace("models/", "")] = rate_limits
+            elif isinstance(data, dict):
+                for name, rate_limits in data.items():
+                    limits_by_model[name] = rate_limits
+                    limits_by_model[name.replace("models/", "")] = rate_limits
+    except Exception as e:
+        logger.error("Failed to load rate limits from %s: %s", path.name, e)
+    return limits_by_model
+
+
+_CONFIG_CACHE: tuple[float, str] = (0.0, "free")
+
+
+def _get_firestore_tier() -> str:
+    """Read WEBHOOK_TIER from Firestore collection system_config/runtime with 30s local cache."""
+    global _CONFIG_CACHE
+    now = time.time()
+    last_fetch, cached_tier = _CONFIG_CACHE
+    if now - last_fetch < 30.0:
+        return cached_tier
+
+    try:
+        from webhook_agent.models.firestore_registry import firestore_depleted_registry
+
+        db = firestore_depleted_registry._get_db()
+        if db is not None:
+            doc = db.collection("system_config").document("runtime").get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                val = str(data.get("WEBHOOK_TIER", "")).lower()
+                if val in ("free", "paid"):
+                    _CONFIG_CACHE = (now, val)
+                    return val
+    except Exception as exc:
+        logger.debug("Firestore dynamic config read skipped: %s", exc)
+
+    return "free"
+
+
+ALWAYS_INCLUDED_MODELS = ["gemma-4-31b-it", "gemma-4-26b-a4b-it"]
+
+
+def get_allowed_models(tier: str | None = None) -> list[str]:
+    """Resolves allowed models for the specified or active tier.
+
+    Excludes models with 0 RPM or 0 RPD on the given tier. Always includes Gemma 4 models.
+    """
+    resolved_tier = tier or _resolve_tier()
+    allowed = set(ALWAYS_INCLUDED_MODELS)
+    try:
+        registry_path = _resolve_registry_path()
+        if registry_path.exists():
+            data = json.loads(registry_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "models" in data:
+                for m in data.get("models", []):
+                    if isinstance(m, dict) and "name" in m:
+                        model_name = m["name"].replace("models/", "")
+                        acc_tiers = m.get("accessible_tiers", ["free", "paid"])
+                        rate_limits = m.get("rate_limits", {})
+                        tier_data = rate_limits.get(resolved_tier, {})
+                        if isinstance(tier_data, dict):
+                            rpm = tier_data.get("rpm", 0)
+                            rpd = tier_data.get("rpd", 0.0)
+                            if resolved_tier in acc_tiers or (rpm > 0 and rpd > 0):
+                                allowed.add(model_name)
+            elif isinstance(data, dict):
+                for model_key, limits in data.items():
+                    model_name = model_key.replace("models/", "")
+                    if isinstance(limits, dict) and resolved_tier in limits:
+                        tier_data = limits[resolved_tier]
+                        if isinstance(tier_data, dict):
+                            rpm = tier_data.get("rpm", 0)
+                            rpd = tier_data.get("rpd", 0.0)
+                            if rpm > 0 and rpd > 0:
+                                allowed.add(model_name)
+    except Exception as e:
+        logger.error("Failed to resolve allowed models from gemini_models.json: %s", e)
+
+    return sorted(allowed)
+
+
+def resolve_webhook_api_key() -> tuple[str, str, str]:
+    """Resolve the webhook API key strictly from WEBHOOK_FREE_KEY or WEBHOOK_PAID_KEY based on tier.
+
+    Uses Secret Manager fallback if env var is missing or empty.
+    Returns:
+        (api_key, key_source, resolved_tier)
+    """
+    from webhook_agent.models.secret_manager import resolve_secret
+
+    tier = _resolve_tier()
+    if tier == "paid":
+        paid_key = resolve_secret("WEBHOOK_PAID_KEY")
+        if not paid_key or paid_key.lower() in ("dummy", "dummy-key-for-dev", "none"):
+            raise RuntimeError("CRITICAL: Missing required secret 'WEBHOOK_PAID_KEY'")
+        return (paid_key, "WEBHOOK_PAID_KEY", "paid")
+
+    free_key = resolve_secret("WEBHOOK_FREE_KEY")
+    if not free_key or free_key.lower() in ("dummy", "dummy-key-for-dev", "none"):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            pytest_key = (
+                os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "pytest_autokey"
+            )
+            return (pytest_key, "PYTEST_ENVIRONMENT", tier)
+        raise RuntimeError("CRITICAL: Missing required secret 'WEBHOOK_FREE_KEY'")
+    return (free_key, "WEBHOOK_FREE_KEY", "free")
+
+
+def get_active_api_key() -> str:
+    """Get active API key strictly based on resolved WEBHOOK_TIER.
+
+    Fast-fails if WEBHOOK_FREE_KEY or WEBHOOK_PAID_KEY is missing.
+    """
+    key, _, _ = resolve_webhook_api_key()
+    if key:
+        os.environ["GEMINI_API_KEY"] = key
+        os.environ["GOOGLE_API_KEY"] = key
+    return key
+
+
+_METADATA_CACHE: tuple[float, str | None] = (0.0, None)
+
+
+def _get_gce_metadata_tier() -> str | None:
+    """Fetch WEBHOOK_TIER from GCE VM Instance Metadata server with 30s cache."""
+    global _METADATA_CACHE
+    now = time.time()
+    last_fetch, cached_tier = _METADATA_CACHE
+    if now - last_fetch < 30.0:
+        return cached_tier
+
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            "http://metadata.google.internal/computeMetadata/v1/instance/attributes/WEBHOOK_TIER",
+            headers={"Metadata-Flavor": "Google"},
+        )
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            val = resp.read().decode("utf-8").strip().lower()
+            if val in ("free", "paid"):
+                _METADATA_CACHE = (now, val)
+                return val
+    except Exception:
+        pass
+
+    _METADATA_CACHE = (now, None)
+    return None
+
+
+def _resolve_tier() -> str:
+    """Resolve active tier for Webhook Agent (strictly defaulting to 'free').
+
+    Resolution cascade:
+    1. Explicit env override: WEBHOOK_TIER ("free" or "paid").
+    2. GCE VM Instance Metadata: instance/attributes/WEBHOOK_TIER.
+    3. Dynamic Firestore config: system_config/runtime -> WEBHOOK_TIER.
+    4. Strict default: "free".
+    """
+    env_tier = (os.getenv("WEBHOOK_TIER") or "").lower()
+    if env_tier in ("free", "paid"):
+        return env_tier
+
+    gce_tier = _get_gce_metadata_tier()
+    if gce_tier in ("free", "paid"):
+        return gce_tier
+
+    return _get_firestore_tier()
+
+
+class RPMWaiter:
+    """Sliding-window rate limiter keyed by model with free/paid tier awareness."""
+
+    def __init__(
+        self,
+        registry_path: Path | None = None,
+        default_limit: int = 10,
+        window: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], Awaitable[Any]] | None = None,
+    ):
+        self.default_limit = default_limit
+        self.window = window
+        self.histories: dict[str, list[float]] = collections.defaultdict(list)
+        self.token_histories: dict[str, list[Any]] = collections.defaultdict(list)
+        self.lock = asyncio.Lock()
+        self.clock = clock
+        self.sleeper = sleeper
+        self.registry_path = registry_path or _resolve_registry_path()
+        self.model_limits = _load_rate_limits(self.registry_path)
+
+    def _norm(self, model_name: str) -> str:
+        if not model_name:
+            return "default"
+        return model_name.replace("models/", "").strip().lower()
+
+    async def check_and_wait(
+        self,
+        model: str = "default",
+        rpm_override: int | None = None,
+        estimated_tokens: int = 0,
+        tier: str | None = None,
+        max_wait: float | None = None,
+    ) -> None:
+        """Check RPM/TPM limits for the given model, sleeping to respect them.
+
+        Args:
+            model: Model name (with or without the 'models/' prefix).
+            rpm_override: Optional explicit RPM limit (bypasses registry).
+            estimated_tokens: Estimated input+output tokens for TPM accounting.
+            tier: Active tier ("free" or "paid"). Resolved from env if omitted.
+            max_wait: Optional max wait threshold in seconds. Fast-fails if exceeded.
+
+        Raises:
+            ValueError: If the model has 0 RPM/RPD quota on the active tier.
+            RateLimitExceededError: If required wait exceeds max_wait.
+        """
+        wait_time = 0.0
+
+        if not tier:
+            tier = _resolve_tier()
+
+        norm_model = self._norm(model)
+        full_model_key = f"models/{norm_model}"
+        model_entry = self.model_limits.get(full_model_key, self.model_limits.get(norm_model, {}))
+        if isinstance(model_entry, dict) and tier in model_entry:
+            tier_entry = model_entry[tier]
+        else:
+            tier_entry = model_entry if isinstance(model_entry, dict) else {}
+
+        rpm_limit = (
+            rpm_override if rpm_override is not None else tier_entry.get("rpm", self.default_limit)
+        )
+        if (
+            rpm_override is None
+            and tier_entry
+            and (tier_entry.get("rpm") == 0 or tier_entry.get("rpd") == 0.0)
+        ):
+            logger.warning(
+                "FAST FAIL (%s): Model has 0 quota on tier '%s'. Rejecting.",
+                norm_model,
+                tier,
+            )
+            raise ValueError(f"Model '{norm_model}' is unavailable on tier '{tier}' (0 quota).")
+
+        if rpm_limit <= 0:
+            rpm_limit = self.default_limit
+
+        tpm_limit = tier_entry.get("tpm", 0)
+
+        async with self.lock:
+            now = self.clock()
+            history = self.histories[norm_model]
+            token_history = self.token_histories[norm_model]
+
+            # Prune old RPM & TPM histories
+            history[:] = [t for t in history if now - t <= self.window]
+            token_history[:] = [entry for entry in token_history if now - entry[0] <= self.window]
+
+            # 1. RPM Check (bursts allowed up to limit)
+            wait_rpm = 0.0
+            if len(history) >= rpm_limit:
+                oldest_ts = history[len(history) - rpm_limit]
+                wait_rpm = max(0.1, (oldest_ts + self.window) - now)
+                logger.info(
+                    "RPM THROTTLE (%s): Used %d/%d. Sleeping %.1fs...",
+                    norm_model,
+                    len(history),
+                    rpm_limit,
+                    wait_rpm,
+                )
+
+            # 2. TPM Check (exact sliding window token expiration)
+            wait_tpm = 0.0
+            if tpm_limit > 0 and estimated_tokens > 0:
+                active_tpm = sum(tok for _, tok, _ in token_history)
+                if active_tpm + estimated_tokens > tpm_limit:
+                    needed_tokens_to_expire = (active_tpm + estimated_tokens) - tpm_limit
+                    accumulated = 0
+                    required_ts = now
+                    for entry in token_history:
+                        ts, tok = entry[0], entry[1]
+                        accumulated += tok
+                        required_ts = ts
+                        if accumulated >= needed_tokens_to_expire:
+                            break
+                    wait_tpm = max(0.1, (required_ts + self.window) - now)
+                    logger.info(
+                        "TPM THROTTLE (%s): Active %d+%d/%d TPM limit exceeded. "
+                        "Waiting %.1fs for tokens to expire...",
+                        norm_model,
+                        active_tpm,
+                        estimated_tokens,
+                        tpm_limit,
+                        wait_tpm,
+                    )
+
+                # Hard ceiling: if finalized (actual) usage already >= 90% of TPM limit, force wait
+                finalized_tpm = sum(tok for _, tok, fin in token_history if fin)
+                ceiling_threshold = int(tpm_limit * 0.9)
+                if finalized_tpm >= ceiling_threshold:
+                    oldest_finalized = min((ts for ts, _, fin in token_history if fin), default=now)
+                    wait_ceiling = max(0.1, (oldest_finalized + self.window) - now)
+                    wait_tpm = max(wait_tpm, wait_ceiling)
+                    logger.warning(
+                        "TPM HARD CEILING (%s): Finalized %d/%d tokens (90%% threshold). "
+                        "Forcing %.1fs wait...",
+                        norm_model,
+                        finalized_tpm,
+                        tpm_limit,
+                        wait_ceiling,
+                    )
+
+            wait_time = max(wait_rpm, wait_tpm)
+
+            if max_wait is not None and wait_time > max_wait:
+                limit_type = "tpm" if wait_tpm > wait_rpm else "rpm"
+                logger.warning(
+                    "FAST FAIL RATE LIMIT (%s): Required wait %.1fs exceeds max_wait %.1fs. Failing over.",
+                    norm_model,
+                    wait_time,
+                    max_wait,
+                )
+                raise RateLimitExceededError(
+                    model=norm_model,
+                    wait_time=wait_time,
+                    max_wait=max_wait,
+                    limit_type=limit_type,
+                )
+
+            # Reserve slot
+            history.append(now + wait_time)
+            if estimated_tokens > 0:
+                token_history.append([now + wait_time, estimated_tokens, False])
+
+        if wait_time > 0:
+            sleeper_func = self.sleeper or asyncio.sleep
+            await sleeper_func(wait_time)
+
+    async def record_actual_tokens(self, model: str = "default", actual_tokens: int = 0) -> None:
+        """Update or record real token usage returned in the provider API response."""
+        if actual_tokens <= 0:
+            return
+
+        norm_model = self._norm(model)
+        async with self.lock:
+            now = self.clock()
+            token_history = self.token_histories[norm_model]
+
+            token_history[:] = [entry for entry in token_history if now - entry[0] <= self.window]
+
+            # Update the earliest estimated (unfinalized) token reservation
+            unfinalized = next((entry for entry in token_history if not entry[2]), None)
+            if unfinalized:
+                unfinalized[1] = actual_tokens
+                unfinalized[2] = True
+            else:
+                token_history.append([now, actual_tokens, True])
+
+
+RateLimiter = RPMWaiter
+rpm_waiter = RPMWaiter()
+
+
+def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
+    """Extract exact rate limit, quota, cooldown, and retry details from ADK/Google GenAI exceptions.
+
+    Unmasks nested `google.genai.errors.ClientError` attached to ADK `_ResourceExhaustedError`.
+    """
+    details: dict[str, Any] = {
+        "code": getattr(exc, "code", 429),
+        "message": str(exc),
+        "quota_limit": None,
+        "quota_value": None,
+        "retry_after_seconds": None,
+        "reason": None,
+        "headers": {},
+    }
+
+    # 1. Target underlying cause if ADK wrapped ClientError in _ResourceExhaustedError
+    candidates: list[Any] = []
+    curr: Any = exc
+    visited: set[int] = set()
+    while curr is not None and id(curr) not in visited:
+        visited.add(id(curr))
+        for attr in ("response_json", "details", "raw_response"):
+            val = getattr(curr, attr, None)
+            if val:
+                candidates.append(val)
+        curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
+
+    # 2. Inspect raw RPC details (QuotaFailure, RetryInfo, ErrorInfo)
+    items_to_scan: list[dict[str, Any]] = []
+    for cand in candidates:
+        if isinstance(cand, list):
+            items_to_scan.extend([i for i in cand if isinstance(i, dict)])
+        elif isinstance(cand, dict):
+            err = cand.get("error")
+            if isinstance(err, dict):
+                if isinstance(err.get("details"), list):
+                    items_to_scan.extend([i for i in err["details"] if isinstance(i, dict)])
+                items_to_scan.append(err)
+            if isinstance(cand.get("details"), list):
+                items_to_scan.extend([i for i in cand["details"] if isinstance(i, dict)])
+            items_to_scan.append(cand)
+
+    for item in items_to_scan:
+        # QuotaFailure metadata
+        if "metadata" in item and isinstance(item["metadata"], dict):
+            meta = item["metadata"]
+            if "quota_limit" in meta:
+                details["quota_limit"] = meta.get("quota_limit")
+            if "quota_limit_value" in meta:
+                details["quota_value"] = meta.get("quota_limit_value")
+
+        # QuotaFailure violations
+        if "violations" in item and isinstance(item["violations"], list):
+            for v in item["violations"]:
+                if isinstance(v, dict):
+                    if "quotaValue" in v and not details["quota_value"]:
+                        details["quota_value"] = v.get("quotaValue")
+                    if "quotaMetric" in v and not details["quota_limit"]:
+                        details["quota_limit"] = v.get("quotaMetric")
+
+        # ErrorInfo reason
+        if "reason" in item and not details["reason"]:
+            details["reason"] = item.get("reason")
+
+        # RetryInfo cooldown delay (e.g. "60s", "48.5s", or 60.0)
+        for delay_key in ("retryDelay", "retry_delay", "retryAfter", "retry_after"):
+            if delay_key in item and details["retry_after_seconds"] is None:
+                delay = item.get(delay_key)
+                if isinstance(delay, str):
+                    delay_clean = delay.rstrip("s").strip()
+                    with contextlib.suppress(ValueError):
+                        details["retry_after_seconds"] = float(delay_clean)
+                elif isinstance(delay, (int, float)):
+                    details["retry_after_seconds"] = float(delay)
+
+    # 3. String Regex fallback across message and stringified exception
+    if details["retry_after_seconds"] is None:
+        target = getattr(exc, "__cause__", exc) or exc
+        search_blob = f"{details['message']} {target!s}"
+        match = re.search(
+            r"(?:[Pp]lease retry in|retryDelay['\":\s]+|retry_delay['\":\s]+)\s*['\"]?([0-9.]+)\s*s?",
+            search_blob,
+        )
+        if match:
+            with contextlib.suppress(ValueError):
+                details["retry_after_seconds"] = float(match.group(1))
+
+    # 4. Inspect HTTP response headers (e.g. Retry-After, x-ratelimit-reset)
+    target = getattr(exc, "__cause__", exc) or exc
+    response = getattr(target, "response", None) or getattr(exc, "response", None)
+    if response and hasattr(response, "headers"):
+        headers = dict(response.headers)
+        details["headers"] = headers
+
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        if retry_after and details["retry_after_seconds"] is None:
+            with contextlib.suppress(ValueError):
+                details["retry_after_seconds"] = float(retry_after)
+
+        limit_req = headers.get("x-ratelimit-limit-requests")
+        if limit_req and not details["quota_value"]:
+            details["quota_value"] = limit_req
+
+    return details
