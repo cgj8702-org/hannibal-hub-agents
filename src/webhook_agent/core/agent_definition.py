@@ -1202,12 +1202,6 @@ class WebhookAgent:
         # Forward-fix: also cover issue_comment reconciliation follow-ups that emit
         # resolutions + verdict (e.g. REQUEST_CHANGES -> APPROVE flips). Otherwise
         # conversational re-reviews are silently dropped as "no actions".
-        canonical = event_data.get("canonical", "")
-        raw = event_data.get("raw_payload", {})
-        comment_body = (
-            (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
-        )
-        is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
         has_review_action = any(r.tool == "review" and r.success for r in results)
 
         is_comment_reconciliation = False
