@@ -13,6 +13,7 @@ from .audit_schema import AuditVerdict, RiskItem
 from .review.duplicate_detector import already_raised, build_exclusions, group_repeated_findings
 from .schemas import IssueItem
 from .tools.diff_tools import (
+    _norm,
     _strip_diff_prefix,
     check_window,
     verify_line_reference,
@@ -112,8 +113,118 @@ def prepare_review_payload(verdict: AuditVerdict, diff_text: str) -> dict[str, A
     return payload
 
 
-def format_suggestion_body(description: str, suggested_fix: str | None = None) -> str:
-    """Format an inline review comment body with a clean GitHub ```suggestion block if a fix is provided."""
+def is_echo_suggestion(
+    suggested_fix: str,
+    file_lines: dict[int, str],
+    line: int,
+    start_line: int | None = None,
+) -> bool:
+    """Check if suggested_fix is an echo (verbatim copy) of existing diff lines at or starting from line."""
+    if not suggested_fix or not file_lines:
+        return False
+
+    code = suggested_fix.strip()
+    if code.startswith("```"):
+        code = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", code)
+        code = re.sub(r"\n?```$", "", code)
+    code = code.strip()
+    if not code:
+        return False
+
+    norm_fix = _norm(code)
+    if not norm_fix:
+        return False
+
+    # 1. If start_line is provided and distinct from line: check explicit range
+    if start_line is not None and start_line != line:
+        s, e = min(start_line, line), max(start_line, line)
+        range_lines = [file_lines[ln] for ln in range(s, e + 1) if ln in file_lines]
+        if range_lines and norm_fix == _norm("".join(range_lines)):
+            return True
+
+    # 2. Single-line comparison at line
+    if line in file_lines and norm_fix == _norm(file_lines[line]):
+        return True
+
+    # 3. Multi-line slice comparison:
+    # If the suggestion has N lines, check if it matches a forward slice [line, line + N - 1]
+    # or backward slice [line - N + 1, line]
+    n_lines = len(code.splitlines())
+    if n_lines > 1:
+        fwd = [file_lines[ln] for ln in range(line, line + n_lines) if ln in file_lines]
+        if len(fwd) == n_lines and norm_fix == _norm("".join(fwd)):
+            return True
+
+        bwd = [file_lines[ln] for ln in range(line - n_lines + 1, line + 1) if ln in file_lines]
+        if len(bwd) == n_lines and norm_fix == _norm("".join(bwd)):
+            return True
+
+    return False
+
+
+def is_echo_description(description: str) -> bool:
+    """Check if the description is merely an observational remark accompanying an echo suggestion."""
+    desc_lower = (description or "").strip().lower()
+    if not desc_lower:
+        return True
+    echo_prefixes = (
+        "ensure",
+        "verify",
+        "check that",
+        "make sure",
+        "confirm that",
+        "note:",
+        "classification checks",
+    )
+    return any(desc_lower.startswith(p) for p in echo_prefixes)
+
+
+def filter_echo_suggestions(issues: list[Any], diff_text: str) -> list[Any]:
+    """Filter out issues whose suggested_fix is an exact echo of the diff lines."""
+    if not issues or not diff_text:
+        return issues
+
+    _, text_by_line = walk_right_side(diff_text)
+    filtered = []
+    for issue in issues:
+        p_val = getattr(issue, "path", None) or (
+            issue.get("path") if isinstance(issue, dict) else None
+        )
+        l_val = getattr(issue, "line", None) or (
+            issue.get("line") if isinstance(issue, dict) else None
+        )
+        s_val = getattr(issue, "start_line", None) or (
+            issue.get("start_line") if isinstance(issue, dict) else None
+        )
+        fix = getattr(issue, "suggested_fix", None) or (
+            issue.get("suggested_fix") if isinstance(issue, dict) else None
+        )
+        if not p_val or l_val is None or not fix:
+            filtered.append(issue)
+            continue
+
+        clean_path = _strip_diff_prefix(str(p_val))
+        fl = text_by_line.get(clean_path) or text_by_line.get(str(p_val)) or {}
+        if isinstance(l_val, int) and is_echo_suggestion(
+            fix, fl, l_val, start_line=s_val if isinstance(s_val, int) else None
+        ):
+            logger.info("Filtered echo suggestion finding at %s:%s", clean_path, l_val)
+            continue
+        filtered.append(issue)
+    return filtered
+
+
+def format_suggestion_body(
+    description: str,
+    suggested_fix: str | None = None,
+    is_multiline_anchor: bool = True,
+) -> str:
+    """Format an inline review comment body with code formatting.
+
+    If suggested_fix has multiple lines and is anchored to a single line without a range,
+    renders a ```python code block to prevent destructive one-line diff bombs in GitHub's UI.
+    Uses ```suggestion for single-line changes or multi-line changes with verified range anchors.
+    """
     desc = (description or "").strip()
     if not suggested_fix or not suggested_fix.strip():
         return desc
@@ -125,6 +236,16 @@ def format_suggestion_body(description: str, suggested_fix: str | None = None) -
         code = re.sub(r"\n?```$", "", code)
 
     code = code.rstrip()
+    if not code:
+        return desc
+
+    has_multiple_lines = "\n" in code.strip()
+    if has_multiple_lines and not is_multiline_anchor:
+        logger.info(
+            "Multi-line suggestion on single-line anchor: formatting as ```python block to prevent diff bomb"
+        )
+        return f"{desc}\n\n```python\n{code}\n```"
+
     return f"{desc}\n\n```suggestion\n{code}\n```"
 
 
@@ -168,6 +289,9 @@ def build_github_review_comments(
         line_val = getattr(issue, "line", None) or (
             issue.get("line") if isinstance(issue, dict) else None
         )
+        start_line_val = getattr(issue, "start_line", None) or (
+            issue.get("start_line") if isinstance(issue, dict) else None
+        )
         desc_val = getattr(issue, "description", "") or (
             issue.get("description", "") if isinstance(issue, dict) else ""
         )
@@ -208,7 +332,27 @@ def build_github_review_comments(
                     final_line = snapped_line
 
         if final_line is not None:
-            body = format_suggestion_body(desc_val, fix_val)
+            s_val = int(start_line_val) if isinstance(start_line_val, int) else None
+
+            # Echo check: if suggested_fix verbatim duplicates existing diff lines, suppress
+            if fix_val and is_echo_suggestion(fix_val, file_lines, final_line, start_line=s_val):
+                logger.info(
+                    "Suppressed echo suggestion comment on %s:%s (suggested_fix matches diff code)",
+                    clean_path,
+                    final_line,
+                )
+                if is_echo_description(desc_val):
+                    continue
+                fix_val = ""
+
+            # Range anchor verification for multi-line suggestions
+            is_multiline_anchor = bool(
+                s_val is not None and s_val < final_line and s_val in file_anchors
+            )
+
+            body = format_suggestion_body(
+                desc_val, fix_val, is_multiline_anchor=is_multiline_anchor
+            )
 
             # Check duplicate suppression against existing comments
             if existing_comments:
@@ -222,14 +366,17 @@ def build_github_review_comments(
                     )
                     continue
 
-            inline_comments.append(
-                {
-                    "path": clean_path,
-                    "line": final_line,
-                    "side": "RIGHT",
-                    "body": body,
-                }
-            )
+            comment_dict: dict[str, Any] = {
+                "path": clean_path,
+                "line": final_line,
+                "side": "RIGHT",
+                "body": body,
+            }
+            if is_multiline_anchor and s_val is not None:
+                comment_dict["start_line"] = s_val
+                comment_dict["start_side"] = "RIGHT"
+
+            inline_comments.append(comment_dict)
             anchored_keys.add(f"{clean_path}:{final_line}")
         else:
             logger.debug(

@@ -222,11 +222,16 @@ def _enforce_verdict(
                             "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
                         )
                         enforced_verdict = "REQUEST_CHANGES"
-                    rendered_body = render_sync_review_markdown(
-                        sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
-                    )
                     inline_comments: list[dict[str, Any]] = []
                     if diff_text:
+                        from webhook_agent.comment_poster import (
+                            build_github_review_comments,
+                            filter_echo_suggestions,
+                        )
+
+                        sync_obj.minor_suggestions = filter_echo_suggestions(
+                            sync_obj.minor_suggestions, diff_text
+                        )
                         sync_issues = list(sync_obj.critical_issues) + list(
                             sync_obj.minor_suggestions
                         )
@@ -236,6 +241,9 @@ def _enforce_verdict(
                             existing_comments=existing_comments_data,
                             max_comments=review_budget,
                         )
+                    rendered_body = render_sync_review_markdown(
+                        sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
+                    )
                     return rendered_body, enforced_verdict, inline_comments
                 elif (
                     "executive_summary" in data
@@ -250,9 +258,16 @@ def _enforce_verdict(
                             "Safety Guardrail: Prevented mechanical upgrade of REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
                         )
                         enforced_verdict = "REQUEST_CHANGES"
-                    rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
                     inline_comments = []
                     if diff_text:
+                        from webhook_agent.comment_poster import (
+                            build_github_review_comments,
+                            filter_echo_suggestions,
+                        )
+
+                        cr_obj.minor_suggestions = filter_echo_suggestions(
+                            cr_obj.minor_suggestions, diff_text
+                        )
                         cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
                         inline_comments, _ = build_github_review_comments(
                             cr_issues,
@@ -260,6 +275,7 @@ def _enforce_verdict(
                             existing_comments=existing_comments_data,
                             max_comments=review_budget,
                         )
+                    rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
                     return rendered_body, enforced_verdict, inline_comments
         except Exception as exc:
             logger.debug("Candidate JSON parse attempt skipped: %s", exc)
@@ -281,6 +297,12 @@ def _enforce_verdict(
         if review_mode == "sync":
             normalized_sync = normalize_sync_review_dict(parsed_dict)
             sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+            if diff_text:
+                from webhook_agent.comment_poster import filter_echo_suggestions
+
+                sync_obj.minor_suggestions = filter_echo_suggestions(
+                    sync_obj.minor_suggestions, diff_text
+                )
             enforced_verdict = calculate_sync_verdict(sync_obj)
             rendered_body = render_sync_review_markdown(
                 sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
@@ -295,9 +317,14 @@ def _enforce_verdict(
                 "Safety Guardrail: Prevented mechanical upgrade of text REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
             )
             enforced_verdict = "REQUEST_CHANGES"
-        rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
         inline_comments = []
         if diff_text:
+            from webhook_agent.comment_poster import (
+                build_github_review_comments,
+                filter_echo_suggestions,
+            )
+
+            cr_obj.minor_suggestions = filter_echo_suggestions(cr_obj.minor_suggestions, diff_text)
             cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
             inline_comments, _ = build_github_review_comments(
                 cr_issues,
@@ -305,6 +332,7 @@ def _enforce_verdict(
                 existing_comments=existing_comments_data,
                 max_comments=review_budget,
             )
+        rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
         return rendered_body, enforced_verdict, inline_comments
     except Exception as parse_err:
         logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)
