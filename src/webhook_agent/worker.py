@@ -131,14 +131,24 @@ def main() -> int:
 
     PROACTIVE_SWEEP_INTERVAL_SECONDS = 300  # 5 minutes
     last_proactive_sweep = 0.0
+    # Kill-switch: proactive sweeps disabled by default. Set
+    # ENABLE_PROACTIVE_SWEEP=1 to re-enable the 5-minute ticker.
+    proactive_sweep_enabled = os.environ.get("ENABLE_PROACTIVE_SWEEP", "0") in (
+        "1",
+        "true",
+        "True",
+    )
 
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
-        # Periodic Proactive Agent Sweep (Every 5 minutes)
+        # Periodic Proactive Agent Sweep (Every 5 minutes, when enabled)
         import time
 
         now = time.time()
-        if now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS:
+        if (
+            proactive_sweep_enabled
+            and now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS
+        ):
             last_proactive_sweep = now
             try:
                 import threading
