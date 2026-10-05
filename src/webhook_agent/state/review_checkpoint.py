@@ -49,10 +49,11 @@ class ReviewCheckpointManager:
     def _get_db(self) -> Any | None:
         if not self._initialized:
             self._initialized = True
-            # Kill-switch: Firestore checkpoint persistence is opt-in via
-            # ENABLE_REVIEW_CHECKPOINT=1. The VM's service identity lacks
-            # Firestore IAM roles (403s in prod logs), so default to local
-            # memory instead of spamming 403 warnings on every review.
+            # Opt-in gate: Firestore checkpoint persistence requires
+            # ENABLE_REVIEW_CHECKPOINT=1 (load_secrets.sh sets it for the
+            # service; .envrc for local dev). IAM prerequisite: roles/datastore.user
+            # for webhook-agent-sa in cgj8702-webhook-agent — without it every
+            # op throws 403, so default to local memory instead of log spam.
             enabled = os.getenv("ENABLE_REVIEW_CHECKPOINT", "0").lower() in (
                 "1",
                 "true",
