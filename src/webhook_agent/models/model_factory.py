@@ -6,7 +6,6 @@ to unify model instantiation, rate limiting, and API key handling across agents.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator
@@ -65,55 +64,33 @@ class RateLimitedGemini(Gemini):
                     exc,
                 )
 
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            yielded_any = False
-            try:
-                async for response in super().generate_content_async(llm_request, stream=stream):
-                    yielded_any = True
-                    yield response
-                return
-            except Exception as exc:
-                if yielded_any:
-                    raise
-
-                from webhook_agent.models.rate_limiter import extract_rate_limit_details
-
-                rate_details = extract_rate_limit_details(exc)
-                err_s = str(exc).lower()
-                is_rate_limit = (
-                    "429" in err_s or "resource_exhausted" in err_s or "quota exceeded" in err_s
-                )
-                if is_rate_limit:
-                    try:
-                        from webhook_agent.models.firestore_registry import (
-                            firestore_depleted_registry,
-                        )
-
-                        firestore_depleted_registry.mark_depleted(model_name, error=exc)
-                    except Exception as dep_err:
-                        logger.debug(
-                            "Failed to mark model '%s' as depleted: %s", model_name, dep_err
-                        )
-
-                if is_rate_limit and attempt < max_attempts - 1:
-                    parsed_retry = rate_details.get("retry_after_seconds")
-                    if parsed_retry is not None and parsed_retry > 0:
-                        retry_delay = min(float(parsed_retry) + 0.5, 65.0)
-                    else:
-                        retry_delay = min(2.0 * (attempt + 1), 15.0)
-
-                    logger.warning(
-                        "⚠️ Model '%s' hit quota/rate-limit in ADK node (attempt %d/%d): %s. Marked depleted. Pausing %.1fs before retrying fallback...",
-                        model_name,
-                        attempt + 1,
-                        max_attempts,
-                        exc,
-                        retry_delay,
-                    )
-                    await asyncio.sleep(retry_delay)
-                    continue
+        yielded_any = False
+        try:
+            async for response in super().generate_content_async(llm_request, stream=stream):
+                yielded_any = True
+                yield response
+            return
+        except Exception as exc:
+            if yielded_any:
+                # Output already streamed to the caller; propagate untouched.
                 raise
+
+            err_s = str(exc).lower()
+            if "429" in err_s or "resource_exhausted" in err_s or "quota exceeded" in err_s:
+                try:
+                    from webhook_agent.models.firestore_registry import (
+                        firestore_depleted_registry,
+                    )
+
+                    firestore_depleted_registry.mark_depleted(model_name, error=exc)
+                except Exception as dep_err:
+                    logger.debug("Failed to mark model '%s' as depleted: %s", model_name, dep_err)
+
+            # Fail fast and propagate transparently: the orchestrator in
+            # agent_definition is the single retry/failover and logging boundary
+            # for transient Google API errors. Re-raising without logging here
+            # keeps one Google error from being printed once per retry layer.
+            raise
 
 
 def get_adk_model(

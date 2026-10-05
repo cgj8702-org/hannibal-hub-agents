@@ -81,10 +81,9 @@ def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
     except CancelledError:
         future.cancel()
         raise
-    except Exception:
-        # Re-raise after logging to make debugging easier in logs
-        logger.exception("Error running coroutine in background loop")
-        raise
+    # Any other exception propagates unchanged: the top-level worker message
+    # handler logs it once with its traceback instead of each layer re-printing
+    # the same error on the way up.
 
 
 def get_shared_genai_client() -> Any:

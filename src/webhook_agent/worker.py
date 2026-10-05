@@ -52,6 +52,11 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("google.auth").setLevel(logging.WARNING)
 logging.getLogger("google_adk").setLevel(logging.ERROR)
 logging.getLogger("google.adk").setLevel(logging.ERROR)
+# ADK's Runner logs 'Root node failed' with exc_info on every failed invocation,
+# duplicating the exception our orchestrator already logs once at the retry
+# boundary. Suppress the per-attempt duplicate traceback while keeping other
+# ADK ERROR records visible.
+logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +93,9 @@ def setup_cloud_logging() -> None:
         logging.getLogger("google_genai.models").setLevel(logging.ERROR)
         logging.getLogger("google_adk").setLevel(logging.ERROR)
         logging.getLogger("google.adk").setLevel(logging.ERROR)
+        # Duplicate of the module-level clamp: drop ADK Runner's per-attempt
+        # 'Root node failed' traceback (our orchestrator logs it once instead).
+        logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
