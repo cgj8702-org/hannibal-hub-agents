@@ -127,7 +127,7 @@ def is_echo_suggestion(
     if code.startswith("```"):
         code = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", code)
         code = re.sub(r"\n?```$", "", code)
-    code = code.strip()
+    code = "\n".join(ln.strip() for ln in code.splitlines() if ln.strip())
     if not code:
         return False
 
@@ -149,7 +149,8 @@ def is_echo_suggestion(
     # 3. Multi-line slice comparison:
     # If the suggestion has N lines, check if it matches a forward slice [line, line + N - 1]
     # or backward slice [line - N + 1, line]
-    n_lines = len(code.splitlines())
+    lines_list = code.splitlines()
+    n_lines = len(lines_list)
     if n_lines > 1:
         fwd = [file_lines[ln] for ln in range(line, line + n_lines) if ln in file_lines]
         if len(fwd) == n_lines and norm_fix == _norm("".join(fwd)):
@@ -157,6 +158,15 @@ def is_echo_suggestion(
 
         bwd = [file_lines[ln] for ln in range(line - n_lines + 1, line + 1) if ln in file_lines]
         if len(bwd) == n_lines and norm_fix == _norm("".join(bwd)):
+            return True
+
+        # Forward non-empty line scan starting at line
+        fwd_non_empty = [
+            file_lines[ln]
+            for ln in sorted(file_lines.keys())
+            if ln >= line and file_lines[ln].strip()
+        ][:n_lines]
+        if len(fwd_non_empty) == n_lines and norm_fix == _norm("".join(fwd_non_empty)):
             return True
 
     return False
