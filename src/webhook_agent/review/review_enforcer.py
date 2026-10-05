@@ -190,22 +190,12 @@ def _enforce_verdict(
                     # Programmatic hallucination guard: clear resolutions if no prior review
                     # had actionable items (critical issues, suggestions, or risks)
                     if pr is not None and sync_obj.resolutions:
+                        from webhook_agent.review.metadata import has_actionable_findings
+
                         prior_had_findings = any(
-                            getattr(r, "state", "") == "CHANGES_REQUESTED"
-                            or (
-                                any(
-                                    marker in (getattr(r, "body", "") or "")
-                                    for marker in (
-                                        "Critical",
-                                        "Suggestions",
-                                        "Risks & Edge Cases",
-                                        "Action Items",
-                                    )
-                                )
-                                and not (
-                                    "None found" in (getattr(r, "body", "") or "")
-                                    and "None identified" in (getattr(r, "body", "") or "")
-                                )
+                            has_actionable_findings(
+                                getattr(r, "body", "") or "",
+                                getattr(r, "state", ""),
                             )
                             for r in bot_reviews
                         )

@@ -261,23 +261,38 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
 def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     """Parse loose Markdown text review body into structured dictionary for CodeReviewResponse."""
     data: dict[str, Any] = {}
-    summary_match = re.search(
-        r"(?:Summary & Justification|Goal of the PR):\*\*?\s*([^\n]+)", body, re.IGNORECASE
+    exec_section_match = re.search(
+        r"###\s*(?:\d+\.)?\s*(?:Executive Summary|Synchronization Summary)[^\n]*\n+([\s\S]*?)(?=\n---|\n###|\Z)",
+        body,
+        re.IGNORECASE,
     )
-    if summary_match:
-        data["executive_summary"] = summary_match.group(1).strip("* -•` ")
+    if exec_section_match:
+        raw_text = exec_section_match.group(1).strip()
+        cleaned_text = re.sub(
+            r"^(?:(?:\*|-|•)\s*)*(?:\*\*)?(?:Summary & Justification|Update Summary|Executive Summary|Goal of the PR):\*\*?\s*",
+            "",
+            raw_text,
+            flags=re.IGNORECASE,
+        ).strip()
+        data["executive_summary"] = cleaned_text or "Autonomous PR code review report."
     else:
-        lines = [
-            re.sub(
-                r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?)\s*",
-                "",
-                line.strip("* -•` "),
-                flags=re.IGNORECASE,
-            )
-            for line in body.splitlines()
-            if line.strip() and not line.startswith("#")
-        ]
-        data["executive_summary"] = lines[0] if lines else "Autonomous PR code review report."
+        summary_match = re.search(
+            r"(?:Summary & Justification|Goal of the PR):\*\*?\s*([^\n]+)", body, re.IGNORECASE
+        )
+        if summary_match:
+            data["executive_summary"] = summary_match.group(1).strip("* -•` ")
+        else:
+            lines = [
+                re.sub(
+                    r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?)\s*",
+                    "",
+                    line.strip("* -•` "),
+                    flags=re.IGNORECASE,
+                )
+                for line in body.splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+            data["executive_summary"] = lines[0] if lines else "Autonomous PR code review report."
 
     risks: list[dict[str, str]] = []
     risk_matches = re.findall(

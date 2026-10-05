@@ -480,6 +480,13 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         bot_reviews: list[str] = []
         had_request_changes = False
         had_prior_findings = False
+        all_prior_findings: list[dict[str, Any]] = []
+
+        from webhook_agent.review.metadata import (
+            get_actionable_findings,
+            has_actionable_findings,
+        )
+
         for r in pr.get_reviews():
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
@@ -488,30 +495,28 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
                 if state == "CHANGES_REQUESTED":
                     had_request_changes = True
                 body = (r.body or "").strip()
-                if any(
-                    marker in body
-                    for marker in (
-                        "Critical",
-                        "Suggestions",
-                        "Risks & Edge Cases",
-                        "Action Items",
-                    )
-                ) and not ("None found" in body and "None identified" in body):
+                if has_actionable_findings(body, state):
                     had_prior_findings = True
+                findings = get_actionable_findings(body)
+                if findings:
+                    all_prior_findings.extend(findings)
                 body_clean = body
                 bot_reviews.append(f"Review (State: {state}):\n{body_clean}")
 
         raw["prior_reviews_had_request_changes"] = had_request_changes
         raw["prior_reviews_had_findings"] = had_prior_findings or had_request_changes
+        raw["prior_actionable_findings"] = all_prior_findings
         if bot_reviews:
             raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews)
             logger.info(
-                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s) for PR #%d",
+                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s, findings_count=%d) for PR #%d",
                 len(bot_reviews),
                 had_request_changes,
                 raw["prior_reviews_had_findings"],
+                len(all_prior_findings),
                 pr_number,
             )
+
     except Exception as exc:
         logger.debug("Could not pre-fetch previous bot reviews: %s", exc)
 

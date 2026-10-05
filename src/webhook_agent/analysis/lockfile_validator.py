@@ -220,7 +220,7 @@ def render_deterministic_approval_markdown(
 
 ### 1. Executive Summary
 
-* **Summary & Justification:** Deterministic pre-flight verification confirmed PR #{pr_number} is a clean automated dependency update for {pkgs_str}. Lockfile structure, package scopes, and manifest constraints verified successfully without unrelated drift or syntax corruption.
+Deterministic pre-flight verification confirmed PR #{pr_number} is a clean automated dependency update for {pkgs_str}. Lockfile structure, package scopes, and manifest constraints verified successfully without unrelated drift or syntax corruption.
 
 ---
 

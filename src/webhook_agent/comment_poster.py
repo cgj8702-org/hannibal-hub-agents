@@ -73,7 +73,7 @@ def render_review_markdown(
         "",
         "### 1. Executive Summary",
         "",
-        f"* **Summary & Justification:** {verdict.summary}",
+        verdict.summary,
         "",
         "---",
         "",
