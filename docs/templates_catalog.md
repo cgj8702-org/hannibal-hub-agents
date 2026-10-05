@@ -7,7 +7,7 @@ This document provides a comprehensive technical catalog, structural review, and
 | Template File | Purpose | Target Object / Context | Sanitization & Parsing Rules |
 | :--- | :--- | :--- | :--- |
 | **`pr_template.md`** | Standardized PR description structure | Pull Requests (`/create`, PR creation) | Sanitized by `_sanitize_pr_body()` to strip raw placeholder instructions and headers. |
-| **`code_review_template.md`** | Structured code review formatting | Initial PR Reviews (`pull_request.opened`, `/review`) | Enforces scorecard metrics, critical issues, minor suggestions, and auditor confidence. |
+| **`code_review_template.md`** | Structured code review formatting | Initial PR Reviews (`pull_request.opened`, `/review`) | Enforces structured executive summary, critical issues, minor suggestions, and verified invariants. |
 | **`sync_review_template.md`** | Incremental review & resolution tracking | PR Updates (`pull_request.synchronize`) | Tracks resolution status of previously requested items against incremental commit diffs. |
 
 ---
@@ -20,7 +20,7 @@ This document provides a comprehensive technical catalog, structural review, and
 
 ### 2. Initial Code Review Template (`code_review_template.md`)
 - **Structure**: Executive Summary, Action Items (Critical & Suggestions), and Potential Risks & Edge Cases.
-- **Verdict Enforcement**: Parsed by `_parse_scorecard_scores()` and `_enforce_verdict()` to enforce strict verdict rules (ANY critical issue -> `REQUEST_CHANGES`, confidence <= 3 -> `COMMENT`).
+- **Verdict Enforcement**: Parsed by `_parse_scorecard_scores()` and `_enforce_verdict()` to enforce strict verdict rules (ANY critical issue -> `REQUEST_CHANGES`, clean -> `APPROVE`).
 
 ### 3. Synchronization Review Template (`sync_review_template.md`)
 - **Structure**: Synchronization Summary, Resolution Tracker (marking previous items as `[RESOLVED]` or `[UNRESOLVED]`), and New Findings.

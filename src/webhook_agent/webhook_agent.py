@@ -34,7 +34,6 @@ from webhook_agent.core.github_tools import (
     _load_template,
     _sanitize_pr_body,
     add_comment,
-    auto_fix_pr_review_feedback,
     get_commit_diff,
     get_current_time,
     get_issue,
@@ -76,7 +75,6 @@ from webhook_agent.models.rate_limiter import (
 )
 from webhook_agent.review.review_enforcer import (
     _enforce_verdict,
-    _parse_confidence,
     _parse_scorecard_scores,
     _submit_formal_review,
 )
@@ -119,7 +117,6 @@ __all__ = [
     "_load_prompt_template",
     "_load_sync_review_template",
     "_load_template",
-    "_parse_confidence",
     "_parse_scorecard_scores",
     "_review_lock",
     "_sanitize_pr_body",
@@ -128,7 +125,6 @@ __all__ = [
     "_truncate_input_for_tier",
     "_truncate_text_to_token_limit",
     "add_comment",
-    "auto_fix_pr_review_feedback",
     "calculate_verdict",
     "count_tokens_exact",
     "evaluate_writeback_policy",

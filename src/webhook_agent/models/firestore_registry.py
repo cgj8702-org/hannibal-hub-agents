@@ -90,20 +90,41 @@ class FirestoreDepletedModelRegistry:
 
             # Daily quota exhaustion takes priority — the retryDelay from 429
             # responses is misleadingly short (14-59s) even for daily limits.
-            if "perday" in quota_limit or "dayperproject" in quota_limit or "perday" in error_str:
+            quota_type = details.get("quota_type")
+            if (
+                quota_type == "RPD"
+                or "perday" in quota_limit
+                or "dayperproject" in quota_limit
+                or "perday" in error_str
+            ):
                 cooldown = 86400.0
                 metric_type = "RPD (24h)"
             elif (
-                "perminute" in quota_limit
+                quota_type == "TPM"
                 or "tokensperminute" in quota_limit
+                or "tokensperminute" in error_str
+                or "token_count" in quota_limit
+            ):
+                cooldown = (
+                    float(retry_after)
+                    if isinstance(retry_after, (int, float)) and retry_after > 0
+                    else 60.0
+                )
+                metric_type = f"TPM ({cooldown:.0f}s)"
+            elif (
+                quota_type == "RPM"
+                or "perminute" in quota_limit
                 or "minuteperproject" in quota_limit
                 or "perminute" in error_str
-                or "tokensperminute" in error_str
                 or "429" in error_str
                 or "resource_exhausted" in error_str
             ):
-                cooldown = 60.0
-                metric_type = "RPM/TPM (60s)"
+                cooldown = (
+                    float(retry_after)
+                    if isinstance(retry_after, (int, float)) and retry_after > 0
+                    else 60.0
+                )
+                metric_type = f"RPM ({cooldown:.0f}s)"
             elif (
                 "503" in error_str
                 or "unavailable" in error_str

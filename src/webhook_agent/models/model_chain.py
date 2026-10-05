@@ -14,6 +14,7 @@ from google.genai.errors import ServerError as GenAIServerError
 
 from webhook_agent.models.rate_limiter import (
     _resolve_tier,
+    extract_rate_limit_details,
     get_active_api_key,
 )
 
@@ -40,6 +41,11 @@ class DepletedModelRegistry:
         metric_type = "DEFAULT (1h)"
 
         if error is not None:
+            details = extract_rate_limit_details(error)
+            retry_after = details.get("retry_after_seconds")
+            quota_limit = (details.get("quota_limit") or "").lower()
+            quota_type = details.get("quota_type")
+
             # Walk cause/context chain to capture nested exceptions
             err_parts = []
             curr: Any = error
@@ -50,18 +56,40 @@ class DepletedModelRegistry:
                 curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
             err_str = " ".join(err_parts).lower()
 
-            if "perday" in err_str or "dayperproject" in err_str:
+            if (
+                quota_type == "RPD"
+                or "perday" in quota_limit
+                or "dayperproject" in quota_limit
+                or "perday" in err_str
+            ):
                 cooldown = 86400.0
                 metric_type = "RPD (24h)"
             elif (
-                "perminute" in err_str
-                or "minuteperproject" in err_str
+                quota_type == "TPM"
+                or "tokensperminute" in quota_limit
                 or "tokensperminute" in err_str
+                or "token_count" in quota_limit
+            ):
+                cooldown = (
+                    float(retry_after)
+                    if isinstance(retry_after, (int, float)) and retry_after > 0
+                    else 60.0
+                )
+                metric_type = f"TPM ({cooldown:.0f}s)"
+            elif (
+                quota_type == "RPM"
+                or "perminute" in quota_limit
+                or "minuteperproject" in quota_limit
+                or "perminute" in err_str
                 or "429" in err_str
                 or "resource_exhausted" in err_str
             ):
-                cooldown = 60.0
-                metric_type = "RPM/TPM (60s)"
+                cooldown = (
+                    float(retry_after)
+                    if isinstance(retry_after, (int, float)) and retry_after > 0
+                    else 60.0
+                )
+                metric_type = f"RPM ({cooldown:.0f}s)"
             elif (
                 "503" in err_str
                 or "unavailable" in err_str
@@ -70,6 +98,9 @@ class DepletedModelRegistry:
             ):
                 cooldown = 120.0
                 metric_type = "503 HIGH DEMAND (120s)"
+            elif isinstance(retry_after, (int, float)) and retry_after > 0:
+                cooldown = max(float(retry_after), 120.0)
+                metric_type = f"EXACT ({cooldown:.0f}s)"
 
         self._depleted[norm_name] = (time.time(), cooldown)
         logger.warning(

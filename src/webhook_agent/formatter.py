@@ -279,10 +279,6 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
         ]
         data["executive_summary"] = lines[0] if lines else "Autonomous PR code review report."
 
-    conf_match = re.search(r"Confidence:\s*`?(\d)`?/5", body, re.IGNORECASE)
-    if conf_match:
-        data["confidence"] = int(conf_match.group(1))
-
     risks: list[dict[str, str]] = []
     risk_matches = re.findall(
         r"(?:\*?\s*\*\*?Risk:\*\*?|Potential Edge Case / Risk:)\s*([^\n]+)(?:\n\s*\*?\s*(?:\*?\s*\*\*?Recommendation:\*\*?|Recommended Safeguard:)\s*([^\n]+))?",

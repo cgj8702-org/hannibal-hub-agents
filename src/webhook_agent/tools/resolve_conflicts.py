@@ -334,7 +334,7 @@ def resolve_merge_conflicts(
         logger.info("Running verification gate (linter & tests) inside isolated worktree...")
 
         test_env = git_env.copy()
-        key = os.getenv("WEBHOOK_FREE_KEY") or os.getenv("FEATURE_AGENT_FREE_KEY") or ""
+        key = os.getenv("WEBHOOK_FREE_KEY") or os.getenv("WEBHOOK_PAID_KEY") or ""
         if key:
             test_env["WEBHOOK_FREE_KEY"] = key
 

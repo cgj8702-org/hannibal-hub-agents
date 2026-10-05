@@ -804,7 +804,6 @@ class WebhookProcessor:
 
         dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
         if not dry_run:
-            _add_eyes_reaction(gh, repo_name, payload)
             _prefetch_pr_diff(gh, repo_name, payload)
             _prefetch_inline_comment_context(gh, repo_name, payload)
             _preexecute_resolve_command(gh, repo_name, payload)
@@ -886,6 +885,10 @@ class WebhookProcessor:
                         head_sha[:7],
                     )
                     return
+
+        # Guarded Eyes Reaction: only react once closed/merged PR and deduplication guardrails pass
+        if not dry_run:
+            _add_eyes_reaction(gh, repo_name, payload)
 
         # Deterministic Fast-Path for automated Dependabot / lockfile PRs
         if not dry_run and is_pr_event and pr_number is not None:

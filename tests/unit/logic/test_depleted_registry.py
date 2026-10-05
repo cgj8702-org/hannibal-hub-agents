@@ -78,3 +78,37 @@ def test_simple_registry_classifies_nested_503() -> None:
     assert "gemma-4-26b-a4b-it" in registry._depleted
     _, cooldown = registry._depleted["gemma-4-26b-a4b-it"]
     assert cooldown == 120.0
+
+
+def test_firestore_registry_classifies_tpm_with_retry_delay() -> None:
+    from google.genai.errors import ClientError
+
+    registry = FirestoreDepletedModelRegistry()
+    registry._db = None
+
+    tpm_json = {
+        "error": {
+            "code": 429,
+            "message": "Quota exceeded for input tokens",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                        {
+                            "quotaId": "GenerateContentInputTokensPerModelPerMinute-FreeTier",
+                            "quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_input_token_count",
+                        }
+                    ],
+                },
+                {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "54.5s",
+                },
+            ],
+        }
+    }
+    err = ClientError(code=429, response_json=tpm_json)
+    registry.mark_depleted("gemini-3.5-flash-lite", error=err)
+
+    _, cooldown = registry._local_depleted["gemini-3.5-flash-lite"]
+    assert cooldown == 54.5
