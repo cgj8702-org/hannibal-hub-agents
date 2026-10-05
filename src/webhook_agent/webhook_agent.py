@@ -41,7 +41,6 @@ from webhook_agent.core.github_tools import (
     merge_pr,
     open_pr,
     read_file,
-    resolve_pr_conflicts,
     review,
     update_branch_from_base,
     update_issue,
@@ -85,7 +84,6 @@ from webhook_agent.review.writeback_policy import (
     _review_lock,
     evaluate_writeback_policy,
 )
-from webhook_agent.tools.resolve_conflicts import resolve_merge_conflicts
 
 logger = logging.getLogger("webhook_agent.agent")
 
@@ -143,8 +141,6 @@ __all__ = [
     "merge_pr",
     "open_pr",
     "read_file",
-    "resolve_merge_conflicts",
-    "resolve_pr_conflicts",
     "review",
     "rpm_waiter",
     "run_in_bg_loop",

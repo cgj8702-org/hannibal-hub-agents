@@ -68,7 +68,6 @@ from webhook_agent.review.writeback_policy import (
 )
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.state.review_checkpoint import review_checkpoint_manager
-from webhook_agent.tools import resolve_conflicts as resolve_conflicts_module
 from webhook_agent.tools.codebase_search import search_codebase_tool
 from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.webhook_types import ActionResult
@@ -507,8 +506,8 @@ class WebhookAgent:
             if is_pr:
                 parts.append(
                     f"Note: This comment is on Pull Request #{pr_num}. "
-                    f"To perform requested actions like code reviews (/review), descriptions (/create), "
-                    f"or conflict resolution (/resolve), first call get_issue({pr_num}, include_diff=True) "
+                    f"To perform requested actions like code reviews (/review) or descriptions (/create), "
+                    f"first call get_issue({pr_num}, include_diff=True) "
                     f"to inspect the PR metadata and code changes."
                 )
         elif canonical.startswith("pull_request."):
@@ -633,15 +632,6 @@ class WebhookAgent:
         if "inline_code_context" in raw:
             parts.append(f"\nPre-Fetched Inline Code Context:\n{raw['inline_code_context']}")
 
-        # Include pre-executed conflict resolution result if available
-        if "conflict_resolution_result" in raw:
-            res = raw["conflict_resolution_result"]
-            parts.append(
-                f"\nPre-Executed Conflict Resolution Result:\n"
-                f"Status: {'Success' if res.get('success') else 'Failed'}\n"
-                f"Detail: {res.get('detail') or res.get('error') or 'N/A'}"
-            )
-
         # Include pre-fetched commit history summary if available
         if "commit_history_summary" in raw:
             parts.append(f"\nPre-Fetched Commit History Summary:\n{raw['commit_history_summary']}")
@@ -746,91 +736,7 @@ class WebhookAgent:
             trace_id[-4:],
         )
 
-        # Programmatic Command Router: Intercept /resolve slash command for instant Git Worktree conflict resolution
         raw = event_data.get("raw_payload", {})
-        comment_body = ""
-        if isinstance(raw, dict) and isinstance(raw.get("comment"), dict):
-            comment_body = (raw["comment"].get("body") or "").strip()
-
-        if "/resolve" in comment_body.lower():
-            if isinstance(raw, dict) and "conflict_resolution_result" in raw:
-                res = raw["conflict_resolution_result"]
-                return [
-                    ActionResult(
-                        tool="resolve_merge_conflicts",
-                        success=res.get("success", False),
-                        detail=res.get("detail", ""),
-                    )
-                ]
-
-            pr_number = None
-            if isinstance(raw, dict):
-                pr_number = (raw.get("pull_request") or {}).get("number") or (
-                    raw.get("issue") or {}
-                ).get("number")
-
-            if pr_number:
-                selected_model = _select_model_for_event(event_data)
-                logger.info(
-                    "⚡ Programmatic Command Router: Intercepted /resolve for PR #%d (trace: %s, model: %s)",
-                    pr_number,
-                    trace_id[-4:],
-                    selected_model,
-                )
-                try:
-                    repo = gh_client.get_repo(repo_full_name)
-                    pr = repo.get_pull(pr_number)
-                    genai_client = get_shared_genai_client()
-                    token = getattr(getattr(gh_client, "_auth", None), "token", None)
-                    # Dispatch via webhook_agent to allow monkeypatching/mocking in tests
-                    from webhook_agent import webhook_agent as wa_mod
-
-                    resolve_fn = getattr(
-                        wa_mod,
-                        "resolve_merge_conflicts",
-                        resolve_conflicts_module.resolve_merge_conflicts,
-                    )
-                    res = resolve_fn(
-                        pr_number=pr_number,
-                        head_branch=pr.head.ref,
-                        base_branch=pr.base.ref,
-                        genai_client=genai_client,
-                        model_name=selected_model,
-                        token=token,
-                    )
-                    status_detail = res.get("detail", "")
-                    if res.get("success"):
-                        comment_text = (
-                            f"I have surgically resolved the merge conflicts for PR #{pr_number} "
-                            f"against `{pr.base.ref}` using an isolated Git Worktree and pushed the updated branch.\n\n"
-                            f"**Detail:** {status_detail}"
-                        )
-                    else:
-                        comment_text = (
-                            f"Unable to automatically resolve merge conflicts for PR #{pr_number}.\n\n"
-                            f"**Detail:** {status_detail}"
-                        )
-                    pr.create_issue_comment(comment_text)
-                    return [
-                        ActionResult(
-                            tool="resolve_merge_conflicts",
-                            success=res.get("success", False),
-                            detail=status_detail,
-                        )
-                    ]
-                except Exception as exc:
-                    logger.exception(
-                        "Programmatic /resolve execution failed for PR #%d: %s",
-                        pr_number,
-                        exc,
-                    )
-                    return [
-                        ActionResult(
-                            tool="resolve_merge_conflicts",
-                            success=False,
-                            detail=f"Programmatic /resolve failed: {exc}",
-                        )
-                    ]
 
         # Derive session and user IDs
         session_id = self._derive_session_id(event_data)

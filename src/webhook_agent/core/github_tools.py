@@ -15,7 +15,6 @@ from github import Github
 from google.adk.agents.context import Context
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.models.model_chain import get_active_model
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
 
@@ -600,47 +599,6 @@ def update_branch_from_base(ctx: Context, pr_number: int) -> str:
             f"Error updating PR #{pr_number} branch: {e}. "
             f"If there are complex merge conflicts, notify the user that manual local rebase is required."
         )
-
-
-def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
-    """Surgically resolve git merge conflicts in a pull request using an isolated Git worktree.
-
-    Uses an ephemeral Git Worktree, Gemini generative code block synthesis,
-    ruff checking, and pytest verification before pushing. Call this tool
-    when a user comments `/resolve` or asks to resolve merge conflicts on a PR.
-
-    Args:
-        pr_number: Pull request number.
-
-    Returns:
-        A string describing the conflict resolution status and files modified.
-    """
-    from webhook_agent.core.loop_helpers import get_shared_genai_client
-    from webhook_agent.tools.resolve_conflicts import resolve_merge_conflicts
-
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-        genai_client = get_shared_genai_client()
-        active_model = ctx.state.get("active_model") or get_active_model()
-        res = resolve_merge_conflicts(
-            pr_number=pr_number,
-            head_branch=pr.head.ref,
-            base_branch=pr.base.ref,
-            genai_client=genai_client,
-            model_name=active_model,
-        )
-        if res.get("success"):
-            detail = res.get("detail", "")
-            return (
-                f"Successfully resolved merge conflicts on PR #{pr_number} "
-                f"({pr.head.ref} -> {pr.base.ref}): {detail}"
-            )
-        return f"Could not resolve merge conflicts on PR #{pr_number}: {res.get('error')}"
-    except Exception as e:
-        return f"Error resolving merge conflicts on PR #{pr_number}: {e}"
 
 
 def mark_ready_for_review(ctx: Context, pr_number: int) -> str:

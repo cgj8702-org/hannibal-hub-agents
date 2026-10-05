@@ -108,7 +108,7 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
     """Determine if a PR diff pre-fetch is necessary for this event to avoid prompt bloat.
 
     Pre-fetching is restricted to PR creation/updates, review requests, and explicit
-    review slash commands (/review, /audit, /test, /resolve).
+    review slash commands (/review, /audit, /test).
     """
     if canonical in (
         "pull_request.opened",
@@ -125,7 +125,6 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
             "/review",
             "/audit",
             "/test",
-            "/resolve",
             "/critique",
             "please review",
         }
@@ -214,7 +213,6 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 
         _prefetch_inline_comment_context(gh, repo_name, payload)
-        _preexecute_resolve_command(gh, repo_name, payload)
         _prefetch_commit_history(gh, repo_name, payload)
 
     except Exception as exc:
@@ -245,76 +243,6 @@ def _prefetch_inline_comment_context(gh: Github, repo_name: str, payload: dict[s
             logger.info("Pre-fetched inline comment code context for %s:%s", path, line)
     except Exception as exc:
         logger.debug("Could not pre-fetch inline comment context: %s", exc)
-
-
-def _preexecute_resolve_command(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Pre-execute conflict resolution programmatically on /resolve command."""
-    try:
-        raw = payload.get("raw_payload")
-        if not isinstance(raw, dict) or "conflict_resolution_result" in raw:
-            return
-
-        comment_body = ""
-        if "comment" in raw and isinstance(raw["comment"], dict):
-            comment_body = raw["comment"].get("body") or ""
-
-        if "/resolve" not in comment_body.lower():
-            return
-
-        pr_number = None
-        if "issue" in raw and isinstance(raw["issue"], dict):
-            if raw["issue"].get("pull_request"):
-                pr_number = raw["issue"].get("number")
-        elif "pull_request" in raw and isinstance(raw["pull_request"], dict):
-            pr_number = raw["pull_request"].get("number")
-
-        if not pr_number:
-            return
-
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-
-        token = getattr(getattr(gh, "_auth", None), "token", None)
-
-        from .tools.resolve_conflicts import (
-            resolve_merge_conflicts,
-        )
-
-        res = resolve_merge_conflicts(
-            pr_number=pr_number,
-            head_branch=pr.head.ref,
-            base_branch=pr.base.ref,
-            token=token,
-        )
-        raw["conflict_resolution_result"] = res
-        status_detail = res.get("detail", "")
-        if res.get("success"):
-            comment_text = (
-                f"I have surgically resolved the merge conflicts for PR #{pr_number} "
-                f"against `{pr.base.ref}` using an isolated Git Worktree and pushed the updated branch.\n\n"
-                f"**Detail:** {status_detail}"
-            )
-        else:
-            comment_text = (
-                f"Unable to automatically resolve merge conflicts for PR #{pr_number}.\n\n"
-                f"**Detail:** {status_detail}"
-            )
-        try:
-            pr.create_issue_comment(comment_text)
-        except Exception as comment_err:
-            logger.warning(
-                "Could not post /resolve status comment for PR #%d: %s",
-                pr_number,
-                comment_err,
-            )
-
-        logger.info(
-            "Pre-executed /resolve command for PR #%d (Success: %s)",
-            pr_number,
-            res.get("success"),
-        )
-    except Exception as exc:
-        logger.debug("Could not pre-execute /resolve command: %s", exc)
 
 
 def _prefetch_commit_history(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
@@ -811,7 +739,6 @@ class WebhookProcessor:
         if not dry_run:
             _prefetch_pr_diff(gh, repo_name, payload)
             _prefetch_inline_comment_context(gh, repo_name, payload)
-            _preexecute_resolve_command(gh, repo_name, payload)
             _prefetch_commit_history(gh, repo_name, payload)
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 
