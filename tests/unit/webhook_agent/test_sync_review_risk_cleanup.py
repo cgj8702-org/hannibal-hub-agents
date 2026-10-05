@@ -85,6 +85,52 @@ def test_sync_review_response_unresolved_critical_retains_request_changes() -> N
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
+def test_sync_review_drops_placeholder_resolutions_without_grounding() -> None:
+    """Placeholder resolutions (empty desc/evidence) must be dropped, not defaulted."""
+    data = {
+        "summary": "Sync update with filler tracker row.",
+        "resolutions": [
+            {
+                "item_description": "",
+                "status": "UNRESOLVED",
+                "evidence": "",
+                "category": "SUGGESTION",
+            },
+            {
+                "status": "RESOLVED",
+                "category": "CRITICAL",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+
+    sync_obj = SyncReviewResponse.model_validate(data)
+    assert sync_obj.resolutions == []
+    # No zombie rows rendered
+    md = sync_obj.to_markdown(verdict="APPROVE")
+    assert "Review finding resolution" not in md
+    assert "Verified in commit diff." not in md
+    assert "No prior review items tracked." in md
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_sync_review_drops_string_only_resolutions() -> None:
+    """String-only resolutions without evidence must not invent tracker rows."""
+    data = {
+        "summary": "Sync update.",
+        "resolutions": ["looks good"],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+
+    sync_obj = SyncReviewResponse.model_validate(data)
+    assert sync_obj.resolutions == []
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 def test_code_review_response_no_synthetic_critical_from_summary() -> None:
     """Ensure CodeReviewResponse does not synthesize a critical issue from an executive summary mentioning breaking changes."""
     data = {

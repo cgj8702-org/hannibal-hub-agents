@@ -379,6 +379,10 @@ class CodeReviewResponse(BaseModel):
             rec_lower = r_item["recommendation"].lower()
             if any(kw in r_lower or kw in rec_lower for kw in BREAKING_RISK_KEYWORDS):
                 if not any(r_item["risk"] in c.get("description", "") for c in clean_crit):
+                    # Only promote when a concrete recommendation exists.
+                    # Placeholder fixes invent action items with no grounding.
+                    if not r_item["recommendation"]:
+                        continue
                     clean_crit.append(
                         {
                             "path": "uv.lock"
@@ -386,8 +390,7 @@ class CodeReviewResponse(BaseModel):
                             else "codebase",
                             "line": None,
                             "description": r_item["risk"],
-                            "suggested_fix": r_item["recommendation"]
-                            or "Address breaking change or unintended modification.",
+                            "suggested_fix": r_item["recommendation"],
                         }
                     )
         normalized["critical_issues"] = clean_crit
@@ -617,27 +620,26 @@ class SyncReviewResponse(BaseModel):
                 if isinstance(item, BaseModel):
                     item = item.model_dump()
                 if isinstance(item, str) and item.strip():
-                    clean_res.append(
-                        {
-                            "item_description": item.strip(),
-                            "status": "RESOLVED",
-                            "evidence": "Verified in incremental commit diff.",
-                        }
-                    )
+                    # Drop string-only resolutions without evidence grounding.
+                    # Placeholder evidence ("Verified in ... diff") invents
+                    # resolution claims with no file:line proof.
+                    continue
                 elif isinstance(item, dict):
                     desc = str(
                         item.get("item_description")
                         or item.get("issue")
                         or item.get("description")
                         or item.get("title")
-                        or "Review finding resolution"
+                        or ""
                     ).strip()
                     status = str(item.get("status") or "RESOLVED").strip().upper()
                     if status not in ("RESOLVED", "UNRESOLVED"):
                         status = "RESOLVED"
-                    ev = str(
-                        item.get("evidence") or item.get("details") or "Verified in commit diff."
-                    ).strip()
+                    ev = str(item.get("evidence") or item.get("details") or "").strip()
+                    # Drop placeholder resolutions: no description or no evidence
+                    # means the model invented a tracker row with no grounding.
+                    if not desc or not ev:
+                        continue
                     raw_cat = str(item.get("category") or "CRITICAL").strip().upper()
                     if "SUGG" in raw_cat or "MAINT" in raw_cat:
                         norm_cat = "SUGGESTION"
