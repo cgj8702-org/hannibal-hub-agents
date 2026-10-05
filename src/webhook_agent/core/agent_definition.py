@@ -646,24 +646,41 @@ class WebhookAgent:
         if "commit_history_summary" in raw:
             parts.append(f"\nPre-Fetched Commit History Summary:\n{raw['commit_history_summary']}")
 
-        # Include pre-fetched previous bot reviews if available
-        if "previous_bot_reviews" in raw:
-            parts.append(f"\nPre-Fetched Previous Bot Reviews:\n{raw['previous_bot_reviews']}")
-            has_prior_items = raw.get("prior_reviews_had_findings", False) or raw.get(
-                "prior_reviews_had_request_changes", False
+        # Include pre-fetched prior review findings if available (decoupled from human Markdown)
+        if "previous_bot_reviews" in raw or "prior_actionable_findings" in raw:
+            from webhook_agent.review.metadata import (
+                format_findings_for_agent,
+                get_actionable_findings,
             )
+
+            findings = raw.get("prior_actionable_findings")
+            if findings is None and "previous_bot_reviews" in raw:
+                findings = get_actionable_findings(raw["previous_bot_reviews"])
+
+            has_prior_items = (
+                bool(findings)
+                or raw.get("prior_reviews_had_findings", False)
+                or raw.get("prior_reviews_had_request_changes", False)
+            )
+
             if not has_prior_items:
                 parts.append(
-                    "\nNOTE ON RESOLUTION TRACKER: No prior review identified actionable critical issues, "
-                    "suggestions, or risks on this PR. You MUST leave 'resolutions' as an empty list ([]) "
+                    "\n### 📋 Pre-Fetched Prior Review Status\n"
+                    "Previous reviews on this PR identified 0 actionable critical issues, suggestions, or risks (clean pass or approved).\n\n"
+                    "NOTE ON RESOLUTION TRACKER: You MUST leave 'resolutions' as an empty list ([]) "
                     "in SyncReviewResponse. Do NOT invent or backfill resolved items."
                 )
             else:
+                findings_text = format_findings_for_agent(findings or [])
                 parts.append(
-                    "\nNOTE ON RESOLUTION TRACKER: Evaluate whether the new commits address or mitigate "
-                    "the previously identified Critical Issues, Suggestions & Maintainability items, or "
-                    "Potential Risks & Edge Cases. Mark each item in 'resolutions' as RESOLVED or "
-                    "UNRESOLVED with diff evidence, setting 'category' to 'CRITICAL', 'SUGGESTION', or 'RISK'."
+                    f"\n### 📋 Pre-Fetched Prior Review Findings to Verify\n"
+                    f"{findings_text}\n\n"
+                    "### 🎯 ACTION DIRECTIVE FOR RESOLUTION TRACKER:\n"
+                    "Evaluate whether the new commits in this update address each of the prior items tracked above.\n"
+                    "For EACH tracked item:\n"
+                    "- If addressed/fixed by the new commits: include an entry in 'resolutions' with "
+                    "status='RESOLVED', category='CRITICAL'|'SUGGESTION'|'RISK', item_description='...', and concrete evidence from the new diff.\n"
+                    "- If not fixed: include an entry with status='UNRESOLVED' and evidence explaining why the issue persists."
                 )
 
         if canonical in ("pull_request.opened", "pull_request.synchronize") or (

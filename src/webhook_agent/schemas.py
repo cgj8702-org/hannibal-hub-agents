@@ -568,6 +568,46 @@ class CodeReviewResponse(BaseModel):
                 ]
             )
 
+        from webhook_agent.review.metadata import serialize_review_metadata
+
+        meta = {
+            "version": 1,
+            "type": "initial",
+            "verdict": verdict_str,
+            "critical_issues": [
+                {
+                    "path": issue.path,
+                    "line": issue.line,
+                    "start_line": issue.start_line,
+                    "description": issue.description,
+                    "suggested_fix": issue.suggested_fix,
+                    "category": "CRITICAL",
+                }
+                for issue in self.critical_issues
+            ],
+            "minor_suggestions": [
+                {
+                    "path": sugg.path,
+                    "line": sugg.line,
+                    "start_line": sugg.start_line,
+                    "description": sugg.description,
+                    "suggested_fix": sugg.suggested_fix,
+                    "category": "SUGGESTION",
+                }
+                for sugg in self.minor_suggestions
+            ],
+            "risks": [
+                {
+                    "risk": item.risk,
+                    "recommendation": item.recommendation,
+                    "category": "RISK",
+                }
+                for item in self.risks_and_edge_cases
+            ],
+        }
+        metadata_comment = serialize_review_metadata(meta)
+        markdown_parts.append(f"\n{metadata_comment}")
+
         return "\n".join(markdown_parts) + "\n"
 
 
@@ -915,6 +955,46 @@ class SyncReviewResponse(BaseModel):
                 f"\n---\n\n### 🛡️ Verified Invariants & Edge Cases\n\n{chr(10).join(inv_lines)}\n"
             )
 
+        from webhook_agent.review.metadata import serialize_review_metadata
+
+        meta = {
+            "version": 1,
+            "type": "sync",
+            "verdict": verdict_str,
+            "resolutions": [
+                {
+                    "item_description": item.item_description,
+                    "status": item.status,
+                    "evidence": item.evidence,
+                    "category": getattr(item, "category", "CRITICAL"),
+                }
+                for item in self.resolutions
+            ],
+            "critical_issues": [
+                {
+                    "path": issue.path,
+                    "line": issue.line,
+                    "start_line": issue.start_line,
+                    "description": issue.description,
+                    "suggested_fix": issue.suggested_fix,
+                    "category": "CRITICAL",
+                }
+                for issue in self.critical_issues
+            ],
+            "minor_suggestions": [
+                {
+                    "path": sugg.path,
+                    "line": sugg.line,
+                    "start_line": sugg.start_line,
+                    "description": sugg.description,
+                    "suggested_fix": sugg.suggested_fix,
+                    "category": "SUGGESTION",
+                }
+                for sugg in self.minor_suggestions
+            ],
+        }
+        metadata_comment = serialize_review_metadata(meta)
+
         return f"""## ⚡ Code Review Update: {verdict_badge}
 
 ### 1. Synchronization Summary
@@ -936,4 +1016,6 @@ class SyncReviewResponse(BaseModel):
 
 #### 🟡 Suggestions & Maintainability
 {chr(10).join(minor_lines)}
-{inv_section}"""
+{inv_section}
+{metadata_comment}
+"""

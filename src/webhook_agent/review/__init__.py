@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from .duplicate_detector import already_raised, build_exclusions, group_repeated_findings
+from .metadata import (
+    extract_review_metadata,
+    format_findings_for_agent,
+    get_actionable_findings,
+    has_actionable_findings,
+    parse_legacy_review_findings,
+    serialize_review_metadata,
+)
 from .review_enforcer import (
     _enforce_verdict,
     _parse_scorecard_scores,
@@ -27,5 +35,11 @@ __all__ = [
     "already_raised",
     "build_exclusions",
     "evaluate_writeback_policy",
+    "extract_review_metadata",
+    "format_findings_for_agent",
+    "get_actionable_findings",
     "group_repeated_findings",
+    "has_actionable_findings",
+    "parse_legacy_review_findings",
+    "serialize_review_metadata",
 ]
