@@ -523,7 +523,7 @@ class CodeReviewResponse(BaseModel):
             "",
             "### 1. Executive Summary",
             "",
-            f"* **Summary & Justification:** {self.executive_summary}",
+            self.executive_summary,
             "",
             "---",
             "",
@@ -999,9 +999,10 @@ class SyncReviewResponse(BaseModel):
 
 ### 1. Synchronization Summary
 
-* **Update Summary:** {self.summary}
+{self.summary}
 
 ---
+
 
 ### 2. Resolution Tracker
 

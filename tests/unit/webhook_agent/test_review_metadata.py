@@ -98,6 +98,8 @@ def test_code_review_response_embeds_metadata() -> None:
     )
     md = cr.to_markdown(verdict="APPROVE")
     assert "<!-- hannibal-review-metadata:" in md
+    assert "* **Summary & Justification:**" not in md
+    assert "### 1. Executive Summary\n\nArchitectural audit pass with 1 suggestion." in md
 
     meta = extract_review_metadata(md)
     assert meta is not None
@@ -132,6 +134,8 @@ def test_sync_review_response_embeds_metadata() -> None:
     )
     md = sync.to_markdown(verdict="APPROVE")
     assert "<!-- hannibal-review-metadata:" in md
+    assert "* **Update Summary:**" not in md
+    assert "### 1. Synchronization Summary\n\nPR update addresses critical finding." in md
 
     meta = extract_review_metadata(md)
     assert meta is not None
