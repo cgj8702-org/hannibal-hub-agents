@@ -1189,3 +1189,188 @@ class TestRunInBgLoop:
         coro.close()
         # Verified that future.cancel() was called to prevent zombie task
         mock_future.cancel.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Conversational Agent and Review Intent Routing
+# ---------------------------------------------------------------------------
+
+
+class TestConversationalAgent:
+    def test_review_intent_keywords_defined(self):
+        from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+        assert isinstance(REVIEW_INTENT_KEYWORDS, tuple)
+        assert "/review" in REVIEW_INTENT_KEYWORDS
+        assert "please review" in REVIEW_INTENT_KEYWORDS
+        assert "re-review" in REVIEW_INTENT_KEYWORDS
+        assert "audit this" in REVIEW_INTENT_KEYWORDS
+
+    def test_is_formal_review_eligible(self):
+        from webhook_agent.review.writeback_policy import _is_formal_review_eligible
+
+        # PR lifecycle events are always review eligible
+        assert _is_formal_review_eligible("pull_request.opened") is True
+        assert _is_formal_review_eligible("pull_request.synchronize") is True
+        assert _is_formal_review_eligible("pull_request.ready_for_review") is True
+        assert _is_formal_review_eligible("pull_request.reopened") is True
+        assert _is_formal_review_eligible("pull_request_review_requested") is True
+
+        # Comments with review intent
+        assert _is_formal_review_eligible("issue_comment.created", "Please /review this") is True
+        assert (
+            _is_formal_review_eligible(
+                "issue_comment.created", "Can you please review the changes?"
+            )
+            is True
+        )
+        assert (
+            _is_formal_review_eligible("pull_request_review_comment.created", "please re-review")
+            is True
+        )
+        assert _is_formal_review_eligible("issue_comment.created", "audit this PR") is True
+        assert _is_formal_review_eligible("issue_comment.created", "PLEASE REVIEW THIS PR") is True
+
+        # Conversational chit-chat / routine comments are NOT review eligible
+        assert (
+            _is_formal_review_eligible(
+                "issue_comment.created",
+                "This is me testing the webhook auditor's conversational abilities btw :3",
+            )
+            is False
+        )
+        assert _is_formal_review_eligible("issue_comment.created", "Looks great, thanks!") is False
+        assert (
+            _is_formal_review_eligible("issue_comment.created", "Can we deploy this to staging?")
+            is False
+        )
+        assert _is_formal_review_eligible("issues.opened", "Bug in parser") is False
+
+    def test_conversational_agent_tools_and_instruction(self):
+        from webhook_agent.webhook_agent import CONVERSATIONAL_INSTRUCTION, WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        assert hasattr(agent, "_conversational_agent")
+        assert agent._conversational_agent.instruction == CONVERSATIONAL_INSTRUCTION
+        tool_names = {
+            getattr(t, "name", getattr(t, "__name__", str(t)))
+            for t in agent._conversational_agent.tools
+        }
+        # Tools should include codebase grounding tools but NOT review
+        assert "read_file" in tool_names
+        assert "search_codebase" in tool_names
+        assert "review" not in tool_names
+
+    def test_conversational_comment_dispatch_posts_comment(self, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=False)
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = MagicMock()
+        mock_comment.html_url = "https://github.com/owner/repo/issues/42#issuecomment-999"
+        mock_issue.create_comment.return_value = mock_comment
+
+        # Clear rate limiter for test key
+        _COMMENT_RATE_LIMITER._history.pop("owner/repo#42", None)
+
+        fake_event = SimpleNamespace(
+            usage_metadata=None,
+            get_function_responses=list,
+            content=SimpleNamespace(
+                parts=[
+                    SimpleNamespace(
+                        text="I'm doing well! The weather in CI is sunny :3",
+                        thought=False,
+                    )
+                ]
+            ),
+        )
+
+        async def fake_run_async(*args, **kwargs):
+            yield fake_event
+
+        monkeypatch.setattr(agent._conversational_runner, "run_async", fake_run_async)
+
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repo_name": "owner/repo",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "human-dev"},
+            "raw_payload": {
+                "repository": {"full_name": "owner/repo"},
+                "issue": {
+                    "number": 42,
+                    "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/42"},
+                },
+                "comment": {"body": "Hey auditor, how are you doing today? :3"},
+            },
+        }
+
+        results = agent.plan_and_execute(event_data, mock_gh, trace_id="trace-test-conv")
+        assert len(results) == 1
+        assert results[0].tool == "add_comment"
+        assert results[0].success is True
+        mock_issue.create_comment.assert_called_once_with(
+            "I'm doing well! The weather in CI is sunny :3"
+        )
+
+    def test_conversational_comment_rate_limited(self, monkeypatch):
+        import time
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=False)
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+
+        target_key = "owner/repo#43"
+        now = time.time()
+        _COMMENT_RATE_LIMITER._history[target_key] = [
+            now - 10,
+            now - 20,
+            now - 30,
+            now - 40,
+            now - 50,
+        ]
+
+        fake_event = SimpleNamespace(
+            usage_metadata=None,
+            get_function_responses=list,
+            content=SimpleNamespace(
+                parts=[SimpleNamespace(text="Another quick reply", thought=False)]
+            ),
+        )
+
+        async def fake_run_async(*args, **kwargs):
+            yield fake_event
+
+        monkeypatch.setattr(agent._conversational_runner, "run_async", fake_run_async)
+
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repo_name": "owner/repo",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "human-dev"},
+            "raw_payload": {
+                "repository": {"full_name": "owner/repo"},
+                "issue": {
+                    "number": 43,
+                    "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/43"},
+                },
+                "comment": {"body": "Spamming comments fast"},
+            },
+        }
+
+        results = agent.plan_and_execute(event_data, mock_gh, trace_id="trace-test-rl")
+        mock_issue.create_comment.assert_not_called()
+        assert not any(r.tool == "add_comment" for r in results)

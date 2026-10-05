@@ -99,6 +99,9 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Tracks **`[RESOLVED]`** vs **`[UNRESOLVED]`** items across commits using structured schema validation.
 6. **Guarded Programmatic 👀 Reaction**:
    - Adds an `eyes` reaction to user comments and valid PR events once closed/merged PR checks and deduplication locks pass.
+7. **Dual-Engine Architecture (Automated Reviews + Conversational Pair Programming)**:
+   - Eliminates rigid slash command requirements: automatically conducts formal clinical reviews on PR lifecycle events (`pull_request.opened`, `pull_request.synchronize`, `pull_request.ready_for_review`).
+   - Supports natural-language pair programming, architecture Q&A, and discussion on PR threads, while seamlessly routing to full re-audits whenever review intent is detected (`please review`, `audit this`, `/review`).
 
 ---
 

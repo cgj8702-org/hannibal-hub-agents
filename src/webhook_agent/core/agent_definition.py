@@ -63,6 +63,7 @@ from webhook_agent.models.rate_limiter import (
 )
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import (
+    _COMMENT_RATE_LIMITER,
     _is_formal_review_eligible,
     evaluate_writeback_policy,
 )
@@ -274,6 +275,21 @@ AUDITOR_CONTEXT_INSTRUCTION = """Always use the original user message, PR metada
 
 """
 
+CONVERSATIONAL_INSTRUCTION = """You are Hannibal Hub's Autonomous Pair Programming Engineer.
+You are actively collaborating with a human engineer in a GitHub Pull Request or Issue discussion thread.
+
+### Mission & Voice
+- Act as a senior, supportive, sharp, and helpful peer engineer ("Efficiency is elegant. Predictability is beautiful.").
+- Communicate naturally using clean GitHub Flavored Markdown. Emojis in discussion comments are welcome when natural.
+- Never output CodeReviewResponse JSON schemas, review scorecards, or structured audit tables unless specifically requested to perform a code review.
+- Engage conversationally: if the user says hello, tests your abilities, or chit-chats, respond with warmth, humor, and technical clarity.
+- When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
+
+### Grounding & Tools
+- You have access to PR metadata, diff context, and inspection tools: `read_file`, `search_codebase`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`.
+- Verify facts using tools before making assertions about repository files.
+"""
+
 
 class WebhookAgent:
     """ADK-powered agent for processing GitHub webhook events.
@@ -359,6 +375,42 @@ class WebhookAgent:
             ],
         )
 
+        self._conversational_agent = LlmAgent(
+            name="conversational_agent",
+            model=model_instance,
+            include_contents="default",
+            description="Collaborative pair programming engineer for conversational discussions in GitHub threads.",
+            instruction=CONVERSATIONAL_INSTRUCTION,
+            output_key="conversational_reply",
+            planner=BuiltInPlanner(
+                thinking_config=genai_types.ThinkingConfig(
+                    include_thoughts=False,
+                    thinking_budget=min(auditor_thinking_budget, 512),
+                )
+            ),
+            before_agent_callback=before_agent_callback,
+            before_model_callback=before_model_callback,
+            after_model_callback=after_model_callback,
+            before_tool_callback=before_tool_callback,
+            after_tool_callback=after_tool_callback,
+            on_tool_error_callback=on_tool_error_callback,
+            tools=[
+                read_file,
+                get_issue,
+                get_commit_diff,
+                get_current_time,
+                google_search_grounding_tool,
+                search_codebase_tool,
+            ],
+        )
+
+        self._conversational_workflow = Workflow(
+            name="conversational_workflow",
+            edges=[
+                (START, self._conversational_agent),
+            ],
+        )
+
         self._history_pruning_plugin = WebhookHistoryPruningPlugin(max_events=12)
         self._tool_pruning_plugin = ToolOutputPruningPlugin()
 
@@ -384,9 +436,25 @@ class WebhookAgent:
             ],
         )
 
-        # Create the runner
+        self._conversational_app = App(
+            name=f"{self._app_name}_conversational",
+            root_agent=self._conversational_workflow,
+            context_cache_config=context_cache_config,
+            plugins=[
+                self._history_pruning_plugin,
+                self._tool_pruning_plugin,
+            ],
+        )
+
+        # Create the runners
         self._runner = Runner(
             app=self._app,
+            session_service=self._session_service,
+            memory_service=self._memory_service,
+        )
+
+        self._conversational_runner = Runner(
+            app=self._conversational_app,
             session_service=self._session_service,
             memory_service=self._memory_service,
         )
@@ -432,18 +500,28 @@ class WebhookAgent:
             model_name=next_model,
             api_key=get_active_api_key(),
         )
-        self._code_auditor.model = new_model_instance
+        if hasattr(self, "_code_auditor") and self._code_auditor is not None:
+            self._code_auditor.model = new_model_instance
+        if hasattr(self, "_conversational_agent") and self._conversational_agent is not None:
+            self._conversational_agent.model = new_model_instance
 
         # Dynamically toggle context caching based on model family:
         # Strictly enable only for Gemini 3+ models; disable for Gemma / legacy models.
         if is_gemini_3_plus(next_model):
-            self._app.context_cache_config = ContextCacheConfig(
+            cache_cfg = ContextCacheConfig(
                 min_tokens=4096,
                 ttl_seconds=1800,
                 cache_intervals=10,
             )
+            if hasattr(self, "_app") and self._app is not None:
+                self._app.context_cache_config = cache_cfg
+            if hasattr(self, "_conversational_app") and self._conversational_app is not None:
+                self._conversational_app.context_cache_config = cache_cfg
         else:
-            self._app.context_cache_config = None
+            if hasattr(self, "_app") and self._app is not None:
+                self._app.context_cache_config = None
+            if hasattr(self, "_conversational_app") and self._conversational_app is not None:
+                self._conversational_app.context_cache_config = None
 
         runner_cls = getattr(wa_mod, "Runner", Runner)
         self._runner = runner_cls(
@@ -504,12 +582,7 @@ class WebhookAgent:
             parts.append(f"Thread Type: {'Pull Request' if is_pr else 'Issue'}")
             parts.append(f"Comment: {comment_body}")
             if is_pr:
-                parts.append(
-                    f"Note: This comment is on Pull Request #{pr_num}. "
-                    f"To perform requested actions like code reviews (/review) or descriptions (/create), "
-                    f"first call get_issue({pr_num}, include_diff=True) "
-                    f"to inspect the PR metadata and code changes."
-                )
+                parts.append(f"Note: This comment is on Pull Request #{pr_num}.")
         elif canonical.startswith("pull_request."):
             pr = raw.get("pull_request", {})
             pr_num = pr.get("number", "unknown")
@@ -771,7 +844,16 @@ class WebhookAgent:
                 model_name=selected_model,
                 api_key=get_active_api_key(),
             )
-            self._code_auditor.model = new_model_instance
+            if hasattr(self, "_code_auditor") and self._code_auditor is not None:
+                self._code_auditor.model = new_model_instance
+            if hasattr(self, "_conversational_agent") and self._conversational_agent is not None:
+                self._conversational_agent.model = new_model_instance
+
+        comment_body = (
+            (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
+        )
+        is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
+        active_runner = self._runner if is_pr_review_event else self._conversational_runner
 
         # Run the agent asynchronously with retry and fallback support
         results: list[ActionResult] = []
@@ -786,7 +868,7 @@ class WebhookAgent:
             )
             run_config = RunConfig(max_llm_calls=max_llm_calls)
             try:
-                async for event in self._runner.run_async(
+                async for event in active_runner.run_async(
                     user_id=user_id,
                     session_id=session_id,
                     new_message=user_message,
@@ -879,7 +961,7 @@ class WebhookAgent:
             self._attempted_model_names = {self._normalize_model_name(self._current_model_name)}
 
             # Checkpoint short-circuit: if this exact commit was already reviewed, skip duplicate
-            if pr_number and head_sha:
+            if is_pr_review_event and pr_number and head_sha:
                 checkpoint = review_checkpoint_manager.get_checkpoint(
                     repo_full_name, pr_number, head_sha
                 )
@@ -996,7 +1078,7 @@ class WebhookAgent:
                             tools_exec.append("verify_python_ast")
                         if "check_symbol_impact" not in tools_exec:
                             tools_exec.append("check_symbol_impact")
-                    if pr_number and head_sha:
+                    if is_pr_review_event and pr_number and head_sha:
                         review_checkpoint_manager.save_checkpoint(
                             repo=repo_full_name,
                             pr_number=pr_number,
@@ -1223,6 +1305,50 @@ class WebhookAgent:
                             "Deterministic review submission failed: %s",
                             fallback_err,
                         )
+
+        elif not is_pr_review_event and not is_comment_reconciliation:
+            has_comment_action = any(r.tool == "add_comment" and r.success for r in results)
+            if not has_comment_action and emitted_texts:
+                full_reply = "\n\n".join(emitted_texts).strip()
+                if full_reply:
+                    pr_number = None
+                    if isinstance(raw, dict):
+                        pr_number = (raw.get("pull_request") or {}).get("number") or (
+                            raw.get("issue") or {}
+                        ).get("number")
+                    if pr_number:
+                        target_key = f"{repo_full_name}#{pr_number}"
+                        if _COMMENT_RATE_LIMITER.is_allowed(target_key):
+                            try:
+                                repo = gh_client.get_repo(repo_full_name)
+                                issue = repo.get_issue(pr_number)
+                                comment_obj = issue.create_comment(full_reply)
+                                _COMMENT_RATE_LIMITER.record(target_key)
+                                results.append(
+                                    ActionResult(
+                                        tool="add_comment",
+                                        success=True,
+                                        detail=f"Posted conversational comment to #{pr_number}: {getattr(comment_obj, 'html_url', 'OK')}",
+                                    )
+                                )
+                                logger.info(
+                                    "💬 Posted conversational comment to %s#%d (trace: %s)",
+                                    repo_full_name,
+                                    pr_number,
+                                    trace_id[-4:],
+                                )
+                            except Exception as comment_err:
+                                logger.warning(
+                                    "Failed to post conversational comment to #%d: %s",
+                                    pr_number,
+                                    comment_err,
+                                )
+                        else:
+                            logger.warning(
+                                "Conversational comment rate limited for %s (trace: %s)",
+                                target_key,
+                                trace_id[-4:],
+                            )
 
         if not results:
             logger.info(

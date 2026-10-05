@@ -241,13 +241,14 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
             if isinstance(raw.get("comment"), dict):
                 comment_body = raw["comment"].get("body") or ""
 
-            commands = (
-                "/review",
-                "/create",
-                "/help",
-                "@hannibal-hub-agents",
-            )
-            if any(cmd in comment_body for cmd in commands):
+            from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+            cb_lower = comment_body.lower()
+            if (
+                any(cmd in cb_lower for cmd in REVIEW_INTENT_KEYWORDS)
+                or "@hannibal-hub-agents" in cb_lower
+                or "/help" in cb_lower
+            ):
                 target = primary
             else:
                 target = lightweight

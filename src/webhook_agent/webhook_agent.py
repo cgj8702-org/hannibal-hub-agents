@@ -16,6 +16,7 @@ from webhook_agent.core.agent_definition import (
     _MAX_RETRIES,
     AUDITOR_CONTEXT_INSTRUCTION,
     BOT_LOGIN,
+    CONVERSATIONAL_INSTRUCTION,
     MAX_INPUT_TOKENS,
     SYSTEM_INSTRUCTION,
     WebhookAgent,
@@ -90,6 +91,7 @@ logger = logging.getLogger("webhook_agent.agent")
 __all__ = [
     "AUDITOR_CONTEXT_INSTRUCTION",
     "BOT_LOGIN",
+    "CONVERSATIONAL_INSTRUCTION",
     "MAX_INPUT_TOKENS",
     "SYSTEM_INSTRUCTION",
     "_COMMENT_RATE_LIMITER",
