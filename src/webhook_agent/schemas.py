@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 def clean_field_string(val: Any) -> Any:
     """Universal string sanitizer that strips any leading Markdown keys, headers, badges, or bullet prefixes."""
+    if val is None:
+        return ""
     if not isinstance(val, str):
         return val
     s = val.strip()

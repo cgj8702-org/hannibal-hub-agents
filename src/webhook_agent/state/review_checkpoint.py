@@ -49,7 +49,15 @@ class ReviewCheckpointManager:
     def _get_db(self) -> Any | None:
         if not self._initialized:
             self._initialized = True
-            if _HAS_FIRESTORE:
+            # Kill-switch: Firestore checkpoint persistence is opt-in via
+            # ENABLE_REVIEW_CHECKPOINT=1. The VM's service identity lacks
+            # Firestore IAM roles (403s in prod logs), so default to local
+            # memory instead of spamming 403 warnings on every review.
+            enabled = os.getenv("ENABLE_REVIEW_CHECKPOINT", "0").lower() in (
+                "1",
+                "true",
+            )
+            if _HAS_FIRESTORE and enabled:
                 try:
                     project_id = (
                         os.getenv("FIRESTORE_PROJECT_ID")
@@ -60,6 +68,11 @@ class ReviewCheckpointManager:
                     logger.info("Initialized ReviewCheckpointManager in Firestore [%s]", project_id)
                 except Exception as exc:
                     logger.warning("Could not initialize Firestore client for checkpoints: %s", exc)
+            elif _HAS_FIRESTORE:
+                logger.debug(
+                    "ReviewCheckpointManager using local memory "
+                    "(set ENABLE_REVIEW_CHECKPOINT=1 for Firestore)"
+                )
         return self._db
 
     def get_checkpoint(self, repo: str, pr_number: int, head_sha: str) -> dict[str, Any] | None:
@@ -78,7 +91,7 @@ class ReviewCheckpointManager:
                         return None
                     return data
             except Exception as exc:
-                logger.warning("Failed to fetch checkpoint %s from Firestore: %s", doc_id, exc)
+                logger.debug("Checkpoint %s using local fallback (Firestore: %s)", doc_id, exc)
 
         with self._lock:
             local = self._local_cache.get(doc_id)
@@ -145,7 +158,9 @@ class ReviewCheckpointManager:
                 )
                 return True
             except Exception as exc:
-                logger.warning("Failed to save checkpoint %s to Firestore: %s", doc_id, exc)
+                logger.debug(
+                    "Checkpoint %s using local fallback on save (Firestore: %s)", doc_id, exc
+                )
 
         return True
 
@@ -183,7 +198,9 @@ class ReviewCheckpointManager:
                 logger.info("⏸️ Checkpoint marked rate_limited for %s", doc_id)
                 return True
             except Exception as exc:
-                logger.warning("Failed to update rate_limited checkpoint %s: %s", doc_id, exc)
+                logger.debug(
+                    "Checkpoint %s rate_limit using local fallback (Firestore: %s)", doc_id, exc
+                )
         return True
 
     def mark_completed(self, repo: str, pr_number: int, head_sha: str) -> bool:
@@ -211,7 +228,9 @@ class ReviewCheckpointManager:
                 logger.info("✅ Checkpoint marked completed for %s", doc_id)
                 return True
             except Exception as exc:
-                logger.warning("Failed to mark checkpoint completed for %s: %s", doc_id, exc)
+                logger.debug(
+                    "Checkpoint %s completion using local fallback (Firestore: %s)", doc_id, exc
+                )
         return True
 
 
