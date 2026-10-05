@@ -448,17 +448,22 @@ class TestTokenTruncation:
 
 class TestToolRegistration:
     def test_agent_tools_count(self):
-        """Verify the exact tool count registered on the code auditor sub-agent in Option A."""
+        """Verify the exact tool count registered on the code auditor sub-agent.
+
+        Forward-fix: review restored as interactive fallback alongside the 6
+        deterministic grounding tools (Option A was too narrow for
+        issue_comment reconciliation).
+        """
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 6
+        assert len(tool_names) == 7
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 6 audit-only inspection and grounding tools."""
+        """Tool names should match the 6 audit-only tools plus review fallback."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -473,6 +478,7 @@ class TestToolRegistration:
                 "get_current_time",
                 "google_search_grounding_tool",
                 "search_codebase",
+                "review",
             ]
         )
         assert tool_names == expected
@@ -486,7 +492,6 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         }
         removed = {
-            "review",
             "verify_python_ast",
             "check_symbol_impact",
             "check_test_coverage",
@@ -563,6 +568,38 @@ class TestToolRegistration:
         )
         res = review(mock_tc, pr_number=1, event="APPROVE", body=body)
         assert "Review submission rejected" not in res
+
+    def test_review_restored_on_auditor_for_comment_reconciliation(self):
+        """Forward-fix: review tool must be present for issue_comment follow-ups."""
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        tool_names = {
+            getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
+        }
+        assert "review" in tool_names
+
+    def test_issue_comment_on_pr_prefetches_diff(self):
+        """Forward-fix: issue_comment on a PR gets diff context for grounding."""
+        from unittest.mock import MagicMock
+
+        from webhook_agent.processor import _should_prefetch_diff
+
+        raw = {
+            "comment": {"body": "looks good, thanks!"},
+            "issue": {"number": 274, "pull_request": {"url": "x"}},
+        }
+        assert _should_prefetch_diff("issue_comment.created", raw) is True
+
+    def test_issue_comment_on_issue_skips_diff(self):
+        """Plain issue comments (no pull_request link) stay lightweight."""
+        from webhook_agent.processor import _should_prefetch_diff
+
+        raw = {
+            "comment": {"body": "looks good, thanks!"},
+            "issue": {"number": 10},
+        }
+        assert _should_prefetch_diff("issue_comment.created", raw) is False
 
 
 # ---------------------------------------------------------------------------

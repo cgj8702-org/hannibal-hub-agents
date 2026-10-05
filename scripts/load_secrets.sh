@@ -58,4 +58,11 @@ export PUBSUB_DEAD_LETTER_TOPIC="projects/${PROJECT_ID}/topics/webhooks-dead-let
 # Enabled by default: allow automated mutations out of the box.
 export ALLOW_AUTOMATED_MUTATIONS="${ALLOW_AUTOMATED_MUTATIONS:-1}"
 
+# --- Firestore persistence gates (service never sources .envrc) ---
+# IAM prerequisite: roles/datastore.user for webhook-agent-sa in ${PROJECT_ID}.
+export FIRESTORE_PROJECT_ID="${FIRESTORE_PROJECT_ID:-${PROJECT_ID}}"
+export ENABLE_REVIEW_IDEMPOTENCY="${ENABLE_REVIEW_IDEMPOTENCY:-1}"
+export ENABLE_REVIEW_CHECKPOINT="${ENABLE_REVIEW_CHECKPOINT:-1}"
+export ENABLE_FIRESTORE_REGISTRY="${ENABLE_FIRESTORE_REGISTRY:-1}"
+
 echo "Secrets loaded into environment memory successfully."

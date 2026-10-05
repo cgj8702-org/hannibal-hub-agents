@@ -131,6 +131,13 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
         }
         if any(trigger in comment_body for trigger in review_triggers):
             return True
+        # Forward-fix: issue_comment on a PR (issue.pull_request set) that needs
+        # reconciliation against prior bot reviews should also get diff context.
+        # Otherwise the agent emits resolutions with no grounding and the
+        # deterministic fallback has no pr_diff to validate against.
+        issue = raw.get("issue") or {}
+        if isinstance(issue, dict) and issue.get("pull_request") is not None:
+            return True
 
     return False
 
@@ -531,7 +538,7 @@ class WebhookProcessor:
         # Load essential GitHub credentials from the environment.
         # Empty env vars (e.g. from a failed secret resolution) are treated as
         # unset so the worker fails with a clear error instead of int('') crashing.
-        from webhook_agent.logic.constants import (
+        from webhook_agent.constants import (
             DEFAULT_GITHUB_APP_ID,
             DEFAULT_GITHUB_INSTALLATION_ID,
         )

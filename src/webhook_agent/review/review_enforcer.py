@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Any
 
+from webhook_agent.analysis.diff_filter import filter_review_diff
 from webhook_agent.comment_poster import build_github_review_comments
 from webhook_agent.formatter import (
     calculate_strict_verdict,
@@ -21,10 +22,9 @@ from webhook_agent.formatter import (
     render_code_review_markdown,
     render_sync_review_markdown,
 )
-from webhook_agent.logic.diff_filter import filter_review_diff
-from webhook_agent.logic.review_idempotency import review_claim_registry
-from webhook_agent.logic.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
+from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
 from webhook_agent.schemas import CodeReviewResponse, SyncReviewResponse
+from webhook_agent.state.review_idempotency import review_claim_registry
 
 logger = logging.getLogger("webhook_agent.review_enforcer")
 

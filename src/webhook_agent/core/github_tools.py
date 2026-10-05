@@ -14,10 +14,10 @@ from typing import Any
 from github import Github
 from google.adk.agents.context import Context
 
-from webhook_agent.logic.diff_filter import filter_review_diff
-from webhook_agent.logic.model_chain import get_active_model
-from webhook_agent.logic.writeback_policy import _COMMENT_RATE_LIMITER
+from webhook_agent.analysis.diff_filter import filter_review_diff
+from webhook_agent.models.model_chain import get_active_model
 from webhook_agent.review.review_enforcer import _submit_formal_review
+from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
 
 logger = logging.getLogger("webhook_agent.core.github_tools")
 

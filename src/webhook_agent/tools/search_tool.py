@@ -13,7 +13,7 @@ import os
 
 from google.adk.agents.context import Context
 
-from webhook_agent.logic.genai_provider import get_text_generation_provider
+from webhook_agent.models.genai_provider import get_text_generation_provider
 
 logger = logging.getLogger("webhook_agent.search")
 

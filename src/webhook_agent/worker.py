@@ -52,6 +52,11 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("google.auth").setLevel(logging.WARNING)
 logging.getLogger("google_adk").setLevel(logging.ERROR)
 logging.getLogger("google.adk").setLevel(logging.ERROR)
+# ADK's Runner logs 'Root node failed' with exc_info on every failed invocation,
+# duplicating the exception our orchestrator already logs once at the retry
+# boundary. Suppress the per-attempt duplicate traceback while keeping other
+# ADK ERROR records visible.
+logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +75,7 @@ def publish_dead_letter(
 
 def setup_cloud_logging() -> None:
     """Initialize Google Cloud Logging handler if available."""
-    from webhook_agent.logic.constants import DEFAULT_PUBSUB_PROJECT
+    from webhook_agent.constants import DEFAULT_PUBSUB_PROJECT
 
     try:
         import google.cloud.logging
@@ -88,6 +93,9 @@ def setup_cloud_logging() -> None:
         logging.getLogger("google_genai.models").setLevel(logging.ERROR)
         logging.getLogger("google_adk").setLevel(logging.ERROR)
         logging.getLogger("google.adk").setLevel(logging.ERROR)
+        # Duplicate of the module-level clamp: drop ADK Runner's per-attempt
+        # 'Root node failed' traceback (our orchestrator logs it once instead).
+        logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
@@ -98,7 +106,7 @@ def setup_cloud_logging() -> None:
 # Main entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
-    from webhook_agent.logic.constants import (
+    from webhook_agent.constants import (
         DEFAULT_PUBSUB_DEAD_LETTER_TOPIC,
         DEFAULT_PUBSUB_PROJECT,
         DEFAULT_PUBSUB_SUBSCRIPTION,
@@ -131,14 +139,24 @@ def main() -> int:
 
     PROACTIVE_SWEEP_INTERVAL_SECONDS = 300  # 5 minutes
     last_proactive_sweep = 0.0
+    # Kill-switch: proactive sweeps disabled by default. Set
+    # ENABLE_PROACTIVE_SWEEP=1 to re-enable the 5-minute ticker.
+    proactive_sweep_enabled = os.environ.get("ENABLE_PROACTIVE_SWEEP", "0") in (
+        "1",
+        "true",
+        "True",
+    )
 
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
-        # Periodic Proactive Agent Sweep (Every 5 minutes)
+        # Periodic Proactive Agent Sweep (Every 5 minutes, when enabled)
         import time
 
         now = time.time()
-        if now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS:
+        if (
+            proactive_sweep_enabled
+            and now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS
+        ):
             last_proactive_sweep = now
             try:
                 import threading

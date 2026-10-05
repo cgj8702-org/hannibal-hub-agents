@@ -14,8 +14,8 @@ from concurrent.futures import CancelledError, Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
-from webhook_agent.logic.genai_provider import get_text_generation_provider
-from webhook_agent.logic.rate_limiter import get_active_api_key
+from webhook_agent.models.genai_provider import get_text_generation_provider
+from webhook_agent.models.rate_limiter import get_active_api_key
 
 logger = logging.getLogger("webhook_agent.core.loop_helpers")
 
@@ -81,10 +81,9 @@ def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
     except CancelledError:
         future.cancel()
         raise
-    except Exception:
-        # Re-raise after logging to make debugging easier in logs
-        logger.exception("Error running coroutine in background loop")
-        raise
+    # Any other exception propagates unchanged: the top-level worker message
+    # handler logs it once with its traceback instead of each layer re-printing
+    # the same error on the way up.
 
 
 def get_shared_genai_client() -> Any:

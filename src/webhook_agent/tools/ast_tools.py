@@ -13,7 +13,7 @@ from typing import Any
 
 from google.adk.tools import FunctionTool
 
-from webhook_agent.logic.ast_analyzer import analyze_python_code
+from webhook_agent.analysis.ast_analyzer import analyze_python_code
 
 logger = logging.getLogger(__name__)
 

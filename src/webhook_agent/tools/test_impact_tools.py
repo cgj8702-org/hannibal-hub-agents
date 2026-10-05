@@ -6,7 +6,7 @@ import logging
 
 from google.adk.tools import FunctionTool
 
-from webhook_agent.logic.test_impact import TestImpactAnalyzer
+from webhook_agent.analysis.test_impact import TestImpactAnalyzer
 
 logger = logging.getLogger("webhook_agent.tools.test_impact_tools")
 
@@ -38,7 +38,7 @@ def check_test_coverage(
         filtered = [
             c for c in report.coverages if c.symbol_name == symbol_name or c.qualname == symbol_name
         ]
-        from webhook_agent.logic.test_impact import TestImpactReport
+        from webhook_agent.analysis.test_impact import TestImpactReport
 
         report = TestImpactReport(
             modified_source_files=report.modified_source_files,

@@ -36,37 +36,38 @@ from webhook_agent.core.github_tools import (
     get_current_time,
     get_issue,
     read_file,
+    review,
 )
 from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
     run_in_bg_loop,
 )
-from webhook_agent.logic.model_chain import (
+from webhook_agent.logic.plugins import (
+    ToolOutputPruningPlugin,
+    WebhookHistoryPruningPlugin,
+)
+from webhook_agent.memory_service import InMemoryMemoryService
+from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
     _is_transient_error,
     _select_model_for_event,
     get_active_model,
     is_gemini_3_plus,
 )
-from webhook_agent.logic.model_factory import get_adk_model
-from webhook_agent.logic.plugins import (
-    ToolOutputPruningPlugin,
-    WebhookHistoryPruningPlugin,
-)
-from webhook_agent.logic.rate_limiter import (
+from webhook_agent.models.model_factory import get_adk_model
+from webhook_agent.models.rate_limiter import (
     _resolve_tier,
     extract_rate_limit_details,
     get_active_api_key,
     rpm_waiter,
 )
-from webhook_agent.logic.review_checkpoint import review_checkpoint_manager
-from webhook_agent.logic.writeback_policy import (
+from webhook_agent.review.review_enforcer import _submit_formal_review
+from webhook_agent.review.writeback_policy import (
     _is_formal_review_eligible,
     evaluate_writeback_policy,
 )
-from webhook_agent.memory_service import InMemoryMemoryService
-from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
+from webhook_agent.state.review_checkpoint import review_checkpoint_manager
 from webhook_agent.tools import resolve_conflicts as resolve_conflicts_module
 from webhook_agent.tools.codebase_search import search_codebase_tool
 from webhook_agent.tools.search_tool import google_search_grounding_tool
@@ -209,6 +210,8 @@ When reviewing a PR, you MUST:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
    - Output your review response directly as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `verified_invariants`. Do NOT call a review tool.
    - For an `APPROVE` verdict, you MUST include **at least 2 to 3 concrete invariants** spanning distinct modified modules in `verified_invariants` with exact `path`, positive integer `line`, and clinical `evidence`. Single-invariant compliance is prohibited.
+   - **Synchronization Summary Depth**: The `summary` MUST NOT be a 1-sentence recap or an echo of the commit message. Provide a thorough, multi-paragraph architectural assessment covering: 1) What Changed & Why (how incremental commits alter contracts, data flow, or module boundaries vs prior review state), 2) Resolution Integrity (which prior findings are genuinely resolved with diff evidence vs merely moved), 3) Residual Risk (edge cases, concurrency boundaries, or test gaps remaining after this update).
+   - **ANTI-RUBBER-STAMPING FOR SYNC**: For any non-trivial update (> 20 lines changed or touching core logic), outputting `"None found"` across both `critical_issues` and `minor_suggestions` is strictly prohibited. Identify at least 1-2 nuanced suggestions or failure modes even when approving. No sycophancy ("pristine", "fully operational", "exemplary") — state objective technical facts only.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
    - Track items in `resolutions` across all three feedback dimensions raised in `previous_bot_reviews`:
      1) **Critical Issues** (`category: "CRITICAL"`): Verify whether blocking issues were resolved.
@@ -296,7 +299,7 @@ class WebhookAgent:
 
         # Track current model chain (TPM Descending)
         from webhook_agent import webhook_agent as wa_mod
-        from webhook_agent.logic.model_chain import get_model_chain as default_get_chain
+        from webhook_agent.models.model_chain import get_model_chain as default_get_chain
 
         get_chain_fn = getattr(wa_mod, "get_model_chain", default_get_chain) or default_get_chain
         self._model_chain = get_chain_fn()
@@ -345,6 +348,7 @@ class WebhookAgent:
                 get_current_time,
                 google_search_grounding_tool,
                 search_codebase_tool,
+                review,
             ],
         )
 
@@ -400,7 +404,7 @@ class WebhookAgent:
         depleted_registry = getattr(wa_mod, "_DEPLETED_MODEL_REGISTRY", _DEPLETED_MODEL_REGISTRY)
         depleted_registry.mark_depleted(self._current_model_name, error=error)
 
-        from webhook_agent.logic.model_chain import get_model_chain as default_get_chain
+        from webhook_agent.models.model_chain import get_model_chain as default_get_chain
 
         get_chain_fn = getattr(wa_mod, "get_model_chain", default_get_chain) or default_get_chain
         full_chain = get_chain_fn()
@@ -593,7 +597,7 @@ class WebhookAgent:
                     event_data["deterministic_precompiled_ast"] = True
 
                     # Cross-File Symbol Dependency & Breaking Signature Graph
-                    from webhook_agent.logic.symbol_graph import SymbolImpactAnalyzer
+                    from webhook_agent.analysis.symbol_graph import SymbolImpactAnalyzer
 
                     sym_analyzer = SymbolImpactAnalyzer()
                     impact_reports = sym_analyzer.analyze_modified_files(changed_files)
@@ -612,7 +616,7 @@ class WebhookAgent:
                         )
 
                     # Test Impact & Coverage Verification
-                    from webhook_agent.logic.test_impact import TestImpactAnalyzer
+                    from webhook_agent.analysis.test_impact import TestImpactAnalyzer
 
                     test_analyzer = TestImpactAnalyzer()
                     test_report = test_analyzer.analyze(changed_files)
@@ -1189,6 +1193,9 @@ class WebhookAgent:
 
         # Deterministic review submission: if no review tool was called during a PR review event,
         # extract structured audit state from ADK session or emitted texts, and enforce verdict.
+        # Forward-fix: also cover issue_comment reconciliation follow-ups that emit
+        # resolutions + verdict (e.g. REQUEST_CHANGES -> APPROVE flips). Otherwise
+        # conversational re-reviews are silently dropped as "no actions".
         canonical = event_data.get("canonical", "")
         raw = event_data.get("raw_payload", {})
         comment_body = (
@@ -1197,7 +1204,22 @@ class WebhookAgent:
         is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
         has_review_action = any(r.tool == "review" and r.success for r in results)
 
-        if is_pr_review_event and not has_review_action:
+        is_comment_reconciliation = False
+        if not is_pr_review_event and not has_review_action and emitted_texts:
+            full_text = "\n\n".join(emitted_texts)
+            has_resolutions = '"resolutions"' in full_text
+            has_verdict = '"verdict"' in full_text
+            is_pr_comment = canonical.startswith(
+                ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
+            )
+            if is_pr_comment and has_resolutions and has_verdict:
+                is_comment_reconciliation = True
+                logger.info(
+                    "Comment reconciliation detected (trace: %s): promoting to deterministic review submission",
+                    trace_id[-4:],
+                )
+
+        if (is_pr_review_event or is_comment_reconciliation) and not has_review_action:
             # 1. Safely extract review payload from session state or emitted text
             review_payload = ""
             if final_session and final_session.state:

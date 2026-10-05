@@ -41,8 +41,15 @@ def test_get_adk_model_paid_tier_default(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.anyio
 @pytest.mark.unit
-async def test_rate_limited_gemini_retries_on_429(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify RateLimitedGemini catches 429 and retries in-flight without aborting."""
+async def test_rate_limited_gemini_fails_fast_on_429(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A 429 must propagate on the first attempt so the orchestrator can fail over.
+
+    The model wrapper deliberately neither retries nor re-logs the Google error:
+    the orchestrator in agent_definition is the single retry/failover and
+    logging boundary, so the error flows up transparently.
+    """
     from collections.abc import AsyncGenerator
     from typing import Any
     from unittest.mock import MagicMock
@@ -54,9 +61,8 @@ async def test_rate_limited_gemini_retries_on_429(monkeypatch: pytest.MonkeyPatc
     async def mock_super_gen(*args: Any, **kwargs: Any) -> AsyncGenerator[Any]:
         nonlocal attempts
         attempts += 1
-        if attempts == 1:
-            raise RuntimeError("429 RESOURCE_EXHAUSTED: Please retry in 0.1s.")
-        yield MagicMock(text="success")
+        raise RuntimeError("429 RESOURCE_EXHAUSTED: Please retry in 0.1s.")
+        yield  # pragma: no cover
 
     monkeypatch.setattr(Gemini, "generate_content_async", mock_super_gen)
 
@@ -64,13 +70,14 @@ async def test_rate_limited_gemini_retries_on_429(monkeypatch: pytest.MonkeyPatc
     llm_request.contents = ["hello"]
     llm_request._rate_limit_checked = True
 
-    responses = []
-    async for resp in model.generate_content_async(llm_request):
-        responses.append(resp)
+    with pytest.raises(RuntimeError, match="429 RESOURCE_EXHAUSTED"):
+        async for _ in model.generate_content_async(llm_request):
+            pass
 
-    assert len(responses) == 1
-    assert responses[0].text == "success"
-    assert attempts == 2
+    assert attempts == 1
+    # The wrapper must not print the Google error itself — no console spam.
+    assert "hit quota/rate-limit" not in caplog.text
+    assert "429 RESOURCE_EXHAUSTED" not in caplog.text
 
 
 @pytest.mark.anyio

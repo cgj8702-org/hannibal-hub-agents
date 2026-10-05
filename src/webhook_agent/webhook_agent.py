@@ -54,7 +54,11 @@ from webhook_agent.core.loop_helpers import (
     get_shared_text_generation_provider,
     run_in_bg_loop,
 )
-from webhook_agent.logic.model_chain import (
+from webhook_agent.logic.plugins import (
+    ToolOutputPruningPlugin,
+    WebhookHistoryPruningPlugin,
+)
+from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
     DepletedModelRegistry,
     _count_tokens_exact,
@@ -64,28 +68,24 @@ from webhook_agent.logic.model_chain import (
     get_active_model,
     get_model_chain,
 )
-from webhook_agent.logic.model_factory import RateLimitedGemini, get_adk_model
-from webhook_agent.logic.plugins import (
-    ToolOutputPruningPlugin,
-    WebhookHistoryPruningPlugin,
-)
-from webhook_agent.logic.rate_limiter import (
+from webhook_agent.models.model_factory import RateLimitedGemini, get_adk_model
+from webhook_agent.models.rate_limiter import (
     extract_rate_limit_details,
     get_active_api_key,
     rpm_waiter,
-)
-from webhook_agent.logic.writeback_policy import (
-    _COMMENT_RATE_LIMITER,
-    CommentRateLimiter,
-    _is_formal_review_eligible,
-    _review_lock,
-    evaluate_writeback_policy,
 )
 from webhook_agent.review.review_enforcer import (
     _enforce_verdict,
     _parse_confidence,
     _parse_scorecard_scores,
     _submit_formal_review,
+)
+from webhook_agent.review.writeback_policy import (
+    _COMMENT_RATE_LIMITER,
+    CommentRateLimiter,
+    _is_formal_review_eligible,
+    _review_lock,
+    evaluate_writeback_policy,
 )
 from webhook_agent.tools.resolve_conflicts import resolve_merge_conflicts
 

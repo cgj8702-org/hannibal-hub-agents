@@ -1051,6 +1051,20 @@ class TestBaseBranchMergeSync:
         logger = logging.getLogger("google_genai.models")
         assert logger.level == logging.ERROR
 
+    def test_worker_suppresses_adk_runner_duplicate_traceback_logger(self):
+        """ADK Runner's per-attempt 'Root node failed' traceback must be clamped.
+
+        The orchestrator already logs each Google error once at the retry
+        boundary, so the duplicate ADK traceback must not reach the console.
+        """
+        import logging
+
+        import webhook_agent.worker as worker_module
+
+        assert worker_module is not None
+        logger = logging.getLogger("google_adk.google.adk.runners")
+        assert logger.level == logging.CRITICAL
+
     def test_process_event_deterministic_fast_path_approves_clean_dependabot_pr(self):
         from unittest.mock import MagicMock, patch
 
