@@ -61,10 +61,8 @@ flowchart TD
 │       ├── bot_identity.py  # Multi-signal bot identity detection for loop avoidance
 │       ├── memory_service.py # ADK agent memory and session persistence service
 │       ├── github_credential_helper.py # GitHub App JWT generation & cached installation tokens
-│       ├── types.py         # Common dataclasses and ActionResult definitions
-│       ├── tools/           # Isolated Git Worktree tools (/fix & /resolve execution)
-│       │   ├── auto_fix.py          # Isolated Git Worktree auto-fix tool
-│       │   └── resolve_conflicts.py # Ephemeral Git Worktree merge conflict resolution tool
+│       ├── webhook_types.py # Common dataclasses and ActionResult definitions
+│       ├── tools/           # AST analysis, diff tools, search, and codebase utilities
 │       └── templates/       # Local prompt & code review templates
 ├── tests/
 │   ├── eval/                # Continuous quality evaluation datasets & configs
@@ -93,16 +91,13 @@ The project includes built-in strategies to maximize context efficiency, elimina
      - **Failing CI Runs**: Failed status check runs ➔ Posts targeted diagnostic recommendations.
 3. **Universal Pydantic Field Validators (`clean_field_string`)**:
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
-4. **Programmatic `/resolve` Git Worktree Conflict Resolution**:
-   - Triggered programmatically when a user comments `/resolve`.
-   - Clones the PR into an isolated Git Worktree (`/tmp/worktrees/pr_X_...`), merges `origin/main` cleanly, synthesizes conflict resolution via LLM, verifies `pytest` & pre-commit checks, configures `http.extraheader` bearer token auth, and pushes the updated branch automatically.
-5. **Tier-Aware Model Chains & 503 Failover**:
+4. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
    - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through Flash-Lite and Gemma tiers.
    - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
-6. **Resolution Tracking & Re-Review Templates**:
+5. **Resolution Tracking & Re-Review Templates**:
    - Tracks **`[RESOLVED]`** vs **`[UNRESOLVED]`** items across commits using structured schema validation.
-7. **Guarded Programmatic 👀 Reaction**:
+6. **Guarded Programmatic 👀 Reaction**:
    - Adds an `eyes` reaction to user comments and valid PR events once closed/merged PR checks and deduplication locks pass.
 
 ---

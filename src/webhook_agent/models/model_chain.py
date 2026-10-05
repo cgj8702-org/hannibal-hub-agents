@@ -244,7 +244,6 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
             commands = (
                 "/review",
                 "/create",
-                "/resolve",
                 "/help",
                 "@hannibal-hub-agents",
             )

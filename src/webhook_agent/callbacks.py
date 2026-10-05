@@ -31,7 +31,6 @@ MUTATING_TOOLS: set[str] = {
     "open_pr",
     "update_issue",
     "update_branch_from_base",
-    "resolve_pr_conflicts",
     "mark_ready_for_review",
 }
 

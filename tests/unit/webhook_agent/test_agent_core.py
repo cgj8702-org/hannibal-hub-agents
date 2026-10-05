@@ -854,54 +854,6 @@ class TestTokenLimits:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Programmatic Command Router for /resolve
-# ---------------------------------------------------------------------------
-
-
-class TestProgrammaticResolveCommandRouter:
-    def test_plan_and_execute_intercepts_resolve_command(self, monkeypatch):
-        from unittest.mock import MagicMock, patch
-
-        from webhook_agent.webhook_agent import WebhookAgent
-
-        monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "1")
-        agent = WebhookAgent(dry_run=False)
-
-        mock_gh = MagicMock()
-        mock_pr = MagicMock()
-        mock_pr.head.ref = "feat-branch"
-        mock_pr.base.ref = "main"
-        mock_gh.get_repo.return_value.get_pull.return_value = mock_pr
-
-        event_data = {
-            "canonical": "issue_comment.created",
-            "sender": {"login": "human"},
-            "repository": {"full_name": "owner/repo"},
-            "raw_payload": {
-                "issue": {"number": 63, "pull_request": {}},
-                "comment": {"body": "/resolve"},
-            },
-        }
-
-        with patch("webhook_agent.webhook_agent.resolve_merge_conflicts") as mock_resolve:
-            mock_resolve.return_value = {
-                "success": True,
-                "detail": "Resolved conflicts in 2 files",
-            }
-            results = agent.plan_and_execute(
-                event_data=event_data,
-                gh_client=mock_gh,
-                trace_id="test-trace-123",
-            )
-            assert len(results) == 1
-            assert results[0].tool == "resolve_merge_conflicts"
-            assert results[0].success is True
-            assert "Resolved conflicts in 2 files" in results[0].detail
-            assert mock_resolve.call_count == 1
-            mock_pr.create_issue_comment.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
 # Tests: mark_ready_for_review & merge_pr draft safety check
 # ---------------------------------------------------------------------------
 
