@@ -227,7 +227,6 @@ def test_normalize_code_review_dict_edge_cases():
     """Verify self-healing normalizer handles empty inputs, non-dict objects, and string lists."""
     assert normalize_code_review_dict({}) == {
         "executive_summary": "Autonomous PR code review report.",
-        "confidence": 5,
         "risks_and_edge_cases": [],
         "critical_issues": [],
         "minor_suggestions": [],
@@ -237,14 +236,12 @@ def test_normalize_code_review_dict_edge_cases():
 
     raw = {
         "executive_summary": "Test summary",
-        "confidence": 10,  # Invalid confidence out of range
         "critical_issues": ["Loose string critical issue"],
         "minor_suggestions": ["Loose string minor suggestion"],
         "risks_and_edge_cases": ["Loose string risk item"],
     }
     normalized = normalize_code_review_dict(raw)
     assert normalized["executive_summary"] == "Test summary"
-    assert normalized["confidence"] == 5
     assert len(normalized["critical_issues"]) == 1
     assert normalized["critical_issues"][0]["description"] == "Loose string critical issue"
     assert len(normalized["minor_suggestions"]) == 1

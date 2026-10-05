@@ -11,7 +11,6 @@ import re
 from typing import Any
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.comment_poster import build_github_review_comments
 from webhook_agent.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -51,20 +50,6 @@ def _parse_scorecard_scores(body: str) -> list[int]:
     return scores
 
 
-def _parse_confidence(body: str) -> int | None:
-    """Extract the confidence self-assessment score from a review body.
-
-    Looks for 'Confidence:' followed by a number 1-5 or N/5.
-    Returns the score or None if not found.
-    """
-    match = re.search(r"\*\*(?:My\s+)?Confidence:\*\*\s*(\d)", body)
-    if match:
-        val = int(match.group(1))
-        if 1 <= val <= 5:
-            return val
-    return None
-
-
 def _enforce_verdict(
     body: str, event: str, pr: Any = None, review_mode: str | None = None
 ) -> tuple[str, str, list[dict[str, Any]]]:
@@ -78,6 +63,8 @@ def _enforce_verdict(
     Safety Invariant: A safety guardrail must ONLY downgrade verdicts (APPROVE -> REQUEST_CHANGES
     or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
     """
+    from webhook_agent.comment_poster import build_github_review_comments
+
     cleaned_body = body.strip()
     req_event = (event or "").strip().upper()
     is_caller_request_changes = req_event == "REQUEST_CHANGES"

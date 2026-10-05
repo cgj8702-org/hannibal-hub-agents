@@ -445,6 +445,8 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
         "code": getattr(exc, "code", 429),
         "message": str(exc),
         "quota_limit": None,
+        "quota_id": None,
+        "quota_type": None,
         "quota_value": None,
         "retry_after_seconds": None,
         "reason": None,
@@ -495,6 +497,8 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
                         details["quota_value"] = v.get("quotaValue")
                     if "quotaMetric" in v and not details["quota_limit"]:
                         details["quota_limit"] = v.get("quotaMetric")
+                    if "quotaId" in v and not details.get("quota_id"):
+                        details["quota_id"] = v.get("quotaId")
 
         # ErrorInfo reason
         if "reason" in item and not details["reason"]:
@@ -538,5 +542,31 @@ def extract_rate_limit_details(exc: Exception) -> dict[str, Any]:
         limit_req = headers.get("x-ratelimit-limit-requests")
         if limit_req and not details["quota_value"]:
             details["quota_value"] = limit_req
+
+    # 5. Classify quota_type: RPD vs TPM vs RPM
+    check_str = (
+        f"{details.get('quota_id') or ''} {details.get('quota_limit') or ''} {details.get('message') or ''}"
+    ).lower()
+    if (
+        "perday" in check_str
+        or "dayperproject" in check_str
+        or "requestsperday" in check_str
+        or "per_day" in check_str
+    ):
+        details["quota_type"] = "RPD"
+    elif (
+        "token" in check_str
+        or "tpm" in check_str
+        or "input_token_count" in check_str
+        or "tokensperminute" in check_str
+    ):
+        details["quota_type"] = "TPM"
+    elif (
+        "request" in check_str
+        or "rpm" in check_str
+        or "requestsperminute" in check_str
+        or "perminute" in check_str
+    ):
+        details["quota_type"] = "RPM"
 
     return details

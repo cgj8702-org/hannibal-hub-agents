@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from webhook_agent.logic.constants import (
-    DEFAULT_FEATURE_AGENT_PROJECT,
     DEFAULT_GITHUB_APP_ID,
     DEFAULT_GITHUB_INSTALLATION_ID,
     DEFAULT_GITHUB_REPOSITORY,
@@ -26,13 +25,12 @@ def test_constants_defaults() -> None:
     assert DEFAULT_PUBSUB_PROJECT == "cgj8702-webhook-agent"
     assert DEFAULT_WEBHOOK_PAID_PROJECT == "cgj8702-webhook-agent"
     assert DEFAULT_WEBHOOK_FREE_PROJECT == "gen-lang-client-0615466973"
-    assert DEFAULT_FEATURE_AGENT_PROJECT == "gen-lang-client-0613181237"
 
 
 @pytest.mark.unit
 def test_resolve_secret_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FEATURE_AGENT_FREE_KEY", "resolved_from_environment")
-    key = resolve_secret("FEATURE_AGENT_FREE_KEY")
+    monkeypatch.setenv("WEBHOOK_FREE_KEY", "resolved_from_environment")
+    key = resolve_secret("WEBHOOK_FREE_KEY")
     assert key == "resolved_from_environment"
 
 

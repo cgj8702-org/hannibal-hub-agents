@@ -206,9 +206,6 @@ class CodeReviewResponse(BaseModel):
         default=None,
         description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",
     )
-    confidence: int | None = Field(
-        default=None, description="Optional legacy auditor confidence rating"
-    )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,
         description="Blocking critical issues (syntax errors, security flaws, broken contracts)",
@@ -251,10 +248,6 @@ class CodeReviewResponse(BaseModel):
             )
         else:
             normalized["executive_summary"] = "Autonomous PR code review report."
-
-        conf = normalized.get("confidence")
-        if not isinstance(conf, int) or not (1 <= conf <= 5):
-            normalized["confidence"] = 5
 
         raw_risks = normalized.get("risks_and_edge_cases") or normalized.get("risks")
         clean_risks: list[dict[str, str]] = []
@@ -589,9 +582,6 @@ class SyncReviewResponse(BaseModel):
         default_factory=list,
         description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
     )
-    confidence: int | None = Field(
-        default=None, description="Optional legacy auditor confidence rating"
-    )
 
     @model_validator(mode="before")
     @classmethod
@@ -815,11 +805,6 @@ class SyncReviewResponse(BaseModel):
                         )
         normalized["verified_invariants"] = clean_inv
 
-        conf = normalized.get("confidence")
-        if not isinstance(conf, int) or not (1 <= conf <= 5):
-            normalized["confidence"] = 5
-        normalized["confidence"] = conf
-
         return normalized
 
     @field_validator("summary", mode="before")
@@ -833,7 +818,6 @@ class SyncReviewResponse(BaseModel):
         if not has_prior_reviews:
             cr_data = {
                 "executive_summary": self.summary or "Autonomous PR code review report.",
-                "confidence": self.confidence,
                 "verdict": self.verdict or verdict,
                 "critical_issues": [item.model_dump() for item in self.critical_issues],
                 "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],

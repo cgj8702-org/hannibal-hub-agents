@@ -163,6 +163,8 @@ def test_extract_rate_limit_details_from_google_dict_response() -> None:
         extracted["quota_limit"]
         == "generativelanguage.googleapis.com/generate_content_free_tier_input_token_count"
     )
+    assert extracted["quota_id"] == "GenerateContentInputTokensPerModelPerMinute-FreeTier"
+    assert extracted["quota_type"] == "TPM"
     assert extracted["quota_value"] == "250000"
     assert extracted["retry_after_seconds"] == 48.0
 
@@ -176,3 +178,54 @@ def test_extract_rate_limit_details_from_message_regex() -> None:
     )
     extracted = extract_rate_limit_details(raw_exc)
     assert extracted["retry_after_seconds"] == 37.5
+
+
+@pytest.mark.unit
+def test_extract_rate_limit_details_rpm_and_rpd() -> None:
+    from google.genai.errors import ClientError
+
+    from webhook_agent.logic.rate_limiter import extract_rate_limit_details
+
+    # Test RPM error structure
+    rpm_json = {
+        "error": {
+            "code": 429,
+            "message": "Resource exhausted",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                        {
+                            "quotaId": "GenerateRequestsPerModelPerMinute-FreeTier",
+                            "quotaMetric": "generativelanguage.googleapis.com/generate_requests_per_minute",
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    extracted_rpm = extract_rate_limit_details(ClientError(code=429, response_json=rpm_json))
+    assert extracted_rpm["quota_id"] == "GenerateRequestsPerModelPerMinute-FreeTier"
+    assert extracted_rpm["quota_type"] == "RPM"
+
+    # Test RPD error structure
+    rpd_json = {
+        "error": {
+            "code": 429,
+            "message": "Resource exhausted: daily limit reached",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                        {
+                            "quotaId": "GenerateRequestsPerModelPerDay-FreeTier",
+                            "quotaMetric": "generativelanguage.googleapis.com/generate_requests_per_day",
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    extracted_rpd = extract_rate_limit_details(ClientError(code=429, response_json=rpd_json))
+    assert extracted_rpd["quota_id"] == "GenerateRequestsPerModelPerDay-FreeTier"
+    assert extracted_rpd["quota_type"] == "RPD"

@@ -643,24 +643,6 @@ def resolve_pr_conflicts(ctx: Context, pr_number: int) -> str:
         return f"Error resolving merge conflicts on PR #{pr_number}: {e}"
 
 
-def auto_fix_pr_review_feedback(ctx: Context, pr_number: int) -> str:
-    """Autonomously resolve code review feedback for a PR in an isolated Git Worktree.
-
-    Checks policy rules, parses requested changes, applies fixes, verifies tests,
-    and commits/pushes the changes to origin. Call this tool when a user comments `/fix`,
-    `/auto`, or `/fix-it` on a pull request.
-
-    Args:
-        pr_number: Pull request number.
-
-    Returns:
-        A string describing the resolution status.
-    """
-    from webhook_agent.tools.auto_fix_feedback import auto_fix_pr_feedback
-
-    return auto_fix_pr_feedback(ctx=ctx, pr_number=pr_number)
-
-
 def mark_ready_for_review(ctx: Context, pr_number: int) -> str:
     """Mark a draft pull request as ready for review.
 

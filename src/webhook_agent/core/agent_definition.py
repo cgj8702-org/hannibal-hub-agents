@@ -143,8 +143,8 @@ def _truncate_text_to_token_limit(
 
 def calculate_verdict(
     scores: dict[str, int] | None = None,
-    confidence: int = 5,
     has_critical: bool = False,
+    **kwargs: Any,
 ) -> str:
     """Calculates PR review verdict cleanly.
 

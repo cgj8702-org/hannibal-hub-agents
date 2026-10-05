@@ -96,16 +96,14 @@ The project includes built-in strategies to maximize context efficiency, elimina
 4. **Programmatic `/resolve` Git Worktree Conflict Resolution**:
    - Triggered programmatically when a user comments `/resolve`.
    - Clones the PR into an isolated Git Worktree (`/tmp/worktrees/pr_X_...`), merges `origin/main` cleanly, synthesizes conflict resolution via LLM, verifies `pytest` & pre-commit checks, configures `http.extraheader` bearer token auth, and pushes the updated branch automatically.
-5. **Autonomous `/fix` Review-Fix Tool (`auto_fix_pr_review_feedback`)**:
-   - Triggered by `/fix`, `/auto`, or `/fix-it` slash commands. Clones the PR in an isolated Git Worktree (`/tmp/worktrees/pr_X_fix/`), applies surgical fixes, verifies `pytest` & pre-commit checks, and pushes the resolved commit automatically.
-6. **Tier-Aware Model Chains & 503 Failover**:
+5. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
    - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through Flash-Lite and Gemma tiers.
    - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
-7. **Resolution Tracking & Re-Review Templates**:
+6. **Resolution Tracking & Re-Review Templates**:
    - Tracks **`[RESOLVED]`** vs **`[UNRESOLVED]`** items across commits using structured schema validation.
-8. **Programmatic 👀 Reaction**:
-   - Immediately adds an `eyes` reaction to user comments upon receiving webhooks in `processor.py` (0 token cost).
+7. **Guarded Programmatic 👀 Reaction**:
+   - Adds an `eyes` reaction to user comments and valid PR events once closed/merged PR checks and deduplication locks pass.
 
 ---
 

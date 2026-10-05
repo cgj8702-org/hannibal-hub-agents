@@ -18,7 +18,6 @@ from webhook_agent.core.agent_definition import (
 )
 from webhook_agent.core.github_tools import (
     add_comment,
-    auto_fix_pr_review_feedback,
     get_commit_diff,
     get_current_time,
     get_issue,
@@ -47,7 +46,6 @@ __all__ = [
     "WebhookAgent",
     "_ensure_bg_loop",
     "add_comment",
-    "auto_fix_pr_review_feedback",
     "calculate_verdict",
     "count_tokens_exact",
     "get_commit_diff",
