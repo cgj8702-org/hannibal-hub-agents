@@ -221,3 +221,16 @@ def test_filter_echo_suggestions():
     assert len(filtered) == 1
     assert filtered[0].line == 2
     assert filtered[0].suggested_fix == "y = 30"
+
+
+def test_is_echo_suggestion_forward_non_empty_line_scan():
+    """Verify forward non-empty line scan matches when interleaved with empty lines."""
+    file_lines = {
+        50: "def calculate():",
+        51: "    ",
+        52: "    a = 10",
+        53: "",
+        54: "    return a",
+    }
+    suggestion = "def calculate():\n    a = 10\n    return a"
+    assert is_echo_suggestion(suggestion, file_lines, line=50) is True
