@@ -291,3 +291,50 @@ def test_review_accepts_approve_with_valid_verified_invariants(mock_submit, mock
     res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
     assert res == "Review submitted"
     assert mock_submit.called
+
+
+@patch("webhook_agent.core.github_tools._submit_formal_review")
+def test_review_handles_adk_state_object_properly(mock_submit, mock_ctx):
+    """Verify review tool correctly reads non-dict ADK State objects with to_dict()."""
+    mock_submit.return_value = ("Review submitted", True)
+
+    class MockADKState:
+        def __init__(self, data):
+            self._data = data
+
+        def to_dict(self):
+            return dict(self._data)
+
+        def get(self, k, default=None):
+            return self._data.get(k, default)
+
+    mock_ctx.state = MockADKState(
+        {
+            "gh_client": mock_ctx.state["gh_client"],
+            "repo_full_name": "owner/repo",
+            "formal_review_eligible": True,
+            "deterministic_changed_files": ["src/webhook_agent/core/agent_definition.py"],
+            "deterministic_precompiled_ast": True,
+            "tools_executed": ["verify_python_ast"],
+        }
+    )
+
+    payload = {
+        "executive_summary": "PR verified and approved.",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [
+            {
+                "invariant": "Rate limiter check remains non-blocking for paid tier",
+                "path": "src/webhook_agent/core/agent_definition.py",
+                "line": 105,
+                "evidence": "Asserted in test_rate_limiter.py:test_paid_tier_waiter",
+            }
+        ],
+        "context_gaps": [],
+    }
+    res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
+    assert res == "Review submitted"
+    assert mock_submit.called

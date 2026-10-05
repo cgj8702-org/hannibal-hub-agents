@@ -363,7 +363,11 @@ def _submit_formal_review(
             if claim is None:
                 return f"Skipped: review claim already exists for current head {head_sha}.", False
 
-        state_dict = state if isinstance(state, dict) else {}
+        state_dict = (
+            state.to_dict()
+            if hasattr(state, "to_dict")
+            else (state if isinstance(state, dict) else {})
+        )
         review_mode = state_dict.get("review_mode")
         if review_mode not in ("initial", "sync"):
             review_mode = "sync" if bot_reviews else "initial"

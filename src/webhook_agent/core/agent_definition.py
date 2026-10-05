@@ -36,7 +36,6 @@ from webhook_agent.core.github_tools import (
     get_current_time,
     get_issue,
     read_file,
-    review,
 )
 from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
@@ -60,6 +59,7 @@ from webhook_agent.logic.rate_limiter import (
     get_active_api_key,
     rpm_waiter,
 )
+from webhook_agent.logic.review_checkpoint import review_checkpoint_manager
 from webhook_agent.logic.writeback_policy import (
     _is_formal_review_eligible,
     evaluate_writeback_policy,
@@ -68,15 +68,8 @@ from webhook_agent.memory_service import InMemoryMemoryService
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools import resolve_conflicts as resolve_conflicts_module
-from webhook_agent.tools.ast_tools import verify_python_ast_tool
 from webhook_agent.tools.codebase_search import search_codebase_tool
-from webhook_agent.tools.diff_tools import (
-    get_pr_diff_file_map_tool,
-    verify_line_reference_tool,
-)
 from webhook_agent.tools.search_tool import google_search_grounding_tool
-from webhook_agent.tools.symbol_tools import check_symbol_impact_tool
-from webhook_agent.tools.test_impact_tools import check_test_coverage_tool
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
@@ -180,15 +173,13 @@ Your core mission is to protect repository hygiene, audit code changes with clin
    - All final review action items MUST be concrete, verified technical assertions with exact file and line citations.
 4. **Code Snippet & Backtick Formatting**:
    - All code snippets in `suggested_fix` or inline recommendations MUST be properly wrapped in backticks (`code`) for single-line expressions or valid markdown code blocks (```python ... ```) for multi-line code.
-5. **Exact Tool Names**: Call tools using their exact function names (`search_codebase`, `read_file`, `review`, `verify_python_ast`, `check_symbol_impact`, etc.) without any prefix.
-6. **Deterministic AST & Structural Integrity Verification**:
-   - The deterministic pre-audit compiler already executes syntax parsing and AST node validation on modified Python files, embedding findings directly into your prompt.
-   - You do NOT need to call `verify_python_ast` if findings are already provided in the pre-audit compiler dossier. The `review()` tool automatically honors the pre-compiled dossier. Call `verify_python_ast` only if you need to inspect an unlisted Python file.
-7. **Cross-File Contract & Symbol Impact Verification**:
-   - The deterministic symbol impact analyzer already maps modified signatures against the repository call graph and embeds breaking alterations in your prompt. Call `check_symbol_impact` only if an unlisted symbol requires additional checking.
-8. **Fast-Pass Review Velocity (1 to 2 Turns Target)**:
-   - Maximize audit velocity and conserve API rate limits. Evaluate the pre-compiled dossier, diff, and contract impact, then call `review()` directly. Avoid chatty or exploratory tool loops unless inspecting an external file strictly required for grounding.
-9. **Test Coverage & Regression Invariants**:
+5. **Available Grounding Tools**: If you need to inspect additional files or search the codebase for grounding, call tools using their exact function names (`search_codebase`, `read_file`, `get_issue`, `get_commit_diff`).
+6. **Deterministic AST, Symbol Contract, & Test Invariants**:
+   - The deterministic pre-audit compiler already executes syntax parsing, AST integrity, cross-file symbol contracts, and test impact analyses, embedding verified findings directly into your prompt.
+   - You do NOT need to call verification tools. Focus your analysis on the pre-compiled dossier, diff chunks, and contract impact.
+7. **Fast 1-Turn Review Verdict**:
+   - Maximize audit velocity and conserve API rate limits. Output your completed code review verdict directly in your response as a valid JSON object. Do NOT call a review tool — the host pipeline deterministically parses your JSON response, checks invariant citations, formats GitHub markdown, and submits the review directly.
+8. **Test Coverage & Regression Invariants**:
    - The deterministic test impact engine has scanned matching test suites under `tests/`. Verify whether modified symbols have unit test coverage. If coverage is verified, cite the test cases in `verified_invariants`. If coverage is missing, provide a concrete unit test recommendation under `minor_suggestions` using the recommended test stub.
 
 ---
@@ -206,14 +197,18 @@ When reviewing a PR, you MUST:
      2) **Concurrency & Memory**: Async race conditions, shared state mutation without locks, memory growth.
      3) **Security & Secrets**: Hardcoded secrets, input sanitization, authentication/authorization boundaries.
      4) **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
-   - Output your review response as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `verified_invariants`, `context_gaps`. When calling `review()`, pass this JSON string as the `body` parameter. Do NOT pass raw Markdown into `review()`; the system deterministically renders clean GitHub Markdown from your validated JSON.
-   - For an `APPROVE` verdict, you MUST include at least one concrete invariant, edge case, or contract in `verified_invariants` with exact `path`, positive integer `line`, and clinical `evidence`.
+   - Output your review response directly as a VALID JSON object matching the `CodeReviewResponse` schema with fields: `executive_summary`, `critical_issues`, `minor_suggestions`, `risks_and_edge_cases`, `verified_invariants`, `context_gaps`. Do NOT call a review tool; the system deterministically renders clean GitHub Markdown from your validated JSON.
+   - **Executive Summary Depth**: The `executive_summary` MUST NOT be a 1-sentence recap or an echo of the author's PR description. Provide a thorough, multi-paragraph architectural critique covering:
+     1) Systemic Architecture & Contract Analysis: How core abstractions, interfaces, data pipelines, and modules interact.
+     2) Boundary Dynamics & Reliability: Concurrency boundaries, locks, error unwrapping, persistence/TTL lifecycle, and potential edge failure modes.
+     3) Test Coverage & Verification Integrity: Real vs mocked boundaries, test completeness, and potential regressions.
+   - **Subsystem-Spanning Invariants on APPROVE**: For an `APPROVE` verdict, you MUST include **at least 2 to 3 concrete invariants** in `verified_invariants` spanning different modified files or subsystems touched by the PR, each with exact `path`, positive integer `line`, and clinical `evidence`. Single-invariant compliance is prohibited.
    - For each actionable bug or improvement in `critical_issues` or `minor_suggestions`, specify the exact `path`, `line`, and clinical replacement code in `suggested_fix`. This enables native GitHub Suggested Change inline review comments (` ```suggestion `).
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
-   - Output your review response as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `verified_invariants`. When calling `review()`, pass this JSON string as the `body` parameter.
-   - For an `APPROVE` verdict, you MUST include at least one concrete invariant, edge case, or contract in `verified_invariants` with exact `path`, positive integer `line`, and clinical `evidence`.
+   - Output your review response directly as a VALID JSON object matching the `SyncReviewResponse` schema with fields: `summary`, `resolutions`, `critical_issues`, `minor_suggestions`, `verified_invariants`. Do NOT call a review tool.
+   - For an `APPROVE` verdict, you MUST include **at least 2 to 3 concrete invariants** spanning distinct modified modules in `verified_invariants` with exact `path`, positive integer `line`, and clinical `evidence`. Single-invariant compliance is prohibited.
    - For new findings in `critical_issues` or `minor_suggestions`, provide `path`, `line`, and `suggested_fix`.
    - Track items in `resolutions` across all three feedback dimensions raised in `previous_bot_reviews`:
      1) **Critical Issues** (`category: "CRITICAL"`): Verify whether blocking issues were resolved.
@@ -223,27 +218,26 @@ When reviewing a PR, you MUST:
    - For items that were in `previous_bot_reviews`, mark every previously identified finding as `RESOLVED` or `UNRESOLVED` with line citations and evidence, setting `category` accordingly.
    - Distinguish PR-authored commits from base branch merges (`Merge branch 'main' ...`). Commits originating from merging or updating from the base branch are part of the target branch and must NOT be attributed to the PR author or flagged as scope creep.
 
-### Verdict Rules & Strict Review Tool Rejection (Non-Negotiable)
+### Verdict Rules & Strict Review Validation (Non-Negotiable)
 
 These rules override your judgment. Apply them mechanically based on your findings:
-- ANY critical issue -> event MUST be REQUEST_CHANGES
-- 0 critical issues and 0 unresolved items -> event MAY be APPROVE
-- **STRICT TOOL VALIDATION**: The `review()` tool will REJECT and error out your submission if:
-  1) Any critical issue or minor suggestion lacks an exact file `path` from the diff (generic paths like `"codebase"` or `"unknown"` will be rejected).
-  2) Any finding lacks a positive integer `line` number (> 0).
-  3) Any finding lacks concrete code in `suggested_fix` or uses generic boilerplate (e.g. "Address requested changes before merge").
-  4) You pass `REQUEST_CHANGES` without at least one actionable critical issue (or an UNRESOLVED item in sync reviews).
-  5) The PR modifies Python files (`.py`), but you neither had pre-compiled AST verification nor executed `verify_python_ast` before calling `review()`.
-  6) You pass `APPROVE`, but `verified_invariants` is missing or empty. An `APPROVE` verdict strictly requires at least one concrete invariant/boundary condition with exact `path`, positive integer `line`, and concrete `evidence`. If no invariant is verified, change verdict to `COMMENT` or `REQUEST_CHANGES`.
-  If `review()` returns an error, examine the rejection details, locate the exact file and line from the diff, provide real replacement code, and call `review()` again.
+- ANY critical issue -> verdict MUST be REQUEST_CHANGES
+- 0 critical issues and 0 unresolved items -> verdict MAY be APPROVE
+- **STRICT VALIDATION RULES**:
+  1) Any critical issue or minor suggestion must have an exact file `path` from the diff (generic paths like `"codebase"` or `"unknown"` will be rejected).
+  2) Any finding must have a positive integer `line` number (> 0).
+  3) Any finding must have concrete code in `suggested_fix` (avoid generic boilerplate).
+  4) If verdict is `REQUEST_CHANGES`, you must include at least one actionable critical issue (or an UNRESOLVED item in sync reviews).
+  5) If verdict is `APPROVE`, `verified_invariants` strictly requires at least 2 concrete invariants/boundary conditions across distinct modified files with exact `path`, positive integer `line`, and concrete `evidence`. If invariants are insufficient, change verdict to `COMMENT` or `REQUEST_CHANGES`.
 
-### Critical Thinking & Anti-Sycophancy Requirements
+### Critical Thinking & Anti-Rubber-Stamping Mandates
 
+- **ANTI-RUBBER-STAMPING MANDATE**: For any non-trivial PR (> 20 lines changed or touching core logic), outputting `"None found"` across both `minor_suggestions` and `risks_and_edge_cases` is strictly prohibited. You MUST identify at least 1-2 nuanced architectural suggestions, long-term maintainability considerations, potential scaling/concurrency boundaries, or subtle failure modes even when approving the PR.
 - **NO SYCOPHANCY / NO CHEERLEADING**: Do NOT use performative praise or generic cheerleading like "Splendid refactoring!", "Exemplary implementation!", or "Rock-solid PR!". State objective technical facts only.
 - **HIGH-SIGNAL RISK & EDGE-CASE ANALYSIS**: Highlight genuine potential failure modes, unhandled edge cases, rate limits, timeout risks, or concurrency boundaries when present.
 - Every review should aim to include actionable, specific suggestions with file:line citations when improvements are possible.
 - Never say code is "verified" without citing specific evidence from the diff for each claim.
-- Do not summarize what the code does back to the author — focus on what could go WRONG.
+- Do not summarize what the code does back to the author — focus on what could go WRONG and where subtle edge cases lurk.
 - If the PR is large (>500 lines changed), recommend splitting it and note this in your review.
 
 ### Review Voice & Comment Style (Clinical & Assertive)
@@ -348,13 +342,7 @@ class WebhookAgent:
                 read_file,
                 get_issue,
                 get_commit_diff,
-                review,
                 get_current_time,
-                get_pr_diff_file_map_tool,
-                verify_line_reference_tool,
-                verify_python_ast_tool,
-                check_symbol_impact_tool,
-                check_test_coverage_tool,
                 google_search_grounding_tool,
                 search_codebase_tool,
             ],
@@ -589,8 +577,9 @@ class WebhookAgent:
                     from webhook_agent.tools.ast_tools import verify_python_ast
 
                     dossier_items: list[str] = []
+                    pr_diff_text = str(raw.get("pr_diff") or "")
                     for py_file in py_files[:5]:
-                        ast_res = verify_python_ast(file_path=py_file)
+                        ast_res = verify_python_ast(file_path=py_file, diff_text=pr_diff_text)
                         if not ast_res.startswith("Error: No code snippet provided and file"):
                             dossier_items.append(ast_res)
                     if dossier_items:
@@ -601,7 +590,7 @@ class WebhookAgent:
                             f"{dossier_text}\n\n"
                             f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
                         )
-                        event_data["deterministic_precompiled_ast"] = True
+                    event_data["deterministic_precompiled_ast"] = True
 
                     # Cross-File Symbol Dependency & Breaking Signature Graph
                     from webhook_agent.logic.symbol_graph import SymbolImpactAnalyzer
@@ -679,10 +668,11 @@ class WebhookAgent:
                 "\n### 🚀 ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT\n"
                 "Evaluate the pre-fetched PR diff, AST verification findings, symbol impact analysis, "
                 "and test coverage findings above.\n"
-                "In Turn 1, call the `review()` tool directly with your completed CodeReviewResponse (or SyncReviewResponse) "
-                "JSON payload (event='APPROVE' or 'REQUEST_CHANGES').\n"
-                "Do NOT perform exploratory search or file inspection unless strictly required for a critical invariant. "
-                "Submit your formal review immediately."
+                "In Turn 1, output your completed CodeReviewResponse (or SyncReviewResponse) "
+                "as a valid JSON object (verdict='APPROVE' or 'REQUEST_CHANGES').\n"
+                "Deliver a thorough, staff-level architectural review: detailed multi-paragraph executive summary, "
+                "subsystem-spanning verified invariants (at least 2-3 for APPROVE), and concrete maintainability suggestions/risks. "
+                "Do NOT rubber-stamp with empty or 1-sentence sections. Output your formal review JSON immediately."
             )
 
         text = "\n".join(parts)
@@ -864,7 +854,7 @@ class WebhookAgent:
             max_llm_calls = int(
                 os.environ.get("MAX_AUDITOR_LLM_CALLS")
                 or os.environ.get("ADK_MAX_LLM_CALLS")
-                or "4"
+                or "6"
             )
             run_config = RunConfig(max_llm_calls=max_llm_calls)
             try:
@@ -942,10 +932,44 @@ class WebhookAgent:
             "deterministic_changed_files": changed_files_list,
         }
 
+        pr_number = None
+        if isinstance(raw, dict):
+            pr_number = (raw.get("pull_request") or {}).get("number") or (
+                raw.get("issue") or {}
+            ).get("number")
+        head_sha = (
+            str(
+                (raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or ""
+            )
+            if isinstance(raw, dict)
+            else ""
+        )
+
         async def _run() -> None:
             nonlocal results, final_session
             last_error = None
             self._attempted_model_names = {self._normalize_model_name(self._current_model_name)}
+
+            # Checkpoint short-circuit: if this exact commit was already reviewed, skip duplicate
+            if pr_number and head_sha:
+                checkpoint = review_checkpoint_manager.get_checkpoint(
+                    repo_full_name, pr_number, head_sha
+                )
+                if checkpoint and checkpoint.get("status") == "completed":
+                    logger.info(
+                        "🔒 Checkpoint: PR %s#%d at commit %s already reviewed (completed). Skipping.",
+                        repo_full_name,
+                        pr_number,
+                        head_sha,
+                    )
+                    results.append(
+                        ActionResult(
+                            tool="review",
+                            success=True,
+                            detail=f"PR #{pr_number} already reviewed at commit {head_sha} (checkpoint completed)",
+                        )
+                    )
+                    return
 
             # Try with retry and optional fallback model
             for attempt in range(_MAX_RETRIES):
@@ -1044,6 +1068,19 @@ class WebhookAgent:
                             tools_exec.append("verify_python_ast")
                         if "check_symbol_impact" not in tools_exec:
                             tools_exec.append("check_symbol_impact")
+                    if pr_number and head_sha:
+                        review_checkpoint_manager.save_checkpoint(
+                            repo=repo_full_name,
+                            pr_number=pr_number,
+                            head_sha=head_sha,
+                            canonical=canonical,
+                            precompiled_dossier=getattr(user_message.parts[0], "text", "")
+                            if user_message.parts
+                            else "",
+                            pr_diff=str(raw.get("pr_diff") or ""),
+                            changed_files=changed_files_list,
+                            status="pending",
+                        )
                     # Execute the ADK runner with current model
                     await _execute_agent()
 
@@ -1074,6 +1111,11 @@ class WebhookAgent:
                         return
 
                     last_error = e
+                    if _is_transient_error(e):
+                        if pr_number and head_sha:
+                            review_checkpoint_manager.mark_rate_limited(
+                                repo_full_name, pr_number, head_sha, str(e)
+                            )
                     if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                         rate_details = extract_rate_limit_details(e)
                         next_model = self._advance_model_chain(error=e)
@@ -1226,6 +1268,10 @@ class WebhookAgent:
                             )
                         )
                         logger.info("Deterministic review result for PR #%d: %s", pr_number, detail)
+                        if submitted and head_sha:
+                            review_checkpoint_manager.mark_completed(
+                                repo_full_name, pr_number, head_sha
+                            )
                     except Exception as fallback_err:
                         logger.warning(
                             "Deterministic review submission failed: %s",

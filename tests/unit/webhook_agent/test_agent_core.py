@@ -448,17 +448,17 @@ class TestTokenTruncation:
 
 class TestToolRegistration:
     def test_agent_tools_count(self):
-        """Verify the exact tool count registered on the code auditor sub-agent."""
+        """Verify the exact tool count registered on the code auditor sub-agent in Option A."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 12
+        assert len(tool_names) == 6
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 12 audit-only inspection, grounding, and review tools."""
+        """Tool names should match the 6 audit-only inspection and grounding tools."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -470,13 +470,7 @@ class TestToolRegistration:
                 "read_file",
                 "get_issue",
                 "get_commit_diff",
-                "review",
                 "get_current_time",
-                "get_pr_diff_file_map",
-                "verify_line_reference",
-                "verify_python_ast",
-                "check_symbol_impact",
-                "check_test_coverage",
                 "google_search_grounding_tool",
                 "search_codebase",
             ]
@@ -492,6 +486,12 @@ class TestToolRegistration:
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         }
         removed = {
+            "review",
+            "verify_python_ast",
+            "check_symbol_impact",
+            "check_test_coverage",
+            "get_pr_diff_file_map",
+            "verify_line_reference",
             "add_label",
             "add_review_comment",
             "reply_to_review_comment",

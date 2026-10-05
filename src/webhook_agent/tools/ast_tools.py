@@ -7,12 +7,15 @@ Provides compiler-grade syntax and structural validation for Python code diffs.
 from __future__ import annotations
 
 import ast
+import logging
 from pathlib import Path
 from typing import Any
 
 from google.adk.tools import FunctionTool
 
 from webhook_agent.logic.ast_analyzer import analyze_python_code
+
+logger = logging.getLogger(__name__)
 
 
 class StructuralDefectVisitor(ast.NodeVisitor):
@@ -73,6 +76,7 @@ def _strip_diff_prefix(path: str) -> str:
 def verify_python_ast(
     file_path: str,
     code_snippet: str | None = None,
+    diff_text: str | None = None,
 ) -> str:
     """Verify syntax, AST structure, and potential runtime defects in Python code.
 
@@ -83,7 +87,9 @@ def verify_python_ast(
     Args:
         file_path: Path to the target Python file (e.g. 'src/webhook_agent/logic/model_chain.py').
         code_snippet: Optional Python source code snippet to verify. If omitted or empty,
-                      the tool attempts to read the file from disk if accessible.
+                      the tool attempts to read the file from disk or diff_text.
+        diff_text: Optional full PR diff text from which right-side file lines can be extracted
+                   if the file is not checked out on the local disk.
 
     Returns:
         A clinical summary of AST validation, highlighting syntax errors with exact line and column
@@ -99,7 +105,21 @@ def verify_python_ast(
                 code_text = target_file.read_text(encoding="utf-8", errors="replace")
             except Exception as read_err:
                 return f"Error reading file '{file_path}': {read_err}"
-        else:
+        elif diff_text:
+            try:
+                from webhook_agent.tools.diff_tools import walk_right_side
+
+                _, text_map = walk_right_side(diff_text)
+                file_lines = text_map.get(cleaned_path) or text_map.get(file_path)
+                if file_lines:
+                    sorted_lines = [file_lines[k] for k in sorted(file_lines.keys())]
+                    code_text = "\n".join(sorted_lines)
+            except Exception as diff_err:
+                logger.debug(
+                    "Could not extract lines from diff_text for %s: %s", file_path, diff_err
+                )
+
+        if not code_text or not code_text.strip():
             return (
                 f"Error: No code snippet provided and file '{file_path}' was not found on disk. "
                 "Please pass code_snippet directly to verify_python_ast."
@@ -109,13 +129,19 @@ def verify_python_ast(
     try:
         tree = ast.parse(code_text, filename=file_path)
     except SyntaxError as e:
-        error_line = e.lineno or 0
-        error_col = e.offset or 0
-        snippet = f"\n  >>> {e.text.strip()}" if e.text else ""
-        return (
-            f"❌ SyntaxError in '{file_path}' at line {error_line}, col {error_col}: {e.msg}{snippet}\n"
-            f"Action: Review and repair the syntax error at line {error_line}."
-        )
+        # If parsing a diff hunk, try textwrap.dedent
+        try:
+            import textwrap
+
+            tree = ast.parse(textwrap.dedent(code_text), filename=file_path)
+        except SyntaxError:
+            error_line = e.lineno or 0
+            error_col = e.offset or 0
+            snippet = f"\n  >>> {e.text.strip()}" if e.text else ""
+            return (
+                f"❌ SyntaxError in '{file_path}' at line {error_line}, col {error_col}: {e.msg}{snippet}\n"
+                f"Action: Review and repair the syntax error at line {error_line}."
+            )
 
     # 2. Structural defects inspection
     visitor = StructuralDefectVisitor()

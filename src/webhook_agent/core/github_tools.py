@@ -66,6 +66,25 @@ def _load_sync_review_template() -> str:
     return _load_template("sync_review_template.md")
 
 
+def _extract_state_dict(session_state: Any) -> dict[str, Any]:
+    """Safely convert ADK State or dict to a standard Python dictionary."""
+    if session_state is None:
+        return {}
+    if hasattr(session_state, "to_dict"):
+        try:
+            return session_state.to_dict()
+        except Exception:
+            pass
+    if isinstance(session_state, dict):
+        return session_state
+    if hasattr(session_state, "get") and hasattr(session_state, "__iter__"):
+        try:
+            return {k: session_state[k] for k in session_state}
+        except Exception:
+            pass
+    return {}
+
+
 def _sanitize_pr_body(body: str) -> str:
     """Programmatically strip raw template instruction headers and placeholders from PR bodies,
     and convert auto-closing issue keywords (Closes #X) to tracking references (Addresses #X).
@@ -466,8 +485,8 @@ def add_comment(ctx: Context, issue_number: int, body: str) -> str:
         A string describing the result.
     """
     # Programmatic Guardrail: Block duplicate add_comment if formal review() was already submitted in this same execution turn
-    session_state = getattr(ctx, "state", None)
-    if (isinstance(session_state, dict) and session_state.get("review_submitted_in_this_turn")) or (
+    state_dict = _extract_state_dict(getattr(ctx, "state", None))
+    if state_dict.get("review_submitted_in_this_turn") or (
         "Successfully audited Pull Request" in body
         or "Skipped: Formal code review" in body
         or "submitted a formal code review report" in body
@@ -751,8 +770,8 @@ def review(
     """
     repo_name = _get_repo_full_name(ctx)
     target_key = f"{repo_name}#{pr_number}"
-    session_state = getattr(ctx, "state", None)
-    if isinstance(session_state, dict) and session_state.get("formal_review_eligible") is False:
+    state_dict = _extract_state_dict(getattr(ctx, "state", None))
+    if state_dict.get("formal_review_eligible") is False:
         return "Skipped: event is not eligible for a formal code review."
 
     if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
@@ -780,7 +799,6 @@ def review(
             )
 
         # Mandatory Investigation Gate: PRs modifying Python code MUST run verify_python_ast before submitting review
-        state_dict = session_state if isinstance(session_state, dict) else {}
         skip_gate = state_dict.get("skip_investigation_gate", False)
         if not skip_gate:
             changed_files: list[str] = []
