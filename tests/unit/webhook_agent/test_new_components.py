@@ -9,8 +9,8 @@ from webhook_agent.comment_poster import (
     prepare_review_payload,
     sanitize_and_anchor_risks,
 )
-from webhook_agent.diff_tools import get_pr_diff_file_map, verify_line_reference
 from webhook_agent.sanitizer_plugin import sanitize_markdown_text
+from webhook_agent.tools.diff_tools import get_pr_diff_file_map, verify_line_reference
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.guardrails]
 
