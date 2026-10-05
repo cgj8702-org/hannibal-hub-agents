@@ -5,12 +5,14 @@ from .circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 from .diff_filter import filter_review_diff, skip_reason
 from .duplicate_detector import already_raised, build_exclusions, group_repeated_findings
 from .review_budget import compute_round_allowance, summarise_review_history
+from .review_checkpoint import ReviewCheckpointManager, review_checkpoint_manager
 
 __all__ = [
     "ASTAnalysisResult",
     "CircuitBreaker",
     "CircuitOpenError",
     "CircuitState",
+    "ReviewCheckpointManager",
     "already_raised",
     "analyze_diff_hunks",
     "analyze_python_code",
@@ -18,6 +20,7 @@ __all__ = [
     "compute_round_allowance",
     "filter_review_diff",
     "group_repeated_findings",
+    "review_checkpoint_manager",
     "skip_reason",
     "summarise_review_history",
 ]
