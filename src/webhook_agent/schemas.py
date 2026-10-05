@@ -46,6 +46,9 @@ class IssueItem(BaseModel):
 
     path: str = Field(description="File path related to issue")
     line: int | None = Field(default=None, description="Line number if applicable")
+    start_line: int | None = Field(
+        default=None, description="Starting line number for multi-line suggestions"
+    )
     description: str = Field(description="Clear, clinical explanation of the issue")
     suggested_fix: str = Field(
         default="", description="Actionable code fix or refactoring suggestion"
@@ -76,7 +79,11 @@ class IssueItem(BaseModel):
 
     def to_markdown(self, prefix: str = "") -> str:
         """Render IssueItem into clean GitHub Markdown bullet point with code block formatting."""
-        loc = f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`"
+        loc = (
+            f"`{self.path}:{self.start_line}-{self.line}`"
+            if (self.start_line and self.line and self.start_line < self.line)
+            else (f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`")
+        )
         prefix_str = f"{prefix} " if prefix else ""
         item_str = f"* {prefix_str}{loc}: {self.description}"
         if self.suggested_fix and self.suggested_fix.strip():
@@ -329,6 +336,9 @@ class CodeReviewResponse(BaseModel):
                                 "line": item.get("line")
                                 if isinstance(item.get("line"), int)
                                 else None,
+                                "start_line": item.get("start_line")
+                                if isinstance(item.get("start_line"), int)
+                                else None,
                                 "description": desc,
                                 "suggested_fix": fix,
                                 "window": window_val,
@@ -432,6 +442,9 @@ class CodeReviewResponse(BaseModel):
                                 "path": path_val,
                                 "line": item.get("line")
                                 if isinstance(item.get("line"), int)
+                                else None,
+                                "start_line": item.get("start_line")
+                                if isinstance(item.get("start_line"), int)
                                 else None,
                                 "description": desc,
                                 "suggested_fix": fix,
@@ -687,6 +700,9 @@ class SyncReviewResponse(BaseModel):
                                 "line": item.get("line")
                                 if isinstance(item.get("line"), int)
                                 else None,
+                                "start_line": item.get("start_line")
+                                if isinstance(item.get("start_line"), int)
+                                else None,
                                 "description": desc,
                                 "suggested_fix": fix,
                                 "window": window_val,
@@ -731,6 +747,9 @@ class SyncReviewResponse(BaseModel):
                                 "path": path,
                                 "line": item.get("line")
                                 if isinstance(item.get("line"), int)
+                                else None,
+                                "start_line": item.get("start_line")
+                                if isinstance(item.get("start_line"), int)
                                 else None,
                                 "description": desc,
                                 "suggested_fix": fix,
