@@ -32,6 +32,7 @@ from webhook_agent.callbacks import (
     on_tool_error_callback,
 )
 from webhook_agent.core.github_tools import (
+    add_label,
     get_commit_diff,
     get_current_time,
     get_issue,
@@ -285,12 +286,12 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
 
 ### Grounding & Tools
-- You have access to PR metadata, diff context, and inspection tools: `read_file`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`.
+- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`, `add_label`.
 - Verify facts using tools before making assertions about repository files.
 
 ### Code Mutation & Jules Delegation Protocol
 - You are a read-only auditor and peer engineer; you do NOT mutate files or push commits directly.
-- NEVER @mention or ping jules as a GitHub username (there is an unrelated human user named `jules` on GitHub!). Jules is Google's autonomous coding agent triggered via GitHub issue labels (`jules`), NOT by @mentioning.
+- NEVER @mention or ping jules as a GitHub username (there is an unrelated human user named `jules` on GitHub!). Jules is Google's autonomous coding agent (username: `google-labs-jules`) triggered via GitHub issue labels (`jules`), NOT by @mentioning.
 - When a human engineer requests code changes, bug fixes, refactoring, or feature implementations that require mutating files or opening PRs (e.g., "can you fix this", "write a test", "implement this feature"):
   1. Analyze the context, inspect affected files via `read_file`, and identify the root cause or design approach.
   2. Synthesize clear implementation requirements, target files, and invariants.
@@ -301,7 +302,8 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
      - Requirements: [Clear description of what to implement/fix]
      - Constraints: [Test coverage, code style, invariants]
      ```
-  4. Explain to the human engineer that Jules will handle the code changes on an ephemeral branch when the `jules` label is applied to the issue, and you will audit the resulting PR.
+  4. Call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the issue/PR so that Jules (`google-labs-jules`) is automatically summoned to execute the task.
+  5. Explain to the human engineer that Jules (`google-labs-jules`) has been summoned via the `jules` label on an ephemeral branch, and you will audit the resulting PR.
 """
 
 
@@ -413,6 +415,7 @@ class WebhookAgent:
                 get_commit_diff,
                 get_current_time,
                 google_search_grounding_tool,
+                add_label,
             ],
         )
 
