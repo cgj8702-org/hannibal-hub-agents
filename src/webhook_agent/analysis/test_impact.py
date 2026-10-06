@@ -237,20 +237,27 @@ class TestImpactAnalyzer:
         exact_name = f"test_{stem}.py"
 
         # 1. Check mirrored path under tests/unit/
-        # e.g. src/webhook_agent/worker.py -> tests/unit/webhook_agent/test_worker.py
         rel_parts = list(src_path.parts)
         if rel_parts and rel_parts[0] in ("src", "lib"):
             rel_parts = rel_parts[1:]
 
+        # Check domain-mirrored path (stripping top package e.g. webhook_agent/models -> tests/unit/models)
+        if rel_parts and rel_parts[0] == "webhook_agent":
+            sub_parts = rel_parts[1:]
+            domain_dir = Path("tests/unit").joinpath(*sub_parts[:-1])
+            domain_file = domain_dir / exact_name
+            if (self.repo_root / domain_file).exists():
+                candidates.append(str(domain_file))
+
         mirrored_dir = Path("tests/unit").joinpath(*rel_parts[:-1])
         mirrored_file = mirrored_dir / exact_name
-        if (self.repo_root / mirrored_file).exists():
+        if (self.repo_root / mirrored_file).exists() and str(mirrored_file) not in candidates:
             candidates.append(str(mirrored_file))
 
-        # 2. Check general tests/unit/webhook_agent/
-        generic_path = Path("tests/unit/webhook_agent") / exact_name
-        if (self.repo_root / generic_path).exists() and str(generic_path) not in candidates:
-            candidates.append(str(generic_path))
+        # 2. Check root tests/unit/
+        unit_root_path = Path("tests/unit") / exact_name
+        if (self.repo_root / unit_root_path).exists() and str(unit_root_path) not in candidates:
+            candidates.append(str(unit_root_path))
 
         # 3. Glob match if neither exists
         if not candidates:

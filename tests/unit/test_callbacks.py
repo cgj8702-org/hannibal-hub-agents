@@ -37,7 +37,7 @@ async def test_before_agent_callback() -> None:
 async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 
-    from webhook_agent.logic.rate_limiter import rpm_waiter
+    from webhook_agent.models.rate_limiter import rpm_waiter
 
     ctx = MagicMock()
     ctx.state = {"active_tier": "free"}
@@ -67,7 +67,7 @@ async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 
-    from webhook_agent.logic.rate_limiter import rpm_waiter
+    from webhook_agent.models.rate_limiter import rpm_waiter
 
     ctx = MagicMock()
     ctx.state = {"active_model": "gemini-3.5-flash-lite"}
