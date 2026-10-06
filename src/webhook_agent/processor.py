@@ -580,13 +580,13 @@ class WebhookProcessor:
             return False
 
         # Prevent bot-to-bot conversational ping-pong loops:
-        # If a comment is authored by Jules, suppress it UNLESS it explicitly requests
-        # a review or explicitly mentions @hannibal-hub-agents.
+        # If a comment is authored by Jules (via login, substring, or performed_via_github_app),
+        # suppress it UNLESS it explicitly requests a review or explicitly mentions @hannibal-hub-agents.
         event_name = ev.get("event_name")
         if event_name in ("issue_comment", "pull_request_review_comment"):
             comment_user = comment.get("user") or {}
             sender = ev.get("sender") or {}
-            if is_jules_sender(comment_user) or is_jules_sender(sender):
+            if is_jules_sender(comment_user, raw) or is_jules_sender(sender, raw):
                 from .review.writeback_policy import REVIEW_INTENT_KEYWORDS
 
                 cb_lower = comment_body.lower()

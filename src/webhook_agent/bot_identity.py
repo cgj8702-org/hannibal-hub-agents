@@ -23,12 +23,36 @@ JULES_BOT_LOGINS = {
 }
 
 
-def is_jules_sender(sender: dict[str, Any] | None) -> bool:
-    """Check whether a sender dict represents the Jules coding agent bot."""
-    if not isinstance(sender, dict):
-        return False
-    login = (sender.get("login") or "").strip().lower()
-    return login in JULES_BOT_LOGINS or "jules" in login
+def is_jules_sender(
+    sender: dict[str, Any] | None,
+    raw_payload: dict[str, Any] | None = None,
+) -> bool:
+    """Check whether a sender or raw payload represents the Jules coding agent bot.
+
+    Uses multiple signals (known logins, handle substring, and performed_via_github_app)
+    so detection is robust against upstream GitHub App handle evolution.
+    """
+    if isinstance(sender, dict):
+        user = sender.get("user") if isinstance(sender.get("user"), dict) else sender
+        if isinstance(user, dict):
+            login = (user.get("login") or "").strip().lower()
+            if login in JULES_BOT_LOGINS or "jules" in login:
+                return True
+
+    if isinstance(raw_payload, dict):
+        candidate_apps = [
+            raw_payload.get("performed_via_github_app"),
+        ]
+        comment = raw_payload.get("comment")
+        if isinstance(comment, dict):
+            candidate_apps.append(comment.get("performed_via_github_app"))
+        for app in candidate_apps:
+            if isinstance(app, dict):
+                slug = (app.get("slug") or "").strip().lower()
+                if "jules" in slug:
+                    return True
+
+    return False
 
 
 def _is_bot_sender(sender: dict[str, Any] | None) -> bool:

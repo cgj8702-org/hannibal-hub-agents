@@ -108,6 +108,45 @@ def test_processor_allows_jules_comments_with_review_intent_or_mention():
     assert processor.should_process_event(jules_mention_comment) is True
 
 
+def test_is_jules_sender_multi_signal():
+    # Login match
+    assert is_jules_sender({"login": "google-jules[bot]"}) is True
+    assert is_jules_sender({"login": "custom-jules-agent[bot]"}) is True
+
+    # Multi-signal match via performed_via_github_app
+    generic_sender = {"login": "custom-bot[bot]"}
+    payload_with_app = {"performed_via_github_app": {"slug": "google-jules"}}
+    assert is_jules_sender(generic_sender, raw_payload=payload_with_app) is True
+
+    comment_with_app = {"comment": {"performed_via_github_app": {"slug": "jules-preview-app"}}}
+    assert is_jules_sender(generic_sender, raw_payload=comment_with_app) is True
+
+    # Unrelated app should not match
+    unrelated_payload = {"performed_via_github_app": {"slug": "codecov"}}
+    assert is_jules_sender(generic_sender, raw_payload=unrelated_payload) is False
+
+
+def test_processor_suppresses_jules_with_unregistered_login_via_app_slug():
+    processor = WebhookProcessor()
+
+    # Even if Jules changes its login handle to 'unregistered-worker[bot]',
+    # performed_via_github_app catches it and prevents loop
+    jules_with_app_comment = {
+        "event_name": "issue_comment",
+        "action": "created",
+        "sender": {"login": "unregistered-worker[bot]"},
+        "raw_payload": {
+            "comment": {
+                "user": {"login": "unregistered-worker[bot]"},
+                "body": "Working on branch...",
+                "performed_via_github_app": {"slug": "google-jules"},
+            },
+            "issue": {"number": 10},
+        },
+    }
+    assert processor.should_process_event(jules_with_app_comment) is False
+
+
 def test_conversational_instruction_has_jules_delegation_protocol():
     assert "@jules" in CONVERSATIONAL_INSTRUCTION
     assert "Jules Delegation Protocol" in CONVERSATIONAL_INSTRUCTION
