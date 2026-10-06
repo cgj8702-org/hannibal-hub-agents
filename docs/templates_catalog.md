@@ -6,7 +6,7 @@ This document provides a comprehensive technical catalog, structural review, and
 
 | Template File | Purpose | Target Object / Context | Sanitization & Parsing Rules |
 | :--- | :--- | :--- | :--- |
-| **`pr_template.md`** | Standardized PR description structure | Pull Requests (`/create`, PR creation) | Sanitized by `_sanitize_pr_body()` to strip raw placeholder instructions and headers. |
+| **`pr_template.md`** | Standardized PR description structure | Pull Requests (PR creation) | Sanitized by `_sanitize_pr_body()` to strip raw placeholder instructions and headers. |
 | **`code_review_template.md`** | Structured code review formatting | Initial PR Reviews (`pull_request.opened`, `/review`) | Enforces structured executive summary, critical issues, minor suggestions, and verified invariants. |
 | **`sync_review_template.md`** | Incremental review & resolution tracking | PR Updates (`pull_request.synchronize`) | Tracks resolution status of previously requested items against incremental commit diffs. |
 

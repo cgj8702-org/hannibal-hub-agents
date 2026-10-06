@@ -725,37 +725,6 @@ class TestPreworkPipelines:
         assert "inline_code_context" in payload["raw_payload"]
         assert "File: src/main.py (Line 42)" in payload["raw_payload"]["inline_code_context"]
 
-    def test_prefetch_commit_history(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.processor import _prefetch_commit_history
-
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = mock_repo.get_pull.return_value
-
-        mock_commit = MagicMock()
-        mock_commit.commit.message = "feat: initial commit"
-        mock_commit.sha = "abc123456"
-        mock_commit.author.login = "developer"
-        mock_pr.get_commits.return_value = [mock_commit]
-
-        payload = {
-            "canonical": "issue_comment.created",
-            "raw_payload": {
-                "issue": {
-                    "number": 10,
-                    "pull_request": {"url": "http://example.com"},
-                },
-                "comment": {"body": "Please /create PR description"},
-            },
-        }
-
-        _prefetch_commit_history(mock_gh, "owner/repo", payload)
-        assert "commit_history_summary" in payload["raw_payload"]
-        assert "abc1234" in payload["raw_payload"]["commit_history_summary"]
-        assert "developer" in payload["raw_payload"]["commit_history_summary"]
-
     def test_prefetch_previous_bot_reviews(self):
         from unittest.mock import MagicMock
 
