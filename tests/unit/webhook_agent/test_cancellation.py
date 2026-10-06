@@ -64,11 +64,13 @@ def test_prefetch_pr_diff_marks_closed_pr():
     assert "pr_diff" not in payload["raw_payload"]
 
 
-def test_process_event_skips_agent_run_on_closed_pr():
+def test_process_event_skips_agent_run_on_closed_pr(monkeypatch: pytest.MonkeyPatch):
     """Verify process_event short-circuits before agent.run if PR is closed."""
     from unittest.mock import MagicMock
 
     from webhook_agent.processor import WebhookProcessor
+
+    monkeypatch.setenv("DRY_RUN", "0")
 
     mock_agent = MagicMock()
     mock_gh = MagicMock()

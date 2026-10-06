@@ -1,13 +1,4 @@
-"""Unit tests for AST & Syntax Integrity Verifier Tool and Gemini 3+ Context Caching.
-
-Validates:
-1. is_gemini_3_plus correctly identifies Gemini 3+ and strictly excludes Gemma / pre-Gemini-3.
-2. before_model_callback context cache guard enforces None for Gemma / pre-Gemini-3 and config for Gemini 3+.
-3. after_model_callback records cached_content_tokens from usage_metadata.
-4. verify_python_ast catches SyntaxErrors with line/column precision.
-5. verify_python_ast detects structural defects: bare excepts, mutable default arguments, unreachable statements.
-6. verify_python_ast integrates with analyze_python_code impact scoring.
-"""
+"""Unit tests for AST & Syntax Integrity Verifier Tool and Gemini 3+ Context Caching."""
 
 from __future__ import annotations
 
@@ -22,7 +13,6 @@ from webhook_agent.tools.ast_tools import (
     StructuralDefectVisitor,
     _strip_diff_prefix,
     verify_python_ast,
-    verify_python_ast_tool,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -30,7 +20,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 def test_is_gemini_3_plus_model_filter():
     """Verify Gemini 3+ detection and strict exclusion of Gemma and legacy models."""
-    # Gemini 3+ (Allowed)
     assert is_gemini_3_plus("gemini-3.5-flash-lite") is True
     assert is_gemini_3_plus("gemini-3.1-flash-lite") is True
     assert is_gemini_3_plus("gemini-3.8-flash") is True
@@ -39,19 +28,16 @@ def test_is_gemini_3_plus_model_filter():
     assert is_gemini_3_plus("models/gemini-3.5-flash-lite") is True
     assert is_gemini_3_plus("gemini-4.0-flash") is True
 
-    # Gemma (STRICTLY PROHIBITED from context caching)
     assert is_gemini_3_plus("gemma-4-31b-it") is False
     assert is_gemini_3_plus("gemma-4-26b-a4b-it") is False
     assert is_gemini_3_plus("models/gemma-4-31b-it") is False
     assert is_gemini_3_plus("gemma-3-12b-it") is False
 
-    # Pre-Gemini 3 models (PROHIBITED from context caching per user rule)
     assert is_gemini_3_plus("gemini-2.5-flash") is False
     assert is_gemini_3_plus("gemini-2.5-flash-lite") is False
     assert is_gemini_3_plus("gemini-2.0-flash") is False
     assert is_gemini_3_plus("gemini-1.5-pro") is False
 
-    # Edge cases
     assert is_gemini_3_plus(None) is False
     assert is_gemini_3_plus("") is False
     assert is_gemini_3_plus("unknown-model") is False
@@ -73,7 +59,6 @@ async def test_before_model_callback_disables_cache_for_gemma():
     with patch("webhook_agent.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
         await before_model_callback(ctx, req)
 
-    # Gemma MUST have cache config stripped
     assert req.cache_config is None
     assert req.cache_metadata is None
     assert req.cacheable_contents_token_count is None
@@ -93,7 +78,6 @@ async def test_before_model_callback_enables_cache_for_gemini_3():
     with patch("webhook_agent.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
         await before_model_callback(ctx, req)
 
-    # Gemini 3+ MUST have cache config attached
     assert req.cache_config is not None
     assert req.cache_config.min_tokens == 4096
     assert req.cache_config.ttl_seconds == 1800
@@ -164,16 +148,8 @@ def test_verify_python_ast_file_on_disk(tmp_path):
     test_file = tmp_path / "sample.py"
     test_file.write_text("x = 10\ny = 20\n", encoding="utf-8")
 
-    # Direct path
     res1 = verify_python_ast(str(test_file))
     assert "SYNTAX VALID" in res1
 
-    # Diff-prefixed path
     res2 = verify_python_ast(f"b/{test_file}")
     assert "SYNTAX VALID" in res2
-
-
-def test_verify_python_ast_tool_definition():
-    """Verify verify_python_ast_tool is properly configured as an ADK FunctionTool."""
-    assert verify_python_ast_tool.name == "verify_python_ast"
-    assert verify_python_ast_tool.func is verify_python_ast

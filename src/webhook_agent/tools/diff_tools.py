@@ -1,4 +1,4 @@
-"""Diff-grounding and AST line verification FunctionTools for Webhook Agent.
+"""Diff-grounding and AST line verification utilities for Webhook Agent.
 
 Includes diff hunk anchor extraction logic adapted directly from adk-samples/.github/scripts/post_review_comments.py.
 """
@@ -7,9 +7,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any
-
-from google.adk.tools import FunctionTool
 
 HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 WINDOW_LINE = re.compile(r"^\s*(\d{1,12})\s*:\s*(.*)$")
@@ -174,16 +171,6 @@ def check_window(
     return False, line, f"window says {claimed.strip()[:40]!r}, diff has {actual.strip()[:40]!r}"
 
 
-def get_pr_diff_file_map(diff_text: str) -> dict[str, Any]:
-    """Return file paths, modified hunk line ranges, and line counts from unified diff text."""
-    anchors = added_line_anchors(diff_text)
-    summary: dict[str, Any] = {
-        "modified_files": list(anchors.keys()),
-        "anchors": {k: sorted(v) for k, v in anchors.items()},
-    }
-    return summary
-
-
 def verify_line_reference(diff_text: str, file_path: str, line_number: int) -> bool:
     """Verify if a cited line number falls within any modified diff hunk for the given file."""
     stripped_path = _strip_diff_prefix(file_path)
@@ -192,7 +179,3 @@ def verify_line_reference(diff_text: str, file_path: str, line_number: int) -> b
     if file_path in anchors and line_number in anchors[file_path]:
         return True
     return bool(stripped_path in anchors and line_number in anchors[stripped_path])
-
-
-get_pr_diff_file_map_tool = FunctionTool(get_pr_diff_file_map)
-verify_line_reference_tool = FunctionTool(verify_line_reference)

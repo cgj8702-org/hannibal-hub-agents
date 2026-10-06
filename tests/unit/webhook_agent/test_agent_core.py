@@ -143,10 +143,10 @@ class TestAgentCoreRun:
 
 class TestActionResult:
     def test_create(self):
-        r = ActionResult(tool="update_issue", success=True, detail="commented")
-        assert r.tool == "update_issue"
+        r = ActionResult(tool="read_file", success=True, detail="read content")
+        assert r.tool == "read_file"
         assert r.success is True
-        assert r.detail == "commented"
+        assert r.detail == "read content"
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +414,8 @@ class TestTokenTruncation:
                     "number": 1,
                     "title": "PR modifying callable",
                 },
-                "pr_diff": "diff --git a/src/webhook_agent/tools/symbol_tools.py b/src/webhook_agent/tools/symbol_tools.py",
-                "changed_files": ["src/webhook_agent/tools/symbol_tools.py"],
+                "pr_diff": "diff --git a/src/webhook_agent/core/github_tools.py b/src/webhook_agent/core/github_tools.py",
+                "changed_files": ["src/webhook_agent/core/github_tools.py"],
             },
         }
         msg = agent._build_user_message(event_data)
@@ -852,98 +852,6 @@ class TestCreateIssue:
         assert "add_label" in tool_names
 
 
-# ---------------------------------------------------------------------------
-# Tests: update_issue tool
-# ---------------------------------------------------------------------------
-
-
-class TestAddComment:
-    def test_add_comment_posts_comment(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import add_comment
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        mock_issue = MagicMock()
-        mock_comment = MagicMock()
-        mock_comment.html_url = "https://github.com/owner/repo/issues/1#comment-123"
-        mock_issue.create_comment.return_value = mock_comment
-        repo.get_issue.return_value = mock_issue
-
-        result = add_comment(ctx, 1, body="Hello!")
-        assert "Commented" in result
-        mock_issue.create_comment.assert_called_once_with(body="Hello!")
-
-
-class TestUpdateIssue:
-    def test_update_issue_edits_title_and_body(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import update_issue
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        mock_issue = MagicMock()
-        repo.get_issue.return_value = mock_issue
-
-        result = update_issue(ctx, 1, title="New Title", body="New body")
-        assert "Updated" in result
-        mock_issue.edit.assert_called_once_with(title="New Title", body="New body")
-
-    def test_update_issue_adds_labels(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import update_issue
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        mock_issue = MagicMock()
-        repo.get_issue.return_value = mock_issue
-
-        result = update_issue(ctx, 1, labels=["bug", "urgent"])
-        assert "Labels added" in result
-        mock_issue.add_to_labels.assert_called_once_with("bug", "urgent")
-
-    def test_update_issue_multiple_actions(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import update_issue
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        mock_issue = MagicMock()
-        repo.get_issue.return_value = mock_issue
-
-        result = update_issue(ctx, 1, title="Updated", labels=["approved"])
-        assert "Updated" in result
-        assert "Labels added" in result
-
-    def test_update_issue_no_changes(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import update_issue
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        mock_issue = MagicMock()
-        repo.get_issue.return_value = mock_issue
-
-        result = update_issue(ctx, 1)
-        assert "no changes" in result
-
-
-# ---------------------------------------------------------------------------
 # Tests: get_max_input_tokens & payload truncation
 # ---------------------------------------------------------------------------
 
@@ -953,69 +861,6 @@ class TestTokenLimits:
         from webhook_agent.webhook_agent import get_max_input_tokens
 
         assert get_max_input_tokens() == 3500
-
-
-# ---------------------------------------------------------------------------
-# Tests: mark_ready_for_review & merge_pr draft safety check
-# ---------------------------------------------------------------------------
-
-
-class TestMarkReadyForReview:
-    def test_mark_ready_for_review_success(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import mark_ready_for_review
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-        mock_pr = MagicMock()
-        mock_pr.draft = True
-        mock_pr.mark_ready_for_review.return_value = True
-        ctx.state["gh_client"].get_repo.return_value.get_pull.return_value = mock_pr
-
-        res = mark_ready_for_review(ctx, 193)
-        assert "Successfully marked PR #193 as ready for review" in res
-        mock_pr.mark_ready_for_review.assert_called_once()
-
-    def test_mark_ready_for_review_already_ready(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import mark_ready_for_review
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-        mock_pr = MagicMock()
-        mock_pr.draft = False
-        ctx.state["gh_client"].get_repo.return_value.get_pull.return_value = mock_pr
-
-        res = mark_ready_for_review(ctx, 193)
-        assert "PR #193 is already ready for review" in res
-
-
-class TestMergePrDraftSafetyCheck:
-    def test_merge_pr_blocks_draft(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.webhook_agent import merge_pr
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-        mock_pr = MagicMock()
-        mock_pr.draft = True
-        ctx.state["gh_client"].get_repo.return_value.get_pull.return_value = mock_pr
-
-        res = merge_pr(ctx, 193)
-        assert "Error: Cannot merge PR #193 because it is currently a draft" in res
-        assert mock_pr.merge.call_count == 0
-
-
-def test_add_comment_blocked_after_review():
-    from webhook_agent.webhook_agent import add_comment
-
-    ctx = MagicMock()
-    ctx.state = {"review_submitted_in_this_turn": True}
-    res = add_comment(ctx, issue_number=193, body="Extra summary comment")
-    assert "Skipped: Formal code review report already submitted for #193 in this turn" in res
 
 
 class TestGetCommitDiffBranchUpdate:
