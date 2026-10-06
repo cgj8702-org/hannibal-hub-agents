@@ -63,7 +63,7 @@ def _enforce_verdict(
     Safety Invariant: A safety guardrail must ONLY downgrade verdicts (APPROVE -> REQUEST_CHANGES
     or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
     """
-    from webhook_agent.comment_poster import build_github_review_comments
+    from .comment_poster import build_github_review_comments
 
     cleaned_body = body.strip()
     req_event = (event or "").strip().upper()
@@ -214,7 +214,7 @@ def _enforce_verdict(
                         enforced_verdict = "REQUEST_CHANGES"
                     inline_comments: list[dict[str, Any]] = []
                     if diff_text:
-                        from webhook_agent.comment_poster import (
+                        from .comment_poster import (
                             build_github_review_comments,
                             filter_echo_suggestions,
                         )
@@ -250,7 +250,7 @@ def _enforce_verdict(
                         enforced_verdict = "REQUEST_CHANGES"
                     inline_comments = []
                     if diff_text:
-                        from webhook_agent.comment_poster import (
+                        from .comment_poster import (
                             build_github_review_comments,
                             filter_echo_suggestions,
                         )
@@ -288,7 +288,7 @@ def _enforce_verdict(
             normalized_sync = normalize_sync_review_dict(parsed_dict)
             sync_obj = SyncReviewResponse.model_validate(normalized_sync)
             if diff_text:
-                from webhook_agent.comment_poster import filter_echo_suggestions
+                from .comment_poster import filter_echo_suggestions
 
                 sync_obj.minor_suggestions = filter_echo_suggestions(
                     sync_obj.minor_suggestions, diff_text
@@ -309,7 +309,7 @@ def _enforce_verdict(
             enforced_verdict = "REQUEST_CHANGES"
         inline_comments = []
         if diff_text:
-            from webhook_agent.comment_poster import (
+            from .comment_poster import (
                 build_github_review_comments,
                 filter_echo_suggestions,
             )

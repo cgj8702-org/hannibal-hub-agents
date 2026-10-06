@@ -130,7 +130,7 @@ class DepletedModelRegistry:
 
 _DEPLETED_MODEL_REGISTRY: Any
 try:
-    from webhook_agent.models.firestore_registry import (
+    from webhook_agent.models.depleted_registry import (
         firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
     )
 except ImportError:

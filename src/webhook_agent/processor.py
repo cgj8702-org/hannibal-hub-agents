@@ -27,6 +27,7 @@ from typing import Any
 
 from github import Auth, Github
 
+from .analysis.diff_filter import filter_review_diff
 from .bot_identity import _is_bot_event, is_jules_sender
 from .cancellation import pr_closed_registry
 from .formatter import (
@@ -39,7 +40,6 @@ from .github_credential_helper import (
     load_private_key,
     save_cached_token,
 )
-from .logic.diff_filter import filter_review_diff
 from .webhook_agent import WebhookAgent
 from .webhook_types import ActionResult
 
@@ -864,7 +864,7 @@ class WebhookProcessor:
         # Deterministic Fast-Path for automated Dependabot / lockfile PRs
         if not dry_run and is_pr_event and pr_number is not None:
             try:
-                from .logic.lockfile_validator import (
+                from .analysis.lockfile_validator import (
                     is_pure_dependency_pr,
                     render_deterministic_approval_markdown,
                     validate_lockfile_diff,

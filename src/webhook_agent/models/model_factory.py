@@ -78,7 +78,7 @@ class RateLimitedGemini(Gemini):
             err_s = str(exc).lower()
             if "429" in err_s or "resource_exhausted" in err_s or "quota exceeded" in err_s:
                 try:
-                    from webhook_agent.models.firestore_registry import (
+                    from webhook_agent.models.depleted_registry import (
                         firestore_depleted_registry,
                     )
 
