@@ -462,6 +462,8 @@ def execute_agent_event(
                     if "verify_python_ast" not in tools_exec:
                         tools_exec.append("verify_python_ast")
                 if is_pr_review_event and pr_number and head_sha:
+                    delivery_id = str(event_data.get("delivery_id") or "")
+                    installation_id = event_data.get("installation_id")
                     review_checkpoint_manager.save_checkpoint(
                         repo=repo_full_name,
                         pr_number=pr_number,
@@ -473,6 +475,10 @@ def execute_agent_event(
                         pr_diff=str(raw.get("pr_diff") or ""),
                         changed_files=changed_files_list,
                         status="pending",
+                        delivery_id=delivery_id,
+                        sender=user_id,
+                        comment_body=comment_body,
+                        installation_id=installation_id,
                     )
 
                 # Execute runner
@@ -514,11 +520,6 @@ def execute_agent_event(
                     return
 
                 last_error = e
-                if _is_transient_error(e):
-                    if pr_number and head_sha:
-                        review_checkpoint_manager.mark_rate_limited(
-                            repo_full_name, pr_number, head_sha, str(e)
-                        )
                 if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                     rate_details = extract_rate_limit_details(e)
                     next_model = agent._advance_model_chain(error=e)
@@ -575,6 +576,16 @@ def execute_agent_event(
                 _MAX_RETRIES,
                 trace_id[-4:],
             )
+            if pr_number and head_sha:
+                rate_details = extract_rate_limit_details(last_error)
+                retry_seconds = rate_details.get("retry_after_seconds")
+                review_checkpoint_manager.mark_rate_limited(
+                    repo=repo_full_name,
+                    pr_number=pr_number,
+                    head_sha=head_sha,
+                    error_message=str(last_error),
+                    retry_after_seconds=retry_seconds,
+                )
             results.append(
                 ActionResult(
                     tool="plan",

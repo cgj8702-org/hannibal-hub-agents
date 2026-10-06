@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -138,3 +138,122 @@ def test_execute_agent_event_checkpoint_short_circuit() -> None:
         assert results[0].tool == "review"
         assert results[0].success is True
         assert "already reviewed" in results[0].detail
+
+
+def test_execute_agent_event_exhaustion_marks_checkpoint_rate_limited() -> None:
+    """Test execute_agent_event marks checkpoint rate-limited only when retries/chain exhausted."""
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+    mock_agent._build_user_message.return_value = MagicMock(parts=[MagicMock(text="Audit request")])
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name.return_value = "gemini-3.5-flash-lite"
+    mock_agent._advance_model_chain.return_value = None  # Immediately exhausted chain
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+    }
+
+    mock_gh = MagicMock()
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.mark_rate_limited"
+        ) as mock_mark_rl,
+        patch(
+            "webhook_agent.core.execution._execute_adk_runner",
+            side_effect=Exception("429 Resource exhausted: please retry after 45s"),
+        ),
+        patch("webhook_agent.core.execution._is_transient_error", return_value=True),
+        patch(
+            "webhook_agent.core.execution.extract_rate_limit_details",
+            return_value={"retry_after_seconds": 45.0},
+        ),
+    ):
+        results = execute_agent_event(
+            agent=mock_agent,
+            event_data=event_data,
+            gh_client=mock_gh,
+            trace_id="trace-exhaust",
+        )
+
+        assert any(r.tool == "plan" and not r.success for r in results)
+        mock_mark_rl.assert_called_once_with(
+            repo="owner/repo",
+            pr_number=42,
+            head_sha="sha-abc",
+            error_message="429 Resource exhausted: please retry after 45s",
+            retry_after_seconds=45.0,
+        )
+
+
+def test_execute_agent_event_transient_failover_success_does_not_mark_rate_limited() -> None:
+    """Test execute_agent_event does NOT mark checkpoint rate-limited if a failover succeeds."""
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+    mock_agent._build_user_message.return_value = MagicMock(parts=[MagicMock(text="Audit request")])
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name.return_value = "gemini-3.5-flash-lite"
+    mock_agent._advance_model_chain.return_value = "gemini-2.5-pro"
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+    }
+
+    mock_gh = MagicMock()
+    call_count = 0
+
+    async def _mock_runner(*args: Any, **kwargs: Any) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("503 Service Unavailable")
+        # second call succeeds
+
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.mark_rate_limited"
+        ) as mock_mark_rl,
+        patch("webhook_agent.core.execution._execute_adk_runner", side_effect=_mock_runner),
+        patch("webhook_agent.core.execution.asyncio.sleep"),
+    ):
+        results = execute_agent_event(
+            agent=mock_agent,
+            event_data=event_data,
+            gh_client=mock_gh,
+            trace_id="trace-recover",
+        )
+
+        mock_mark_rl.assert_not_called()
