@@ -19,7 +19,13 @@ from webhook_agent.core.agent_definition import (
     execute_agent_event,
     get_max_input_tokens,
 )
-from webhook_agent.core.github_tools import (
+from webhook_agent.core.loop_helpers import (
+    _ensure_bg_loop,
+    get_shared_genai_client,
+    get_shared_text_generation_provider,
+    run_in_bg_loop,
+)
+from webhook_agent.tools.github_tools import (
     add_label,
     create_issue,
     get_commit_diff,
@@ -27,12 +33,6 @@ from webhook_agent.core.github_tools import (
     get_issue,
     read_file,
     review,
-)
-from webhook_agent.core.loop_helpers import (
-    _ensure_bg_loop,
-    get_shared_genai_client,
-    get_shared_text_generation_provider,
-    run_in_bg_loop,
 )
 
 __all__ = [
