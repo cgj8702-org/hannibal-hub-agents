@@ -302,8 +302,8 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
      - Requirements: [Clear description of what to implement/fix]
      - Constraints: [Test coverage, code style, invariants]
      ```
-  4. Call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the issue/PR so that Jules (`google-labs-jules`) is automatically summoned to execute the task.
-  5. Explain to the human engineer that Jules (`google-labs-jules`) has been summoned via the `jules` label on an ephemeral branch, and you will audit the resulting PR.
+  4. Call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the issue/PR so that Jules (`google-labs-jules[bot]`) is automatically summoned to execute the task.
+  5. Explain to the human engineer that Jules (`google-labs-jules[bot]`) has been summoned via the `jules` label on an ephemeral branch, and you will audit the resulting PR.
 """
 
 
