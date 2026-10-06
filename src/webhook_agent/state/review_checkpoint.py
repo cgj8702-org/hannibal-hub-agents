@@ -175,6 +175,55 @@ class ReviewCheckpointManager:
         )
         return checkpoint
 
+    def list_resumable(self) -> list[dict[str, Any]]:
+        """List all rate_limited checkpoints whose resume_after timestamp has elapsed.
+
+        Queries Firestore if configured; otherwise inspects the in-memory cache.
+        """
+        now = datetime.datetime.now(datetime.UTC)
+        resumable_docs: list[dict[str, Any]] = []
+
+        db = self._get_db()
+        if db is not None and firestore is not None:
+            try:
+                query = db.collection(self.collection_name).where(
+                    filter=firestore.FieldFilter("status", "==", "rate_limited")
+                )
+                for doc in query.stream():
+                    data = doc.to_dict() or {}
+                    expire_at = data.get("expire_at")
+                    if expire_at and isinstance(expire_at, datetime.datetime) and expire_at < now:
+                        continue
+                    res_after = data.get("resume_after")
+                    if isinstance(res_after, datetime.datetime):
+                        if res_after.tzinfo is None:
+                            res_after = res_after.replace(tzinfo=datetime.UTC)
+                        if now >= res_after:
+                            resumable_docs.append(data)
+                    elif isinstance(res_after, str):
+                        with contextlib.suppress(Exception):
+                            dt = datetime.datetime.fromisoformat(res_after)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=datetime.UTC)
+                            if now >= dt:
+                                resumable_docs.append(data)
+                    else:
+                        resumable_docs.append(data)
+                return resumable_docs
+            except Exception as exc:
+                logger.debug("Failed to list resumable checkpoints from Firestore: %s", exc)
+
+        with self._lock:
+            now_ts = now.timestamp()
+            for entry in self._local_cache.values():
+                if entry.get("status") == "rate_limited":
+                    if entry.get("expire_at_ts", 0) > now_ts:
+                        resume_after_ts = entry.get("resume_after_ts")
+                        if resume_after_ts is None or now_ts >= float(resume_after_ts):
+                            resumable_docs.append(dict(entry))
+
+        return resumable_docs
+
     def save_checkpoint(
         self,
         repo: str,
@@ -374,3 +423,36 @@ class ReviewCheckpointManager:
 
 
 review_checkpoint_manager = ReviewCheckpointManager()
+
+
+def build_resume_payload(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    """Build a normalized webhook payload from a stored review checkpoint for resumption."""
+    repo = str(checkpoint.get("repo") or "")
+    pr_number = checkpoint.get("pr_number") or 0
+    head_sha = str(checkpoint.get("head_sha") or "")
+    delivery_id = str(checkpoint.get("delivery_id") or "chk")
+    sender = str(checkpoint.get("sender") or "developer")
+    canonical = str(checkpoint.get("canonical") or "pull_request.synchronize")
+    comment_body = str(checkpoint.get("comment_body") or "")
+    installation_id = checkpoint.get("installation_id") or 0
+
+    return {
+        "canonical": canonical,
+        "delivery_id": f"resume-{delivery_id}",
+        "event_name": "pull_request",
+        "action": "synchronize",
+        "sender": {"login": sender, "type": "User"},
+        "installation": {"id": installation_id},
+        "repository": {"full_name": repo},
+        "raw_payload": {
+            "pull_request": {
+                "number": pr_number,
+                "head": {"sha": head_sha},
+            },
+            "comment": {"body": comment_body} if comment_body else {},
+            "pr_diff": str(checkpoint.get("pr_diff") or ""),
+        },
+        "precompiled_dossier": str(checkpoint.get("precompiled_dossier") or ""),
+        "changed_files": list(checkpoint.get("changed_files") or []),
+        "resumed_checkpoint": checkpoint,
+    }

@@ -147,6 +147,14 @@ def main() -> int:
         "True",
     )
 
+    REVIEW_RESUME_INTERVAL_SECONDS = int(os.environ.get("REVIEW_RESUME_INTERVAL_SECONDS", "60"))
+    last_review_resume_sweep = 0.0
+    review_resume_enabled = os.environ.get("ENABLE_REVIEW_RESUME", "0") in (
+        "1",
+        "true",
+        "True",
+    )
+
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
         # Periodic Proactive Agent Sweep (Every 5 minutes, when enabled)
@@ -212,6 +220,27 @@ def main() -> int:
                 sweep_thread.start()
             except Exception as exc:
                 logger.warning("Proactive background sweep skipped/failed: %s", exc)
+
+        # Periodic Review Checkpoint Resume Sweep (Every 60s when ENABLE_REVIEW_RESUME=1)
+        if (
+            review_resume_enabled
+            and now - last_review_resume_sweep >= REVIEW_RESUME_INTERVAL_SECONDS
+        ):
+            last_review_resume_sweep = now
+            try:
+                from .state.review_checkpoint import (
+                    build_resume_payload,
+                    review_checkpoint_manager,
+                )
+
+                resumables = review_checkpoint_manager.list_resumable()
+                if resumables:
+                    logger.info("🔁 Found %d resumable review checkpoint(s)", len(resumables))
+                    for checkpoint in resumables:
+                        resume_payload = build_resume_payload(checkpoint)
+                        processor.process_event(resume_payload)
+            except Exception as resume_err:
+                logger.warning("Review resume sweep error: %s", resume_err)
 
         try:
             # Pull exactly one message synchronously
