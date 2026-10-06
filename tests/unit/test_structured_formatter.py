@@ -10,6 +10,7 @@ from webhook_agent.formatter import (
     render_code_review_markdown,
     render_sync_review_markdown,
 )
+from webhook_agent.review.review_enforcer import _enforce_verdict
 from webhook_agent.schemas import (
     CodeReviewResponse,
     IssueItem,
@@ -17,7 +18,6 @@ from webhook_agent.schemas import (
     SyncResolutionItem,
     SyncReviewResponse,
 )
-from webhook_agent.webhook_agent import _enforce_verdict
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
@@ -709,7 +709,7 @@ def test_enforce_verdict_sync_review_resolution_guard_preserves_legitimate_resol
 
 
 def test_reproduce_pr_155_mangled_formatting():
-    from webhook_agent.webhook_agent import _enforce_verdict
+    from webhook_agent.review.review_enforcer import _enforce_verdict
 
     text_input = (
         "## 🛡️ Code Review: `REQUEST_CHANGES`\n\n"

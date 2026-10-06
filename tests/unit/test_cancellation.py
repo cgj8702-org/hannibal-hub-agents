@@ -108,7 +108,7 @@ def test_review_tool_raises_abort_agent_execution_on_closed_pr():
     """Verify review tool raises AbortAgentExecution and registers closed PR."""
     from unittest.mock import MagicMock
 
-    from webhook_agent.webhook_agent import review
+    from webhook_agent.core.github_tools import review
 
     ctx = MagicMock()
     mock_gh = MagicMock()
@@ -129,7 +129,7 @@ def test_plan_and_execute_skips_when_pr_in_registry():
     """Verify plan_and_execute immediately skips when PR is in pr_closed_registry."""
     from unittest.mock import MagicMock
 
-    from webhook_agent.webhook_agent import WebhookAgent
+    from webhook_agent.core.agent_definition import WebhookAgent
 
     pr_closed_registry.mark_closed("cgj8702-org/test-repo", 606)
 

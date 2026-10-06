@@ -75,7 +75,7 @@ async def before_model_callback(
     active_tier = callback_context.state.get("active_tier") or _resolve_tier()
     api_key = get_active_api_key()
     try:
-        from webhook_agent.webhook_agent import get_active_model
+        from webhook_agent.models.model_chain import get_active_model
 
         default_model = get_active_model()
     except ImportError:
@@ -235,7 +235,7 @@ async def after_model_callback(
         target_model = callback_context.state.get("active_model")
         if not target_model:
             try:
-                from webhook_agent.webhook_agent import get_active_model
+                from webhook_agent.models.model_chain import get_active_model
 
                 target_model = get_active_model()
             except ImportError:

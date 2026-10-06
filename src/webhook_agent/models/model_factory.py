@@ -28,7 +28,7 @@ class RateLimitedGemini(Gemini):
     async def generate_content_async(
         self, llm_request: Any, stream: bool = False
     ) -> AsyncGenerator[Any]:
-        from webhook_agent.webhook_agent import get_active_model
+        from webhook_agent.models.model_chain import get_active_model
 
         model_name = getattr(llm_request, "model", getattr(self, "model", get_active_model()))
         active_tier = _resolve_tier()

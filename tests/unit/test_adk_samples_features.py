@@ -32,9 +32,9 @@ from webhook_agent.review.duplicate_detector import (
     build_exclusions,
     group_repeated_findings,
 )
+from webhook_agent.review.review_enforcer import _enforce_verdict
 from webhook_agent.schemas import IssueItem
 from webhook_agent.tools.diff_tools import check_window, walk_right_side
-from webhook_agent.webhook_agent import _enforce_verdict
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
