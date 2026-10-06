@@ -257,3 +257,92 @@ def test_execute_agent_event_transient_failover_success_does_not_mark_rate_limit
         )
 
         mock_mark_rl.assert_not_called()
+
+
+def test_execute_agent_event_resumes_with_precompiled_dossier() -> None:
+    """Test execute_agent_event uses precompiled dossier and skips _build_user_message on resume."""
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name.return_value = "gemini-3.5-flash-lite"
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+        "precompiled_dossier": "### Resumed Precompiled Findings",
+    }
+
+    mock_gh = MagicMock()
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch("webhook_agent.core.execution._execute_adk_runner") as mock_runner,
+    ):
+        execute_agent_event(
+            agent=mock_agent,
+            event_data=event_data,
+            gh_client=mock_gh,
+            trace_id="trace-resume",
+        )
+
+        mock_agent._build_user_message.assert_not_called()
+        mock_runner.assert_called_once()
+        user_message_arg = mock_runner.call_args.kwargs["user_message"]
+        assert "### Resumed Precompiled Findings" in user_message_arg.parts[0].text
+        assert event_data.get("deterministic_precompiled_ast") is True
+
+
+def test_execute_agent_event_rate_limited_paused_short_circuits() -> None:
+    """Test execute_agent_event short-circuits when commit checkpoint is rate_limited and backoff active."""
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+    }
+
+    mock_gh = MagicMock()
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value={"status": "rate_limited"},
+        ),
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_resumable",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution._execute_adk_runner") as mock_runner,
+    ):
+        results = execute_agent_event(
+            agent=mock_agent,
+            event_data=event_data,
+            gh_client=mock_gh,
+            trace_id="trace-paused",
+        )
+
+        assert len(results) == 1
+        assert results[0].tool == "review"
+        assert results[0].success is True
+        assert "paused" in results[0].detail
+        mock_runner.assert_not_called()
+        mock_agent._build_user_message.assert_not_called()

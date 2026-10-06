@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import logging
 import os
@@ -118,6 +119,61 @@ class ReviewCheckpointManager:
                 if local.get("expire_at_ts", 0) > now_ts:
                     return dict(local)
         return None
+
+    def get_resumable(self, repo: str, pr_number: int, head_sha: str) -> dict[str, Any] | None:
+        """Fetch a rate_limited checkpoint if its resume_after backoff has elapsed.
+
+        Returns:
+            The checkpoint dictionary if status == "rate_limited" and now >= resume_after;
+            otherwise returns None.
+        """
+        checkpoint = self.get_checkpoint(repo, pr_number, head_sha)
+        if not checkpoint:
+            return None
+
+        status = checkpoint.get("status")
+        if status != "rate_limited":
+            return None
+
+        now = datetime.datetime.now(datetime.UTC)
+        resume_after = checkpoint.get("resume_after")
+        resume_after_ts = checkpoint.get("resume_after_ts")
+
+        target_resume: datetime.datetime | None = None
+        if isinstance(resume_after, datetime.datetime):
+            if resume_after.tzinfo is None:
+                target_resume = resume_after.replace(tzinfo=datetime.UTC)
+            else:
+                target_resume = resume_after
+        elif isinstance(resume_after, str):
+            with contextlib.suppress(Exception):
+                dt = datetime.datetime.fromisoformat(resume_after)
+                if dt.tzinfo is None:
+                    target_resume = dt.replace(tzinfo=datetime.UTC)
+                else:
+                    target_resume = dt
+
+        if target_resume is None and resume_after_ts is not None:
+            with contextlib.suppress(Exception):
+                target_resume = datetime.datetime.fromtimestamp(
+                    float(resume_after_ts), tz=datetime.UTC
+                )
+
+        doc_id = _safe_doc_id(repo, pr_number, head_sha)
+        if target_resume is not None and now < target_resume:
+            remaining = (target_resume - now).total_seconds()
+            logger.info(
+                "⏳ Checkpoint %s is rate_limited but backoff has not expired yet (%.1fs remaining)",
+                doc_id,
+                remaining,
+            )
+            return None
+
+        logger.info(
+            "🚀 Checkpoint %s is resumable (status: rate_limited, backoff expired)",
+            doc_id,
+        )
+        return checkpoint
 
     def save_checkpoint(
         self,
