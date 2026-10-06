@@ -27,9 +27,12 @@ from typing import Any
 
 from github import Auth, Github
 
-from .analysis.diff_filter import filter_review_diff
 from .bot_identity import _is_bot_event, is_jules_sender
 from .cancellation import pr_closed_registry
+from .fast_path import (
+    evaluate_dependency_fast_path,
+    is_base_branch_merge_sync,
+)
 from .formatter import (
     truncate_log_payload,
 )
@@ -40,6 +43,13 @@ from .github_credential_helper import (
     load_private_key,
     save_cached_token,
 )
+from .pr_context import (
+    _prefetch_inline_comment_context,
+    _prefetch_pr_diff,
+    _prefetch_previous_bot_reviews,
+    _should_prefetch_diff,
+)
+from .review.comment_poster import _add_eyes_reaction
 from .webhook_agent import WebhookAgent
 from .webhook_types import ActionResult
 
@@ -64,340 +74,20 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Programmatically react with eyes emoji to incoming comment events."""
-    try:
-        canonical = payload.get("canonical", "")
-        raw = payload.get("raw_payload", {})
-        action = payload.get("action") or raw.get("action")
-        if action == "deleted" or canonical.endswith(".deleted"):
-            return
-
-        if canonical.startswith("issue_comment."):
-            issue_data = raw.get("issue", {})
-            pr_data = raw.get("pull_request", {})
-            issue_num = issue_data.get("number") or pr_data.get("number")
-            comment_data = raw.get("comment", {})
-            comment_id = comment_data.get("id")
-            if issue_num and comment_id:
-                repo = gh.get_repo(repo_name)
-                issue = repo.get_issue(int(issue_num))
-                comment = issue.get_comment(int(comment_id))
-                comment.create_reaction("eyes")
-        elif canonical.startswith("pull_request_review_comment."):
-            pr_data = raw.get("pull_request", {})
-            comment_data = raw.get("comment", {})
-            pr_num = pr_data.get("number")
-            comment_id = comment_data.get("id")
-            if pr_num and comment_id:
-                repo = gh.get_repo(repo_name)
-                pr = repo.get_pull(int(pr_num))
-                pr_comment = pr.get_review_comment(int(comment_id))
-                pr_comment.create_reaction("eyes")
-        elif canonical in (
-            "pull_request.opened",
-            "pull_request.reopened",
-            "issues.opened",
-            "issues.reopened",
-        ) or (
-            canonical.startswith(("pull_request.", "issues.")) and action in ("opened", "reopened")
-        ):
-            target_num = (raw.get("pull_request") or {}).get("number") or (
-                raw.get("issue") or {}
-            ).get("number")
-            if target_num:
-                repo = gh.get_repo(repo_name)
-                issue = repo.get_issue(int(target_num))
-                issue.create_reaction("eyes")
-    except Exception as exc:
-        logger.warning("Failed to add eyes reaction to comment: %s", exc)
-
-
-def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
-    """Determine if a PR diff pre-fetch is necessary for this event to avoid prompt bloat.
-
-    Pre-fetching is restricted to PR creation/updates, review requests, and explicit
-    review intent triggers.
-    """
-    if canonical in (
-        "pull_request.opened",
-        "pull_request.synchronize",
-        "pull_request.ready_for_review",
-        "pull_request.reopened",
-        "pull_request_review_requested",
-    ):
-        return True
-
-    if canonical.startswith(("issue_comment.", "pull_request_review_comment.")):
-        comment_body = (raw.get("comment", {}) or {}).get("body", "").lower()
-        from .review.writeback_policy import REVIEW_INTENT_KEYWORDS
-
-        if any(trigger in comment_body for trigger in REVIEW_INTENT_KEYWORDS):
-            return True
-        # Forward-fix: issue_comment on a PR (issue.pull_request set) that needs
-        # reconciliation against prior bot reviews should also get diff context.
-        # Otherwise the agent emits resolutions with no grounding and the
-        # deterministic fallback has no pr_diff to validate against.
-        issue = raw.get("issue") or {}
-        if isinstance(issue, dict) and issue.get("pull_request") is not None:
-            return True
-
-    return False
-
-
-def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Programmatically pre-fetch PR diff and inject into raw_payload for 1-turn review execution."""
-    try:
-        canonical = payload.get("canonical", "")
-        raw = payload.get("raw_payload")
-        if not isinstance(raw, dict) or "pr_diff" in raw:
-            return
-
-        if not _should_prefetch_diff(canonical, raw):
-            return
-
-        pr_number = None
-        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
-            pr_number = raw["pull_request"].get("number")
-        elif "issue" in raw and isinstance(raw["issue"], dict) and raw["issue"].get("pull_request"):
-            pr_number = raw["issue"].get("number")
-
-        if pr_number is None:
-            return
-
-        try:
-            pr_num_int = int(pr_number)
-        except (TypeError, ValueError):
-            return
-
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_num_int)
-
-        # Check live PR state: if closed or merged, register in pr_closed_registry
-        raw_state = getattr(pr, "state", None)
-        pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
-        is_merged = getattr(pr, "merged", None) is True
-        if pr_state == "closed" or is_merged:
-            pr_closed_registry.mark_closed(repo_name, pr_num_int)
-            if "pull_request" in raw and isinstance(raw["pull_request"], dict):
-                raw["pull_request"]["state"] = "closed"
-                raw["pull_request"]["merged"] = True
-            elif "issue" in raw and isinstance(raw["issue"], dict):
-                raw["issue"]["state"] = "closed"
-            logger.info(
-                "🔒 Live GitHub check: PR %s#%d is closed or merged (state=%s, merged=%s); registered as closed",
-                repo_name,
-                pr_num_int,
-                pr_state,
-                is_merged,
-            )
-            return
-
-        changed_files: list[str] = []
-        diff_lines: list[str] = []
-        for f in pr.get_files():
-            changed_files.append(f.filename)
-            patch = f.patch or "No patch available (binary/renamed/empty)."
-            diff_lines.append(f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}")
-
-        if diff_lines:
-            raw["changed_files"] = changed_files
-            raw_diff = "\n".join(diff_lines)
-            filtered = filter_review_diff(raw_diff)
-            raw["pr_diff"] = filtered.filtered_diff or raw_diff
-            logger.info(
-                "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d) for 1-turn review",
-                pr_num_int,
-                len(diff_lines),
-                len(filtered.kept_files),
-                filtered.reviewable_lines,
-            )
-
-        if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
-            _prefetch_previous_bot_reviews(gh, repo_name, payload)
-
-        _prefetch_inline_comment_context(gh, repo_name, payload)
-
-    except Exception as exc:
-        logger.debug("Could not pre-fetch PR diff: %s", exc)
-
-
-def _prefetch_inline_comment_context(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Pre-fetch code context snippet for inline review comment events."""
-    try:
-        canonical = payload.get("canonical", "")
-        raw = payload.get("raw_payload")
-        if (
-            not isinstance(raw, dict)
-            or not canonical.startswith("pull_request_review_comment.")
-            or "inline_code_context" in raw
-        ):
-            return
-
-        comment = raw.get("comment", {})
-        path = comment.get("path")
-        diff_hunk = comment.get("diff_hunk")
-        line = comment.get("line") or comment.get("original_line")
-
-        if path and (diff_hunk or line):
-            raw["inline_code_context"] = (
-                f"File: {path} (Line {line})\nDiff Hunk Snippet:\n{diff_hunk or 'N/A'}"
-            )
-            logger.info("Pre-fetched inline comment code context for %s:%s", path, line)
-    except Exception as exc:
-        logger.debug("Could not pre-fetch inline comment context: %s", exc)
-
-
-def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any]) -> bool:
-    """Check if a pull_request.synchronize event is an update from the base branch (e.g. merging main).
-
-    When a PR branch is updated with the base branch (via GitHub's 'Update branch' button
-    or `git merge main`), the head commit is a merge commit from the base branch.
-    Such events should NOT trigger automated re-reviews or dismiss existing approvals.
-    """
-    try:
-        raw = payload.get("raw_payload")
-        if not isinstance(raw, dict):
-            return False
-
-        canonical = payload.get("canonical", "")
-        action = raw.get("action")
-        if canonical != "pull_request.synchronize" and action != "synchronize":
-            return False
-
-        pr_data = raw.get("pull_request")
-        if not isinstance(pr_data, dict):
-            return False
-
-        head = pr_data.get("head") or {}
-        head_sha = head.get("sha") or raw.get("after")
-        if not head_sha:
-            return False
-
-        base = pr_data.get("base") or {}
-        base_ref = (base.get("ref") or "").lower()
-        base_sha = base.get("sha") or ""
-        head_ref = (head.get("ref") or "").lower()
-        before_sha = raw.get("before") or ""
-
-        # Fast-path: Check raw_payload commits if available
-        commits = raw.get("commits")
-        if isinstance(commits, list) and commits:
-            for c in commits:
-                if isinstance(c, dict) and c.get("id") == head_sha:
-                    msg = (c.get("message") or "").strip().lower()
-                    first_line = msg.splitlines()[0] if msg else ""
-                    if any(
-                        pat in first_line
-                        for pat in (
-                            f"merge branch '{base_ref}'",
-                            f"merge branch '{base_ref}' of",
-                            f"merge remote-tracking branch 'origin/{base_ref}'",
-                            "merge https://github.com/",
-                            f"into {head_ref}",
-                        )
-                    ):
-                        return True
-
-        repo = gh.get_repo(repo_name)
-        commit = repo.get_commit(head_sha)
-        parents = getattr(commit, "parents", []) or []
-        if len(parents) < 2:
-            return False
-
-        commit_obj = getattr(commit, "commit", None)
-        msg = (getattr(commit_obj, "message", "") or "").strip().lower()
-        first_line = msg.splitlines()[0] if msg else ""
-
-        merge_patterns = (
-            f"merge branch '{base_ref}'",
-            f"merge branch '{base_ref}' of",
-            f"merge remote-tracking branch 'origin/{base_ref}'",
-            "merge https://github.com/",
-            "merge commit",
-            f"into {head_ref}",
-        )
-        is_merge_msg = any(pat in first_line for pat in merge_patterns)
-
-        parent_shas = [p.sha for p in parents if hasattr(p, "sha")]
-        is_base_parent = base_sha in parent_shas or is_merge_msg
-
-        return bool(
-            is_merge_msg or (is_base_parent and (not before_sha or before_sha in parent_shas))
-        )
-    except Exception as exc:
-        logger.debug("Could not verify base branch merge sync: %s", exc)
-        return False
-
-
-def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Pre-fetch previous reviews posted by hannibal-hub-agents[bot]."""
-    try:
-        raw = payload.get("raw_payload")
-        if not isinstance(raw, dict) or "previous_bot_reviews" in raw:
-            return
-
-        pr_number = None
-        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
-            pr_number = raw["pull_request"].get("number")
-        elif (
-            "issue" in raw
-            and isinstance(raw["issue"], dict)
-            and raw["issue"].get("pull_request") is not None
-        ):
-            pr_number = raw["issue"].get("number")
-
-        if not pr_number:
-            return
-
-        repo = gh.get_repo(repo_name)
-        try:
-            pr = repo.get_pull(pr_number)
-        except Exception:
-            return
-
-        bot_reviews: list[str] = []
-        had_request_changes = False
-        had_prior_findings = False
-        all_prior_findings: list[dict[str, Any]] = []
-
-        from webhook_agent.review.metadata import (
-            get_actionable_findings,
-            has_actionable_findings,
-        )
-
-        for r in pr.get_reviews():
-            u = getattr(r, "user", None)
-            login = (getattr(u, "login", "") or "").lower() if u else ""
-            if "hannibal-hub-agents" in login or login.endswith("[bot]"):
-                state = getattr(r, "state", "COMMENT")
-                if state == "CHANGES_REQUESTED":
-                    had_request_changes = True
-                body = (r.body or "").strip()
-                if has_actionable_findings(body, state):
-                    had_prior_findings = True
-                findings = get_actionable_findings(body)
-                if findings:
-                    all_prior_findings.extend(findings)
-                body_clean = body
-                bot_reviews.append(f"Review (State: {state}):\n{body_clean}")
-
-        raw["prior_reviews_had_request_changes"] = had_request_changes
-        raw["prior_reviews_had_findings"] = had_prior_findings or had_request_changes
-        raw["prior_actionable_findings"] = all_prior_findings
-        if bot_reviews:
-            raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews)
-            logger.info(
-                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s, findings_count=%d) for PR #%d",
-                len(bot_reviews),
-                had_request_changes,
-                raw["prior_reviews_had_findings"],
-                len(all_prior_findings),
-                pr_number,
-            )
-
-    except Exception as exc:
-        logger.debug("Could not pre-fetch previous bot reviews: %s", exc)
+# Re-exported module helpers (extracted to pr_context.py, fast_path.py, and review/comment_poster.py)
+# Preserved for backwards compatibility with existing consumers and unit tests.
+__all__ = [
+    "AgentCore",
+    "WebhookProcessor",
+    "_add_eyes_reaction",
+    "_prefetch_inline_comment_context",
+    "_prefetch_pr_diff",
+    "_prefetch_previous_bot_reviews",
+    "_should_prefetch_diff",
+    "evaluate_dependency_fast_path",
+    "generate_trace_id",
+    "is_base_branch_merge_sync",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -863,64 +553,16 @@ class WebhookProcessor:
 
         # Deterministic Fast-Path for automated Dependabot / lockfile PRs
         if not dry_run and is_pr_event and pr_number is not None:
-            try:
-                from .analysis.lockfile_validator import (
-                    is_pure_dependency_pr,
-                    render_deterministic_approval_markdown,
-                    validate_lockfile_diff,
-                )
-                from .webhook_agent import _submit_formal_review
-
-                sender_login = (
-                    (payload.get("sender") or {}).get("login", "")
-                    or (raw.get("sender") or {}).get("login", "")
-                    or ""
-                )
-                head_branch = (pr_data.get("head") or {}).get("ref", "")
-                changed_files = raw.get("changed_files") or []
-                pr_diff = raw.get("pr_diff") or ""
-
-                if is_pure_dependency_pr(sender_login, head_branch, changed_files):
-                    logger.info(
-                        "⚡ Evaluating deterministic fast-path for PR %s#%s (%d changed files)",
-                        repo_name,
-                        pr_number,
-                        len(changed_files),
-                    )
-                    val_res = validate_lockfile_diff(pr_diff, changed_files)
-                    if val_res.should_approve:
-                        pr_num_int = int(pr_number)
-                        repo = gh.get_repo(repo_name)
-                        pr = repo.get_pull(pr_num_int)
-                        approval_body = render_deterministic_approval_markdown(val_res, pr_num_int)
-                        target_key = f"{repo_name}#{pr_number}"
-                        status_msg, submitted = _submit_formal_review(
-                            pr=pr,
-                            body=approval_body,
-                            event="APPROVE",
-                            target_key=target_key,
-                        )
-                        logger.info(
-                            "⚡ Fast-Path: Deterministically approved dependency PR %s#%s: %s (submitted=%s)",
-                            repo_name,
-                            pr_number,
-                            status_msg,
-                            submitted,
-                        )
-                        return
-                    else:
-                        logger.info(
-                            "⚡ Fast-Path: Dependency PR %s#%s bypassed to full agent audit: %s (%s)",
-                            repo_name,
-                            pr_number,
-                            val_res.summary,
-                            val_res.rejection_reason,
-                        )
-            except Exception as fast_path_err:
-                logger.warning(
-                    "Deterministic fast-path evaluation encountered error, falling back to agent: %s",
-                    fast_path_err,
-                )
+            if evaluate_dependency_fast_path(
+                gh=gh,
+                repo_name=repo_name,
+                payload=payload,
+                raw=raw,
+                pr_data=pr_data,
+                pr_number=pr_number,
+                dry_run=dry_run,
+            ):
+                return
 
         try:
             results = agent.run(payload, repo_name, gh_client=gh)

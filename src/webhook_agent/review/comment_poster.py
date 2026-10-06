@@ -9,6 +9,8 @@ import logging
 import re
 from typing import Any
 
+from github import Github
+
 from ..schemas import IssueItem
 from ..tools.diff_tools import (
     _norm,
@@ -304,3 +306,55 @@ def build_github_review_comments(
             )
 
     return inline_comments, anchored_keys
+
+
+def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
+    """Programmatically react with eyes emoji to incoming comment events."""
+    try:
+        canonical = payload.get("canonical", "")
+        raw = payload.get("raw_payload", {})
+        action = payload.get("action") or raw.get("action")
+        if action == "deleted" or canonical.endswith(".deleted"):
+            return
+
+        if canonical.startswith("issue_comment."):
+            issue_data = raw.get("issue", {})
+            pr_data = raw.get("pull_request", {})
+            issue_num = issue_data.get("number") or pr_data.get("number")
+            comment_data = raw.get("comment", {})
+            comment_id = comment_data.get("id")
+            if issue_num and comment_id:
+                repo = gh.get_repo(repo_name)
+                issue = repo.get_issue(int(issue_num))
+                comment = issue.get_comment(int(comment_id))
+                comment.create_reaction("eyes")
+        elif canonical.startswith("pull_request_review_comment."):
+            pr_data = raw.get("pull_request", {})
+            comment_data = raw.get("comment", {})
+            pr_num = pr_data.get("number")
+            comment_id = comment_data.get("id")
+            if pr_num and comment_id:
+                repo = gh.get_repo(repo_name)
+                pr = repo.get_pull(int(pr_num))
+                pr_comment = pr.get_review_comment(int(comment_id))
+                pr_comment.create_reaction("eyes")
+        elif canonical in (
+            "pull_request.opened",
+            "pull_request.reopened",
+            "issues.opened",
+            "issues.reopened",
+        ) or (
+            canonical.startswith(("pull_request.", "issues.")) and action in ("opened", "reopened")
+        ):
+            target_num = (raw.get("pull_request") or {}).get("number") or (
+                raw.get("issue") or {}
+            ).get("number")
+            if target_num:
+                repo = gh.get_repo(repo_name)
+                issue = repo.get_issue(int(target_num))
+                issue.create_reaction("eyes")
+    except Exception as exc:
+        logger.warning("Failed to add eyes reaction to comment: %s", exc)
+
+
+add_eyes_reaction = _add_eyes_reaction
