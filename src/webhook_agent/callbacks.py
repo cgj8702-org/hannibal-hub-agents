@@ -24,17 +24,6 @@ from webhook_agent.models.rate_limiter import _resolve_tier, get_active_api_key,
 logger = logging.getLogger("webhook_agent.callbacks")
 
 
-MUTATING_TOOLS: set[str] = {
-    "review",
-    "add_comment",
-    "merge_pr",
-    "open_pr",
-    "update_issue",
-    "update_branch_from_base",
-    "mark_ready_for_review",
-}
-
-
 def _check_pr_closed_short_circuit(state: Any) -> None:
     """Check if target PR is registered as closed/merged and abort agent turn immediately."""
     repo_full_name = state.get("repo_full_name") or ""
@@ -62,14 +51,11 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     active_tier = _resolve_tier()
     callback_context.state["active_tier"] = active_tier
     callback_context.state["review_submitted_in_this_turn"] = False
-    callback_context.state["mutating_tool_executed_in_this_turn"] = False
     callback_context.state.setdefault("tools_executed", [])
     if callback_context.state.get("deterministic_precompiled_ast"):
         tools_executed = callback_context.state["tools_executed"]
         if "verify_python_ast" not in tools_executed:
             tools_executed.append("verify_python_ast")
-        if "check_symbol_impact" not in tools_executed:
-            tools_executed.append("check_symbol_impact")
     agent_name = getattr(callback_context, "agent_name", None) or getattr(
         getattr(callback_context, "agent", None), "name", "unknown_agent"
     )
@@ -303,15 +289,6 @@ async def on_tool_error_callback(
 ) -> dict[str, Any] | None:
     """Self-healing error recovery callback."""
     logger.warning("on_tool_error_callback: tool '%s' raised error: %s", tool.name, error)
-    if tool.name == "update_branch_from_base":
-        pr_number = args.get("pr_number") or args.get("number")
-        if pr_number:
-            tool_context.state["trigger_worktree_conflict_resolution"] = True
-            return {
-                "success": False,
-                "detail": f"REST API auto-merge failed for PR #{pr_number}. Triggering isolated Git Worktree conflict resolution.",
-            }
-
     err_str = str(error).lower()
     if "429" in err_str or "resource_exhausted" in err_str:
         return {

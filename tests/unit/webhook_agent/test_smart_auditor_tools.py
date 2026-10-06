@@ -1,40 +1,12 @@
-"""Unit tests for Smart Webhook Auditor tools (sequential thinking, codebase search) and code block formatting."""
+"""Unit tests for Smart Webhook Auditor tools and code block formatting."""
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 from webhook_agent.formatter import (
     CodeReviewResponse,
     render_code_review_markdown,
 )
 from webhook_agent.schemas import IssueItem
-from webhook_agent.tools.sequential_thinking import sequential_thinking
-
-
-def test_sequential_thinking_tool():
-    """Verify sequential_thinking records thought history into context state."""
-    ctx = MagicMock()
-    ctx.state = {}
-    res1 = sequential_thinking(
-        ctx,
-        thought="Analyzing diff for potential null dereference",
-        thought_number=1,
-        total_thoughts=2,
-        next_thought_needed=True,
-    )
-    assert "Recorded thought 1/2" in res1
-    assert len(ctx.state["sequential_thoughts"]) == 1
-
-    res2 = sequential_thinking(
-        ctx,
-        thought="Verified null check exists in upstream caller",
-        thought_number=2,
-        total_thoughts=2,
-        next_thought_needed=False,
-    )
-    assert "Thinking complete" in res2
-    assert len(ctx.state["sequential_thoughts"]) == 2
 
 
 def test_format_suggested_fix_markdown_single_line():

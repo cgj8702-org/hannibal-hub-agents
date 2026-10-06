@@ -11,7 +11,6 @@ from webhook_agent.logic.test_impact import (
     TestImpactAnalyzer,
     TestImpactReport,
 )
-from webhook_agent.tools.test_impact_tools import check_test_coverage
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
@@ -138,11 +137,3 @@ class TestTestImpactAnalyzer:
         assert "Deterministic Test Coverage & Regression Impact" in md
         assert "PR Modified Tests" in md
         assert "No callable Python functions" in md
-
-    def test_check_test_coverage_tool_execution(self):
-        res = check_test_coverage(
-            "src/webhook_agent/proactive_service.py", symbol_name="try_claim_reconciliation"
-        )
-        assert "Deterministic Test Coverage" in res
-        assert "try_claim_reconciliation" in res
-        assert "✅ COVERED" in res

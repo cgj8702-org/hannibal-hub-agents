@@ -1108,8 +1108,6 @@ class WebhookAgent:
                         tools_exec = user_state_map.setdefault("tools_executed", [])
                         if "verify_python_ast" not in tools_exec:
                             tools_exec.append("verify_python_ast")
-                        if "check_symbol_impact" not in tools_exec:
-                            tools_exec.append("check_symbol_impact")
                     if is_pr_review_event and pr_number and head_sha:
                         review_checkpoint_manager.save_checkpoint(
                             repo=repo_full_name,
@@ -1333,8 +1331,7 @@ class WebhookAgent:
                         )
 
         elif not is_pr_review_event and not is_comment_reconciliation:
-            has_comment_action = any(r.tool == "add_comment" and r.success for r in results)
-            if not has_comment_action and emitted_texts:
+            if emitted_texts:
                 full_reply = "\n\n".join(emitted_texts).strip()
                 if full_reply:
                     pr_number = None

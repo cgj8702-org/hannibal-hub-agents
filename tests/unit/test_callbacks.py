@@ -105,22 +105,22 @@ async def test_before_tool_callback_sanitization() -> None:
 @pytest.mark.anyio
 async def test_on_tool_error_callback() -> None:
     tool = MagicMock()
-    tool.name = "update_branch_from_base"
-    args = {"pr_number": 63}
+    tool.name = "read_file"
+    args = {"file_path": "main.py"}
     ctx = MagicMock()
     ctx.state = {}
 
-    err = Exception("Merge conflict 422")
+    err = Exception("429 RESOURCE_EXHAUSTED")
     res = await on_tool_error_callback(tool, args, ctx, err)
     assert res is not None
     assert res["success"] is False
-    assert ctx.state.get("trigger_worktree_conflict_resolution") is True
+    assert "temporary limit or error" in res["detail"]
 
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 @pytest.mark.anyio
-async def test_before_tool_callback_allow_multiple_mutating_tools() -> None:
+async def test_before_tool_callback_allow_multiple_tools() -> None:
     tool = MagicMock()
     tool.name = "review"
     args = {}
@@ -131,7 +131,7 @@ async def test_before_tool_callback_allow_multiple_mutating_tools() -> None:
     assert res1 is None
 
     tool2 = MagicMock()
-    tool2.name = "add_comment"
+    tool2.name = "read_file"
     res2 = await before_tool_callback(tool2, args, ctx)
     assert res2 is None
 
@@ -206,14 +206,12 @@ async def test_after_tool_callback_dict_truncation() -> None:
 @pytest.mark.webhook_agent
 def test_resilient_token_extraction_variants() -> None:
     """Verify _extract_total_tokens and _extract_cached_tokens handle all SDK and dict formats."""
-    # 1. Direct object attributes
     resp1 = MagicMock()
     resp1.usage_metadata.total_token_count = 1000
     resp1.usage_metadata.cached_content_token_count = 800
     assert _extract_total_tokens(resp1) == 1000
     assert _extract_cached_tokens(resp1) == 800
 
-    # 2. Nested cache_tokens_details
     resp2 = MagicMock()
     resp2.usage_metadata.total_token_count = 2000
     del resp2.usage_metadata.cached_content_token_count
@@ -222,7 +220,6 @@ def test_resilient_token_extraction_variants() -> None:
     assert _extract_total_tokens(resp2) == 2000
     assert _extract_cached_tokens(resp2) == 1500
 
-    # 3. Serialized dictionary payload
     resp3 = MagicMock()
     resp3.usage_metadata = {
         "total_token_count": 3000,
@@ -231,7 +228,6 @@ def test_resilient_token_extraction_variants() -> None:
     assert _extract_total_tokens(resp3) == 3000
     assert _extract_cached_tokens(resp3) == 2500
 
-    # 4. Dict with nested cache_tokens_details
     resp4 = MagicMock()
     resp4.usage_metadata = {
         "total_token_count": 4000,
@@ -240,7 +236,6 @@ def test_resilient_token_extraction_variants() -> None:
     assert _extract_total_tokens(resp4) == 4000
     assert _extract_cached_tokens(resp4) == 3500
 
-    # 5. Empty / None usage
     resp5 = MagicMock()
     resp5.usage_metadata = None
     assert _extract_total_tokens(resp5) == 0

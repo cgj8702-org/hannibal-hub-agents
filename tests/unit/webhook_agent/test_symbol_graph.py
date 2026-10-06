@@ -2,23 +2,15 @@
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-
 import pytest
 
 from webhook_agent.logic.symbol_graph import (
     CallSiteSpec,
-    CallSiteVisitor,
-    SignatureDiff,
-    SignatureSpec,
-    SymbolDefinitionVisitor,
     SymbolImpactAnalyzer,
     compare_signatures,
     extract_signatures_from_code,
     verify_call_site_compatibility,
 )
-from webhook_agent.tools.symbol_tools import check_symbol_impact
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
@@ -68,8 +60,8 @@ class MetricsEngine:
     p_sig = sigs["process"]
     assert p_sig.is_method
     assert p_sig.first_arg_is_self
-    assert p_sig.min_positional_args == 2  # self + value
-    assert p_sig.max_positional_args == 3  # self + value + multiplier
+    assert p_sig.min_positional_args == 2
+    assert p_sig.max_positional_args == 3
 
 
 def test_extract_signatures_keyword_only_and_varargs():
@@ -147,11 +139,9 @@ def test_verify_call_site_compatibility_valid():
     code = "def process(a, b, c=10): pass"
     sig = extract_signatures_from_code(code)["process"]
 
-    # Valid positional call: process(1, 2)
     cs1 = CallSiteSpec("test.py", 10, 0, "process", 2, frozenset(), False, False)
     assert verify_call_site_compatibility(cs1, sig) is None
 
-    # Valid call with kwarg: process(1, b=2)
     cs2 = CallSiteSpec("test.py", 11, 0, "process", 1, frozenset({"b"}), False, False)
     assert verify_call_site_compatibility(cs2, sig) is None
 
@@ -160,7 +150,6 @@ def test_verify_call_site_compatibility_missing_positional():
     code = "def process(a, b, c=10): pass"
     sig = extract_signatures_from_code(code)["process"]
 
-    # Call missing b: process(1)
     cs = CallSiteSpec("test.py", 10, 0, "process", 1, frozenset(), False, False)
     broken = verify_call_site_compatibility(cs, sig)
     assert broken is not None
@@ -172,7 +161,6 @@ def test_verify_call_site_compatibility_too_many_args():
     code = "def process(a, b): pass"
     sig = extract_signatures_from_code(code)["process"]
 
-    # Call with 3 args: process(1, 2, 3)
     cs = CallSiteSpec("test.py", 10, 0, "process", 3, frozenset(), False, False)
     broken = verify_call_site_compatibility(cs, sig)
     assert broken is not None
@@ -184,7 +172,6 @@ def test_verify_call_site_compatibility_missing_kwonly():
     code = "def process(a, *, strict: bool): pass"
     sig = extract_signatures_from_code(code)["process"]
 
-    # Call missing strict: process(1)
     cs = CallSiteSpec("test.py", 10, 0, "process", 1, frozenset(), False, False)
     broken = verify_call_site_compatibility(cs, sig)
     assert broken is not None
@@ -196,7 +183,6 @@ def test_verify_call_site_compatibility_unexpected_kw():
     code = "def process(a, b=2): pass"
     sig = extract_signatures_from_code(code)["process"]
 
-    # Call with unexpected unknown_arg=True
     cs = CallSiteSpec("test.py", 10, 0, "process", 1, frozenset({"unknown_arg"}), False, False)
     broken = verify_call_site_compatibility(cs, sig)
     assert broken is not None
@@ -211,11 +197,9 @@ class Service:
 """
     sig = extract_signatures_from_code(code)["execute"]
 
-    # Method call: s.execute(data) -> 1 arg supplied on instance, satisfies (self + payload)
     cs = CallSiteSpec("test.py", 10, 0, "execute", 1, frozenset(), False, False)
     assert verify_call_site_compatibility(cs, sig) is None
 
-    # Method call with 0 args: s.execute() -> missing payload!
     cs_bad = CallSiteSpec("test.py", 11, 0, "execute", 0, frozenset(), False, False)
     broken = verify_call_site_compatibility(cs_bad, sig)
     assert broken is not None
@@ -224,25 +208,13 @@ class Service:
 
 def test_symbol_impact_analyzer_real_repo():
     analyzer = SymbolImpactAnalyzer()
-    # Check a symbol defined in ast_tools.py
     report = analyzer.analyze_symbol(
         file_path="src/webhook_agent/tools/ast_tools.py",
         symbol_name="verify_python_ast",
     )
     assert report.symbol_name == "verify_python_ast"
-    # verify_python_ast is called in agent_definition.py and test files
     assert report.total_call_sites_found > 0
-    # No broken call sites exist in repository
     assert len(report.broken_call_sites) == 0
     md = report.to_markdown()
     assert "verify_python_ast" in md
     assert "All External Call Sites Compatible" in md
-
-
-def test_check_symbol_impact_tool():
-    res = check_symbol_impact(
-        file_path="src/webhook_agent/tools/ast_tools.py",
-        symbol_name="verify_python_ast",
-    )
-    assert "Symbol: `verify_python_ast`" in res
-    assert "External Call Sites Checked" in res
