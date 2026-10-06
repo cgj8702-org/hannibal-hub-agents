@@ -14,6 +14,22 @@ from typing import Any
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 BOT_APP_SLUG = "hannibal-hub-agents"
 
+# Autonomous coding partner bot logins (Jules)
+JULES_BOT_LOGINS = {
+    "google-jules[bot]",
+    "jules[bot]",
+    "google-jules",
+    "jules",
+}
+
+
+def is_jules_sender(sender: dict[str, Any] | None) -> bool:
+    """Check whether a sender dict represents the Jules coding agent bot."""
+    if not isinstance(sender, dict):
+        return False
+    login = (sender.get("login") or "").strip().lower()
+    return login in JULES_BOT_LOGINS or "jules" in login
+
 
 def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
     """Check whether a sender dict represents this app's bot identity.
@@ -25,6 +41,10 @@ def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
         return False
     login = (sender.get("login") or "").strip().lower()
     sender_type = (sender.get("type") or "").strip()
+
+    # Jules is an external mutation partner bot, not this app
+    if is_jules_sender(sender):
+        return False
 
     known_bot_logins = {
         BOT_LOGIN.lower(),

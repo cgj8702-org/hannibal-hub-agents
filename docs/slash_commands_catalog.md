@@ -19,6 +19,7 @@ Hannibal Hub has evolved beyond rigid slash commands. The agent uses a decoupled
 | **Automated Review** | `pull_request.opened`, `pull_request.synchronize`, `pull_request.ready_for_review` | Pull Request | Code Auditor Subagent (`SYSTEM_INSTRUCTION`) | Prefetches diff and compiler findings; enforces structured verdict (`APPROVE` / `REQUEST_CHANGES`); submits formal PR review. |
 | **Review Intent** | `/review`, `please review`, `re-review`, `review this`, `request review`, `run review`, `audit this`, `code review` | PR Comment / Inline Review Comment | Code Auditor Subagent (`SYSTEM_INSTRUCTION`) | Prefetches incremental & full diff; runs clinical audit; updates formal review state. |
 | **Conversational Pair Programming** | Any conversational comment, technical question, or `@hannibal-hub-agents` mention (without review intent keywords) | PR Comment / Inline Review Comment / Issue Comment | Conversational Subagent (`CONVERSATIONAL_INSTRUCTION`) | Uses codebase grounding tools (`read_file`, etc.) to provide context-aware answers; writes back as friendly markdown comment via GitHub Issues/PR API. |
+| **Code Mutation & Delegation** | `@jules`, `/jules`, or asking Hannibal to mutate/implement code | Issue / PR Comment | Dual-Agent Delegation (Hannibal -> Jules) | Hannibal synthesizes context and invokes `@jules`; Jules implements on ephemeral branch and opens PR; Hannibal audits PR. |
 
 ---
 
@@ -28,6 +29,10 @@ Hannibal Hub has evolved beyond rigid slash commands. The agent uses a decoupled
 - **`_runner` (`_code_auditor`)**: Configured with strict 1-turn clinical review instructions, precompiled AST dossier, and structured Pydantic response models. Only invoked when `_is_formal_review_eligible` evaluates to `True`.
 - **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with full codebase inspection tools (`read_file`, `get_issue`, `get_commit_diff`, `get_current_time`, `google_search_grounding_tool`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
 
-### 2. Comment Rate Limiting & Safety
+### 2. Separation of Powers: Hannibal (Auditor) + Jules (Builder)
+- **Zero-Bypass Architecture**: Hannibal is strictly read-only and never pushes commits directly. Code mutations are handled autonomously by Jules (`google-jules[bot]` / `@jules`) on isolated feature branches.
+- **Bot Loop Protection**: Hannibal audits Jules's PRs (`pull_request.opened`, `pull_request.synchronize`) up to a capped feedback cycle on `REQUEST_CHANGES`, but suppresses conversational chatter replies to Jules's general status comments unless review is explicitly requested.
+
+### 3. Comment Rate Limiting & Safety
 - Conversational comments are rate-limited via `_COMMENT_RATE_LIMITER` (sliding window per repository/PR key) to prevent runaway conversational loops.
-- Bot identity filters (`_is_bot_event`) prevent recursive loops with other automated services.
+- Bot identity filters (`_is_bot_event`, `is_jules_sender`) prevent recursive feedback loops with other automated services.

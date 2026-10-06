@@ -27,7 +27,7 @@ from typing import Any
 from github import Auth, Github
 
 from .agent_core import AgentCore
-from .bot_identity import _is_bot_event
+from .bot_identity import _is_bot_event, is_jules_sender
 from .cancellation import pr_closed_registry
 from .formatter import (
     truncate_log_payload,
@@ -574,10 +574,29 @@ class WebhookProcessor:
             return False
 
         raw = ev.get("raw_payload") or {}
-        comment = raw.get("comment") or {}
+        comment = raw.get("comment") or raw.get("review_comment") or {}
         comment_body = comment.get("body") or ""
         if "@dependabot" in comment_body.lower():
             return False
+
+        # Prevent bot-to-bot conversational ping-pong loops:
+        # If a comment is authored by Jules, suppress it UNLESS it explicitly requests
+        # a review or explicitly mentions @hannibal-hub-agents.
+        event_name = ev.get("event_name")
+        if event_name in ("issue_comment", "pull_request_review_comment"):
+            comment_user = comment.get("user") or {}
+            sender = ev.get("sender") or {}
+            if is_jules_sender(comment_user) or is_jules_sender(sender):
+                from .review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+                cb_lower = comment_body.lower()
+                has_review_intent = any(cmd in cb_lower for cmd in REVIEW_INTENT_KEYWORDS)
+                is_explicitly_mentioned = "@hannibal-hub-agents" in cb_lower
+                if not (has_review_intent or is_explicitly_mentioned):
+                    logger.debug(
+                        "Suppressing conversational reply to Jules comment (no review intent / mention)"
+                    )
+                    return False
 
         action = ev.get("action")
         if action == "deleted":
