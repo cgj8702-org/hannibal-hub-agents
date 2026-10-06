@@ -314,7 +314,10 @@ def review(
         is_merged = getattr(pr, "merged", None) is True
         if pr_state == "closed" or is_merged:
             logger.info("PR #%d is closed or merged; skipping review submission", pr_number)
-            from webhook_agent.cancellation import AbortAgentExecution, pr_closed_registry
+            from webhook_agent.core.cancellation import (
+                AbortAgentExecution,
+                pr_closed_registry,
+            )
 
             pr_closed_registry.mark_closed(repo_name, pr_number)
             raise AbortAgentExecution(

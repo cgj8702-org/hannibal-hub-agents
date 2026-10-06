@@ -157,7 +157,7 @@ def evaluate_writeback_policy(
     pr_number = pr_data.get("number") if isinstance(pr_data, dict) else None
 
     try:
-        from webhook_agent.cancellation import pr_closed_registry
+        from webhook_agent.core.cancellation import pr_closed_registry
     except ImportError:
         pr_closed_registry = None  # type: ignore[assignment]
 

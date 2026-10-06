@@ -11,7 +11,7 @@ from typing import Any
 from github import Github
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.cancellation import pr_closed_registry
+from webhook_agent.core.cancellation import pr_closed_registry
 from webhook_agent.review.metadata import (
     get_actionable_findings,
     has_actionable_findings,

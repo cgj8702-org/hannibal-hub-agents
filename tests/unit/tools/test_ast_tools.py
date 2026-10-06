@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from google.adk.agents.context_cache_config import ContextCacheConfig
 
-from webhook_agent.callbacks import after_model_callback, before_model_callback
+from webhook_agent.core.callbacks import after_model_callback, before_model_callback
 from webhook_agent.models.model_chain import is_gemini_3_plus
 from webhook_agent.tools.ast_tools import (
     StructuralDefectVisitor,
@@ -56,7 +56,7 @@ async def test_before_model_callback_disables_cache_for_gemma():
     req.cache_metadata = MagicMock()
     req.cacheable_contents_token_count = 5000
 
-    with patch("webhook_agent.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
+    with patch("webhook_agent.core.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
         await before_model_callback(ctx, req)
 
     assert req.cache_config is None
@@ -75,7 +75,7 @@ async def test_before_model_callback_enables_cache_for_gemini_3():
     req.contents = ["Hello Gemini 3.5"]
     req.cache_config = None
 
-    with patch("webhook_agent.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
+    with patch("webhook_agent.core.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
         await before_model_callback(ctx, req)
 
     assert req.cache_config is not None
@@ -94,7 +94,9 @@ async def test_after_model_callback_records_cached_content_tokens():
     resp.usage_metadata.cached_content_token_count = 4200
     resp.content = None
 
-    with patch("webhook_agent.callbacks.rpm_waiter.record_actual_tokens", new_callable=AsyncMock):
+    with patch(
+        "webhook_agent.core.callbacks.rpm_waiter.record_actual_tokens", new_callable=AsyncMock
+    ):
         await after_model_callback(ctx, resp)
 
     assert ctx.state["total_tokens"] == 5000

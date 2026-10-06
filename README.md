@@ -49,7 +49,7 @@ flowchart TD
 ├── src/
 │   ├── webhook_agent/         # Core Webhook Orchestrator Package
 │       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter)
-│       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, & plugins
+│       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, callbacks, & plugins
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
 │       ├── review/          # Code review verdict parser, scorecard enforcement, & comment writeback
 │       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
