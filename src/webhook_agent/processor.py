@@ -51,6 +51,7 @@ from .pr_context import (
     _should_prefetch_diff,
 )
 from .review.comment_poster import _add_eyes_reaction
+from .state.review_checkpoint import review_checkpoint_manager
 from .webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.processor")
@@ -465,12 +466,6 @@ class WebhookProcessor:
             )
             return
 
-        dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
-        if not dry_run:
-            _prefetch_pr_diff(gh, repo_name, payload)
-            _prefetch_inline_comment_context(gh, repo_name, payload)
-            _prefetch_previous_bot_reviews(gh, repo_name, payload)
-
         # Short-circuit if target PR is closed or merged
         raw = payload.get("raw_payload") or {}
         pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
@@ -488,6 +483,7 @@ class WebhookProcessor:
             else (raw.get("issue") or {}).get("number")
         )
 
+        pr_num_int: int | None = None
         if is_pr_event and pr_number is not None:
             try:
                 pr_num_int = int(pr_number)
@@ -515,12 +511,54 @@ class WebhookProcessor:
                 )
                 return
 
+        head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
+        resumed_checkpoint: dict[str, Any] | None = None
+        if is_pr_event and pr_num_int is not None and head_sha:
+            resumed_checkpoint = review_checkpoint_manager.get_resumable(
+                repo_name, pr_num_int, head_sha
+            )
+            if resumed_checkpoint:
+                logger.info(
+                    "🔁 PR %s#%s (commit %s) has resumable checkpoint; skipping diff and history prefetch.",
+                    repo_name,
+                    pr_number,
+                    head_sha[:7],
+                )
+                payload["resumed_checkpoint"] = resumed_checkpoint
+                if not raw.get("pr_diff") and resumed_checkpoint.get("pr_diff"):
+                    raw["pr_diff"] = resumed_checkpoint["pr_diff"]
+                if not payload.get("precompiled_dossier") and resumed_checkpoint.get(
+                    "precompiled_dossier"
+                ):
+                    payload["precompiled_dossier"] = resumed_checkpoint["precompiled_dossier"]
+                if not payload.get("changed_files") and resumed_checkpoint.get("changed_files"):
+                    payload["changed_files"] = resumed_checkpoint["changed_files"]
+
+        dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
+        if not dry_run and not resumed_checkpoint:
+            _prefetch_pr_diff(gh, repo_name, payload)
+            _prefetch_inline_comment_context(gh, repo_name, payload)
+            _prefetch_previous_bot_reviews(gh, repo_name, payload)
+
+            # Re-check closed/merged state if live prefetch discovered it was closed on GitHub
+            if is_pr_event and pr_num_int is not None:
+                updated_pr = (
+                    raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+                )
+                updated_state = (
+                    (updated_pr.get("state") or "").lower() if isinstance(updated_pr, dict) else ""
+                )
+                if updated_state == "closed" or pr_closed_registry.is_closed(repo_name, pr_num_int):
+                    logger.info(
+                        "🔒 PR %s#%s was closed or merged on GitHub; skipping agent execution.",
+                        repo_name,
+                        pr_number,
+                    )
+                    return
+
         # In-Flight Audit Deduplication: prevent concurrent runs across webhooks & proactive sweeps
         audit_cache_key: str | None = None
-        if is_pr_event and pr_number is not None:
-            head_sha = (
-                (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
-            )
+        if is_pr_event and pr_number is not None and head_sha:
             if (
                 canonical
                 in (

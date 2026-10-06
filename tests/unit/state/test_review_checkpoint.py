@@ -262,3 +262,54 @@ def test_checkpoint_save_additional_metadata():
     assert cp["sender"] == "octocat"
     assert cp["comment_body"] == "/review"
     assert cp["installation_id"] == 98765
+
+
+def test_get_resumable_status_and_timer_conditions():
+    """Verify get_resumable only returns checkpoint when rate_limited and resume_after elapsed."""
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+
+    # 1. Non-existent returns None
+    assert mgr.get_resumable("owner/repo", 99, "missing") is None
+
+    # 2. Status == "pending" returns None
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=1,
+        head_sha="sha1",
+        canonical="pull_request.opened",
+        status="pending",
+    )
+    assert mgr.get_resumable("owner/repo", 1, "sha1") is None
+
+    # 3. Status == "completed" returns None
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=2,
+        head_sha="sha2",
+        canonical="pull_request.opened",
+        status="completed",
+    )
+    assert mgr.get_resumable("owner/repo", 2, "sha2") is None
+
+    # 4. Status == "rate_limited" but resume_after is in the future returns None
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=3,
+        head_sha="sha3",
+        canonical="pull_request.opened",
+        status="pending",
+    )
+    mgr.mark_rate_limited("owner/repo", 3, "sha3", "Quota", retry_after_seconds=600.0)
+    assert mgr.get_resumable("owner/repo", 3, "sha3") is None
+
+    # 5. Status == "rate_limited" and resume_after is in the past returns the checkpoint
+    now = datetime.datetime.now(datetime.UTC)
+    doc_id = _safe_doc_id("owner/repo", 3, "sha3")
+    past_time = now - datetime.timedelta(seconds=10)
+    mgr._local_cache[doc_id]["resume_after"] = past_time
+    mgr._local_cache[doc_id]["resume_after_ts"] = past_time.timestamp()
+
+    resumable = mgr.get_resumable("owner/repo", 3, "sha3")
+    assert resumable is not None
+    assert resumable["status"] == "rate_limited"
+    assert resumable["pr_number"] == 3

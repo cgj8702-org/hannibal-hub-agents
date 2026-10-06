@@ -288,8 +288,79 @@ def execute_agent_event(
         user_id,
     )
 
-    # Build user message
-    user_message = agent._build_user_message(event_data)
+    comment_body = (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
+    is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
+
+    pr_number = None
+    if isinstance(raw, dict):
+        pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
+            "number"
+        )
+    head_sha = (
+        str((raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or "")
+        if isinstance(raw, dict)
+        else ""
+    )
+
+    results: list[ActionResult] = []
+
+    # Checkpoint gate: skip if commit has already been reviewed, or pause if rate-limited backoff active
+    if is_pr_review_event and pr_number and head_sha:
+        checkpoint = review_checkpoint_manager.get_checkpoint(repo_full_name, pr_number, head_sha)
+        if checkpoint and checkpoint.get("status") == "completed":
+            logger.info(
+                "🔒 Checkpoint: PR %s#%d at commit %s already reviewed (completed). Skipping.",
+                repo_full_name,
+                pr_number,
+                head_sha,
+            )
+            results.append(
+                ActionResult(
+                    tool="review",
+                    success=True,
+                    detail=f"PR #{pr_number} already reviewed at commit {head_sha} (checkpoint completed)",
+                )
+            )
+            return results
+
+        if (
+            checkpoint
+            and checkpoint.get("status") == "rate_limited"
+            and not event_data.get("resumed_checkpoint")
+        ):
+            resumable = review_checkpoint_manager.get_resumable(repo_full_name, pr_number, head_sha)
+            if resumable is None:
+                logger.info(
+                    "⏸️ PR %s#%s review is paused due to rate limits; backoff window has not elapsed.",
+                    repo_full_name,
+                    pr_number,
+                )
+                results.append(
+                    ActionResult(
+                        tool="review",
+                        success=True,
+                        detail=f"PR #{pr_number} review paused (rate_limited, backoff active)",
+                    )
+                )
+                return results
+            event_data["resumed_checkpoint"] = resumable
+
+    # Build user message (fast-path from stored precompiled dossier on resume if present)
+    resumed_dossier = event_data.get("precompiled_dossier") or (
+        event_data.get("resumed_checkpoint") or {}
+    ).get("precompiled_dossier")
+    if resumed_dossier:
+        logger.info(
+            "⚡ Fast-path: using stored precompiled dossier from review checkpoint (skipping AST/symbol pre-audit)"
+        )
+        user_message = genai_types.Content(
+            role="user",
+            parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
+        )
+        event_data["deterministic_precompiled_ast"] = True
+    else:
+        user_message = agent._build_user_message(event_data)
+
     logger.debug(
         "📝 Built user message for agent (length: %d chars)",
         len(getattr(user_message.parts[0], "text", "") or "") if user_message.parts else 0,
@@ -314,10 +385,6 @@ def execute_agent_event(
         if hasattr(agent, "_conversational_agent") and agent._conversational_agent is not None:
             agent._conversational_agent.model = new_model_instance
 
-    comment_body = (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
-    is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
-
-    results: list[ActionResult] = []
     emitted_texts: list[str] = []
     final_session = None
 
@@ -326,42 +393,10 @@ def execute_agent_event(
         "deterministic_changed_files": changed_files_list,
     }
 
-    pr_number = None
-    if isinstance(raw, dict):
-        pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
-            "number"
-        )
-    head_sha = (
-        str((raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or "")
-        if isinstance(raw, dict)
-        else ""
-    )
-
     async def _run() -> None:
         nonlocal results, final_session
         last_error = None
         agent._attempted_model_names = {agent._normalize_model_name(agent._current_model_name)}
-
-        # Checkpoint short-circuit: if this exact commit was already reviewed, skip duplicate
-        if is_pr_review_event and pr_number and head_sha:
-            checkpoint = review_checkpoint_manager.get_checkpoint(
-                repo_full_name, pr_number, head_sha
-            )
-            if checkpoint and checkpoint.get("status") == "completed":
-                logger.info(
-                    "🔒 Checkpoint: PR %s#%d at commit %s already reviewed (completed). Skipping.",
-                    repo_full_name,
-                    pr_number,
-                    head_sha,
-                )
-                results.append(
-                    ActionResult(
-                        tool="review",
-                        success=True,
-                        detail=f"PR #{pr_number} already reviewed at commit {head_sha} (checkpoint completed)",
-                    )
-                )
-                return
 
         active_runner = agent._runner if is_pr_review_event else agent._conversational_runner
         active_app_name = (

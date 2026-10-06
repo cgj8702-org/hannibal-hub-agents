@@ -1149,3 +1149,87 @@ class TestBaseBranchMergeSync:
 
         # Claim must have been released upon error
         assert is_reconciliation_claimed(cache_key) is False
+
+    def test_process_event_skips_prefetch_when_resumable_checkpoint_present(self):
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        processor._gh = MagicMock()
+        processor._agent_core = MagicMock()
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-resumed-1",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "developer"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 100,
+                    "state": "open",
+                    "head": {"sha": "sha_resume_123"},
+                }
+            },
+        }
+
+        mock_checkpoint = {
+            "status": "rate_limited",
+            "pr_number": 100,
+            "head_sha": "sha_resume_123",
+            "pr_diff": "diff --git a/foo b/foo",
+            "precompiled_dossier": "Cached Dossier Text",
+            "changed_files": ["foo.py"],
+        }
+
+        with (
+            patch(
+                "webhook_agent.processor.review_checkpoint_manager.get_resumable",
+                return_value=mock_checkpoint,
+            ),
+            patch("webhook_agent.processor._prefetch_pr_diff") as mock_prefetch_diff,
+            patch(
+                "webhook_agent.processor._prefetch_inline_comment_context"
+            ) as mock_prefetch_inline,
+            patch(
+                "webhook_agent.processor._prefetch_previous_bot_reviews"
+            ) as mock_prefetch_reviews,
+            patch("webhook_agent.processor._add_eyes_reaction"),
+        ):
+            processor.process_event(payload)
+
+            mock_prefetch_diff.assert_not_called()
+            mock_prefetch_inline.assert_not_called()
+            mock_prefetch_reviews.assert_not_called()
+            assert payload.get("resumed_checkpoint") == mock_checkpoint
+            assert payload.get("precompiled_dossier") == "Cached Dossier Text"
+            assert payload["raw_payload"].get("pr_diff") == "diff --git a/foo b/foo"
+            assert processor._agent_core.run.call_count == 1
+
+    def test_process_event_skips_prefetch_when_pr_closed(self):
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        processor._gh = MagicMock()
+        processor._agent_core = MagicMock()
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-closed-1",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "developer"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 101,
+                    "state": "closed",
+                    "head": {"sha": "sha_closed_123"},
+                }
+            },
+        }
+
+        with patch("webhook_agent.processor._prefetch_pr_diff") as mock_prefetch_diff:
+            processor.process_event(payload)
+            mock_prefetch_diff.assert_not_called()
+            processor._agent_core.run.assert_not_called()
