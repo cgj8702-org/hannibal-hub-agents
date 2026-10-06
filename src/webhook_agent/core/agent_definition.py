@@ -73,6 +73,7 @@ from webhook_agent.models.rate_limiter import (
     rpm_waiter,
 )
 from webhook_agent.review.review_enforcer import _submit_formal_review
+from webhook_agent.review.verdict_parser import calculate_verdict
 from webhook_agent.review.writeback_policy import (
     _COMMENT_RATE_LIMITER,
     _is_formal_review_eligible,
@@ -131,22 +132,6 @@ def count_tokens_exact(contents: str | list[Any], model_name: str | None = None)
     except Exception as exc:
         logger.debug("count_tokens API call skipped/unavailable: %s", exc)
         return None
-
-
-def calculate_verdict(
-    scores: dict[str, int] | None = None,
-    has_critical: bool = False,
-    **kwargs: Any,
-) -> str:
-    """Calculates PR review verdict cleanly.
-
-    Rules:
-    - If has_critical: REQUEST_CHANGES
-    - Otherwise: APPROVE
-    """
-    if has_critical:
-        return "REQUEST_CHANGES"
-    return "APPROVE"
 
 
 class WebhookAgent:

@@ -23,6 +23,7 @@ from .review_enforcer import (
     _parse_scorecard_scores,
     _submit_formal_review,
 )
+from .verdict_parser import calculate_verdict
 from .writeback_policy import (
     _COMMENT_RATE_LIMITER,
     CommentRateLimiter,
@@ -42,6 +43,7 @@ __all__ = [
     "already_raised",
     "build_exclusions",
     "build_github_review_comments",
+    "calculate_verdict",
     "evaluate_writeback_policy",
     "extract_review_metadata",
     "filter_echo_suggestions",
