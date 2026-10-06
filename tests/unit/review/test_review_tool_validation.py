@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from google.adk.agents.context import Context
 
-from webhook_agent.core.github_tools import review
+from webhook_agent.tools.github_tools import review
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
@@ -148,7 +148,7 @@ def test_review_rejects_sync_request_changes_without_actionable_items(mock_ctx):
     assert "critical_issues is empty and no prior items are UNRESOLVED" in res
 
 
-@patch("webhook_agent.core.github_tools._submit_formal_review")
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_accepts_valid_payload(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
     payload = {
@@ -190,7 +190,7 @@ def test_review_rejects_python_pr_without_ast_verification(mock_ctx):
     )
 
 
-@patch("webhook_agent.core.github_tools._submit_formal_review")
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_allows_python_pr_with_ast_verification(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
@@ -208,7 +208,7 @@ def test_review_allows_python_pr_with_ast_verification(mock_submit, mock_ctx):
     assert mock_submit.called
 
 
-@patch("webhook_agent.core.github_tools._submit_formal_review")
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_skips_investigation_gate_when_no_python_files(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["README.md", "docs/architecture.md"]
@@ -267,7 +267,7 @@ def test_review_rejects_approve_with_invalid_invariant(mock_ctx):
     assert "lacks concrete evidence" in res
 
 
-@patch("webhook_agent.core.github_tools._submit_formal_review")
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_accepts_approve_with_valid_verified_invariants(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
@@ -293,7 +293,7 @@ def test_review_accepts_approve_with_valid_verified_invariants(mock_submit, mock
     assert mock_submit.called
 
 
-@patch("webhook_agent.core.github_tools._submit_formal_review")
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_handles_adk_state_object_properly(mock_submit, mock_ctx):
     """Verify review tool correctly reads non-dict ADK State objects with to_dict()."""
     mock_submit.return_value = ("Review submitted", True)

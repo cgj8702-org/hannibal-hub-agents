@@ -537,7 +537,7 @@ class TestToolRegistration:
 
         from google.adk.tools import ToolContext
 
-        from webhook_agent.core.github_tools import review
+        from webhook_agent.tools.github_tools import review
 
         mock_tc = MagicMock(spec=ToolContext)
         mock_file = MagicMock()
@@ -611,7 +611,7 @@ class TestGetCurrentTime:
     def test_returns_iso_utc_timestamp(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import get_current_time
+        from webhook_agent.tools.github_tools import get_current_time
 
         ctx = MagicMock()
         res = get_current_time(ctx)
@@ -629,7 +629,7 @@ class TestReadFile:
     def test_read_file_returns_content(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import read_file
+        from webhook_agent.tools.github_tools import read_file
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -646,7 +646,7 @@ class TestReadFile:
     def test_read_file_with_ref(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import read_file
+        from webhook_agent.tools.github_tools import read_file
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -663,7 +663,7 @@ class TestReadFile:
     def test_read_file_directory_returns_error(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import read_file
+        from webhook_agent.tools.github_tools import read_file
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -684,7 +684,7 @@ class TestGetIssue:
     def test_get_issue_returns_pr_metadata(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import get_issue
+        from webhook_agent.tools.github_tools import get_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -716,7 +716,7 @@ class TestGetIssue:
     def test_get_issue_with_diff(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import get_issue
+        from webhook_agent.tools.github_tools import get_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -759,7 +759,7 @@ class TestAddLabel:
     def test_add_label_success(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import add_label
+        from webhook_agent.tools.github_tools import add_label
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -775,7 +775,7 @@ class TestAddLabel:
     def test_add_label_error_handling(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import add_label
+        from webhook_agent.tools.github_tools import add_label
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -796,7 +796,7 @@ class TestCreateIssue:
     def test_create_issue_success(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import create_issue
+        from webhook_agent.tools.github_tools import create_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -825,7 +825,7 @@ class TestCreateIssue:
     def test_create_issue_error_handling(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import create_issue
+        from webhook_agent.tools.github_tools import create_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -867,7 +867,7 @@ class TestGetCommitDiffBranchUpdate:
     def test_get_commit_diff_returns_branch_update_notice(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import get_commit_diff
+        from webhook_agent.tools.github_tools import get_commit_diff
 
         ctx = MagicMock()
         mock_gh = MagicMock()
@@ -929,7 +929,7 @@ class TestReviewDismissalOrdering:
     def test_review_failure_does_not_dismiss_existing_reviews(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import review
+        from webhook_agent.tools.github_tools import review
 
         ctx = MagicMock()
         mock_gh = MagicMock()
@@ -958,7 +958,7 @@ class TestReviewDismissalOrdering:
     def test_review_success_dismisses_prior_reviews_excluding_current(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.core.github_tools import review
+        from webhook_agent.tools.github_tools import review
 
         ctx = MagicMock()
         mock_gh = MagicMock()

@@ -29,15 +29,6 @@ from webhook_agent.callbacks import (
     on_tool_error_callback,
 )
 from webhook_agent.core.execution import execute_agent_event
-from webhook_agent.core.github_tools import (
-    add_label,
-    create_issue,
-    get_commit_diff,
-    get_current_time,
-    get_issue,
-    read_file,
-    review,
-)
 from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
 )
@@ -71,6 +62,15 @@ from webhook_agent.review.writeback_policy import (
     evaluate_writeback_policy,
 )
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
+from webhook_agent.tools.github_tools import (
+    add_label,
+    create_issue,
+    get_commit_diff,
+    get_current_time,
+    get_issue,
+    read_file,
+    review,
+)
 from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.webhook_types import ActionResult
 

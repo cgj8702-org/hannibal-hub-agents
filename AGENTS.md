@@ -36,12 +36,12 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 
 - `src/webhook_agent/worker.py`: Pub/Sub pull loop and sweeps.
 - `src/webhook_agent/processor.py`: event normalization, routing, dedup, prefetch, and agent delegation.
-- `src/webhook_agent/core/`: `WebhookAgent` definition, GitHub tools exposed to the model, async loop helpers.
+- `src/webhook_agent/core/`: `WebhookAgent` definition, execution engine, prompt builders, async loop helpers.
 - `src/webhook_agent/models/`: model chains, factory, rate limiter, depleted-model registry, secrets.
 - `src/webhook_agent/analysis/`: deterministic pre-audit (AST, symbol graph, test impact, diff filter, lockfile and dependency checks).
 - `src/webhook_agent/state/`: idempotency claims, circuit breaker, review checkpoints.
 - `src/webhook_agent/review/`: writeback policy, duplicate detection, verdict enforcement, review metadata.
-- `src/webhook_agent/tools/`: model-callable tools (AST, diff, search, symbol, test impact).
+- `src/webhook_agent/tools/`: model-callable tools (GitHub, AST, diff, search, symbol, test impact).
 - `.agents/skills/`: operational skills (`gcloud-logging`, `github-pr-manager`). Read the relevant skill before touching logs or PR lifecycle.
 
 ---

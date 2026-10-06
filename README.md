@@ -48,12 +48,16 @@ flowchart TD
 │   └── install-git-hooks.sh       # Pre-commit hook installer for lint & type validation
 ├── src/
 │   ├── webhook_agent/         # Core Webhook Orchestrator Package
-│       ├── core/            # Core ADK WebhookAgent definition, loop helpers, and GitHub tools
-│       ├── logic/           # Model chain routing, writeback policy, and rate limiting
-│       ├── review/          # Code review verdict enforcement, scorecard parsing, and guarded submission
-│       ├── worker.py        # Pub/Sub subscriber entry point and main polling loop
-│       ├── processor.py     # Event routing, deduplication, 👀 reaction, & ADK agent execution
-│       ├── webhook_agent.py # Thin backwards-compatible façade re-exporting core agent and tools
+│       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter)
+│       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, & plugins
+│       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
+│       ├── review/          # Code review verdict parser, scorecard enforcement, & comment writeback
+│       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
+│       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff tools, search)
+│       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
+│       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
+│       ├── fast_path.py     # Base-branch merge-sync & dependency fast-paths
+│       ├── pr_context.py    # GitHub diff & PR context prefetching
 │       ├── proactive_service.py # Proactive PR evaluator for stale threads, conflicts, & CI runs
 │       ├── schemas.py       # Pydantic response models & universal markdown string field validators
 │       ├── formatter.py     # GitHub Flavored Markdown renderer for code reviews & sync reviews
@@ -61,12 +65,11 @@ flowchart TD
 │       ├── memory_service.py # ADK agent memory and session persistence service
 │       ├── github_credential_helper.py # GitHub App JWT generation & cached installation tokens
 │       ├── webhook_types.py # Common dataclasses and ActionResult definitions
-│       ├── tools/           # AST analysis, diff tools, search, and codebase utilities
 │       └── templates/       # Local prompt & code review templates
 ├── tests/
 │   ├── eval/                # Continuous quality evaluation datasets & configs
 │   ├── fixtures/            # Sample webhook payloads & review event fixtures
-│   └── unit/                # Unified test suite (webhook_agent, logic, callbacks)
+│   └── unit/                # Domain-mirrored unit test suite (analysis, core, models, review, state, tools)
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 └── README.md                # Repository documentation
@@ -156,4 +159,4 @@ systemctl --user restart hannibal-webhook-agent.service
 journalctl --user -u hannibal-webhook-agent.service -f
 ```
 
-All pushes to `main` automatically trigger [`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml) to deploy code updates and restart `hannibal-webhook-agent.service` via IAP SSH!
+All pushes to `main` automatically trigger [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) to deploy code updates and restart `hannibal-webhook-agent.service` via IAP SSH!

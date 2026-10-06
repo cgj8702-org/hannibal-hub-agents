@@ -108,7 +108,7 @@ def test_review_tool_raises_abort_agent_execution_on_closed_pr():
     """Verify review tool raises AbortAgentExecution and registers closed PR."""
     from unittest.mock import MagicMock
 
-    from webhook_agent.core.github_tools import review
+    from webhook_agent.tools.github_tools import review
 
     ctx = MagicMock()
     mock_gh = MagicMock()
