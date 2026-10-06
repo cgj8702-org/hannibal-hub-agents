@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from webhook_agent.callbacks import _check_pr_closed_short_circuit
-from webhook_agent.cancellation import AbortAgentExecution, pr_closed_registry
+from webhook_agent.core.callbacks import _check_pr_closed_short_circuit
+from webhook_agent.core.cancellation import AbortAgentExecution, pr_closed_registry
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 

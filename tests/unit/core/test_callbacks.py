@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from webhook_agent.callbacks import (
+from webhook_agent.core.callbacks import (
     _extract_cached_tokens,
     _extract_total_tokens,
     after_model_callback,

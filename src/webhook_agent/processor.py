@@ -27,8 +27,9 @@ from typing import Any
 
 from github import Auth, Github
 
+from webhook_agent.core.cancellation import pr_closed_registry
+
 from .bot_identity import _is_bot_event, is_jules_sender
-from .cancellation import pr_closed_registry
 from .core.agent_definition import WebhookAgent
 from .fast_path import (
     evaluate_dependency_fast_path,
@@ -395,7 +396,7 @@ class WebhookProcessor:
             pr_number = pr_data.get("number")
             if repo_full_name and pr_number:
                 try:
-                    from .cancellation import pr_closed_registry
+                    from webhook_agent.core.cancellation import pr_closed_registry
 
                     pr_closed_registry.mark_closed(repo_full_name, int(pr_number))
                 except Exception as ex:

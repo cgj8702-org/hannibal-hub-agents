@@ -8,7 +8,7 @@ import pytest
 from google.adk.memory.base_memory_service import MemoryEntry
 from google.genai.types import Content
 
-from webhook_agent.memory_service import InMemoryMemoryService
+from webhook_agent.core.memory_service import InMemoryMemoryService
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 

@@ -20,7 +20,7 @@ from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 
 from webhook_agent.bot_identity import _is_bot_event
-from webhook_agent.callbacks import (
+from webhook_agent.core.callbacks import (
     after_model_callback,
     after_tool_callback,
     before_agent_callback,
@@ -32,6 +32,7 @@ from webhook_agent.core.execution import execute_agent_event
 from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
 )
+from webhook_agent.core.memory_service import InMemoryMemoryService
 from webhook_agent.core.plugins import (
     ToolOutputPruningPlugin,
     WebhookHistoryPruningPlugin,
@@ -46,7 +47,7 @@ from webhook_agent.core.prompts import (
     build_user_message,
     get_max_input_tokens,
 )
-from webhook_agent.memory_service import InMemoryMemoryService
+from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
     get_active_model,
@@ -61,7 +62,6 @@ from webhook_agent.review.verdict_parser import calculate_verdict
 from webhook_agent.review.writeback_policy import (
     evaluate_writeback_policy,
 )
-from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools.github_tools import (
     add_label,
     create_issue,

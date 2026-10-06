@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from webhook_agent.sanitizer_plugin import sanitize_markdown_text
+from webhook_agent.core.sanitizer_plugin import sanitize_markdown_text
 from webhook_agent.tools.diff_tools import verify_line_reference
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.guardrails]
