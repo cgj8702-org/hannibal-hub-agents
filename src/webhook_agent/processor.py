@@ -10,7 +10,7 @@ Key responsibilities:
 * Normalise GitHub webhook events into a small set of canonical categories.
 * Decide whether an event should be processed based on its canonical
   value and a set of known noisy events.
-* Delegate to :class:`~.agent_core.AgentCore` for the actual agent execution.
+* Delegate to :class:`AgentCore` for the actual agent execution.
 
 The implementation deliberately avoids importing heavy packages until the
 ``process_event`` method is called.
@@ -21,12 +21,12 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from github import Auth, Github
 
-from .agent_core import AgentCore
 from .bot_identity import _is_bot_event, is_jules_sender
 from .cancellation import pr_closed_registry
 from .formatter import (
@@ -40,8 +40,11 @@ from .github_credential_helper import (
     save_cached_token,
 )
 from .logic.diff_filter import filter_review_diff
+from .webhook_agent import WebhookAgent
+from .webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.processor")
+core_logger = logging.getLogger("webhook_agent.core")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -395,6 +398,64 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
 
     except Exception as exc:
         logger.debug("Could not pre-fetch previous bot reviews: %s", exc)
+
+
+def generate_trace_id() -> str:
+    """Generate a unique hex trace ID for event execution."""
+    return uuid.uuid4().hex
+
+
+class AgentCore:
+    """Entry point for webhook event processing.
+
+    Delegates planning and execution to the ADK-powered WebhookAgent.
+    """
+
+    def __init__(self, gh_client: Any = None, dry_run: bool = False, planner: Any = None) -> None:
+        self.gh = gh_client
+        self.dry_run = dry_run
+        self._webhook_agent = WebhookAgent(dry_run=dry_run)
+
+    def run(
+        self,
+        event_data: dict[str, Any],
+        repo_full_name: str,
+        trace_id: str | None = None,
+        gh_client: Any = None,
+    ) -> list[ActionResult]:
+        """Process a normalized event through the ADK-powered agent.
+
+        Delegates all planning and execution to WebhookAgent.
+        """
+        trace_id = trace_id or generate_trace_id()
+
+        core_logger.debug(
+            "🧠 Starting ADK agent processing (trace: %s, repo: %s)",
+            trace_id[-4:],
+            repo_full_name,
+        )
+
+        core_logger.info(
+            "🧠 Processing event via ADK agent (trace: %s, repo: %s)",
+            trace_id[-4:],
+            repo_full_name,
+        )
+
+        gh = gh_client if gh_client is not None else self.gh
+
+        results = self._webhook_agent.plan_and_execute(
+            event_data=event_data,
+            gh_client=gh,
+            trace_id=trace_id,
+        )
+
+        core_logger.debug(
+            "🧠 ADK agent processing completed (trace: %s, result_count: %d)",
+            trace_id[-4:],
+            len(results) if results else 0,
+        )
+
+        return results
 
 
 class WebhookProcessor:

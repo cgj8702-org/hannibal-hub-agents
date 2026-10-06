@@ -370,7 +370,6 @@ class TestShouldProcessEvent:
     def test_logger_hierarchy_named_loggers(self):
         """All webhook agent modules use unified 'webhook_agent.*' logger namespace."""
         from webhook_agent import (
-            agent_core,
             memory_service,
             processor,
             webhook_agent,
@@ -378,9 +377,9 @@ class TestShouldProcessEvent:
         )
 
         assert processor.logger.name == "webhook_agent.processor"
+        assert processor.core_logger.name == "webhook_agent.core"
         assert worker.logger.name == "webhook_agent.worker"
         assert webhook_agent.logger.name == "webhook_agent.agent"
-        assert agent_core.logger.name == "webhook_agent.core"
         assert memory_service.logger.name == "webhook_agent.memory"
 
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):

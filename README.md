@@ -52,8 +52,7 @@ flowchart TD
 │       ├── logic/           # Model chain routing, writeback policy, and rate limiting
 │       ├── review/          # Code review verdict enforcement, scorecard parsing, and guarded submission
 │       ├── worker.py        # Pub/Sub subscriber entry point and main polling loop
-│       ├── processor.py     # Event routing, deduplication, 👀 reaction, & AgentCore delegation
-│       ├── agent_core.py    # ADK agent wrapper & execution entry point
+│       ├── processor.py     # Event routing, deduplication, 👀 reaction, & ADK agent execution
 │       ├── webhook_agent.py # Thin backwards-compatible façade re-exporting core agent and tools
 │       ├── proactive_service.py # Proactive PR evaluator for stale threads, conflicts, & CI runs
 │       ├── schemas.py       # Pydantic response models & universal markdown string field validators

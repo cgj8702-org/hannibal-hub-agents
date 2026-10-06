@@ -805,7 +805,7 @@ class WebhookAgent:
     ) -> list[ActionResult]:
         """Process a webhook event through the ADK agent.
 
-        This is the main entry point, called from agent_core.run().
+        This is the main entry point, called from WebhookProcessor / AgentCore.run().
 
         Args:
             event_data: Normalized webhook event data.
