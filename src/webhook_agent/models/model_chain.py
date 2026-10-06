@@ -247,7 +247,6 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
             if (
                 any(cmd in cb_lower for cmd in REVIEW_INTENT_KEYWORDS)
                 or "@hannibal-hub-agents" in cb_lower
-                or "/help" in cb_lower
             ):
                 target = primary
             else:

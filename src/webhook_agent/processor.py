@@ -114,7 +114,7 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
     """Determine if a PR diff pre-fetch is necessary for this event to avoid prompt bloat.
 
     Pre-fetching is restricted to PR creation/updates, review requests, and explicit
-    review slash commands (/review, /audit, /test).
+    review intent triggers.
     """
     if canonical in (
         "pull_request.opened",
@@ -214,7 +214,6 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 
         _prefetch_inline_comment_context(gh, repo_name, payload)
-        _prefetch_commit_history(gh, repo_name, payload)
 
     except Exception as exc:
         logger.debug("Could not pre-fetch PR diff: %s", exc)
@@ -244,58 +243,6 @@ def _prefetch_inline_comment_context(gh: Github, repo_name: str, payload: dict[s
             logger.info("Pre-fetched inline comment code context for %s:%s", path, line)
     except Exception as exc:
         logger.debug("Could not pre-fetch inline comment context: %s", exc)
-
-
-def _prefetch_commit_history(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Pre-fetch commit history log summary for /create command."""
-    try:
-        raw = payload.get("raw_payload")
-        if not isinstance(raw, dict) or "commit_history_summary" in raw:
-            return
-
-        body = ""
-        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
-            body = raw["pull_request"].get("body") or ""
-        elif "comment" in raw and isinstance(raw["comment"], dict):
-            body = raw["comment"].get("body") or ""
-
-        if "/create" not in body:
-            return
-
-        pr_number = None
-        if "pull_request" in raw and isinstance(raw["pull_request"], dict):
-            pr_number = raw["pull_request"].get("number")
-        elif (
-            "issue" in raw
-            and isinstance(raw["issue"], dict)
-            and raw["issue"].get("pull_request") is not None
-        ):
-            pr_number = raw["issue"].get("number")
-
-        if not pr_number:
-            return
-
-        repo = gh.get_repo(repo_name)
-        pr = repo.get_pull(pr_number)
-
-        commit_summaries: list[str] = []
-        for c in pr.get_commits():
-            msg = (
-                c.commit.message.splitlines()[0] if c.commit and c.commit.message else "No message"
-            )
-            sha = c.sha[:7] if c.sha else "N/A"
-            author = c.author.login if c.author else "Unknown"
-            commit_summaries.append(f"- `{sha}` ({author}): {msg}")
-
-        if commit_summaries:
-            raw["commit_history_summary"] = "\n".join(commit_summaries)
-            logger.info(
-                "Pre-fetched commit history summary (%d commits) for /create PR #%d",
-                len(commit_summaries),
-                pr_number,
-            )
-    except Exception as exc:
-        logger.debug("Could not pre-fetch commit history for /create: %s", exc)
 
 
 def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any]) -> bool:
@@ -740,7 +687,6 @@ class WebhookProcessor:
         if not dry_run:
             _prefetch_pr_diff(gh, repo_name, payload)
             _prefetch_inline_comment_context(gh, repo_name, payload)
-            _prefetch_commit_history(gh, repo_name, payload)
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 
         # Short-circuit if target PR is closed or merged

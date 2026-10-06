@@ -717,10 +717,6 @@ class WebhookAgent:
         if "inline_code_context" in raw:
             parts.append(f"\nPre-Fetched Inline Code Context:\n{raw['inline_code_context']}")
 
-        # Include pre-fetched commit history summary if available
-        if "commit_history_summary" in raw:
-            parts.append(f"\nPre-Fetched Commit History Summary:\n{raw['commit_history_summary']}")
-
         # Include pre-fetched prior review findings if available (decoupled from human Markdown)
         if "previous_bot_reviews" in raw or "prior_actionable_findings" in raw:
             from webhook_agent.review.metadata import (
