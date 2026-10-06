@@ -400,15 +400,27 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         logger.debug("Could not pre-fetch previous bot reviews: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# LLM Agent Execution Lifecycle (Inlined from agent_core.py)
+# ---------------------------------------------------------------------------
+
+
 def generate_trace_id() -> str:
     """Generate a unique hex trace ID for event execution."""
     return uuid.uuid4().hex
 
 
 class AgentCore:
-    """Entry point for webhook event processing.
+    """Entry point for webhook event processing and LLM agent lifecycle.
 
-    Delegates planning and execution to the ADK-powered WebhookAgent.
+    Inlined from `agent_core.py` as part of Phase 1 of the Master Modularization
+    Blueprint to flatten the indirection cascade (worker -> processor -> WebhookAgent).
+
+    Maintains a strict separation of concerns:
+    - WebhookProcessor governs HTTP delivery ingestion, dedup, and event routing.
+    - AgentCore encapsulates execution lifecycle, trace propagation, and WebhookAgent invocation.
+    - Future modularization (Phase 3) extracts prefetch and fast paths into separate modules
+      (`pr_context.py`, `fast_path.py`) to prevent module bloat.
     """
 
     def __init__(self, gh_client: Any = None, dry_run: bool = False, planner: Any = None) -> None:
