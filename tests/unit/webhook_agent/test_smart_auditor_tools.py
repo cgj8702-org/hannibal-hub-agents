@@ -9,7 +9,6 @@ from webhook_agent.formatter import (
     render_code_review_markdown,
 )
 from webhook_agent.schemas import IssueItem
-from webhook_agent.tools.codebase_search import search_codebase
 from webhook_agent.tools.sequential_thinking import sequential_thinking
 
 
@@ -36,15 +35,6 @@ def test_sequential_thinking_tool():
     )
     assert "Thinking complete" in res2
     assert len(ctx.state["sequential_thoughts"]) == 2
-
-
-def test_codebase_search_tool():
-    """Verify search_codebase finds matching code snippets in repo."""
-    ctx = MagicMock()
-    ctx.state = {}
-    res = search_codebase(ctx, query="def render_code_review_markdown")
-    assert "Codebase Search Results" in res
-    assert "formatter.py" in res
 
 
 def test_format_suggested_fix_markdown_single_line():

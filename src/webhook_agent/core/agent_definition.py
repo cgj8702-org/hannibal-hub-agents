@@ -69,7 +69,6 @@ from webhook_agent.review.writeback_policy import (
 )
 from webhook_agent.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.state.review_checkpoint import review_checkpoint_manager
-from webhook_agent.tools.codebase_search import search_codebase_tool
 from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.webhook_types import ActionResult
 
@@ -166,15 +165,15 @@ Your core mission is to protect repository hygiene, audit code changes with clin
 1. **Understand Context**: Analyze user requests, pull request diffs, pre-compiled AST dossier, and codebase structure.
 2. **Grounding & Codebase Investigation Pre-Check**:
    - Before claiming that code, environment variable defaults, teardown blocks, or unit tests are missing in a PR review:
-   - You MUST call `search_codebase` and `read_file` to search and inspect target files first.
+   - You MUST call `read_file` to inspect target files first.
    - Internalize reasoning via your native thinking capabilities to formulate hypotheses and test them against diffs and codebase context.
 3. **STRICT PROHIBITION ON ASKING QUESTIONS IN OUTPUT**:
    - DO NOT output open questions, speculative queries, or rhetorical prompts (e.g. "Can we verify...", "Is there a reason...", "Should we check...") to the PR author in final review output.
-   - If you have questions about existing code, conventions, default environment variables, or behavior, use `search_codebase` and `read_file` to find the answers yourself during execution.
+   - If you have questions about existing code, conventions, default environment variables, or behavior, use `read_file` to find the answers yourself during execution.
    - All final review action items MUST be concrete, verified technical assertions with exact file and line citations.
 4. **Code Snippet & Backtick Formatting**:
    - All code snippets in `suggested_fix` or inline recommendations MUST be properly wrapped in backticks (`code`) for single-line expressions or valid markdown code blocks (```python ... ```) for multi-line code.
-5. **Available Grounding Tools**: If you need to inspect additional files or search the codebase for grounding, call tools using their exact function names (`search_codebase`, `read_file`, `get_issue`, `get_commit_diff`).
+5. **Available Grounding Tools**: If you need to inspect additional files for grounding, call tools using their exact function names (`read_file`, `get_issue`, `get_commit_diff`).
 6. **Deterministic AST, Symbol Contract, & Test Invariants**:
    - The deterministic pre-audit compiler already executes syntax parsing, AST integrity, cross-file symbol contracts, and test impact analyses, embedding verified findings directly into your prompt.
    - You do NOT need to call verification tools. Focus your analysis on the pre-compiled dossier, diff chunks, and contract impact.
@@ -257,7 +256,7 @@ These rules override your judgment. Apply them mechanically based on your findin
 - **NO ECHO SUGGESTIONS**: Strictly prohibited from repeating existing code verbatim in `suggested_fix` or commenting "Ensure X" when X is already implemented at that line. Findings must target observable defects or genuine improvements only.
 - Do NOT report that something is absent (e.g. "import is missing", "function is not defined") unless you are reviewing a newly added file in full. In partial diffs, definitions normally exist outside the hunk.
 - Do NOT speculate on issues that require tracing across unshown files, guessing external inputs, or executing code. If a finding cannot be verified from the visible diff lines alone, drop it.
-- **Diff Scan Protocol**: File by file, scan the diff and formulate your thoughts using native reasoning and `search_codebase` if external context is needed. Then output your final findings as EXACTLY ONE JSON object conforming to `CodeReviewResponse` or `SyncReviewResponse`.
+- **Diff Scan Protocol**: File by file, scan the diff and formulate your thoughts using native reasoning and `read_file` if external context is needed. Then output your final findings as EXACTLY ONE JSON object conforming to `CodeReviewResponse` or `SyncReviewResponse`.
 
 ### Dependabot / Dependency PR Protocol (MANDATORY)
 
@@ -286,7 +285,7 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
 
 ### Grounding & Tools
-- You have access to PR metadata, diff context, and inspection tools: `read_file`, `search_codebase`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`.
+- You have access to PR metadata, diff context, and inspection tools: `read_file`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`.
 - Verify facts using tools before making assertions about repository files.
 """
 
@@ -363,7 +362,6 @@ class WebhookAgent:
                 get_commit_diff,
                 get_current_time,
                 google_search_grounding_tool,
-                search_codebase_tool,
                 review,
             ],
         )
@@ -400,7 +398,6 @@ class WebhookAgent:
                 get_commit_diff,
                 get_current_time,
                 google_search_grounding_tool,
-                search_codebase_tool,
             ],
         )
 
