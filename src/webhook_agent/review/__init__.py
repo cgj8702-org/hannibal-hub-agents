@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .comment_poster import (
+    _add_eyes_reaction,
     build_github_review_comments,
     filter_echo_suggestions,
     format_suggestion_body,
@@ -35,6 +36,7 @@ from .writeback_policy import (
 __all__ = [
     "_COMMENT_RATE_LIMITER",
     "CommentRateLimiter",
+    "_add_eyes_reaction",
     "_enforce_verdict",
     "_is_formal_review_eligible",
     "_parse_scorecard_scores",

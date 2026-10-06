@@ -996,7 +996,7 @@ class TestBaseBranchMergeSync:
 
         processor._agent_core = MagicMock()
 
-        with patch("webhook_agent.webhook_agent._submit_formal_review") as mock_submit_review:
+        with patch("webhook_agent.fast_path._submit_formal_review") as mock_submit_review:
             mock_submit_review.return_value = ("Approved PR #195", True)
             with patch.dict(os.environ, {"DRY_RUN": "0"}):
                 processor.process_event(payload)
