@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Any
 
@@ -1233,3 +1234,47 @@ class TestBaseBranchMergeSync:
             processor.process_event(payload)
             mock_prefetch_diff.assert_not_called()
             processor._agent_core.run.assert_not_called()
+
+    def test_worker_main_resume_sweep_triggers_processor(self, monkeypatch):
+        from unittest.mock import patch
+
+        from webhook_agent.worker import main
+
+        monkeypatch.setenv("ENABLE_REVIEW_RESUME", "1")
+        monkeypatch.setenv("REVIEW_RESUME_INTERVAL_SECONDS", "0")
+
+        mock_checkpoint = {
+            "status": "rate_limited",
+            "repo": "owner/repo",
+            "pr_number": 77,
+            "head_sha": "sha_res_77",
+            "canonical": "pull_request.opened",
+            "delivery_id": "orig-del-77",
+            "precompiled_dossier": "Cached Dossier",
+        }
+
+        with (
+            patch("webhook_agent.worker.setup_cloud_logging"),
+            patch("webhook_agent.worker.WebhookProcessor") as mock_processor_cls,
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient") as mock_sub_cls,
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
+            patch(
+                "webhook_agent.state.review_checkpoint.review_checkpoint_manager.list_resumable",
+                return_value=[mock_checkpoint],
+            ),
+        ):
+            mock_proc = mock_processor_cls.return_value
+            mock_sub = mock_sub_cls.return_value
+            # Break after first loop iteration by having pull raise KeyboardInterrupt
+            mock_sub.pull.side_effect = KeyboardInterrupt()
+
+            with contextlib.suppress(KeyboardInterrupt):
+                main()
+
+            assert mock_proc.process_event.call_count == 1
+            call_payload = mock_proc.process_event.call_args[0][0]
+            assert call_payload["canonical"] == "pull_request.opened"
+            assert call_payload["repository"]["full_name"] == "owner/repo"
+            assert call_payload["raw_payload"]["pull_request"]["number"] == 77
+            assert call_payload["raw_payload"]["pull_request"]["head"]["sha"] == "sha_res_77"
+            assert call_payload["precompiled_dossier"] == "Cached Dossier"

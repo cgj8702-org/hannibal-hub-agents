@@ -313,3 +313,76 @@ def test_get_resumable_status_and_timer_conditions():
     assert resumable is not None
     assert resumable["status"] == "rate_limited"
     assert resumable["pr_number"] == 3
+
+
+def test_list_resumable_local_and_firestore():
+    """Verify list_resumable collects ready checkpoints across cache and Firestore."""
+    from webhook_agent.state.review_checkpoint import build_resume_payload
+
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+    now = datetime.datetime.now(datetime.UTC)
+
+    # Empty
+    assert mgr.list_resumable() == []
+
+    # Add future rate limited checkpoint
+    mgr.save_checkpoint(
+        repo="owner/repo", pr_number=1, head_sha="sha1", canonical="pull_request.opened"
+    )
+    mgr.mark_rate_limited("owner/repo", 1, "sha1", "Rate limited", retry_after_seconds=300.0)
+    assert mgr.list_resumable() == []
+
+    # Add past rate limited checkpoint
+    mgr.save_checkpoint(
+        repo="owner/repo", pr_number=2, head_sha="sha2", canonical="pull_request.synchronize"
+    )
+    mgr.mark_rate_limited("owner/repo", 2, "sha2", "Rate limited", retry_after_seconds=1.0)
+    doc_id = _safe_doc_id("owner/repo", 2, "sha2")
+    past_time = now - datetime.timedelta(seconds=20)
+    mgr._local_cache[doc_id]["resume_after"] = past_time
+    mgr._local_cache[doc_id]["resume_after_ts"] = past_time.timestamp()
+
+    ready = mgr.list_resumable()
+    assert len(ready) == 1
+    assert ready[0]["pr_number"] == 2
+
+    # Verify build_resume_payload
+    payload = build_resume_payload(ready[0])
+    assert payload["canonical"] == "pull_request.synchronize"
+    assert payload["repository"]["full_name"] == "owner/repo"
+    assert payload["raw_payload"]["pull_request"]["number"] == 2
+    assert payload["raw_payload"]["pull_request"]["head"]["sha"] == "sha2"
+    assert payload["resumed_checkpoint"] == ready[0]
+
+
+def test_list_resumable_firestore_query():
+    """Verify list_resumable streams and filters from mocked Firestore."""
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+    mock_db = MagicMock()
+    mgr._db = mock_db
+    mgr._initialized = True
+
+    now = datetime.datetime.now(datetime.UTC)
+    doc1 = MagicMock()
+    doc1.to_dict.return_value = {
+        "repo": "owner/repo",
+        "pr_number": 10,
+        "head_sha": "sha_ready",
+        "status": "rate_limited",
+        "resume_after": now - datetime.timedelta(seconds=10),
+    }
+
+    doc2 = MagicMock()
+    doc2.to_dict.return_value = {
+        "repo": "owner/repo",
+        "pr_number": 11,
+        "head_sha": "sha_future",
+        "status": "rate_limited",
+        "resume_after": now + datetime.timedelta(seconds=500),
+    }
+
+    mock_db.collection.return_value.where.return_value.stream.return_value = [doc1, doc2]
+
+    resumable = mgr.list_resumable()
+    assert len(resumable) == 1
+    assert resumable[0]["pr_number"] == 10
