@@ -16,10 +16,10 @@ BOT_APP_SLUG = "hannibal-hub-agents"
 
 # Autonomous coding partner bot logins (Jules)
 JULES_BOT_LOGINS = {
+    "google-labs-jules[bot]",
+    "google-labs-jules",
     "google-jules[bot]",
-    "jules[bot]",
     "google-jules",
-    "jules",
 }
 
 
@@ -36,7 +36,12 @@ def is_jules_sender(
         user = sender.get("user") if isinstance(sender.get("user"), dict) else sender
         if isinstance(user, dict):
             login = (user.get("login") or "").strip().lower()
-            if login in JULES_BOT_LOGINS or "jules" in login:
+            if (
+                login in JULES_BOT_LOGINS
+                or "google-labs-jules" in login
+                or "google-jules" in login
+                or (login.endswith("[bot]") and "jules" in login)
+            ):
                 return True
 
     if isinstance(raw_payload, dict):

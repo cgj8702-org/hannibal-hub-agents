@@ -8,10 +8,13 @@ from webhook_agent.processor import WebhookProcessor
 
 
 def test_is_jules_sender():
+    assert is_jules_sender({"login": "google-labs-jules[bot]"}) is True
+    assert is_jules_sender({"login": "google-labs-jules"}) is True
     assert is_jules_sender({"login": "google-jules[bot]"}) is True
-    assert is_jules_sender({"login": "jules[bot]"}) is True
     assert is_jules_sender({"login": "google-jules"}) is True
-    assert is_jules_sender({"login": "jules"}) is True
+    assert is_jules_sender({"login": "custom-jules[bot]"}) is True
+    # Plain 'jules' username represents an unrelated human user, not the bot
+    assert is_jules_sender({"login": "jules"}) is False
     assert is_jules_sender({"login": "cgj8702"}) is False
     assert is_jules_sender({"login": "hannibal-hub-agents[bot]"}) is False
     assert is_jules_sender(None) is False
@@ -24,8 +27,8 @@ def test_is_bot_sender_exempts_jules():
     assert _is_bot_sender({"login": "github-actions[bot]"}) is True
 
     # Jules must NOT be classified as this app's bot identity so its PRs can be audited
+    assert _is_bot_sender({"login": "google-labs-jules[bot]"}) is False
     assert _is_bot_sender({"login": "google-jules[bot]"}) is False
-    assert _is_bot_sender({"login": "jules[bot]"}) is False
     assert _is_bot_sender({"login": "cgj8702"}) is False
 
 
@@ -148,5 +151,6 @@ def test_processor_suppresses_jules_with_unregistered_login_via_app_slug():
 
 
 def test_conversational_instruction_has_jules_delegation_protocol():
-    assert "@jules" in CONVERSATIONAL_INSTRUCTION
+    assert "@jules" not in CONVERSATIONAL_INSTRUCTION
+    assert "google-labs-jules" in CONVERSATIONAL_INSTRUCTION
     assert "Jules Delegation Protocol" in CONVERSATIONAL_INSTRUCTION

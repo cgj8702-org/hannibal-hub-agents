@@ -420,6 +420,27 @@ def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
         return f"Error fetching commit diff: {e}"
 
 
+def add_label(ctx: Context, issue_number: int, labels: list[str]) -> str:
+    """Add one or more labels to an issue or pull request (e.g. attaching 'jules' label).
+
+    Args:
+        issue_number: Issue or PR number.
+        labels: List of label names to attach (e.g. ['jules']).
+
+    Returns:
+        A string describing the result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        issue = repo.get_issue(number=issue_number)
+        issue.add_to_labels(*labels)
+        return f"Successfully added labels {labels} to #{issue_number}."
+    except Exception as e:
+        return f"Error adding labels to #{issue_number}: {e}"
+
+
 def update_issue(
     ctx: Context,
     number: int,

@@ -751,6 +751,43 @@ class TestGetIssue:
 
 
 # ---------------------------------------------------------------------------
+# Tests: add_label tool
+# ---------------------------------------------------------------------------
+
+
+class TestAddLabel:
+    def test_add_label_success(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import add_label
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        repo.get_issue.return_value = mock_issue
+
+        result = add_label(ctx, 42, labels=["jules"])
+        assert "Successfully added labels ['jules'] to #42" in result
+        mock_issue.add_to_labels.assert_called_once_with("jules")
+
+    def test_add_label_error_handling(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import add_label
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.get_issue.side_effect = Exception("Not found")
+
+        result = add_label(ctx, 42, labels=["jules"])
+        assert "Error adding labels to #42" in result
+
+
+# ---------------------------------------------------------------------------
 # Tests: update_issue tool
 # ---------------------------------------------------------------------------
 
