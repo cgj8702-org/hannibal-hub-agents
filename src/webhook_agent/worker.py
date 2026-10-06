@@ -169,7 +169,7 @@ def main() -> int:
             try:
                 import threading
 
-                from .proactive_service import ProactiveEvaluator
+                from webhook_agent.review.proactive_service import ProactiveEvaluator
 
                 repos_env = os.environ.get(
                     "TARGET_REPOSITORIES",

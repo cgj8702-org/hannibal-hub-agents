@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from webhook_agent.formatter import calculate_sync_verdict
-from webhook_agent.schemas import (
+from webhook_agent.review.formatter import calculate_sync_verdict
+from webhook_agent.review.schemas import (
     CodeReviewResponse,
     SyncReviewResponse,
     has_genuine_summary_risk,

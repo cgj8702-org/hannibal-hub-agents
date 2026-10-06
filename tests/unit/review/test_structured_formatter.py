@@ -2,7 +2,7 @@
 
 import pytest
 
-from webhook_agent.formatter import (
+from webhook_agent.review.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
     normalize_code_review_dict,
@@ -11,7 +11,7 @@ from webhook_agent.formatter import (
     render_sync_review_markdown,
 )
 from webhook_agent.review.review_enforcer import _enforce_verdict
-from webhook_agent.schemas import (
+from webhook_agent.review.schemas import (
     CodeReviewResponse,
     IssueItem,
     RiskItem,
@@ -189,7 +189,7 @@ def test_calculate_sync_verdict_blocking_new_finding():
 
 def test_parse_text_review_to_dict():
     """Verify that parse_text_review_to_dict correctly extracts structured data from loose text reviews."""
-    from webhook_agent.formatter import parse_text_review_to_dict
+    from webhook_agent.review.formatter import parse_text_review_to_dict
 
     text_review = """# Code Review Report
 
@@ -362,7 +362,7 @@ def test_parse_text_review_approval_bullets_not_critical():
 
 
 def test_normalize_strips_redundant_summary_label_prefix():
-    from webhook_agent.formatter import (
+    from webhook_agent.review.formatter import (
         normalize_code_review_dict,
         normalize_sync_review_dict,
     )
@@ -379,8 +379,8 @@ def test_normalize_strips_redundant_summary_label_prefix():
 
 
 def test_render_sync_review_markdown_fallback_when_no_prior_reviews():
-    from webhook_agent.formatter import render_sync_review_markdown
-    from webhook_agent.schemas import SyncReviewResponse
+    from webhook_agent.review.formatter import render_sync_review_markdown
+    from webhook_agent.review.schemas import SyncReviewResponse
 
     sync_resp = SyncReviewResponse(
         summary="PR update introduced changes.",

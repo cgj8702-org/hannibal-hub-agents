@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from github import GithubException
 
-from webhook_agent.proactive_service import ProactiveEvaluator
+from webhook_agent.review.proactive_service import ProactiveEvaluator
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
@@ -59,7 +59,7 @@ class TestProactiveEvaluator:
 
     @pytest.fixture(autouse=True)
     def clear_cache(self):
-        from webhook_agent.proactive_service import clear_reconciliation_cache
+        from webhook_agent.review.proactive_service import clear_reconciliation_cache
 
         clear_reconciliation_cache()
         yield
@@ -163,7 +163,7 @@ class TestProactiveEvaluator:
     def test_concurrent_threads_reconciliation_claim_is_thread_safe(self):
         import concurrent.futures
 
-        from webhook_agent.proactive_service import try_claim_reconciliation
+        from webhook_agent.review.proactive_service import try_claim_reconciliation
 
         cache_key = "cgj8702-org/hannibal-hub#300#abcdef1"
         now_ts = 1000000.0
@@ -182,7 +182,7 @@ class TestProactiveEvaluator:
         assert results.count(False) == 19
 
     def test_release_reconciliation_claim_allows_reclaim(self):
-        from webhook_agent.proactive_service import (
+        from webhook_agent.review.proactive_service import (
             release_reconciliation_claim,
             try_claim_reconciliation,
         )
@@ -195,7 +195,7 @@ class TestProactiveEvaluator:
         assert try_claim_reconciliation(key) is True
 
     def test_is_reconciliation_claimed_checks_without_acquiring(self):
-        from webhook_agent.proactive_service import (
+        from webhook_agent.review.proactive_service import (
             is_reconciliation_claimed,
             try_claim_reconciliation,
         )
@@ -206,14 +206,14 @@ class TestProactiveEvaluator:
         assert is_reconciliation_claimed(key) is True
 
     def test_build_reconciliation_cache_key_format(self):
-        from webhook_agent.proactive_service import build_reconciliation_cache_key
+        from webhook_agent.review.proactive_service import build_reconciliation_cache_key
 
         assert (
             build_reconciliation_cache_key("owner/repo", 42, "deadbeef") == "owner/repo#42#deadbeef"
         )
 
     def test_webhook_in_flight_claims_deduplication(self):
-        from webhook_agent.proactive_service import (
+        from webhook_agent.review.proactive_service import (
             build_reconciliation_cache_key,
             release_reconciliation_claim,
             try_claim_reconciliation,

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from webhook_agent.formatter import (
-    CodeReviewResponse,
+from webhook_agent.review.formatter import (
     render_code_review_markdown,
 )
-from webhook_agent.schemas import IssueItem
+from webhook_agent.review.schemas import CodeReviewResponse, IssueItem
 
 
 def test_format_suggested_fix_markdown_single_line():

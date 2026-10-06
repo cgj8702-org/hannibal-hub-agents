@@ -28,16 +28,16 @@ from typing import Any
 from github import Auth, Github
 
 from webhook_agent.core.cancellation import pr_closed_registry
-
-from .bot_identity import _is_bot_event, is_jules_sender
-from .core.agent_definition import WebhookAgent
-from .fast_path import (
+from webhook_agent.review.fast_path import (
     evaluate_dependency_fast_path,
     is_base_branch_merge_sync,
 )
-from .formatter import (
+from webhook_agent.review.formatter import (
     truncate_log_payload,
 )
+
+from .bot_identity import _is_bot_event, is_jules_sender
+from .core.agent_definition import WebhookAgent
 from .github_credential_helper import (
     generate_jwt,
     get_installation_token,

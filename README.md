@@ -51,18 +51,13 @@ flowchart TD
 │       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter)
 │       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, callbacks, & plugins
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
-│       ├── review/          # Code review verdict parser, scorecard enforcement, & comment writeback
+│       ├── review/          # Code review verdict parser, scorecard enforcement, schemas, & formatter
 │       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
 │       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff tools, search)
 │       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
 │       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
-│       ├── fast_path.py     # Base-branch merge-sync & dependency fast-paths
 │       ├── pr_context.py    # GitHub diff & PR context prefetching
-│       ├── proactive_service.py # Proactive PR evaluator for stale threads, conflicts, & CI runs
-│       ├── schemas.py       # Pydantic response models & universal markdown string field validators
-│       ├── formatter.py     # GitHub Flavored Markdown renderer for code reviews & sync reviews
 │       ├── bot_identity.py  # Multi-signal bot identity detection for loop avoidance
-│       ├── memory_service.py # ADK agent memory and session persistence service
 │       ├── github_credential_helper.py # GitHub App JWT generation & cached installation tokens
 │       ├── webhook_types.py # Common dataclasses and ActionResult definitions
 │       └── templates/       # Local prompt & code review templates
