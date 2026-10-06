@@ -44,18 +44,31 @@ _REVIEW_LOCKS: dict[str, threading.Lock] = {}
 _REVIEW_LOCKS_GUARD = threading.Lock()
 
 
+REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
+    "/review",
+    "please review",
+    "re-review",
+    "review this",
+    "request review",
+    "run review",
+    "audit this",
+    "code review",
+)
+
+
 def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
     """Return whether an event is allowed to initiate a formal code review."""
-    return (
-        canonical
-        in {
-            "pull_request.opened",
-            "pull_request.reopened",
-            "pull_request.synchronize",
-            "pull_request_review_requested",
-        }
-        or "/review" in comment_body.lower()
-    )
+    if canonical in {
+        "pull_request.opened",
+        "pull_request.reopened",
+        "pull_request.synchronize",
+        "pull_request.ready_for_review",
+        "pull_request_review_requested",
+    }:
+        return True
+
+    cb_lower = comment_body.lower()
+    return any(keyword in cb_lower for keyword in REVIEW_INTENT_KEYWORDS)
 
 
 def _review_lock(target_key: str) -> threading.Lock:

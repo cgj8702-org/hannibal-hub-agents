@@ -9,6 +9,7 @@ from __future__ import annotations
 from webhook_agent.core.agent_definition import (
     AUDITOR_CONTEXT_INSTRUCTION,
     BOT_LOGIN,
+    CONVERSATIONAL_INSTRUCTION,
     MAX_INPUT_TOKENS,
     SYSTEM_INSTRUCTION,
     WebhookAgent,
@@ -40,6 +41,7 @@ from webhook_agent.core.loop_helpers import (
 __all__ = [
     "AUDITOR_CONTEXT_INSTRUCTION",
     "BOT_LOGIN",
+    "CONVERSATIONAL_INSTRUCTION",
     "MAX_INPUT_TOKENS",
     "SYSTEM_INSTRUCTION",
     "WebhookAgent",

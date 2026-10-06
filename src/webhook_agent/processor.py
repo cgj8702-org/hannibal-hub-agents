@@ -121,14 +121,9 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
 
     if canonical.startswith(("issue_comment.", "pull_request_review_comment.")):
         comment_body = (raw.get("comment", {}) or {}).get("body", "").lower()
-        review_triggers = {
-            "/review",
-            "/audit",
-            "/test",
-            "/critique",
-            "please review",
-        }
-        if any(trigger in comment_body for trigger in review_triggers):
+        from .review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+        if any(trigger in comment_body for trigger in REVIEW_INTENT_KEYWORDS):
             return True
         # Forward-fix: issue_comment on a PR (issue.pull_request set) that needs
         # reconciliation against prior bot reviews should also get diff context.

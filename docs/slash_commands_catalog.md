@@ -1,36 +1,33 @@
-# Hannibal Hub Agents — Slash Command Catalog & Architecture Review
+# Hannibal Hub Agents — Interaction & Natural Language Architecture Guide
 
-This document provides a comprehensive technical catalog, routing reference, and security/reliability audit of all supported slash commands in the Hannibal Hub agents ecosystem.
+This document outlines the interaction model, event routing, and conversational pair programming capabilities of the Hannibal Hub agents ecosystem.
 
-## Overview of Slash Commands
+## 🌟 Natural-Language-First & Automated Lifecycle
 
-| Command | Triggers / Aliases | Target Object | Primary Handler / Tool | Reliability & Security Considerations |
+Hannibal Hub has evolved beyond rigid slash commands. The agent uses a decoupled dual-engine architecture:
+
+1. **Automated PR Audits**: Formal clinical code reviews run automatically on pull request lifecycle events (`pull_request.opened`, `pull_request.synchronize`, `pull_request.ready_for_review`). No slash commands are required.
+2. **Conversational Pair Programming**: When engineers ask questions, discuss architecture, or chit-chat on a PR thread or mention the bot, the conversational runner responds directly with sharp, helpful, and friendly markdown comments.
+3. **Intent-Based Review Triggers**: When a comment expresses an intent to run or re-run a review, the agent routes to the formal code review auditor.
+
+---
+
+## Interaction Routing Reference
+
+| Interaction Mode | Triggers & Keywords | Target Object | Active Engine | Behavior & Writeback |
 | :--- | :--- | :--- | :--- | :--- |
-| **`/review`** | `/review`, `/audit`, `/test`, `/critique`, `please review` | Pull Request / Issue Comment | `_prefetch_pr_diff`, `review()` tool | Prefetches PR diff to avoid prompt bloat. Requires structured verdict & invariant enforcement. |
-| **`/create`** | `/create` | Pull Request | `get_pr_diff`, `update_pr_description` | Auto-fills PR descriptions and summaries based on commit history. |
+| **Automated Review** | `pull_request.opened`, `pull_request.synchronize`, `pull_request.ready_for_review` | Pull Request | Code Auditor Subagent (`SYSTEM_INSTRUCTION`) | Prefetches diff and compiler findings; enforces structured verdict (`APPROVE` / `REQUEST_CHANGES`); submits formal PR review. |
+| **Review Intent** | `/review`, `please review`, `re-review`, `review this`, `request review`, `run review`, `audit this`, `code review` | PR Comment / Inline Review Comment | Code Auditor Subagent (`SYSTEM_INSTRUCTION`) | Prefetches incremental & full diff; runs clinical audit; updates formal review state. |
+| **Conversational Pair Programming** | Any conversational comment, technical question, or `@hannibal-hub-agents` mention (without review intent keywords) | PR Comment / Inline Review Comment / Issue Comment | Conversational Subagent (`CONVERSATIONAL_INSTRUCTION`) | Uses codebase grounding tools (`read_file`, `search_codebase`, etc.) to provide context-aware answers; writes back as friendly markdown comment via GitHub Issues/PR API. |
 
 ---
 
-## Detailed Architectural Review
+## Architectural Details
 
-### 1. `/review` & Review Aliases
-- **Purpose**: Initiates a formal code review on a pull request.
-- **Workflow**: 
-  1. Comment payload detected by `_should_prefetch_diff`.
-  2. `_prefetch_pr_diff` fetches repository files and patches via PyGitHub.
-  3. Context injected into `raw_payload["pr_diff"]`.
-  4. Agent parses diff and evaluates across 4 mandatory audit dimensions.
-- **Risk Analysis**: Large PRs (>500 lines) can cause prompt bloat or token limit saturation. Mitigation: Prefetching formats patches concisely.
+### 1. Dual-Runner Architecture in `WebhookAgent`
+- **`_runner` (`_code_auditor`)**: Configured with strict 1-turn clinical review instructions, precompiled AST dossier, and structured Pydantic response models. Only invoked when `_is_formal_review_eligible` evaluates to `True`.
+- **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with full codebase inspection tools (`read_file`, `search_codebase`, `get_issue`, `get_commit_diff`, `get_current_time`, `google_search_grounding_tool`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
 
-### 2. `/create`
-- **Purpose**: Generates or updates PR descriptions from commit history.
-- **Workflow**:
-  1. Prefetches commit history summary via `_prefetch_commit_history`.
-  2. Generates comprehensive description.
-- **Risk Analysis**: Empty commit messages lead to sparse descriptions.
-
----
-
-## Recommendations & Next Steps
-- Enforce rate limiting on resource-intensive review operations.
-- Expand test coverage for edge-case parser inputs.
+### 2. Comment Rate Limiting & Safety
+- Conversational comments are rate-limited via `_COMMENT_RATE_LIMITER` (sliding window per repository/PR key) to prevent runaway conversational loops.
+- Bot identity filters (`_is_bot_event`) prevent recursive loops with other automated services.
