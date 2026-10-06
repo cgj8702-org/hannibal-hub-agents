@@ -299,7 +299,7 @@ def test_enforce_verdict_preserves_resolutions_on_dismissed_prior_review_with_fi
 @pytest.mark.webhook_agent
 def test_agent_prompt_builder_decouples_markdown_and_feeds_structured_findings() -> None:
     """Ensure agent user message contains structured checklist and decouples from human Markdown."""
-    from webhook_agent.webhook_agent import WebhookAgent
+    from webhook_agent.core.agent_definition import WebhookAgent
 
     payload = {
         "canonical": "pull_request.synchronize",
@@ -347,7 +347,7 @@ def test_agent_prompt_builder_decouples_markdown_and_feeds_structured_findings()
 @pytest.mark.webhook_agent
 def test_agent_prompt_builder_clean_pass_orders_empty_resolutions() -> None:
     """Ensure agent user message orders empty resolutions when prior review had 0 findings."""
-    from webhook_agent.webhook_agent import WebhookAgent
+    from webhook_agent.core.agent_definition import WebhookAgent
 
     payload = {
         "canonical": "pull_request.synchronize",

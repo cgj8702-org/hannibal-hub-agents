@@ -121,7 +121,7 @@ class TestRouteEvent:
         assert self.processor.route_event(ev) == "label.created"
 
     def test_label_event_is_not_formal_review_eligible(self):
-        from webhook_agent.webhook_agent import _is_formal_review_eligible
+        from webhook_agent.review.writeback_policy import _is_formal_review_eligible
 
         assert _is_formal_review_eligible("label.created") is False
 
@@ -372,14 +372,14 @@ class TestShouldProcessEvent:
         from webhook_agent import (
             memory_service,
             processor,
-            webhook_agent,
             worker,
         )
+        from webhook_agent.core import agent_definition
 
         assert processor.logger.name == "webhook_agent.processor"
         assert processor.core_logger.name == "webhook_agent.core"
         assert worker.logger.name == "webhook_agent.worker"
-        assert webhook_agent.logger.name == "webhook_agent.agent"
+        assert agent_definition.logger.name == "webhook_agent.core.agent_definition"
         assert memory_service.logger.name == "webhook_agent.memory"
 
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):

@@ -29,6 +29,7 @@ from github import Auth, Github
 
 from .bot_identity import _is_bot_event, is_jules_sender
 from .cancellation import pr_closed_registry
+from .core.agent_definition import WebhookAgent
 from .fast_path import (
     evaluate_dependency_fast_path,
     is_base_branch_merge_sync,
@@ -50,7 +51,6 @@ from .pr_context import (
     _should_prefetch_diff,
 )
 from .review.comment_poster import _add_eyes_reaction
-from .webhook_agent import WebhookAgent
 from .webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.processor")

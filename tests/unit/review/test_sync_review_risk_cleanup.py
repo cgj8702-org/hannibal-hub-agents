@@ -150,7 +150,7 @@ def test_sync_review_preserves_resolutions_from_approved_review_with_suggestions
     """Ensure resolutions addressing suggestions from an APPROVED prior review are preserved."""
     from unittest.mock import MagicMock
 
-    from webhook_agent.webhook_agent import _enforce_verdict
+    from webhook_agent.review.review_enforcer import _enforce_verdict
 
     mock_pr = MagicMock()
     mock_review = MagicMock()

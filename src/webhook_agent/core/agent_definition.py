@@ -59,6 +59,7 @@ from webhook_agent.memory_service import InMemoryMemoryService
 from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
     get_active_model,
+    get_model_chain,
     is_gemini_3_plus,
 )
 from webhook_agent.models.model_factory import get_adk_model
@@ -147,11 +148,7 @@ class WebhookAgent:
         self._memory_service = InMemoryMemoryService()
 
         # Track current model chain (TPM Descending)
-        from webhook_agent import webhook_agent as wa_mod
-        from webhook_agent.models.model_chain import get_model_chain as default_get_chain
-
-        get_chain_fn = getattr(wa_mod, "get_model_chain", default_get_chain) or default_get_chain
-        self._model_chain = get_chain_fn()
+        self._model_chain = get_model_chain()
         self._chain_index = 0
         self._current_model_name = self._model_chain[self._chain_index]
         self._attempted_model_names = {self._normalize_model_name(self._current_model_name)}
@@ -298,17 +295,11 @@ class WebhookAgent:
 
     def _advance_model_chain(self, error: Exception | None = None) -> str | None:
         """Cascade once to the next untried model, or return None when exhausted."""
-        from webhook_agent import webhook_agent as wa_mod
-
         failed_model = self._normalize_model_name(self._current_model_name)
         self._attempted_model_names.add(failed_model)
-        depleted_registry = getattr(wa_mod, "_DEPLETED_MODEL_REGISTRY", _DEPLETED_MODEL_REGISTRY)
-        depleted_registry.mark_depleted(self._current_model_name, error=error)
+        _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name, error=error)
 
-        from webhook_agent.models.model_chain import get_model_chain as default_get_chain
-
-        get_chain_fn = getattr(wa_mod, "get_model_chain", default_get_chain) or default_get_chain
-        full_chain = get_chain_fn()
+        full_chain = get_model_chain()
         available = [
             model
             for model in full_chain
@@ -356,7 +347,7 @@ class WebhookAgent:
             if hasattr(self, "_conversational_app") and self._conversational_app is not None:
                 self._conversational_app.context_cache_config = None
 
-        runner_cls = getattr(wa_mod, "Runner", Runner)
+        runner_cls = Runner
         self._runner = runner_cls(
             app=self._app,
             session_service=self._session_service,

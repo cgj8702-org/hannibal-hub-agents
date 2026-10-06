@@ -24,9 +24,9 @@ def test_calculate_verdict_clean_approves() -> None:
 @pytest.mark.unit
 @pytest.mark.webhook_agent
 def test_calculate_verdict_reexports_parity() -> None:
-    """Verify backwards-compatible re-exports in core and webhook_agent."""
+    """Verify re-exports in core and review."""
     from webhook_agent.core.agent_definition import calculate_verdict as core_calc
-    from webhook_agent.webhook_agent import calculate_verdict as legacy_calc
+    from webhook_agent.review import calculate_verdict as review_calc
 
     assert core_calc is calculate_verdict
-    assert legacy_calc is calculate_verdict
+    assert review_calc is calculate_verdict

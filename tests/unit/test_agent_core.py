@@ -159,7 +159,7 @@ class TestIsTransientError:
         """503 UNAVAILABLE should be recognized as transient."""
         from google.genai.errors import ServerError
 
-        from webhook_agent.webhook_agent import _is_transient_error
+        from webhook_agent.models.model_chain import _is_transient_error
 
         error = ServerError(503, {}, None)
         assert _is_transient_error(error) is True
@@ -168,7 +168,7 @@ class TestIsTransientError:
         """500 INTERNAL_ERROR should be recognized as transient."""
         from google.genai.errors import ServerError
 
-        from webhook_agent.webhook_agent import _is_transient_error
+        from webhook_agent.models.model_chain import _is_transient_error
 
         error = ServerError(500, {}, None)
         assert _is_transient_error(error) is True
@@ -177,7 +177,7 @@ class TestIsTransientError:
         """429 RESOURCE_EXHAUSTED should be recognized as transient."""
         from google.genai.errors import ServerError
 
-        from webhook_agent.webhook_agent import _is_transient_error
+        from webhook_agent.models.model_chain import _is_transient_error
 
         error = ServerError(429, {}, None)
         assert _is_transient_error(error) is True
@@ -186,14 +186,14 @@ class TestIsTransientError:
         """400 BAD_REQUEST should NOT be recognized as transient."""
         from google.genai.errors import ServerError
 
-        from webhook_agent.webhook_agent import _is_transient_error
+        from webhook_agent.models.model_chain import _is_transient_error
 
         error = ServerError(400, {}, None)
         assert _is_transient_error(error) is False
 
     def test_returns_false_for_non_server_error(self):
         """Non-ServerError exceptions should NOT be recognized as transient."""
-        from webhook_agent.webhook_agent import _is_transient_error
+        from webhook_agent.models.model_chain import _is_transient_error
 
         assert _is_transient_error(ValueError("test")) is False
 
@@ -206,7 +206,7 @@ class TestIsTransientError:
 class TestWebhookAgentModelChain:
     def test_get_model_chain_orders_tpm_descending(self):
         """get_model_chain should order models by capacity without duplicates and omit 3.6 on Free Tier."""
-        from webhook_agent.webhook_agent import get_model_chain
+        from webhook_agent.models.model_chain import get_model_chain
 
         free_chain = get_model_chain()
         assert len(free_chain) == len(set(free_chain))
@@ -218,7 +218,7 @@ class TestWebhookAgentModelChain:
 
     def test_get_model_chain_paid_tier_orders_gemini_38_first(self, monkeypatch):
         """get_model_chain on Paid Tier should place gemini-3.8-flash as primary."""
-        from webhook_agent.webhook_agent import get_model_chain
+        from webhook_agent.models.model_chain import get_model_chain
 
         monkeypatch.setenv("WEBHOOK_TIER", "paid")
         monkeypatch.delenv("GEMMA_MODEL", raising=False)
@@ -230,7 +230,7 @@ class TestWebhookAgentModelChain:
 
     def test_primary_model_env_override(self, monkeypatch):
         """get_model_chain respects PRIMARY_MODEL environment variable."""
-        from webhook_agent.webhook_agent import get_model_chain
+        from webhook_agent.models.model_chain import get_model_chain
 
         monkeypatch.setenv("PRIMARY_MODEL", "custom-model-override")
         chain = get_model_chain()
@@ -238,7 +238,7 @@ class TestWebhookAgentModelChain:
 
     def test_advance_model_chain_mutates_agent_model(self):
         """_advance_model_chain should dynamically cascade to the next tier model."""
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         initial_model = agent._current_model_name
@@ -253,8 +253,8 @@ class TestWebhookAgentModelChain:
         """A single agent run must never select a model that already failed."""
         from types import SimpleNamespace
 
-        from webhook_agent import webhook_agent as module
-        from webhook_agent.webhook_agent import WebhookAgent
+        import webhook_agent.core.agent_definition as module
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         chain = [
             "gemini-3.5-flash-lite",
@@ -287,20 +287,20 @@ class TestWebhookAgentModelChain:
 
 class TestDynamicModelRouting:
     def setup_method(self):
-        from webhook_agent.webhook_agent import _DEPLETED_MODEL_REGISTRY
+        from webhook_agent.models.model_chain import _DEPLETED_MODEL_REGISTRY
 
         _DEPLETED_MODEL_REGISTRY._depleted.clear()
 
     def test_pull_request_opened_routes_to_primary_model(self, monkeypatch):
         monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
-        from webhook_agent.webhook_agent import _select_model_for_event
+        from webhook_agent.models.model_chain import _select_model_for_event
 
         event_data = {"canonical": "pull_request.opened"}
         assert _select_model_for_event(event_data) == "gemini-3.6-flash"
 
     def test_slash_command_comment_routes_to_primary_model(self, monkeypatch):
         monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
-        from webhook_agent.webhook_agent import _select_model_for_event
+        from webhook_agent.models.model_chain import _select_model_for_event
 
         event_data = {
             "canonical": "issue_comment.created",
@@ -310,7 +310,7 @@ class TestDynamicModelRouting:
 
     def test_bot_mention_comment_routes_to_primary_model(self, monkeypatch):
         monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
-        from webhook_agent.webhook_agent import _select_model_for_event
+        from webhook_agent.models.model_chain import _select_model_for_event
 
         event_data = {
             "canonical": "pull_request_review_comment.created",
@@ -319,7 +319,7 @@ class TestDynamicModelRouting:
         assert _select_model_for_event(event_data) == "gemini-3.6-flash"
 
     def test_routine_comment_routes_to_lightweight_model(self):
-        from webhook_agent.webhook_agent import _select_model_for_event
+        from webhook_agent.models.model_chain import _select_model_for_event
 
         event_data = {
             "canonical": "issue_comment.created",
@@ -328,14 +328,14 @@ class TestDynamicModelRouting:
         assert _select_model_for_event(event_data) == "gemini-3.5-flash-lite"
 
     def test_pull_request_closed_routes_to_lightweight_model(self):
-        from webhook_agent.webhook_agent import _select_model_for_event
+        from webhook_agent.models.model_chain import _select_model_for_event
 
         event_data = {"canonical": "pull_request.closed"}
         assert _select_model_for_event(event_data) == "gemini-3.5-flash-lite"
 
     def test_disabled_dynamic_routing_forces_primary_model(self, monkeypatch):
         monkeypatch.setenv("GEMMA_MODEL", "gemini-3.6-flash")
-        from webhook_agent.webhook_agent import _select_model_for_event
+        from webhook_agent.models.model_chain import _select_model_for_event
 
         monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "0")
         event_data = {"canonical": "pull_request.closed"}
@@ -349,13 +349,13 @@ class TestDynamicModelRouting:
 
 class TestTokenTruncation:
     def test_truncate_text_under_limit_unchanged(self):
-        from webhook_agent.webhook_agent import _truncate_text_to_token_limit
+        from webhook_agent.core.prompts import _truncate_text_to_token_limit
 
         short_text = "Hello world"
         assert _truncate_text_to_token_limit(short_text, max_tokens=100) == short_text
 
     def test_truncate_text_preserves_full_text(self):
-        from webhook_agent.webhook_agent import _truncate_text_to_token_limit
+        from webhook_agent.core.prompts import _truncate_text_to_token_limit
 
         long_text = "A" * 200000
         result = _truncate_text_to_token_limit(long_text, max_tokens=10, label="Test payload")
@@ -363,7 +363,7 @@ class TestTokenTruncation:
         assert "truncated" not in result
 
     def test_build_user_message_preserves_pr_diff(self):
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         event_data = {
@@ -382,7 +382,7 @@ class TestTokenTruncation:
         assert "D" * 60000 in text
 
     def test_build_user_message_injects_deterministic_compiler_dossier(self):
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         event_data = {
@@ -403,7 +403,7 @@ class TestTokenTruncation:
         assert "AST Verification for 'src/webhook_agent/tools/ast_tools.py'" in text
 
     def test_build_user_message_injects_symbol_impact_dossier(self):
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         event_data = {
@@ -424,7 +424,7 @@ class TestTokenTruncation:
 
     def test_code_auditor_preserves_review_context_and_disables_caching(self, monkeypatch):
         """The auditor retains PR context; enables caching for Gemini 3+ and disables for Gemma."""
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         # Default Free Tier (gemini-3.5-flash-lite) enables caching with 4096 min tokens
         monkeypatch.setenv("WEBHOOK_TIER", "free")
@@ -454,7 +454,7 @@ class TestToolRegistration:
         deterministic grounding tools (Option A was too narrow for
         issue_comment reconciliation).
         """
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = [
@@ -464,7 +464,7 @@ class TestToolRegistration:
 
     def test_agent_tools_are_api_aligned(self):
         """Tool names should match the 5 audit-only tools plus review fallback."""
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = sorted(
@@ -484,7 +484,7 @@ class TestToolRegistration:
 
     def test_no_removed_tools_present(self):
         """Removed and mutation tools should not be registered on the auditor."""
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = {
@@ -522,7 +522,7 @@ class TestToolRegistration:
 
     def test_code_auditor_bounded_thinking_budget(self, monkeypatch):
         """Auditor thinking budget must default to 1024 or respect AUDITOR_THINKING_BUDGET."""
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent_default = WebhookAgent(dry_run=True)
         assert agent_default._code_auditor.planner.thinking_config.thinking_budget == 1024
@@ -571,7 +571,7 @@ class TestToolRegistration:
 
     def test_review_restored_on_auditor_for_comment_reconciliation(self):
         """Forward-fix: review tool must be present for issue_comment follow-ups."""
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = {
@@ -611,7 +611,7 @@ class TestGetCurrentTime:
     def test_returns_iso_utc_timestamp(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import get_current_time
+        from webhook_agent.core.github_tools import get_current_time
 
         ctx = MagicMock()
         res = get_current_time(ctx)
@@ -629,7 +629,7 @@ class TestReadFile:
     def test_read_file_returns_content(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import read_file
+        from webhook_agent.core.github_tools import read_file
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -646,7 +646,7 @@ class TestReadFile:
     def test_read_file_with_ref(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import read_file
+        from webhook_agent.core.github_tools import read_file
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -663,7 +663,7 @@ class TestReadFile:
     def test_read_file_directory_returns_error(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import read_file
+        from webhook_agent.core.github_tools import read_file
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -684,7 +684,7 @@ class TestGetIssue:
     def test_get_issue_returns_pr_metadata(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import get_issue
+        from webhook_agent.core.github_tools import get_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -716,7 +716,7 @@ class TestGetIssue:
     def test_get_issue_with_diff(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import get_issue
+        from webhook_agent.core.github_tools import get_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -759,7 +759,7 @@ class TestAddLabel:
     def test_add_label_success(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import add_label
+        from webhook_agent.core.github_tools import add_label
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -775,7 +775,7 @@ class TestAddLabel:
     def test_add_label_error_handling(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import add_label
+        from webhook_agent.core.github_tools import add_label
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -796,7 +796,7 @@ class TestCreateIssue:
     def test_create_issue_success(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import create_issue
+        from webhook_agent.core.github_tools import create_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -825,7 +825,7 @@ class TestCreateIssue:
     def test_create_issue_error_handling(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import create_issue
+        from webhook_agent.core.github_tools import create_issue
 
         ctx = MagicMock()
         ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
@@ -841,7 +841,7 @@ class TestCreateIssue:
         assert "Error creating issue: API rate limit exceeded" in result
 
     def test_conversational_agent_equipped_with_create_issue(self):
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         tool_names = {
@@ -858,7 +858,7 @@ class TestCreateIssue:
 
 class TestTokenLimits:
     def test_get_max_input_tokens_default_tier(self):
-        from webhook_agent.webhook_agent import get_max_input_tokens
+        from webhook_agent.core.prompts import get_max_input_tokens
 
         assert get_max_input_tokens() == 3500
 
@@ -867,7 +867,7 @@ class TestGetCommitDiffBranchUpdate:
     def test_get_commit_diff_returns_branch_update_notice(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import get_commit_diff
+        from webhook_agent.core.github_tools import get_commit_diff
 
         ctx = MagicMock()
         mock_gh = MagicMock()
@@ -929,7 +929,7 @@ class TestReviewDismissalOrdering:
     def test_review_failure_does_not_dismiss_existing_reviews(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import review
+        from webhook_agent.core.github_tools import review
 
         ctx = MagicMock()
         mock_gh = MagicMock()
@@ -958,7 +958,7 @@ class TestReviewDismissalOrdering:
     def test_review_success_dismisses_prior_reviews_excluding_current(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import review
+        from webhook_agent.core.github_tools import review
 
         ctx = MagicMock()
         mock_gh = MagicMock()
@@ -1023,7 +1023,7 @@ class TestReviewIdempotency:
         return review
 
     def test_same_head_suppresses_duplicate(self):
-        from webhook_agent.webhook_agent import _submit_formal_review
+        from webhook_agent.review.review_enforcer import _submit_formal_review
 
         prior = self._bot_review("head-1")
         pr = self._pr(reviews=[prior])
@@ -1038,7 +1038,7 @@ class TestReviewIdempotency:
         prior.dismiss.assert_not_called()
 
     def test_prior_head_renders_update_and_dismisses_after_success(self):
-        from webhook_agent.webhook_agent import _submit_formal_review
+        from webhook_agent.review.review_enforcer import _submit_formal_review
 
         prior = self._bot_review("old-head")
         pr = self._pr(reviews=[prior])
@@ -1055,7 +1055,7 @@ class TestReviewIdempotency:
         prior.dismiss.assert_called_once()
 
     def test_synchronize_initial_shaped_data_uses_update_renderer(self):
-        from webhook_agent.webhook_agent import _enforce_verdict
+        from webhook_agent.review.review_enforcer import _enforce_verdict
 
         pr = self._pr(reviews=[self._bot_review("old-head")])
         body = '{"executive_summary":"Synchronize result.","critical_issues":[]}'
@@ -1070,7 +1070,7 @@ class TestReviewIdempotency:
         import time
         from unittest.mock import MagicMock
 
-        from webhook_agent.webhook_agent import _submit_formal_review
+        from webhook_agent.review.review_enforcer import _submit_formal_review
 
         pr = self._pr(head_sha="race-head")
         prior_reviews = []
@@ -1194,7 +1194,8 @@ class TestConversationalAgent:
         assert _is_formal_review_eligible("issues.opened", "Bug in parser") is False
 
     def test_conversational_agent_tools_and_instruction(self):
-        from webhook_agent.webhook_agent import CONVERSATIONAL_INSTRUCTION, WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
+        from webhook_agent.core.prompts import CONVERSATIONAL_INSTRUCTION
 
         agent = WebhookAgent(dry_run=True)
         assert hasattr(agent, "_conversational_agent")
@@ -1212,8 +1213,8 @@ class TestConversationalAgent:
         from types import SimpleNamespace
         from unittest.mock import MagicMock
 
+        from webhook_agent.core.agent_definition import WebhookAgent
         from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
-        from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=False)
         mock_gh = MagicMock()
@@ -1272,8 +1273,8 @@ class TestConversationalAgent:
         from types import SimpleNamespace
         from unittest.mock import MagicMock
 
+        from webhook_agent.core.agent_definition import WebhookAgent
         from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
-        from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=False)
         mock_gh = MagicMock()
@@ -1323,13 +1324,13 @@ class TestConversationalAgent:
         assert not any(r.tool == "add_comment" for r in results)
 
     def test_conversational_app_name_aligned_with_agent(self):
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         assert agent._conversational_app.name == agent._app_name
 
     def test_build_user_message_for_issues_opened(self):
-        from webhook_agent.webhook_agent import WebhookAgent
+        from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
         event_data = {
@@ -1354,8 +1355,8 @@ class TestConversationalAgent:
         from types import SimpleNamespace
         from unittest.mock import MagicMock
 
+        from webhook_agent.core.agent_definition import WebhookAgent
         from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
-        from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=False)
         mock_gh = MagicMock()
