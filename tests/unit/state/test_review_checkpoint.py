@@ -143,3 +143,122 @@ def test_checkpoint_firestore_integration():
     doc_ref_mock.set.reset_mock()
     mgr.mark_completed("owner/repo", 42, "abc999")
     assert doc_ref_mock.set.called
+
+
+def test_checkpoint_size_guard_truncation():
+    """Verify oversized diff and dossier are truncated to protect Firestore 1 MiB limit."""
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+    huge_diff = "D" * (450 * 1024)
+    huge_dossier = "P" * (550 * 1024)
+
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=10,
+        head_sha="sha123",
+        canonical="pull_request.opened",
+        precompiled_dossier=huge_dossier,
+        pr_diff=huge_diff,
+    )
+
+    checkpoint = mgr.get_checkpoint("owner/repo", 10, "sha123")
+    assert checkpoint is not None
+    assert len(checkpoint["pr_diff"].encode("utf-8")) < 450 * 1024
+    assert "[TRUNCATED: PR diff exceeded 400 KiB document size guard]" in checkpoint["pr_diff"]
+    assert len(checkpoint["precompiled_dossier"].encode("utf-8")) < 550 * 1024
+    assert (
+        "[TRUNCATED: Precompiled dossier exceeded 500 KiB document size guard]"
+        in checkpoint["precompiled_dossier"]
+    )
+
+
+def test_checkpoint_never_downgrade_completed_or_rate_limited():
+    """Verify save_checkpoint preserves completed or rate_limited status even if pending is passed."""
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+
+    # 1. Start with completed
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=1,
+        head_sha="sha1",
+        canonical="pull_request.opened",
+        status="completed",
+    )
+    # Subsequent attempt tries to save as pending
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=1,
+        head_sha="sha1",
+        canonical="pull_request.synchronize",
+        status="pending",
+    )
+    cp1 = mgr.get_checkpoint("owner/repo", 1, "sha1")
+    assert cp1 is not None
+    assert cp1["status"] == "completed"
+
+    # 2. Start with rate_limited
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=2,
+        head_sha="sha2",
+        canonical="pull_request.opened",
+        status="pending",
+    )
+    mgr.mark_rate_limited("owner/repo", 2, "sha2", "Quota exceeded", retry_after_seconds=30.0)
+    # Subsequent attempt tries to save as pending
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=2,
+        head_sha="sha2",
+        canonical="pull_request.synchronize",
+        status="pending",
+    )
+    cp2 = mgr.get_checkpoint("owner/repo", 2, "sha2")
+    assert cp2 is not None
+    assert cp2["status"] == "rate_limited"
+    assert "resume_after" in cp2
+
+
+def test_checkpoint_mark_rate_limited_with_retry_after():
+    """Verify mark_rate_limited computes resume_after timestamp based on retry_after_seconds."""
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=10,
+        head_sha="sha123",
+        canonical="pull_request.opened",
+    )
+
+    now = datetime.datetime.now(datetime.UTC)
+    mgr.mark_rate_limited(
+        "owner/repo",
+        10,
+        "sha123",
+        "ResourceExhausted: 429",
+        retry_after_seconds=120.0,
+    )
+    cp = mgr.get_checkpoint("owner/repo", 10, "sha123")
+    assert cp is not None
+    assert cp["status"] == "rate_limited"
+    assert "resume_after" in cp
+    assert cp["resume_after_ts"] >= now.timestamp() + 115.0
+
+
+def test_checkpoint_save_additional_metadata():
+    """Verify delivery_id, sender, comment_body, installation_id are saved."""
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=10,
+        head_sha="sha123",
+        canonical="issue_comment.created",
+        delivery_id="del-12345",
+        sender="octocat",
+        comment_body="/review",
+        installation_id=98765,
+    )
+    cp = mgr.get_checkpoint("owner/repo", 10, "sha123")
+    assert cp is not None
+    assert cp["delivery_id"] == "del-12345"
+    assert cp["sender"] == "octocat"
+    assert cp["comment_body"] == "/review"
+    assert cp["installation_id"] == 98765

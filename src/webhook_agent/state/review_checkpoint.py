@@ -28,6 +28,23 @@ def _safe_doc_id(repo: str, pr_number: int, head_sha: str) -> str:
     return f"{safe_repo}__{pr_number}__{head_sha}"
 
 
+MAX_CHECKPOINT_DIFF_BYTES = 400 * 1024  # 400 KiB max for PR diff
+MAX_CHECKPOINT_DOSSIER_BYTES = 500 * 1024  # 500 KiB max for precompiled dossier
+
+
+def _guard_payload_size(text: str, max_bytes: int, label: str) -> str:
+    """Ensure string payload does not exceed max_bytes for Firestore 1MiB document limit."""
+    if not text:
+        return text
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    return (
+        f"{truncated}\n\n[TRUNCATED: {label} exceeded {max_bytes // 1024} KiB document size guard]"
+    )
+
+
 class ReviewCheckpointManager:
     """Manages durable pre-audit dossiers and PR review state across halts and resumptions.
 
@@ -108,16 +125,37 @@ class ReviewCheckpointManager:
         pr_number: int,
         head_sha: str,
         canonical: str,
-        precompiled_dossier: str,
+        precompiled_dossier: str = "",
         pr_diff: str = "",
         changed_files: list[str] | None = None,
         status: str = "pending",
         last_error: str | None = None,
+        delivery_id: str | None = None,
+        sender: str | None = None,
+        comment_body: str | None = None,
+        installation_id: int | str | None = None,
+        resume_after: datetime.datetime | None = None,
     ) -> bool:
-        """Save or update a checkpoint with fresh 14-day sliding TTL."""
+        """Save or update a checkpoint with fresh 14-day sliding TTL and payload size guards."""
         doc_id = _safe_doc_id(repo, pr_number, head_sha)
         now = datetime.datetime.now(datetime.UTC)
         expire_at = now + datetime.timedelta(days=self.sliding_ttl_days)
+
+        # Apply document size guard for Firestore 1 MiB limit
+        safe_dossier = _guard_payload_size(
+            precompiled_dossier, MAX_CHECKPOINT_DOSSIER_BYTES, "Precompiled dossier"
+        )
+        safe_diff = _guard_payload_size(pr_diff, MAX_CHECKPOINT_DIFF_BYTES, "PR diff")
+
+        # Never downgrade status: preserve existing completed or rate_limited status
+        with self._lock:
+            existing = self._local_cache.get(doc_id)
+            if (
+                existing
+                and existing.get("status") in ("completed", "rate_limited")
+                and status == "pending"
+            ):
+                status = str(existing.get("status"))
 
         payload: dict[str, Any] = {
             "repo": repo,
@@ -125,19 +163,29 @@ class ReviewCheckpointManager:
             "head_sha": head_sha,
             "canonical": canonical,
             "status": status,
-            "precompiled_dossier": precompiled_dossier,
-            "pr_diff": pr_diff,
+            "precompiled_dossier": safe_dossier,
+            "pr_diff": safe_diff,
             "changed_files": list(changed_files or []),
             "updated_at": firestore.SERVER_TIMESTAMP if _HAS_FIRESTORE else now.isoformat(),
             "expire_at": expire_at,
             "last_error": last_error,
+            "delivery_id": delivery_id or "",
+            "sender": sender or "",
+            "comment_body": comment_body or "",
+            "installation_id": installation_id,
         }
+        if resume_after is not None:
+            payload["resume_after"] = resume_after
 
         # Update local memory
         with self._lock:
             local_entry = dict(payload)
             local_entry["expire_at_ts"] = expire_at.timestamp()
-            existing = self._local_cache.get(doc_id)
+            if resume_after is not None:
+                local_entry["resume_after_ts"] = resume_after.timestamp()
+            elif existing and "resume_after_ts" in existing:
+                local_entry["resume_after_ts"] = existing["resume_after_ts"]
+                local_entry["resume_after"] = existing.get("resume_after")
             local_entry["attempts"] = (existing.get("attempts", 0) + 1) if existing else 1
             self._local_cache[doc_id] = local_entry
 
@@ -145,6 +193,20 @@ class ReviewCheckpointManager:
         if db is not None:
             try:
                 doc_ref = db.collection(self.collection_name).document(doc_id)
+                # Check Firestore document status to never downgrade in remote store
+                try:
+                    existing_doc = doc_ref.get()
+                    if existing_doc.exists:
+                        remote_data = existing_doc.to_dict() or {}
+                        remote_status = remote_data.get("status")
+                        if (
+                            remote_status in ("completed", "rate_limited")
+                            and payload["status"] == "pending"
+                        ):
+                            payload["status"] = remote_status
+                except Exception:
+                    pass
+
                 # Incremental attempts if document exists
                 db_payload = dict(payload)
                 if _HAS_FIRESTORE and firestore is not None:
@@ -155,7 +217,7 @@ class ReviewCheckpointManager:
                 logger.info(
                     "💾 Saved review checkpoint for %s (status: %s, TTL: 14d)",
                     doc_id,
-                    status,
+                    payload["status"],
                 )
                 return True
             except Exception as exc:
@@ -166,18 +228,32 @@ class ReviewCheckpointManager:
         return True
 
     def mark_rate_limited(
-        self, repo: str, pr_number: int, head_sha: str, error_message: str
+        self,
+        repo: str,
+        pr_number: int,
+        head_sha: str,
+        error_message: str,
+        retry_after_seconds: float | None = None,
     ) -> bool:
-        """Mark checkpoint as paused due to rate limits with updated sliding TTL."""
+        """Mark checkpoint as paused due to rate limits with resume_after timestamp and updated sliding TTL."""
         doc_id = _safe_doc_id(repo, pr_number, head_sha)
         now = datetime.datetime.now(datetime.UTC)
         expire_at = now + datetime.timedelta(days=self.sliding_ttl_days)
+
+        backoff_seconds = (
+            float(retry_after_seconds)
+            if (retry_after_seconds is not None and float(retry_after_seconds) > 0)
+            else 60.0
+        )
+        resume_after = now + datetime.timedelta(seconds=backoff_seconds)
 
         with self._lock:
             if doc_id in self._local_cache:
                 self._local_cache[doc_id]["status"] = "rate_limited"
                 self._local_cache[doc_id]["last_error"] = error_message
                 self._local_cache[doc_id]["expire_at_ts"] = expire_at.timestamp()
+                self._local_cache[doc_id]["resume_after_ts"] = resume_after.timestamp()
+                self._local_cache[doc_id]["resume_after"] = resume_after
 
         db = self._get_db()
         if db is not None:
@@ -193,10 +269,16 @@ class ReviewCheckpointManager:
                         "last_error": error_message,
                         "updated_at": timestamp_val,
                         "expire_at": expire_at,
+                        "resume_after": resume_after,
                     },
                     merge=True,
                 )
-                logger.info("⏸️ Checkpoint marked rate_limited for %s", doc_id)
+                logger.info(
+                    "⏸️ Checkpoint marked rate_limited for %s (resume_after: %s, delay: %.1fs)",
+                    doc_id,
+                    resume_after.isoformat(),
+                    backoff_seconds,
+                )
                 return True
             except Exception as exc:
                 logger.debug(
