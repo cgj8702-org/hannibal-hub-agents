@@ -20,6 +20,7 @@ from webhook_agent.core.agent_definition import (
 from webhook_agent.core.github_tools import (
     add_comment,
     add_label,
+    create_issue,
     get_commit_diff,
     get_current_time,
     get_issue,
@@ -51,6 +52,7 @@ __all__ = [
     "add_label",
     "calculate_verdict",
     "count_tokens_exact",
+    "create_issue",
     "get_commit_diff",
     "get_current_time",
     "get_issue",
