@@ -16,6 +16,7 @@ from webhook_agent.core.agent_definition import (
     build_user_message,
     calculate_verdict,
     count_tokens_exact,
+    execute_agent_event,
     get_max_input_tokens,
 )
 from webhook_agent.core.github_tools import (
@@ -47,6 +48,7 @@ __all__ = [
     "calculate_verdict",
     "count_tokens_exact",
     "create_issue",
+    "execute_agent_event",
     "get_commit_diff",
     "get_current_time",
     "get_issue",
