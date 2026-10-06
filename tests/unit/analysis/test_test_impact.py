@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 class TestTestImpactAnalyzer:
     def test_covered_symbol_detection(self):
         analyzer = TestImpactAnalyzer()
-        report = analyzer.analyze(["src/webhook_agent/proactive_service.py"])
+        report = analyzer.analyze(["src/webhook_agent/review/proactive_service.py"])
 
         claim_cov = next(
             (c for c in report.coverages if c.symbol_name == "try_claim_reconciliation"),

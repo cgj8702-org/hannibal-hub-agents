@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from webhook_agent.fast_path import (
+from webhook_agent.review.fast_path import (
     evaluate_dependency_fast_path,
     is_base_branch_merge_sync,
 )
@@ -113,7 +113,7 @@ def test_evaluate_dependency_fast_path_dry_run_or_none() -> None:
     assert evaluate_dependency_fast_path(mock_gh, "o/r", {}, {}, {}, 1, dry_run=True) is False
 
 
-@patch("webhook_agent.fast_path.logger")
+@patch("webhook_agent.review.fast_path.logger")
 def test_evaluate_dependency_fast_path_pure_dependency_approval(mock_logger: MagicMock) -> None:
     mock_gh = MagicMock()
     mock_repo = MagicMock()
@@ -132,7 +132,7 @@ def test_evaluate_dependency_fast_path_pure_dependency_approval(mock_logger: Mag
         patch("webhook_agent.analysis.lockfile_validator.is_pure_dependency_pr", return_value=True),
         patch("webhook_agent.analysis.lockfile_validator.validate_lockfile_diff") as mock_val,
         patch(
-            "webhook_agent.fast_path._submit_formal_review", return_value=("Approved", True)
+            "webhook_agent.review.fast_path._submit_formal_review", return_value=("Approved", True)
         ) as mock_submit,
     ):
         mock_val_res = MagicMock()

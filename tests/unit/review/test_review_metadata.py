@@ -15,7 +15,7 @@ from webhook_agent.review.metadata import (
     serialize_review_metadata,
 )
 from webhook_agent.review.review_enforcer import _enforce_verdict
-from webhook_agent.schemas import (
+from webhook_agent.review.schemas import (
     CodeReviewResponse,
     IssueItem,
     RiskItem,

@@ -15,12 +15,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.formatter import (
-    extract_json_payload,
-    is_implausible_body,
-    is_not_cheap_finding,
-    normalize_code_review_dict,
-)
 from webhook_agent.models.review_budget import (
     compute_round_allowance,
     should_suppress_round,
@@ -32,8 +26,14 @@ from webhook_agent.review.duplicate_detector import (
     build_exclusions,
     group_repeated_findings,
 )
+from webhook_agent.review.formatter import (
+    extract_json_payload,
+    is_implausible_body,
+    is_not_cheap_finding,
+    normalize_code_review_dict,
+)
 from webhook_agent.review.review_enforcer import _enforce_verdict
-from webhook_agent.schemas import IssueItem
+from webhook_agent.review.schemas import IssueItem
 from webhook_agent.tools.diff_tools import check_window, walk_right_side
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]

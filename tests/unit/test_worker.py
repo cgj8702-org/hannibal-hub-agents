@@ -358,7 +358,7 @@ class TestShouldProcessEvent:
 
     def test_truncate_log_payload(self):
         """truncate_log_payload returns full payload strings for Cloud Logging output without truncation."""
-        from webhook_agent.formatter import truncate_log_payload
+        from webhook_agent.review.formatter import truncate_log_payload
 
         short_msg = "Short message"
         assert truncate_log_payload(short_msg, 300) == "Short message"
@@ -997,7 +997,7 @@ class TestBaseBranchMergeSync:
 
         processor._agent_core = MagicMock()
 
-        with patch("webhook_agent.fast_path._submit_formal_review") as mock_submit_review:
+        with patch("webhook_agent.review.fast_path._submit_formal_review") as mock_submit_review:
             mock_submit_review.return_value = ("Approved PR #195", True)
             with patch.dict(os.environ, {"DRY_RUN": "0"}):
                 processor.process_event(payload)
@@ -1012,7 +1012,7 @@ class TestBaseBranchMergeSync:
     def test_process_event_in_flight_deduplication_skips_duplicate_webhook(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.proactive_service import clear_reconciliation_cache
+        from webhook_agent.review.proactive_service import clear_reconciliation_cache
 
         clear_reconciliation_cache()
 
@@ -1070,7 +1070,7 @@ class TestBaseBranchMergeSync:
     def test_process_event_proactive_reconciliation_is_not_self_suppressed(self):
         from unittest.mock import MagicMock
 
-        from webhook_agent.proactive_service import (
+        from webhook_agent.review.proactive_service import (
             build_reconciliation_cache_key,
             clear_reconciliation_cache,
             try_claim_reconciliation,
@@ -1114,7 +1114,7 @@ class TestBaseBranchMergeSync:
 
         import pytest
 
-        from webhook_agent.proactive_service import (
+        from webhook_agent.review.proactive_service import (
             build_reconciliation_cache_key,
             clear_reconciliation_cache,
             is_reconciliation_claimed,

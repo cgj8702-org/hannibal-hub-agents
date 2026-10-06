@@ -19,7 +19,7 @@ from webhook_agent.review.comment_poster import (
     is_echo_description,
     is_echo_suggestion,
 )
-from webhook_agent.schemas import IssueItem
+from webhook_agent.review.schemas import IssueItem
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 

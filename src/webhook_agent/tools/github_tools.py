@@ -355,8 +355,8 @@ def review(
                     )
 
         # Pre-submission finding validation: force LLM self-correction if payload has boilerplate or missing line numbers
-        from webhook_agent.formatter import extract_json_payload
-        from webhook_agent.schemas import CodeReviewResponse, SyncReviewResponse
+        from webhook_agent.review.formatter import extract_json_payload
+        from webhook_agent.review.schemas import CodeReviewResponse, SyncReviewResponse
 
         parsed_data = extract_json_payload(body)
         if not parsed_data or not isinstance(parsed_data, dict):
