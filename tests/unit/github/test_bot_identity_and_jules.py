@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from webhook_agent.bot_identity import _is_bot_sender, is_jules_sender
 from webhook_agent.core.agent_definition import CONVERSATIONAL_INSTRUCTION
+from webhook_agent.github.bot_identity import _is_bot_sender, is_jules_sender
 from webhook_agent.processor import WebhookProcessor
 
 
