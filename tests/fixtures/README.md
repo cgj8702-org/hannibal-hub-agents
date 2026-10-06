@@ -11,7 +11,7 @@ This directory contains static fixtures and canonical sample webhook payloads us
 
 ## Usage
 
-These fixtures are loaded in unit tests (under `tests/unit/webhook_agent/`) to verify:
+These fixtures are loaded in unit tests (under `tests/unit/`) to verify:
 1. `processor.py` event routing and bot loop prevention logic.
 2. `schemas.py` and `bot_identity.py` user login extraction and bot identification.
 3. Payload normalization and deterministic idempotency hashing.

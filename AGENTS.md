@@ -21,7 +21,7 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 | Sync environment (after any `pyproject.toml` change) | `uv sync` |
 | Install the commit gate (once per clone) | `./scripts/install-git-hooks.sh` |
 | Lint, format, and type-check (same as the hook) | `./scripts/ruff-all.sh` |
-| One test file | `uv run pytest tests/unit/webhook_agent/test_worker.py` |
+| One test file | `uv run pytest tests/unit/test_worker.py` |
 | One test function | `uv run pytest <file> -k "<test_name>"` |
 | All unit tests | `uv run pytest tests/unit` |
 | Full suite (what CI runs) | `uv run pytest --tb=short -q` |
@@ -43,8 +43,6 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 - `src/webhook_agent/review/`: writeback policy, duplicate detection, verdict enforcement, review metadata.
 - `src/webhook_agent/tools/`: model-callable tools (AST, diff, search, symbol, test impact).
 - `.agents/skills/`: operational skills (`gcloud-logging`, `github-pr-manager`). Read the relevant skill before touching logs or PR lifecycle.
-
-**`src/webhook_agent/logic/` is deprecated.** It contains only backward-compatibility re-export shims. Never add new code or new imports there. Import from the canonical package (`models`, `analysis`, `state`, `review`). *(Remove this note once `logic/` is deleted.)*
 
 ---
 
