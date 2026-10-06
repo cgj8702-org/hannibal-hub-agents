@@ -437,7 +437,7 @@ class WebhookAgent:
         )
 
         self._conversational_app = App(
-            name=f"{self._app_name}_conversational",
+            name=self._app_name,
             root_agent=self._conversational_workflow,
             context_cache_config=context_cache_config,
             plugins=[
@@ -529,6 +529,12 @@ class WebhookAgent:
             session_service=self._session_service,
             memory_service=self._memory_service,
         )
+        if hasattr(self, "_conversational_app") and self._conversational_app is not None:
+            self._conversational_runner = runner_cls(
+                app=self._conversational_app,
+                session_service=self._session_service,
+                memory_service=self._memory_service,
+            )
         return next_model
 
     def _create_fallback_agent(self, error: Exception | None = None) -> None:
@@ -583,6 +589,12 @@ class WebhookAgent:
             parts.append(f"Comment: {comment_body}")
             if is_pr:
                 parts.append(f"Note: This comment is on Pull Request #{pr_num}.")
+        elif canonical.startswith("issues."):
+            issue = raw.get("issue", {})
+            issue_num = issue.get("number", "unknown")
+            parts.append(f"Issue Number: {issue_num}")
+            parts.append(f"Issue Title: {issue.get('title', 'N/A')}")
+            parts.append(f"Issue Body: {issue.get('body') or ''}")
         elif canonical.startswith("pull_request."):
             pr = raw.get("pull_request", {})
             pr_num = pr.get("number", "unknown")
@@ -982,26 +994,30 @@ class WebhookAgent:
                     return
 
             # Try with retry and optional fallback model
+            active_app_name = (
+                getattr(getattr(active_runner, "app", None), "name", self._app_name)
+                or self._app_name
+            )
             for attempt in range(_MAX_RETRIES):
                 try:
                     # Ensure session exists before invoking the runner.
                     # In the installed ADK version, InMemorySessionService only
                     # exposes async helpers, so we must await them here.
                     session = await self._session_service.get_session(
-                        app_name=self._app_name,
+                        app_name=active_app_name,
                         user_id=user_id,
                         session_id=session_id,
                     )
                     if session is None:
                         await self._session_service.create_session(
-                            app_name=self._app_name,
+                            app_name=active_app_name,
                             user_id=user_id,
                             session_id=session_id,
                             state=deterministic_state,
                         )
                         # Re-fetch the session after creation
                         session = await self._session_service.get_session(
-                            app_name=self._app_name,
+                            app_name=active_app_name,
                             user_id=user_id,
                             session_id=session_id,
                         )
@@ -1025,7 +1041,7 @@ class WebhookAgent:
                             ),
                         )
                         session = await self._session_service.get_session(
-                            app_name=self._app_name,
+                            app_name=active_app_name,
                             user_id=user_id,
                             session_id=session_id,
                         )
@@ -1059,7 +1075,7 @@ class WebhookAgent:
                     # Set user_state values - they get merged into session.state by InMemorySessionService
                     # This is needed because session copies are returned and our direct mutations wouldn't persist
                     user_state_map = self._session_service.user_state.setdefault(
-                        self._app_name, {}
+                        active_app_name, {}
                     ).setdefault(user_id, {})
                     user_state_map["gh_client"] = gh_client
                     user_state_map["repo_full_name"] = repo_full_name
@@ -1096,7 +1112,7 @@ class WebhookAgent:
 
                     # Fetch the final session state with all sub-agent output_key updates
                     final_session = await self._session_service.get_session(
-                        app_name=self._app_name,
+                        app_name=active_app_name,
                         user_id=user_id,
                         session_id=session_id,
                     )

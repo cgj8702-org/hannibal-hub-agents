@@ -1374,3 +1374,89 @@ class TestConversationalAgent:
         results = agent.plan_and_execute(event_data, mock_gh, trace_id="trace-test-rl")
         mock_issue.create_comment.assert_not_called()
         assert not any(r.tool == "add_comment" for r in results)
+
+    def test_conversational_app_name_aligned_with_agent(self):
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        assert agent._conversational_app.name == agent._app_name
+
+    def test_build_user_message_for_issues_opened(self):
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        event_data = {
+            "canonical": "issues.opened",
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "issue": {
+                    "number": 233,
+                    "title": "Testing conversational abilities",
+                    "body": "Comment below your thoughts.",
+                }
+            },
+        }
+        msg = agent._build_user_message(event_data)
+        text = msg.parts[0].text
+        assert "Canonical Event: issues.opened" in text
+        assert "Issue Number: 233" in text
+        assert "Issue Title: Testing conversational abilities" in text
+        assert "Issue Body: Comment below your thoughts." in text
+
+    def test_issues_opened_conversational_dispatch(self, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=False)
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = MagicMock()
+        mock_comment.html_url = "https://github.com/owner/repo/issues/233#issuecomment-1"
+        mock_issue.create_comment.return_value = mock_comment
+
+        _COMMENT_RATE_LIMITER._history.pop("owner/repo#233", None)
+
+        fake_event = SimpleNamespace(
+            usage_metadata=None,
+            get_function_responses=list,
+            content=SimpleNamespace(
+                parts=[
+                    SimpleNamespace(
+                        text="Hello! I'm here and ready to pair program with you :3",
+                        thought=False,
+                    )
+                ]
+            ),
+        )
+
+        async def fake_run_async(*args, **kwargs):
+            yield fake_event
+
+        monkeypatch.setattr(agent._conversational_runner, "run_async", fake_run_async)
+
+        event_data = {
+            "canonical": "issues.opened",
+            "repo_name": "owner/repo",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "repository": {"full_name": "owner/repo"},
+                "issue": {
+                    "number": 233,
+                    "title": "Testing conversational abilities",
+                    "body": "Comment below your thoughts.",
+                },
+            },
+        }
+
+        results = agent.plan_and_execute(event_data, mock_gh, trace_id="trace-test-issue-open")
+        assert len(results) == 1
+        assert results[0].tool == "add_comment"
+        assert results[0].success is True
+        mock_issue.create_comment.assert_called_once_with(
+            "Hello! I'm here and ready to pair program with you :3"
+        )

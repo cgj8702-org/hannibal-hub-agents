@@ -91,14 +91,20 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> N
                 pr = repo.get_pull(int(pr_num))
                 pr_comment = pr.get_review_comment(int(comment_id))
                 pr_comment.create_reaction("eyes")
-        elif canonical in ("pull_request.opened", "pull_request.reopened") or (
-            canonical.startswith("pull_request.") and action in ("opened", "reopened")
+        elif canonical in (
+            "pull_request.opened",
+            "pull_request.reopened",
+            "issues.opened",
+            "issues.reopened",
+        ) or (
+            canonical.startswith(("pull_request.", "issues.")) and action in ("opened", "reopened")
         ):
-            pr_data = raw.get("pull_request", {})
-            pr_num = pr_data.get("number")
-            if pr_num:
+            target_num = (raw.get("pull_request") or {}).get("number") or (
+                raw.get("issue") or {}
+            ).get("number")
+            if target_num:
                 repo = gh.get_repo(repo_name)
-                issue = repo.get_issue(pr_num)
+                issue = repo.get_issue(int(target_num))
                 issue.create_reaction("eyes")
     except Exception as exc:
         logger.warning("Failed to add eyes reaction to comment: %s", exc)
