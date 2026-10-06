@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from .firestore_registry import FirestoreDepletedModelRegistry, firestore_depleted_registry
+from .depleted_registry import (
+    DepletedModelRegistry,
+    FirestoreDepletedModelRegistry,
+    firestore_depleted_registry,
+)
 from .genai_provider import (
     GenerateContentProvider,
     TextGenerationProvider,
@@ -10,7 +14,6 @@ from .genai_provider import (
     get_text_generation_provider,
 )
 from .model_chain import (
-    DepletedModelRegistry,
     get_active_model,
     get_model_chain,
     is_gemini_3_plus,

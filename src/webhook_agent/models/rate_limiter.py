@@ -94,7 +94,7 @@ def _get_firestore_tier() -> str:
         return cached_tier
 
     try:
-        from webhook_agent.models.firestore_registry import firestore_depleted_registry
+        from webhook_agent.models.depleted_registry import firestore_depleted_registry
 
         db = firestore_depleted_registry._get_db()
         if db is not None:

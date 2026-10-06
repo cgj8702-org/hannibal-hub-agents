@@ -41,7 +41,7 @@ from webhook_agent.core.loop_helpers import (
     get_shared_text_generation_provider,
     run_in_bg_loop,
 )
-from webhook_agent.logic.plugins import (
+from webhook_agent.core.plugins import (
     ToolOutputPruningPlugin,
     WebhookHistoryPruningPlugin,
 )

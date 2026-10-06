@@ -10,7 +10,7 @@ from typing import Any
 
 from webhook_agent.constants import DEFAULT_FIRESTORE_PROJECT
 
-logger = logging.getLogger("webhook_agent.logic.review_checkpoint")
+logger = logging.getLogger("webhook_agent.state.review_checkpoint")
 
 firestore: Any = None
 try:

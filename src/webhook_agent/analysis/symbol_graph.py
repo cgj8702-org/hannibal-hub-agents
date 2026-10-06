@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("webhook_agent.logic.symbol_graph")
+logger = logging.getLogger("webhook_agent.analysis.symbol_graph")
 
 
 @dataclass(frozen=True)

@@ -44,7 +44,7 @@ from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
     run_in_bg_loop,
 )
-from webhook_agent.logic.plugins import (
+from webhook_agent.core.plugins import (
     ToolOutputPruningPlugin,
     WebhookHistoryPruningPlugin,
 )
@@ -664,8 +664,12 @@ class WebhookAgent:
             # Ground transitive dependency updates when uv.lock is modified
             if any(f.endswith("uv.lock") for f in changed_files):
                 try:
-                    from ..logic.dependency_tree import build_dependency_grounding_context
-                    from ..logic.lockfile_validator import parse_bumped_packages_from_diff
+                    from webhook_agent.analysis.dependency_tree import (
+                        build_dependency_grounding_context,
+                    )
+                    from webhook_agent.analysis.lockfile_validator import (
+                        parse_bumped_packages_from_diff,
+                    )
 
                     bumps = parse_bumped_packages_from_diff(raw["pr_diff"])
                     bumped_names = [b["name"] for b in bumps]

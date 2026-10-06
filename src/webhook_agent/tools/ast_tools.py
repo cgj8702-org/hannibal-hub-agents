@@ -83,7 +83,7 @@ def verify_python_ast(
     and calculate AST impact scores.
 
     Args:
-        file_path: Path to the target Python file (e.g. 'src/webhook_agent/logic/model_chain.py').
+        file_path: Path to the target Python file (e.g. 'src/webhook_agent/models/model_chain.py').
         code_snippet: Optional Python source code snippet to verify. If omitted or empty,
                       the tool attempts to read the file from disk or diff_text.
         diff_text: Optional full PR diff text from which right-side file lines can be extracted
