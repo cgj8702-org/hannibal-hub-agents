@@ -99,3 +99,20 @@ def test_instructions_exist_and_non_empty() -> None:
     assert len(SYSTEM_INSTRUCTION) > 100
     assert len(AUDITOR_CONTEXT_INSTRUCTION) > 100
     assert len(CONVERSATIONAL_INSTRUCTION) > 100
+
+
+def test_webhook_agent_build_user_message_delegation_parity() -> None:
+    """Verify WebhookAgent._build_user_message delegates identically to build_user_message."""
+    from webhook_agent.core.agent_definition import WebhookAgent
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "hannibal/hannibal-hub-agents"},
+        "sender": {"login": "developer"},
+        "raw_payload": {"pull_request": {"number": 123}},
+    }
+    agent = WebhookAgent(dry_run=True)
+    delegated = agent._build_user_message(event_data)
+    direct = build_user_message(event_data)
+    assert delegated.role == direct.role
+    assert delegated.parts[0].text == direct.parts[0].text
