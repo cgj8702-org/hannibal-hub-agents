@@ -1,10 +1,10 @@
-"""Tests for agent_core.py — focusing on AgentCore delegation and trace ID generation."""
+"""Tests for AgentCore delegation and trace ID generation (inlined into processor)."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from webhook_agent.agent_core import (
+from webhook_agent.processor import (
     AgentCore,
     generate_trace_id,
 )
