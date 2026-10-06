@@ -460,10 +460,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 7
+        assert len(tool_names) == 6
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 6 audit-only tools plus review fallback."""
+        """Tool names should match the 5 audit-only tools plus review fallback."""
         from webhook_agent.webhook_agent import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -477,7 +477,6 @@ class TestToolRegistration:
                 "get_commit_diff",
                 "get_current_time",
                 "google_search_grounding_tool",
-                "search_codebase",
                 "review",
             ]
         )
@@ -513,6 +512,7 @@ class TestToolRegistration:
             "open_pr",
             "update_branch_from_base",
             "resolve_pr_conflicts",
+            "search_codebase",
             "auto_fix_pr_review_feedback",
             "mark_ready_for_review",
             "merge_pr",
@@ -1258,7 +1258,7 @@ class TestConversationalAgent:
         }
         # Tools should include codebase grounding tools but NOT review
         assert "read_file" in tool_names
-        assert "search_codebase" in tool_names
+        assert "search_codebase" not in tool_names
         assert "review" not in tool_names
 
     def test_conversational_comment_dispatch_posts_comment(self, monkeypatch):

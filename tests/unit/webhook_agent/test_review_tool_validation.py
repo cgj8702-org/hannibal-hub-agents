@@ -173,7 +173,7 @@ def test_review_accepts_valid_payload(mock_submit, mock_ctx):
 
 def test_review_rejects_python_pr_without_ast_verification(mock_ctx):
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
-    mock_ctx.state["tools_executed"] = ["search_codebase"]
+    mock_ctx.state["tools_executed"] = ["read_file"]
     payload = {
         "executive_summary": "Test summary",
         "confidence": 5,
