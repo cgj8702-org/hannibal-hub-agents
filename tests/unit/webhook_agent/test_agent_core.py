@@ -788,6 +788,71 @@ class TestAddLabel:
 
 
 # ---------------------------------------------------------------------------
+# Tests: create_issue tool
+# ---------------------------------------------------------------------------
+
+
+class TestCreateIssue:
+    def test_create_issue_success(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import create_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        mock_issue = MagicMock()
+        mock_issue.number = 101
+        mock_issue.html_url = "https://github.com/owner/repo/issues/101"
+        repo.create_issue.return_value = mock_issue
+
+        result = create_issue(
+            ctx,
+            title="refactor: clean up legacy code",
+            body="Task specification for Jules",
+            labels=["jules"],
+        )
+        assert "Successfully created issue #101" in result
+        assert "https://github.com/owner/repo/issues/101" in result
+        assert "labels ['jules']" in result
+        repo.create_issue.assert_called_once_with(
+            title="refactor: clean up legacy code",
+            body="Task specification for Jules",
+            labels=["jules"],
+        )
+
+    def test_create_issue_error_handling(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.webhook_agent import create_issue
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.create_issue.side_effect = Exception("API rate limit exceeded")
+
+        result = create_issue(
+            ctx,
+            title="test issue",
+            body="test body",
+        )
+        assert "Error creating issue: API rate limit exceeded" in result
+
+    def test_conversational_agent_equipped_with_create_issue(self):
+        from webhook_agent.webhook_agent import WebhookAgent
+
+        agent = WebhookAgent(dry_run=True)
+        tool_names = {
+            getattr(t, "name", getattr(t, "__name__", str(t)))
+            for t in agent._conversational_agent.tools
+        }
+        assert "create_issue" in tool_names
+        assert "add_label" in tool_names
+
+
+# ---------------------------------------------------------------------------
 # Tests: update_issue tool
 # ---------------------------------------------------------------------------
 

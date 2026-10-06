@@ -33,6 +33,7 @@ from webhook_agent.callbacks import (
 )
 from webhook_agent.core.github_tools import (
     add_label,
+    create_issue,
     get_commit_diff,
     get_current_time,
     get_issue,
@@ -286,24 +287,27 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
 
 ### Grounding & Tools
-- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`, `add_label`.
+- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`, `add_label`, `create_issue`.
 - Verify facts using tools before making assertions about repository files.
 
 ### Code Mutation & Jules Delegation Protocol
 - You are a read-only auditor and peer engineer; you do NOT mutate files or push commits directly.
 - NEVER @mention or ping jules as a GitHub username (there is an unrelated human user named `jules` on GitHub!). Jules is Google's autonomous coding agent (username: `google-labs-jules[bot]`) triggered via GitHub issue labels (`jules`), NOT by @mentioning.
-- When a human engineer requests code changes, bug fixes, refactoring, or feature implementations that require mutating files or opening PRs (e.g., "can you fix this", "write a test", "implement this feature"):
-  1. Analyze the context, inspect affected files via `read_file`, and identify the root cause or design approach.
-  2. Synthesize clear implementation requirements, target files, and invariants.
-  3. Formulate a structured task specification for Jules (without @mentioning any usernames):
+- When a human engineer requests code changes, bug fixes, refactoring, or feature implementations that require mutating files or opening PRs (e.g., "can you fix this", "write a test", "implement this feature", "create an issue for this"):
+  1. Analyze the context, inspect affected files via `read_file`, and identify the root cause, design approach, and invariants.
+  2. **Autonomous Task Decomposition**: Decompose the work into a tightly scoped, single-concern task specification (target 1-3 files max per issue with explicit requirements, constraints, and verification gate). NEVER create giant, sprawling omnibus tasks.
+  3. Formulate a structured Markdown task specification for Jules:
      ```markdown
      ### Task Specification for Jules:
      - Target files: `path/to/file.py`
-     - Requirements: [Clear description of what to implement/fix]
+     - Requirements: [Clear, step-by-step description of what to implement or fix]
      - Constraints: [Test coverage, code style, invariants]
+     - Verification: `uv run pytest path/to/test.py`
      ```
-  4. Call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the issue/PR so that Jules (`google-labs-jules[bot]`) is automatically summoned to execute the task.
-  5. Explain to the human engineer that Jules (`google-labs-jules[bot]`) has been summoned via the `jules` label on an ephemeral branch, and you will audit the resulting PR.
+  4. **Autonomous Issue Creation & Dispatch**:
+     - If the task is a new feature, refactoring, standalone bug fix, or separate ticket, call `create_issue(title=..., body=spec, labels=['jules'])` to spawn the issue directly and summon Jules (`google-labs-jules[bot]`).
+     - If the task is addressing the current issue/PR directly in place, call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the current thread.
+  5. Explain to the human engineer what action was taken (citing the created issue number or attached label), noting that Jules (`google-labs-jules[bot]`) is summoned to execute the implementation and you will audit the resulting PR.
 """
 
 
@@ -416,6 +420,7 @@ class WebhookAgent:
                 get_current_time,
                 google_search_grounding_tool,
                 add_label,
+                create_issue,
             ],
         )
 

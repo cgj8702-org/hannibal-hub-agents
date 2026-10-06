@@ -441,6 +441,41 @@ def add_label(ctx: Context, issue_number: int, labels: list[str]) -> str:
         return f"Error adding labels to #{issue_number}: {e}"
 
 
+def create_issue(
+    ctx: Context,
+    title: str,
+    body: str,
+    labels: list[str] | None = None,
+) -> str:
+    """Create a new GitHub issue in the repository.
+
+    Use this tool to autonomously spawn well-defined tasks, bug reports,
+    or refactoring jobs (e.g. attaching the 'jules' label so that Google Labs
+    Jules can execute the implementation).
+
+    Args:
+        title: Issue title.
+        body: Markdown issue description and structured task specification.
+        labels: Optional list of label names to attach (e.g. ['jules']).
+
+    Returns:
+        A string describing the result, including issue number and URL.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        sanitized_body = _sanitize_pr_body(body)
+        kwargs: dict[str, Any] = {"title": title, "body": sanitized_body}
+        if labels:
+            kwargs["labels"] = labels
+        issue = repo.create_issue(**kwargs)
+        labels_str = f" with labels {labels}" if labels else ""
+        return f"Successfully created issue #{issue.number} ({getattr(issue, 'html_url', 'created')}){labels_str}."
+    except Exception as e:
+        return f"Error creating issue: {e}"
+
+
 def update_issue(
     ctx: Context,
     number: int,
