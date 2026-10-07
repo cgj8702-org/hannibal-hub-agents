@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from webhook_agent.core.agent_definition import CONVERSATIONAL_INSTRUCTION
-from webhook_agent.github.bot_identity import _is_bot_sender, is_jules_sender
+from webhook_agent.github.bot_identity import _is_bot_event, _is_bot_sender, is_jules_sender
 from webhook_agent.processor import WebhookProcessor
 
 
@@ -154,3 +154,182 @@ def test_conversational_instruction_has_jules_delegation_protocol():
     assert "@jules" not in CONVERSATIONAL_INSTRUCTION
     assert "google-labs-jules" in CONVERSATIONAL_INSTRUCTION
     assert "Jules Delegation Protocol" in CONVERSATIONAL_INSTRUCTION
+
+
+def test_is_bot_sender_edge_cases():
+    assert _is_bot_sender(None) is False
+    assert _is_bot_sender("invalid") is False  # type: ignore[arg-type]
+    assert _is_bot_sender({}) is False
+    assert _is_bot_sender({"login": ""}) is False
+
+    # Known logins
+    assert _is_bot_sender({"login": "hannibal-hub-agents"}) is True
+    assert _is_bot_sender({"login": "hannibal-hub-agents[bot]"}) is True
+    assert _is_bot_sender({"login": "github-actions[bot]"}) is True
+
+    # Suffix [bot] + substring
+    assert _is_bot_sender({"login": "my-hannibal[bot]"}) is True
+    assert _is_bot_sender({"login": "ci-agent[bot]"}) is True
+    assert _is_bot_sender({"login": "unrelated[bot]"}) is False
+
+    # Sender type Bot
+    assert _is_bot_sender({"login": "hannibal-runner", "type": "Bot"}) is True
+    assert _is_bot_sender({"login": "custom-agent-worker", "type": "Bot"}) is True
+    assert _is_bot_sender({"login": "unrelated-runner", "type": "Bot"}) is False
+    assert _is_bot_sender({"login": "hannibal-runner", "type": "User"}) is False
+
+
+def test_is_bot_event_top_level_and_raw_sender():
+    # Top-level sender
+    assert _is_bot_event({"sender": {"login": "hannibal-hub-agents[bot]"}}) is True
+    assert _is_bot_event({"sender": {"login": "human"}}) is False
+    assert _is_bot_event({"sender": {"login": "human"}, "raw_payload": None}) is False
+
+    # Raw payload sender
+    assert (
+        _is_bot_event(
+            {
+                "sender": {"login": "human"},
+                "raw_payload": {"sender": {"login": "hannibal-hub-agents[bot]"}},
+            }
+        )
+        is True
+    )
+
+
+def test_is_bot_event_comment_and_review_authors():
+    # Comment author
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "comment": {"user": {"login": "hannibal-hub-agents[bot]"}},
+                }
+            }
+        )
+        is True
+    )
+
+    # Review author
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "review": {"user": {"login": "hannibal-hub-agents[bot]"}},
+                }
+            }
+        )
+        is True
+    )
+
+    # Review comment author
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "review_comment": {"user": {"login": "hannibal-hub-agents[bot]"}},
+                }
+            }
+        )
+        is True
+    )
+
+
+def test_is_bot_event_performed_via_github_app(monkeypatch):
+    # Root level app slug
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "performed_via_github_app": {"slug": "hannibal-hub-agents"},
+                }
+            }
+        )
+        is True
+    )
+
+    # In comment
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "comment": {"performed_via_github_app": {"slug": "hannibal-hub-agents"}},
+                }
+            }
+        )
+        is True
+    )
+
+    # In review
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "review": {"performed_via_github_app": {"slug": "hannibal-hub-agents"}},
+                }
+            }
+        )
+        is True
+    )
+
+    # In review comment
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "review_comment": {"performed_via_github_app": {"slug": "hannibal-hub-agents"}},
+                }
+            }
+        )
+        is True
+    )
+
+    # App ID match via environment variable
+    monkeypatch.setenv("GITHUB_APP_ID", "998877")
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "performed_via_github_app": {"id": 998877, "slug": "custom-app"},
+                }
+            }
+        )
+        is True
+    )
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "performed_via_github_app": {"id": 112233, "slug": "custom-app"},
+                }
+            }
+        )
+        is False
+    )
+
+    # Unrelated app
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    assert (
+        _is_bot_event(
+            {
+                "raw_payload": {
+                    "performed_via_github_app": {"slug": "codecov"},
+                }
+            }
+        )
+        is False
+    )
+
+    # Clean non-bot event
+    assert (
+        _is_bot_event(
+            {
+                "sender": {"login": "octocat"},
+                "raw_payload": {
+                    "sender": {"login": "octocat"},
+                    "comment": {"user": {"login": "octocat"}},
+                },
+            }
+        )
+        is False
+    )
