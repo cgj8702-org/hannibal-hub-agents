@@ -338,3 +338,28 @@ def test_review_handles_adk_state_object_properly(mock_submit, mock_ctx):
     res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
     assert res == "Review submitted"
     assert mock_submit.called
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_accepts_advisory_minor_suggestion_with_empty_suggested_fix(mock_submit, mock_ctx):
+    """Verify that review() tool accepts advisory minor suggestions with empty suggested_fix."""
+    mock_submit.return_value = ("Review submitted", True)
+    mock_ctx.state["deterministic_changed_files"] = ["README.md"]
+    payload = {
+        "executive_summary": "Docs review with advisory feedback.",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "README.md",
+                "line": 10,
+                "description": "Consider adding a quickstart section for new contributors.",
+                "suggested_fix": "",
+            }
+        ],
+        "context_gaps": [],
+    }
+    res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
+    assert res == "Review submitted"
+    assert mock_submit.called

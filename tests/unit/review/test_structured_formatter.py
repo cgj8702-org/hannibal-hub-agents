@@ -858,3 +858,78 @@ def test_normalize_sync_review_dict_preserves_categories():
     assert resolutions[0]["category"] == "CRITICAL"
     assert resolutions[1]["category"] == "SUGGESTION"
     assert resolutions[2]["category"] == "RISK"
+
+
+def test_normalize_code_review_dict_rescues_evidence_only_invariants():
+    """Verify that normalize_code_review_dict rescues invariants emitted with only path/line/evidence."""
+    raw_data = {
+        "executive_summary": "Comprehensive tool input gate PR.",
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [
+            {
+                "path": "src/webhook_agent/core/callbacks.py",
+                "line": 281,
+                "evidence": "Universal Pydantic schema lookup and validation correctly intercepts raw tool arguments.",
+            },
+            {
+                "path": "src/webhook_agent/tools/github_tools.py",
+                "line": "556",
+                "evidence": "Explicitly verifies pr.draft and pr.mergeable status prior to invoking pr.merge().",
+            },
+        ],
+    }
+    normalized = normalize_code_review_dict(raw_data)
+    invariants = normalized["verified_invariants"]
+    assert len(invariants) == 2
+    assert invariants[0]["path"] == "src/webhook_agent/core/callbacks.py"
+    assert invariants[0]["line"] == 281
+    assert "Universal Pydantic schema lookup" in invariants[0]["invariant"]
+    assert "Universal Pydantic schema lookup" in invariants[0]["evidence"]
+
+    assert invariants[1]["line"] == 556
+    assert "Explicitly verifies pr.draft" in invariants[1]["invariant"]
+
+    # Verify rendering into markdown
+    cr_obj = CodeReviewResponse.model_validate(normalized)
+    md = cr_obj.to_markdown("APPROVE")
+    assert "### 🛡️ Verified Invariants & Edge Cases" in md
+    assert "`src/webhook_agent/core/callbacks.py:281`" in md
+    assert "`src/webhook_agent/tools/github_tools.py:556`" in md
+
+
+def test_normalize_code_review_dict_rescues_string_invariants():
+    """Verify that normalize_code_review_dict coerces plain string invariants."""
+    raw_data = {
+        "executive_summary": "Clean review.",
+        "verified_invariants": ["In-memory cache expiration invariant preserved across threads."],
+    }
+    normalized = normalize_code_review_dict(raw_data)
+    assert len(normalized["verified_invariants"]) == 1
+    inv = normalized["verified_invariants"][0]
+    assert inv["invariant"] == "In-memory cache expiration invariant preserved across threads."
+    assert inv["evidence"] == "In-memory cache expiration invariant preserved across threads."
+
+
+def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
+    """Verify that normalize_sync_review_dict rescues invariants in synchronization reviews."""
+    raw_data = {
+        "summary": "Incremental sync diff verified.",
+        "resolutions": [],
+        "verified_invariants": [
+            {
+                "path": "src/webhook_agent/state/review_checkpoint.py",
+                "line": 416,
+                "evidence": "Checkpoint marked completed only after successful review writeback.",
+            }
+        ],
+    }
+    normalized = normalize_sync_review_dict(raw_data)
+    assert len(normalized["verified_invariants"]) == 1
+    assert normalized["verified_invariants"][0]["line"] == 416
+    assert "Checkpoint marked completed" in normalized["verified_invariants"][0]["invariant"]
+
+    sync_obj = SyncReviewResponse.model_validate(normalized)
+    md = sync_obj.to_markdown("APPROVE")
+    assert "### 🛡️ Verified Invariants & Edge Cases" in md
+    assert "`src/webhook_agent/state/review_checkpoint.py:416`" in md
