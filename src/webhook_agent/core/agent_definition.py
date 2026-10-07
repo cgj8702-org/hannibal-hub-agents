@@ -19,7 +19,6 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 
-from webhook_agent.bot_identity import _is_bot_event
 from webhook_agent.core.callbacks import (
     after_model_callback,
     after_tool_callback,
@@ -48,6 +47,7 @@ from webhook_agent.core.prompts import (
     get_max_input_tokens,
 )
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
+from webhook_agent.github.bot_identity import _is_bot_event
 from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
     get_active_model,

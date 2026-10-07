@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from webhook_agent.pr_context import (
+from webhook_agent.github.pr_context import (
     _prefetch_inline_comment_context,
     _prefetch_pr_diff,
     _prefetch_previous_bot_reviews,

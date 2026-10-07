@@ -50,21 +50,18 @@ flowchart TD
 │   ├── webhook_agent/         # Core Webhook Orchestrator Package
 │       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter)
 │       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, callbacks, & plugins
+│       ├── github/          # GitHub App authentication, bot identity, and PR context enrichment
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
 │       ├── review/          # Code review verdict parser, scorecard enforcement, schemas, & formatter
 │       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
 │       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff tools, search)
 │       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
 │       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
-│       ├── pr_context.py    # GitHub diff & PR context prefetching
-│       ├── bot_identity.py  # Multi-signal bot identity detection for loop avoidance
-│       ├── github_credential_helper.py # GitHub App JWT generation & cached installation tokens
-│       ├── webhook_types.py # Common dataclasses and ActionResult definitions
-│       └── templates/       # Local prompt & code review templates
+│       └── webhook_types.py # Common dataclasses and ActionResult definitions
 ├── tests/
 │   ├── eval/                # Continuous quality evaluation datasets & configs
 │   ├── fixtures/            # Sample webhook payloads & review event fixtures
-│   └── unit/                # Domain-mirrored unit test suite (analysis, core, models, review, state, tools)
+│   └── unit/                # Domain-mirrored unit test suite (analysis, core, github, models, review, state, tools)
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 └── README.md                # Repository documentation

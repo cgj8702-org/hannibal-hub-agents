@@ -28,6 +28,20 @@ from typing import Any
 from github import Auth, Github
 
 from webhook_agent.core.cancellation import pr_closed_registry
+from webhook_agent.github.bot_identity import _is_bot_event, is_jules_sender
+from webhook_agent.github.credentials import (
+    generate_jwt,
+    get_installation_token,
+    load_cached_token,
+    load_private_key,
+    save_cached_token,
+)
+from webhook_agent.github.pr_context import (
+    _prefetch_inline_comment_context,
+    _prefetch_pr_diff,
+    _prefetch_previous_bot_reviews,
+    _should_prefetch_diff,
+)
 from webhook_agent.review.fast_path import (
     evaluate_dependency_fast_path,
     is_base_branch_merge_sync,
@@ -36,21 +50,7 @@ from webhook_agent.review.formatter import (
     truncate_log_payload,
 )
 
-from .bot_identity import _is_bot_event, is_jules_sender
 from .core.agent_definition import WebhookAgent
-from .github_credential_helper import (
-    generate_jwt,
-    get_installation_token,
-    load_cached_token,
-    load_private_key,
-    save_cached_token,
-)
-from .pr_context import (
-    _prefetch_inline_comment_context,
-    _prefetch_pr_diff,
-    _prefetch_previous_bot_reviews,
-    _should_prefetch_diff,
-)
 from .review.comment_poster import _add_eyes_reaction
 from .state.review_checkpoint import review_checkpoint_manager
 from .webhook_types import ActionResult
