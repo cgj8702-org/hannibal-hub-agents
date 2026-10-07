@@ -265,6 +265,48 @@ def create_issue(
         return f"Error creating issue: {e}"
 
 
+def update_issue(
+    ctx: Context,
+    issue_number: int,
+    title: str | None = None,
+    body: str | None = None,
+    state: str | None = None,
+    labels: list[str] | None = None,
+) -> str:
+    """Update an existing GitHub issue's title, body, state, or labels.
+
+    Args:
+        issue_number: Issue or PR number.
+        title: Optional new issue title.
+        body: Optional new issue body.
+        state: Optional state: 'open' or 'closed'.
+        labels: Optional new list of labels.
+
+    Returns:
+        A string describing the result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        issue = repo.get_issue(number=issue_number)
+        edit_kwargs: dict[str, Any] = {}
+        if title is not None:
+            edit_kwargs["title"] = title
+        if body is not None:
+            edit_kwargs["body"] = body
+        if state is not None:
+            edit_kwargs["state"] = state.lower()
+        if labels is not None:
+            edit_kwargs["labels"] = labels
+        if not edit_kwargs:
+            return f"No changes specified for #{issue_number}."
+        issue.edit(**edit_kwargs)
+        return f"Successfully updated issue #{issue_number}."
+    except Exception as e:
+        return f"Error updating issue #{issue_number}: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Pulls API (PR-specific extensions)
 # ---------------------------------------------------------------------------
@@ -484,6 +526,38 @@ def review(
         if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(e)):
             raise
         return f"Error submitting review: {e}"
+
+
+def merge_pr(
+    ctx: Context,
+    pr_number: int,
+    merge_method: str = "merge",
+) -> str:
+    """Merge an approved pull request.
+
+    Args:
+        pr_number: Pull request number to merge.
+        merge_method: Merge method: 'merge', 'squash', or 'rebase'. Defaults to 'merge'.
+
+    Returns:
+        A string describing the merge result.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    try:
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(number=pr_number)
+        if pr.draft:
+            return f"PR #{pr_number} is a draft and cannot be merged."
+        if pr.mergeable is False:
+            return f"PR #{pr_number} has merge conflicts and cannot be merged."
+
+        status = pr.merge(merge_method=merge_method)
+        if status.merged:
+            return f"Successfully merged PR #{pr_number} via {merge_method} ({status.sha[:7]})."
+        return f"Failed to merge PR #{pr_number}: {getattr(status, 'message', 'unknown status')}"
+    except Exception as e:
+        return f"Error merging PR #{pr_number}: {e}"
 
 
 def get_current_time(ctx: Context) -> dict[str, str]:

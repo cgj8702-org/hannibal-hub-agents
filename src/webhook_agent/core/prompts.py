@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from google.genai import types as genai_types
@@ -127,7 +128,7 @@ These rules override your judgment. Apply them mechanically based on your findin
 
 - **ANTI-RUBBER-STAMPING MANDATE**: For any non-trivial PR (> 20 lines changed or touching core logic), rubber-stamping is strictly prohibited. You MUST thoroughly analyze potential failure modes, operational risks, concurrency boundaries, or rate limits under `risks_and_edge_cases` and substantiate `verified_invariants`. If the code is cleanly implemented, `minor_suggestions` may be empty (`*None found.*`) rather than fabricating artificial nitpicks or echoing existing code back to the author.
 - **NO SYCOPHANCY / NO CHEERLEADING**: Do NOT use performative praise or generic cheerleading like "Splendid refactoring!", "Exemplary implementation!", or "Rock-solid PR!". State objective technical facts only.
-- **HIGH-SIGNAL RISK & EDGE-CASE ANALYSIS**: Highlight genuine potential failure modes, unhandled edge cases, rate limits, timeout risks, or concurrency boundaries when present.
+- **HIGH-SIGNAL RISK & EDGE-CASE ANALYSIS**: Highlight genuine potential failure modes, unhandled edge cases, rate limits, timeout risks, or concurrency boundaries when present. For every item in `risks_and_edge_cases`, you MUST provide a non-empty, actionable safeguard or mitigation under `recommendation`.
 - Every review should aim to include actionable, specific suggestions with file:line citations when improvements are possible.
 - Never say code is "verified" without citing specific evidence from the diff for each claim.
 - Do not summarize what the code does back to the author — focus on what could go WRONG and where subtle edge cases lurk.
@@ -176,11 +177,11 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
 
 ### Grounding & Tools
-- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `get_current_time`, `google_search_grounding_tool`, `add_label`, `create_issue`.
+- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `add_label`, `create_issue`, `update_issue`, `merge_pr`.
 - Verify facts using tools before making assertions about repository files.
 
-### Code Mutation & Jules Delegation Protocol
-- You are a read-only auditor and peer engineer; you do NOT mutate files or push commits directly.
+### Code Mutation, GitHub Ops & Jules Delegation Protocol
+- You do NOT directly edit source code files or push git commits to repositories; implementation changes are delegated to Jules or human peers.
 - NEVER @mention or ping jules as a GitHub username (there is an unrelated human user named `jules` on GitHub!). Jules is Google's autonomous coding agent (username: `google-labs-jules[bot]`) triggered via GitHub issue labels (`jules`), NOT by @mentioning.
 - When a human engineer requests code changes, bug fixes, refactoring, or feature implementations that require mutating files or opening PRs (e.g., "can you fix this", "write a test", "implement this feature", "create an issue for this"):
   1. Analyze the context, inspect affected files via `read_file`, and identify the root cause, design approach, and invariants.
@@ -193,10 +194,13 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
      - Constraints: [Test coverage, code style, invariants]
      - Verification: `uv run pytest path/to/test.py`
      ```
-  4. **Autonomous Issue Creation & Dispatch**:
+  4. **MANDATORY TOOL EXECUTION**:
+     - You MUST execute the tool function call directly; do NOT simply print markdown instructions for Jules in your text reply without calling the tool!
      - If the task is a new feature, refactoring, standalone bug fix, or separate ticket, call `create_issue(title=..., body=spec, labels=['jules'])` to spawn the issue directly and summon Jules (`google-labs-jules[bot]`).
      - If the task is addressing the current issue/PR directly in place, call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the current thread.
   5. Explain to the human engineer what action was taken (citing the created issue number or attached label), noting that Jules (`google-labs-jules[bot]`) is summoned to execute the implementation and you will audit the resulting PR.
+- When requested by maintainers to merge an approved, passing PR, invoke `merge_pr(pr_number=..., merge_method="merge")` (or "squash"/"rebase" as requested).
+- When asked to update an issue's status, title, description, or labels, invoke `update_issue(issue_number=...)`.
 """
 
 
@@ -208,11 +212,13 @@ def build_user_message(event_data: dict[str, Any]) -> genai_types.Content:
         sender.get("login", "unknown") if isinstance(sender, dict) else str(sender or "unknown")
     )
     raw = event_data.get("raw_payload", {})
+    now_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Build context from the event
     parts: list[str] = [
         f"Canonical Event: {canonical}",
         f"Sender: {sender_login}",
+        f"Current UTC Time: {now_utc}",
     ]
 
     comment_body = ""

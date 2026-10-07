@@ -450,9 +450,7 @@ class TestToolRegistration:
     def test_agent_tools_count(self):
         """Verify the exact tool count registered on the code auditor sub-agent.
 
-        Forward-fix: review restored as interactive fallback alongside the 6
-        deterministic grounding tools (Option A was too narrow for
-        issue_comment reconciliation).
+        Code auditor uses 4 focused tools: read_file, get_issue, get_commit_diff, review.
         """
         from webhook_agent.core.agent_definition import WebhookAgent
 
@@ -460,10 +458,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 6
+        assert len(tool_names) == 4
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 5 audit-only tools plus review fallback."""
+        """Tool names should match the 3 inspection tools plus review fallback."""
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -475,8 +473,6 @@ class TestToolRegistration:
                 "read_file",
                 "get_issue",
                 "get_commit_diff",
-                "get_current_time",
-                "google_search_grounding_tool",
                 "review",
             ]
         )
@@ -1204,8 +1200,14 @@ class TestConversationalAgent:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._conversational_agent.tools
         }
-        # Tools should include codebase grounding tools but NOT review
+        # Tools should include codebase grounding and ops tools but NOT review
         assert "read_file" in tool_names
+        assert "create_issue" in tool_names
+        assert "add_label" in tool_names
+        assert "update_issue" in tool_names
+        assert "merge_pr" in tool_names
+        assert "get_current_time" not in tool_names
+        assert "google_search_grounding_tool" not in tool_names
         assert "search_codebase" not in tool_names
         assert "review" not in tool_names
 

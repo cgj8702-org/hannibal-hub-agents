@@ -27,7 +27,7 @@ Hannibal Hub has evolved beyond rigid slash commands. The agent uses a decoupled
 
 ### 1. Dual-Runner Architecture in `WebhookAgent`
 - **`_runner` (`_code_auditor`)**: Configured with strict 1-turn clinical review instructions, precompiled AST dossier, and structured Pydantic response models. Only invoked when `_is_formal_review_eligible` evaluates to `True`.
-- **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with full codebase inspection tools (`read_file`, `get_issue`, `get_commit_diff`, `get_current_time`, `google_search_grounding_tool`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
+- **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with full codebase inspection and GitHub operations tools (`read_file`, `get_issue`, `get_commit_diff`, `add_label`, `create_issue`, `update_issue`, `merge_pr`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
 
 ### 2. Separation of Powers: Hannibal (Auditor) + Jules (Builder)
 - **Zero-Bypass Architecture**: Hannibal is strictly read-only and never pushes commits directly. Code mutations are handled autonomously by Jules (`google-labs-jules[bot]`) on isolated feature branches via the `jules` issue label.

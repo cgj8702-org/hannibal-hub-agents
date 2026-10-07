@@ -66,12 +66,12 @@ from webhook_agent.tools.github_tools import (
     add_label,
     create_issue,
     get_commit_diff,
-    get_current_time,
     get_issue,
+    merge_pr,
     read_file,
     review,
+    update_issue,
 )
-from webhook_agent.tools.search_tool import google_search_grounding_tool
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
@@ -191,8 +191,6 @@ class WebhookAgent:
                 read_file,
                 get_issue,
                 get_commit_diff,
-                get_current_time,
-                google_search_grounding_tool,
                 review,
             ],
         )
@@ -227,10 +225,10 @@ class WebhookAgent:
                 read_file,
                 get_issue,
                 get_commit_diff,
-                get_current_time,
-                google_search_grounding_tool,
                 add_label,
                 create_issue,
+                update_issue,
+                merge_pr,
             ],
         )
 
