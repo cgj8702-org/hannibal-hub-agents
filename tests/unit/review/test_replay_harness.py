@@ -30,10 +30,10 @@ import pytest
 from webhook_agent.review.grounding import (
     Finding,
     Kind,
-    extract_cited_symbols,
-    extract_identifiers,
     citation_overlap,
     diff_text_from_patches,
+    extract_cited_symbols,
+    extract_identifiers,
     verify_citations,
 )
 
@@ -391,9 +391,9 @@ def test_fixture_records_review_commits_and_incremental_diffs() -> None:
         for review in _bot_reviews(_load(path)):
             assert review.get("commit_id"), f"#{name} review {review.get('id')} has no commit_id"
             assert "incremental_tokens" in review, f"#{name} review missing incremental_tokens"
-    assert any(
-        review.get("incremental_tokens") for review in _bot_reviews(_load(FIXTURE_260))
-    ), "no incremental tokens recorded anywhere -- the rule would pass vacuously"
+    assert any(review.get("incremental_tokens") for review in _bot_reviews(_load(FIXTURE_260))), (
+        "no incremental tokens recorded anywhere -- the rule would pass vacuously"
+    )
 
 
 def test_recorder_tokenizer_matches_grounding_extractor() -> None:

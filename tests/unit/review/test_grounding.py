@@ -12,9 +12,9 @@ import pytest
 from webhook_agent.review.grounding import (
     Finding,
     citation_overlap,
+    diff_text_from_patches,
     extract_cited_symbols,
     extract_identifiers,
-    diff_text_from_patches,
     hard_reasons,
     verify_citations,
 )
