@@ -223,4 +223,3 @@ def test_cross_pr_reversal_is_detectable_from_the_fixtures() -> None:
     assert any("+def merge_pr(" in (patch or "") for patch in p258["patches"].values()), (
         "#258 diff does not re-add merge_pr"
     )
-
