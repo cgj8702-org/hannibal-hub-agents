@@ -1200,12 +1200,13 @@ class TestConversationalAgent:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._conversational_agent.tools
         }
-        # Tools should include codebase grounding and ops tools but NOT review
+        # Tools should include codebase grounding tools but NOT review
         assert "read_file" in tool_names
         assert "create_issue" in tool_names
         assert "add_label" in tool_names
-        assert "update_issue" in tool_names
-        assert "merge_pr" in tool_names
+        # Regression guard: unguarded mutating tools must stay unregistered.
+        assert "update_issue" not in tool_names
+        assert "merge_pr" not in tool_names
         assert "get_current_time" not in tool_names
         assert "google_search_grounding_tool" not in tool_names
         assert "search_codebase" not in tool_names

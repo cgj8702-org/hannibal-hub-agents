@@ -67,10 +67,8 @@ from webhook_agent.tools.github_tools import (
     create_issue,
     get_commit_diff,
     get_issue,
-    merge_pr,
     read_file,
     review,
-    update_issue,
 )
 from webhook_agent.webhook_types import ActionResult
 
@@ -227,8 +225,6 @@ class WebhookAgent:
                 get_commit_diff,
                 add_label,
                 create_issue,
-                update_issue,
-                merge_pr,
             ],
         )
 

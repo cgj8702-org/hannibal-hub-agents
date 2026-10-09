@@ -12,10 +12,8 @@ from .github_tools import (
     get_commit_diff,
     get_current_time,
     get_issue,
-    merge_pr,
     read_file,
     review,
-    update_issue,
 )
 from .schemas import (
     TOOL_INPUT_SCHEMAS,
@@ -23,10 +21,8 @@ from .schemas import (
     CreateIssueInput,
     GetCommitDiffInput,
     GetIssueInput,
-    MergePrInput,
     ReadFileInput,
     ReviewInput,
-    UpdateIssueInput,
 )
 from .search_tool import google_search_grounding_tool
 
@@ -36,10 +32,8 @@ __all__ = [
     "CreateIssueInput",
     "GetCommitDiffInput",
     "GetIssueInput",
-    "MergePrInput",
     "ReadFileInput",
     "ReviewInput",
-    "UpdateIssueInput",
     "add_label",
     "check_window",
     "create_issue",
@@ -47,10 +41,8 @@ __all__ = [
     "get_current_time",
     "get_issue",
     "google_search_grounding_tool",
-    "merge_pr",
     "read_file",
     "review",
-    "update_issue",
     "verify_line_reference",
     "verify_python_ast",
     "walk_right_side",

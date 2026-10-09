@@ -11,10 +11,8 @@ from webhook_agent.tools.schemas import (
     CreateIssueInput,
     GetCommitDiffInput,
     GetIssueInput,
-    MergePrInput,
     ReadFileInput,
     ReviewInput,
-    UpdateIssueInput,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -121,40 +119,6 @@ def test_create_issue_input():
         CreateIssueInput.model_validate({"body": "Test"})
 
 
-def test_update_issue_input():
-    # Valid
-    inp = UpdateIssueInput.model_validate(
-        {
-            "issue_number": 88,
-            "title": "Updated Title",
-            "state": "CLOSED",
-        }
-    )
-    assert inp.issue_number == 88
-    assert inp.title == "Updated Title"
-    assert inp.state == "closed"
-
-    # Missing issue_number
-    with pytest.raises(ValidationError):
-        UpdateIssueInput.model_validate({"title": "No number"})
-
-
-def test_merge_pr_input():
-    # Valid
-    inp = MergePrInput.model_validate({"pr_number": 200, "merge_method": "SQUASH"})
-    assert inp.pr_number == 200
-    assert inp.merge_method == "squash"
-
-    # Default merge_method
-    inp2 = MergePrInput.model_validate({"pr_number": "205"})
-    assert inp2.pr_number == 205
-    assert inp2.merge_method == "merge"
-
-    # Invalid merge method
-    with pytest.raises(ValidationError):
-        MergePrInput.model_validate({"pr_number": 1, "merge_method": "cherry-pick"})
-
-
 def test_tool_input_schemas_registry():
     assert "read_file" in TOOL_INPUT_SCHEMAS
     assert "get_issue" in TOOL_INPUT_SCHEMAS
@@ -162,5 +126,7 @@ def test_tool_input_schemas_registry():
     assert "review" in TOOL_INPUT_SCHEMAS
     assert "add_label" in TOOL_INPUT_SCHEMAS
     assert "create_issue" in TOOL_INPUT_SCHEMAS
-    assert "update_issue" in TOOL_INPUT_SCHEMAS
-    assert "merge_pr" in TOOL_INPUT_SCHEMAS
+    # Regression guard: unguarded mutating tools must not be re-registered without
+    # authorization gates. See the reviewer hardening plan, Phase 6.
+    assert "update_issue" not in TOOL_INPUT_SCHEMAS
+    assert "merge_pr" not in TOOL_INPUT_SCHEMAS

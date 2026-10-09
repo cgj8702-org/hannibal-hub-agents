@@ -109,53 +109,6 @@ class CreateIssueInput(ToolInputBase):
         return data
 
 
-class UpdateIssueInput(ToolInputBase):
-    """Input schema for update_issue tool."""
-
-    issue_number: int = Field(..., ge=1, description="Issue or PR number.")
-    title: str | None = Field(default=None, description="Updated issue title.")
-    body: str | None = Field(default=None, description="Updated issue body.")
-    state: Literal["open", "closed"] | None = Field(default=None, description="Issue state.")
-    labels: list[str] | None = Field(default=None, description="Updated list of labels.")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_aliases(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "issue_number" not in data:
-                if "pr_number" in data:
-                    data["issue_number"] = data["pr_number"]
-                elif "number" in data:
-                    data["issue_number"] = data["number"]
-            if "labels" in data and isinstance(data["labels"], str):
-                data["labels"] = [lbl.strip() for lbl in data["labels"].split(",") if lbl.strip()]
-            if "state" in data and isinstance(data["state"], str):
-                data["state"] = data["state"].lower()
-        return data
-
-
-class MergePrInput(ToolInputBase):
-    """Input schema for merge_pr tool."""
-
-    pr_number: int = Field(..., ge=1, description="Pull request number.")
-    merge_method: Literal["merge", "squash", "rebase"] = Field(
-        default="merge", description="Merge method to use."
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_aliases(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "pr_number" not in data:
-                if "issue_number" in data:
-                    data["pr_number"] = data["issue_number"]
-                elif "number" in data:
-                    data["pr_number"] = data["number"]
-            if "merge_method" in data and isinstance(data["merge_method"], str):
-                data["merge_method"] = data["merge_method"].lower()
-        return data
-
-
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
     "get_issue": GetIssueInput,
@@ -163,8 +116,6 @@ TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "review": ReviewInput,
     "add_label": AddLabelInput,
     "create_issue": CreateIssueInput,
-    "update_issue": UpdateIssueInput,
-    "merge_pr": MergePrInput,
 }
 
 __all__ = [
@@ -173,9 +124,7 @@ __all__ = [
     "CreateIssueInput",
     "GetCommitDiffInput",
     "GetIssueInput",
-    "MergePrInput",
     "ReadFileInput",
     "ReviewInput",
     "ToolInputBase",
-    "UpdateIssueInput",
 ]
