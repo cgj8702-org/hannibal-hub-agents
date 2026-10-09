@@ -13,6 +13,10 @@ from webhook_agent.review.grounding import (
     Finding,
     citation_overlap,
     diff_text_from_patches,
+    extract_bare_symbols,
+    extract_cited_paths,
+    extract_cited_symbols,
+    extract_identifiers,
     hard_reasons,
     verify_citations,
 )
@@ -160,3 +164,56 @@ def test_diff_text_from_patches_skips_missing_patches() -> None:
     diff = diff_text_from_patches({"a/b.py": None, "b/c.py": "@@ -1,1 +1,1 @@\n+x\n"})
     assert "+++ b/c.py" in diff
     assert "b.py" not in diff.replace("+++ b/c.py", "")
+
+
+def test_extract_identifiers_lowercases_and_drops_digits_and_short_tokens() -> None:
+    """The diff-side tokenizer keeps word-like tokens and lowercases them."""
+    tokens = extract_identifiers("Foo bar _x_ grounding_patches 42 pr")
+    assert tokens == {"foo", "bar", "_x_", "grounding_patches"}
+
+
+def test_extract_cited_symbols_reads_only_backticked_spans() -> None:
+    """The claim-side extractor trusts backticks, which is the reviewer's convention."""
+    text = "`_collect_pr_patches()` and pr.get_files() and `STRICT_REVIEW_GROUNDING`"
+    assert extract_cited_symbols(text) == {"_collect_pr_patches", "strict_review_grounding"}
+
+
+def test_extract_cited_symbols_ignores_unbackticked_code() -> None:
+    """Prose that mentions code without backticks yields no symbols (R2, not R1)."""
+    assert extract_cited_symbols("the patch collection reuses cached data") == set()
+
+
+def test_extract_bare_symbols_reads_snake_case_without_backticks() -> None:
+    """The backtick dodge is closed: bare _collect_pr_patches is still a symbol."""
+    text = "_collect_pr_patches now reuses cached patches"
+    assert extract_bare_symbols(text) == {"_collect_pr_patches"}
+
+
+def test_extract_bare_symbols_ignores_plain_english_prose() -> None:
+    """Prose cannot manufacture a pass: no code-like token, no symbol."""
+    assert extract_bare_symbols("the patch collection fallback now reuses cached data") == set()
+
+
+def test_extract_bare_symbols_reads_camel_case_and_skips_stopwords() -> None:
+    """camelCase counts as code; stopwords never do, even with underscores nearby."""
+    assert extract_bare_symbols("mergePr was removed") == {"mergepr"}
+    assert extract_bare_symbols("the invariant still holds") == set()
+
+
+def test_extract_cited_paths_reads_bare_and_full_paths() -> None:
+    """Both 'fixed in github_tools.py' and 'see src/foo.py' are paths."""
+    assert extract_cited_paths("fixed in github_tools.py") == {"github_tools.py"}
+    assert extract_cited_paths("see src/webhook_agent/tools/github_tools.py") == {
+        "src/webhook_agent/tools/github_tools.py"
+    }
+
+
+def test_extract_cited_paths_ignores_prose_without_paths() -> None:
+    """'the fallback path' has no slash or extension, so it is not a path."""
+    assert extract_cited_paths("the patch collection fallback now reuses cached data") == set()
+
+
+def test_extract_cited_paths_ignores_dotted_calls() -> None:
+    """`subprocess.run` and `gh.api` are symbols, not file paths."""
+    assert extract_cited_paths("uses subprocess.run with check=False") == set()
+    assert extract_cited_paths("calls gh.api paginate") == set()

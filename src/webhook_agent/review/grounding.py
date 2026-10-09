@@ -364,6 +364,124 @@ def _issue(
     )
 
 
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+# Bare file paths with a directory or extension: src/foo.py, docs/plan.md,
+# tests/unit/review/test_x.py. The extension allowlist keeps dotted calls like
+# ``subprocess.run`` or ``gh.api`` out -- those are symbols, not paths. Guarded
+# to need a slash or a known extension so prose like "the fallback path" does
+# not match.
+_KNOWN_EXTENSIONS = frozenset(
+    {
+        "py",
+        "md",
+        "txt",
+        "json",
+        "yml",
+        "yaml",
+        "toml",
+        "cfg",
+        "ini",
+        "sh",
+        "js",
+        "ts",
+        "tsx",
+        "jsx",
+        "go",
+        "rs",
+        "java",
+        "rb",
+        "c",
+        "h",
+        "cpp",
+        "hpp",
+        "css",
+        "html",
+        "xml",
+        "sql",
+        "lock",
+        "diff",
+        "patch",
+    }
+)
+_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])"
+    r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
+    r"|[A-Za-z0-9_.-]+\.([A-Za-z0-9]{1,5})"
+    r"(?![A-Za-z0-9_.-])"
+)
+
+
+def extract_identifiers(text: str) -> set[str]:
+    """Extract lowercased identifier-like tokens from arbitrary text.
+
+    Used on both sides of a provenance comparison -- the claim (what a review says it
+    verified or resolved) and the artifact (the diff it was reviewing). Kept in one place
+    so the fixture recorder and the offline harness cannot drift apart.
+    """
+    return {match.group(0).lower() for match in _IDENTIFIER_RE.finditer(text or "")}
+
+
+def extract_cited_symbols(text: str) -> set[str]:
+    """Extract the symbols a review explicitly cited in backticks.
+
+    Backticks are the reviewer's own convention for naming code, so this is a
+    high-precision read of "what did this review claim to be talking about".
+    """
+    symbols: set[str] = set()
+    for match in _BACKTICK_RE.finditer(text or ""):
+        for token in _IDENTIFIER_RE.findall(match.group(1)):
+            symbols.add(token.lower())
+    return symbols
+
+
+def extract_cited_paths(text: str) -> set[str]:
+    """Extract bare file paths a resolution names, lowercased and normalized.
+
+    Catches "fixed in github_tools.py" or "see src/foo.py" with no backticks.
+    Dotted calls like ``subprocess.run`` are symbols, not paths, and are
+    excluded via the extension allowlist.
+    """
+    paths: set[str] = set()
+    for match in _PATH_RE.finditer(text or ""):
+        candidate = match.group(0).strip("./").lower()
+        if "/" in candidate:
+            paths.add(candidate)
+            continue
+        ext = (match.group(1) or "").lower()
+        if ext in _KNOWN_EXTENSIONS:
+            paths.add(candidate)
+    return paths
+
+
+def extract_bare_symbols(text: str) -> set[str]:
+    """Extract code-like identifiers named without backticks.
+
+    A token counts only when it *looks like code*: snake_case or camelCase, a
+    dunder, or dotted (``pr.get_files``). Plain English words ("fallback",
+    "collection", "latency") are excluded so prose cannot manufacture a match --
+    matching nothing keeps the evidence unverifiable (soft R2) rather than
+    wrongly satisfying the rule.
+    """
+    text = text or ""
+    backticked: set[str] = set()
+    for match in _BACKTICK_RE.finditer(text):
+        backticked.update(t.lower() for t in _IDENTIFIER_RE.findall(match.group(1)))
+    bare = re.sub(_BACKTICK_RE, " ", text)
+    symbols: set[str] = set()
+    for token in _IDENTIFIER_RE.findall(bare):
+        lowered = token.lower()
+        if lowered in _STOPWORDS or lowered in backticked:
+            continue
+        if (
+            "_" in token
+            or token.startswith("__")
+            or (token[0].islower() and any(c.isupper() for c in token[1:]))
+        ):
+            symbols.add(lowered)
+    return symbols
+
+
 __all__ = [
     "PLACEHOLDER_PATHS",
     "CitationOverlap",
@@ -374,6 +492,10 @@ __all__ = [
     "bare_path",
     "citation_overlap",
     "diff_text_from_patches",
+    "extract_bare_symbols",
+    "extract_cited_paths",
+    "extract_cited_symbols",
+    "extract_identifiers",
     "hard_reasons",
     "verify_citations",
 ]
