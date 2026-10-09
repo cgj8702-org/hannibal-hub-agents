@@ -365,6 +365,7 @@ def test_review_accepts_advisory_minor_suggestion_with_empty_suggested_fix(mock_
     assert res == "Review submitted"
     assert mock_submit.called
 
+
 # ---------------------------------------------------------------------------
 # Phase 2.2: deterministic citation grounding (warn-only unless strict)
 # ---------------------------------------------------------------------------
