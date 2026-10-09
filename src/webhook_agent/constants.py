@@ -27,4 +27,7 @@ DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/we
 # --- Operational Policy Defaults ---
 # Fail open / allowed by default: automated mutations enabled out of the box.
 DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"
+# Fail closed: citation grounding is measured (logged) first and only enforced once its
+# false-positive rate is known. See docs/plans/reviewer_hardening_plan.md Phase 2.2.
+DEFAULT_STRICT_REVIEW_GROUNDING = "0"
 DEFAULT_WEBHOOK_TIER = "free"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -363,3 +364,128 @@ def test_review_accepts_advisory_minor_suggestion_with_empty_suggested_fix(mock_
     res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
     assert res == "Review submitted"
     assert mock_submit.called
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.2: deterministic citation grounding (warn-only unless strict)
+# ---------------------------------------------------------------------------
+
+_ALPHA_PATCH = "@@ -10,2 +10,3 @@\n existing_line\n+added_line\n"
+
+
+def _grounding_ctx(patches, *, files_error=None):
+    """Build a Context whose PR exposes the given {path: patch} mapping."""
+    pr = MagicMock()
+    if files_error is not None:
+        pr.get_files.side_effect = files_error
+    else:
+        files = []
+        for name, patch in patches.items():
+            file_mock = MagicMock()
+            file_mock.filename = name
+            file_mock.patch = patch
+            files.append(file_mock)
+        pr.get_files.return_value = files
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    ctx = MagicMock(spec=Context)
+    ctx.state = {
+        "gh_client": gh,
+        "repo_full_name": "owner/repo",
+        "formal_review_eligible": True,
+        # Mirrors the prefetch path: without this the mandatory investigation gate
+        # rejects any PR touching a .py file before the grounding check is reached.
+        "deterministic_precompiled_ast": True,
+    }
+    return ctx
+
+
+def _critical_payload(path, line):
+    """A REQUEST_CHANGES payload that passes every pre-existing validation rule."""
+    return {
+        "executive_summary": "Grounding test summary",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [
+            {
+                "path": path,
+                "line": line,
+                "description": "Critical flaw detected",
+                "suggested_fix": "return True",
+            }
+        ],
+        "minor_suggestions": [],
+        "context_gaps": [],
+    }
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_does_not_reject_when_not_strict(mock_submit, monkeypatch):
+    """A hard grounding failure is logged but not enforced by default."""
+    monkeypatch.delenv("STRICT_REVIEW_GROUNDING", raising=False)
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    res = review(ctx, 8101, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert mock_submit.called
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_rejects_hard_failure_when_strict(mock_submit, monkeypatch):
+    """With STRICT_REVIEW_GROUNDING set, an unciteable path rejects the review."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    res = review(ctx, 8102, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+    assert res.startswith("Error: Review submission rejected")
+    assert "src/beta.py" in res
+    assert not mock_submit.called
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_soft_issues_never_reject_even_when_strict(mock_submit, monkeypatch):
+    """A line the diff does not display is unverifiable, not wrong: do not reject."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    res = review(ctx, 8103, json.dumps(_critical_payload("src/alpha.py", 99)), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert mock_submit.called
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_skips_and_logs_when_patch_text_is_unavailable(
+    mock_submit,
+    monkeypatch,
+    caplog,
+):
+    """'Cannot verify' must be reported and must not silently become a rejection."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({}, files_error=RuntimeError("no files"))
+    with caplog.at_level(logging.WARNING):
+        res = review(ctx, 8104, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert "Grounding check skipped" in caplog.text
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_rejects_unciteable_verified_invariant_when_strict(mock_submit, monkeypatch):
+    """The APPROVE path is grounded too: an invariant on an unchanged path is rejected."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    payload = {
+        "executive_summary": "Grounding test summary",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+        "verified_invariants": [{"path": "src/gamma.py", "line": 5, "evidence": "guard holds"}],
+    }
+    res = review(ctx, 8105, json.dumps(payload), "APPROVE")
+    assert res.startswith("Error: Review submission rejected")
+    assert "src/gamma.py" in res
