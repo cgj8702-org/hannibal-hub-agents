@@ -1,0 +1,56 @@
+{
+  "_note": "Recorded fixture for the offline replay harness. Regenerate with `python3 dev/record_review_fixtures.py 241 --patches none`. Do not hand-edit review bodies: they are evidence.",
+  "_patch_mode": "none",
+  "additions": 35,
+  "body": "This PR eliminates obsolete, unused tools, prototype schemas, stale templates, and dead callbacks across the Hannibal Hub Agents codebase following the Zero-Bypass Architecture migration. All tests, ruff linting, and mypy type checking pass cleanly.\n\nFixes #238\n\n---\n*PR created automatically by Jules for task [2982769562636532206](https://jules.google.com/task/2982769562636532206) started by @cgj8702*",
+  "changed_files": [
+    "docs/templates_catalog.md",
+    "src/webhook_agent/audit_schema.py",
+    "src/webhook_agent/callbacks.py",
+    "src/webhook_agent/comment_poster.py",
+    "src/webhook_agent/core/__init__.py",
+    "src/webhook_agent/core/agent_definition.py",
+    "src/webhook_agent/core/github_tools.py",
+    "src/webhook_agent/templates/code_review_template.md",
+    "src/webhook_agent/templates/pr_template.md",
+    "src/webhook_agent/templates/sync_review_template.md",
+    "src/webhook_agent/tools/__init__.py",
+    "src/webhook_agent/tools/ast_tools.py",
+    "src/webhook_agent/tools/diff_tools.py",
+    "src/webhook_agent/tools/sequential_thinking.py",
+    "src/webhook_agent/tools/symbol_tools.py",
+    "src/webhook_agent/tools/test_impact_tools.py",
+    "src/webhook_agent/webhook_agent.py",
+    "tests/unit/test_callbacks.py",
+    "tests/unit/webhook_agent/test_agent_core.py",
+    "tests/unit/webhook_agent/test_ast_tools.py",
+    "tests/unit/webhook_agent/test_cancellation.py",
+    "tests/unit/webhook_agent/test_new_components.py",
+    "tests/unit/webhook_agent/test_output_system.py",
+    "tests/unit/webhook_agent/test_smart_auditor_tools.py",
+    "tests/unit/webhook_agent/test_symbol_graph.py",
+    "tests/unit/webhook_agent/test_test_impact.py",
+    "tests/unit/webhook_agent/test_worker.py"
+  ],
+  "deletions": 1440,
+  "number": 241,
+  "patches": {},
+  "repo": "cgj8702-org/hannibal-hub-agents",
+  "reviews": [
+    {
+      "body": "## \ud83d\udee1\ufe0f Code Review: `APPROVE`\n\n### 1. Executive Summary\n\nPull Request #241 executes a comprehensive architectural purge of legacy cruft, obsolete tool definitions, prototype audit schemas, and stale markdown templates across the Hannibal Hub Agents codebase in accordance with the Zero-Bypass Architecture migration. By removing unmaintained helper functions, dead callback logic (such as worktree conflict fallback handlers and obsolete mutating tool gating), and unreferenced template files (`pr_template.md`, `code_review_template.md`, `sync_review_template.md`), the PR significantly reduces maintenance overhead and tightens attack surface area.\n\nFrom a boundary dynamics and reliability perspective, the removal of direct git mutation tools (`merge_pr`, `open_pr`, `update_issue`, `write_file`) from `github_tools.py` enforces the Zero-Bypass paradigm where all review outputs and formatting are strictly mediated through validated Pydantic schemas and deterministic renderers (`formatter.py`). Furthermore, test suites have been cleanly adapted to reflect these purges, ensuring complete verification integrity without orphaned mock tests or dangling function imports.\n\n---\n\n### 2. Action Items\n\n#### \ud83d\udd34 Critical (Must Fix Before Merge)\n* *None found.*\n\n#### \ud83d\udfe1 Suggestions & Maintainability\n* *None found.*\n\n---\n\n### 3. Potential Risks & Edge Cases\n\n* **Risk:** Verify that external downstream callers or auxiliary workflows do not attempt to import pruned function tools (such as `check_symbol_impact` or `sequential_thinking`) from `webhook_agent.tools`, as static imports have been removed.\n\n<!-- hannibal-review-metadata: {\"version\":1,\"type\":\"initial\",\"verdict\":\"APPROVE\",\"critical_issues\":[],\"minor_suggestions\":[],\"risks\":[{\"risk\":\"Verify that external downstream callers or auxiliary workflows do not attempt to import pruned function tools (such as `check_symbol_impact` or `sequential_thinking`) from `webhook_agent.tools`, as static imports have been removed.\",\"recommendation\":\"\",\"category\":\"RISK\"}]} -->\n",
+      "id": 5423594778,
+      "login": "hannibal-hub-agents[bot]",
+      "state": "DISMISSED",
+      "submitted_at": "2026-10-06T03:50:50Z"
+    },
+    {
+      "body": "## \u26a1 Code Review Update: `APPROVE`\n\n### 1. Synchronization Summary\n\nThis synchronization update completes the Zero-Bypass Architecture migration by purging obsolete prototype schemas (`src/webhook_agent/audit_schema.py`), legacy markdown templates (`pr_template.md`, `code_review_template.md`, `sync_review_template.md`), and pruned function tools (`sequential_thinking.py`, `symbol_tools.py`, `test_impact_tools.py`) from the codebase. All associated unit tests and imports have been cleanly pruned or updated across 27 changed files, resulting in a net reduction of over 1,400 lines of legacy cruft while preserving core webhook agent execution integrity and Pydantic schema validation.\n\nThe resolution of prior risk items regarding pruned tool imports has been verified: static exports in `src/webhook_agent/tools/__init__.py` and agent callback state initializers have been rigorously updated to remove references to defunct tools, preventing dangling imports or broken execution states. Residual risks are minimal, as static type checking (`mypy`), linting (`ruff`), and unit test suites execute cleanly with complete regression coverage across remaining modules.\n\n---\n\n\n### 2. Resolution Tracker\n\n#### \ud83d\udee1\ufe0f Risks & Edge Cases\n* \u2705 **[RESOLVED]** Verify that external downstream callers or auxiliary workflows do not attempt to import pruned function tools (such as check_symbol_impact or sequential_thinking) from webhook_agent.tools.\n  * *Evidence*: Observed in src/webhook_agent/tools/__init__.py and core module exports where defunct tool references and wrappers have been fully removed and test suites updated.\n\n---\n\n### 3. New Findings (Introduced in Update)\n\n#### \ud83d\udd34 Critical (Must Fix Before Merge)\n* *None found.*\n\n#### \ud83d\udfe1 Suggestions & Maintainability\n* *None found.*\n\n<!-- hannibal-review-metadata: {\"version\":1,\"type\":\"sync\",\"verdict\":\"APPROVE\",\"resolutions\":[{\"item_description\":\"Verify that external downstream callers or auxiliary workflows do not attempt to import pruned function tools (such as check_symbol_impact or sequential_thinking) from webhook_agent.tools.\",\"status\":\"RESOLVED\",\"evidence\":\"Observed in src/webhook_agent/tools/__init__.py and core module exports where defunct tool references and wrappers have been fully removed and test suites updated.\",\"category\":\"RISK\"}],\"critical_issues\":[],\"minor_suggestions\":[]} -->\n",
+      "id": 5434036710,
+      "login": "hannibal-hub-agents[bot]",
+      "state": "APPROVED",
+      "submitted_at": "2026-10-06T20:11:48Z"
+    }
+  ],
+  "title": "Eliminate Legacy Cruft & Dead Code from Hannibal Hub Agents"
+}
