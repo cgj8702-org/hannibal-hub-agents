@@ -220,7 +220,7 @@ def test_cross_pr_reversal_is_detectable_from_the_fixtures() -> None:
     bodies = [r["body"] or "" for r in _bot_reviews(p241)]
     assert any("merge_pr" in b for b in bodies), "#241 review never names merge_pr"
     assert any("APPROVE" in b for b in bodies), "no APPROVE verdict recorded for #241"
-    assert any(
-        "+def merge_pr(" in (patch or "") for patch in p258["patches"].values()
-    ), "#258 diff does not re-add merge_pr"
+    assert any("+def merge_pr(" in (patch or "") for patch in p258["patches"].values()), (
+        "#258 diff does not re-add merge_pr"
+    )
 
