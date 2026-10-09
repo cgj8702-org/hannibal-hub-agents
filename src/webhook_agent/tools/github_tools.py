@@ -6,15 +6,20 @@ Extracted from webhook_agent.py as part of Phase 4 modularization.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from github import Github
 from google.adk.agents.context import Context
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
+from webhook_agent.constants import DEFAULT_STRICT_REVIEW_GROUNDING
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
+
+if TYPE_CHECKING:
+    from webhook_agent.review.grounding import Finding, Kind
 
 logger = logging.getLogger("webhook_agent.tools.github_tools")
 
@@ -270,6 +275,59 @@ def create_issue(
 # ---------------------------------------------------------------------------
 
 
+def _collect_pr_patches(pr: Any) -> dict[str, str | None]:
+    """Collect ``{filename: patch}`` for the grounding check. Never raises.
+
+    Returns an empty mapping when no patch text is available, so the caller can tell
+    "cannot verify" apart from "verified nothing" instead of silently passing.
+    """
+    try:
+        return {
+            str(file.filename): getattr(file, "patch", None)
+            for file in pr.get_files()
+            if getattr(file, "filename", None)
+        }
+    except Exception as err:
+        logger.debug("Could not collect PR patches for the grounding check: %s", err)
+        return {}
+
+
+def _citation_finding(kind: Kind, item: Any) -> Finding:
+    """Adapt one parsed review finding into a grounding citation finding."""
+    # Imported locally: a module-level import would pull webhook_agent.tools.diff_tools
+    # in while webhook_agent.tools.__init__ is still executing.
+    from webhook_agent.review.grounding import Finding
+
+    evidence = getattr(item, "evidence", None) or getattr(item, "description", None) or ""
+    return Finding(
+        kind=kind,
+        path=getattr(item, "path", None) or "",
+        line=getattr(item, "line", None),
+        evidence=str(evidence),
+    )
+
+
+def _grounding_findings(review_obj: Any) -> list[Finding]:
+    """Adapt every cited finding in a parsed review response into citation findings."""
+    findings: list[Finding] = []
+    for item in getattr(review_obj, "critical_issues", None) or []:
+        findings.append(_citation_finding(kind="critical", item=item))
+    for item in getattr(review_obj, "minor_suggestions", None) or []:
+        findings.append(_citation_finding(kind="suggestion", item=item))
+    for item in getattr(review_obj, "verified_invariants", None) or []:
+        findings.append(_citation_finding(kind="invariant", item=item))
+    return findings
+
+
+def strict_grounding_enabled() -> bool:
+    """Return True when ungrounded citations should reject a review, not merely log."""
+    return os.environ.get("STRICT_REVIEW_GROUNDING", DEFAULT_STRICT_REVIEW_GROUNDING) in (
+        "1",
+        "true",
+        "True",
+    )
+
+
 def review(
     ctx: Context,
     pr_number: int,
@@ -324,6 +382,7 @@ def review(
                 f"PR {repo_name}#{pr_number} is closed or merged. Skipping review submission."
             )
 
+        patches: dict[str, str | None] = {}
         # Mandatory Investigation Gate: PRs modifying Python code MUST run verify_python_ast before submitting review
         skip_gate = state_dict.get("skip_investigation_gate", False)
         if not skip_gate:
@@ -336,6 +395,7 @@ def review(
                         fn = getattr(f, "filename", None)
                         if isinstance(fn, str):
                             changed_files.append(fn)
+                            patches[fn] = getattr(f, "patch", None)
                 except Exception as files_err:
                     logger.debug("Could not inspect PR files for investigation gate: %s", files_err)
 
@@ -459,6 +519,40 @@ def review(
                         invalid_findings.append(
                             f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}:{inv.line}' lacks concrete evidence"
                         )
+
+        # Deterministic citation grounding: check every cited path/line against the diff.
+        # Always logged; only enforced when STRICT_REVIEW_GROUNDING is set, because a
+        # verifier with a false-positive bug can otherwise reject reviews into exhaustion.
+        from webhook_agent.review.grounding import (
+            diff_text_from_patches,
+            hard_reasons,
+            verify_citations,
+        )
+
+        grounding_patches = patches or _collect_pr_patches(pr)
+        if not grounding_patches:
+            logger.warning(
+                "Grounding check skipped for %s#%s: no patch text available to verify "
+                "citations against. Treating citations as unverified, not as valid.",
+                repo_name,
+                pr_number,
+            )
+        else:
+            grounding_issues = verify_citations(
+                _grounding_findings(review_obj),
+                diff_text_from_patches(grounding_patches),
+                list(grounding_patches),
+            )
+            if grounding_issues:
+                logger.info(
+                    "🔎 [Grounding] %s#%s: %d ungrounded citation(s) %s",
+                    repo_name,
+                    pr_number,
+                    len(grounding_issues),
+                    [f"{issue.severity}:{issue.code}" for issue in grounding_issues],
+                )
+            if strict_grounding_enabled():
+                invalid_findings.extend(hard_reasons(grounding_issues))
 
         if invalid_findings:
             error_details = "; ".join(invalid_findings)
