@@ -211,3 +211,9 @@ def test_extract_cited_paths_reads_bare_and_full_paths() -> None:
 def test_extract_cited_paths_ignores_prose_without_paths() -> None:
     """'the fallback path' has no slash or extension, so it is not a path."""
     assert extract_cited_paths("the patch collection fallback now reuses cached data") == set()
+
+
+def test_extract_cited_paths_ignores_dotted_calls() -> None:
+    """`subprocess.run` and `gh.api` are symbols, not file paths."""
+    assert extract_cited_paths("uses subprocess.run with check=False") == set()
+    assert extract_cited_paths("calls gh.api paginate") == set()

@@ -367,11 +367,47 @@ def _issue(
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 _BACKTICK_RE = re.compile(r"`([^`\n]+)`")
 # Bare file paths with a directory or extension: src/foo.py, docs/plan.md,
-# tests/unit/review/test_x.py. Guarded to need a slash or a dot so prose like
-# "the fallback path" does not match.
+# tests/unit/review/test_x.py. The extension allowlist keeps dotted calls like
+# ``subprocess.run`` or ``gh.api`` out -- those are symbols, not paths. Guarded
+# to need a slash or a known extension so prose like "the fallback path" does
+# not match.
+_KNOWN_EXTENSIONS = frozenset(
+    {
+        "py",
+        "md",
+        "txt",
+        "json",
+        "yml",
+        "yaml",
+        "toml",
+        "cfg",
+        "ini",
+        "sh",
+        "js",
+        "ts",
+        "tsx",
+        "jsx",
+        "go",
+        "rs",
+        "java",
+        "rb",
+        "c",
+        "h",
+        "cpp",
+        "hpp",
+        "css",
+        "html",
+        "xml",
+        "sql",
+        "lock",
+        "diff",
+        "patch",
+    }
+)
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])"
-    r"(?:(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,5})"
+    r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
+    r"|[A-Za-z0-9_.-]+\.([A-Za-z0-9]{1,5})"
     r"(?![A-Za-z0-9_.-])"
 )
 
@@ -403,11 +439,17 @@ def extract_cited_paths(text: str) -> set[str]:
     """Extract bare file paths a resolution names, lowercased and normalized.
 
     Catches "fixed in github_tools.py" or "see src/foo.py" with no backticks.
+    Dotted calls like ``subprocess.run`` are symbols, not paths, and are
+    excluded via the extension allowlist.
     """
     paths: set[str] = set()
     for match in _PATH_RE.finditer(text or ""):
         candidate = match.group(0).strip("./").lower()
-        if "/" in candidate or "." in candidate:
+        if "/" in candidate:
+            paths.add(candidate)
+            continue
+        ext = (match.group(1) or "").lower()
+        if ext in _KNOWN_EXTENSIONS:
             paths.add(candidate)
     return paths
 
