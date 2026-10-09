@@ -28,10 +28,13 @@ from typing import Any
 import pytest
 
 from webhook_agent.review.grounding import (
+    _IDENTIFIER_RE,
     Finding,
     Kind,
     citation_overlap,
     diff_text_from_patches,
+    extract_bare_symbols,
+    extract_cited_paths,
     extract_cited_symbols,
     extract_identifiers,
     verify_citations,
@@ -257,7 +260,14 @@ def _resolution_findings(reviews: list[dict[str, Any]]) -> list[tuple[str, str, 
 
     R0 hard  same_commit_as_previous_review    -- nothing changed, so nothing was resolved
     R1 hard  resolved_without_evidence_in_diff -- the symbols it names are not in this diff
+    R1 hard  resolved_file_not_in_diff         -- the file it names is not in this diff
     R2 soft  resolution_names_no_symbol        -- unverifiable evidence; log, never reject
+
+    R1 checks three signals, strongest first: backticked symbols (explicit
+    citation), file paths (``github_tools.py`` or ``src/foo.py``), then bare
+    code-like identifiers (snake_case/camelCase without backticks). Plain
+    English prose matches none of them and stays soft R2 -- prose cannot
+    manufacture a pass, but it is never punished for being prose.
 
     A fourth candidate rule was dropped during implementation: "the incremental diff
     touches only test files" is redundant with R1 in practice, because a test-only diff
@@ -270,17 +280,32 @@ def _resolution_findings(reviews: list[dict[str, Any]]) -> list[tuple[str, str, 
             continue
         commit = review.get("commit_id")
         tokens = set(review.get("incremental_tokens") or [])
+        files = {f.lower() for f in (review.get("incremental_files") or [])}
+        file_basenames = {f.rsplit("/", 1)[-1] for f in files}
         for item in _metadata(review.get("body") or "").get("resolutions") or []:
             if item.get("status") != "RESOLVED":
                 continue
             text = f"{item.get('item_description', '')} {item.get('evidence', '')}"
-            symbols = extract_cited_symbols(text)
+            paths = extract_cited_paths(text)
+            path_tokens = {
+                token
+                for path in paths
+                for token in _IDENTIFIER_RE.findall(path.replace("/", " ").replace(".", " "))
+            }
+            path_tokens = {t.lower() for t in path_tokens}
+            symbols = (extract_cited_symbols(text) | extract_bare_symbols(text)) - path_tokens
             if commit and previous_commit and commit == previous_commit:
                 findings.append(("hard", "same_commit_as_previous_review", review.get("id")))
-            if not symbols:
+            if not symbols and not paths:
                 findings.append(("soft", "resolution_names_no_symbol", review.get("id")))
-            elif all(symbol not in tokens for symbol in symbols):
+                continue
+            if symbols and all(symbol not in tokens for symbol in symbols):
                 findings.append(("hard", "resolved_without_evidence_in_diff", review.get("id")))
+            if paths and not any(
+                p in files or p in file_basenames or any(f.endswith(f"/{p}") for f in files)
+                for p in paths
+            ):
+                findings.append(("hard", "resolved_file_not_in_diff", review.get("id")))
         previous_commit = commit or previous_commit
     return findings
 
@@ -365,6 +390,110 @@ def test_resolution_rule_treats_symbol_less_evidence_as_advisory() -> None:
     findings = _resolution_findings([review])
     assert _hard_codes(findings) == []
     assert findings == [("soft", "resolution_names_no_symbol", 9)]
+
+
+def test_resolution_rule_flags_bare_snake_case_symbol_missing_from_the_diff() -> None:
+    """R1 without backticks: _collect_pr_patches named bare is still checkable."""
+    review = {
+        "login": _BOT,
+        "id": 10,
+        "commit_id": "eee",
+        "incremental_tokens": ["unrelated"],
+        "body": _meta_body(
+            [
+                {
+                    "item_description": "_collect_pr_patches adds an API call",
+                    "status": "RESOLVED",
+                    "evidence": "_collect_pr_patches now reuses cached patches",
+                }
+            ]
+        ),
+    }
+    assert _hard_codes(_resolution_findings([review])) == ["resolved_without_evidence_in_diff"]
+
+
+def test_resolution_rule_passes_when_bare_symbol_is_in_the_diff() -> None:
+    """Bare-symbol negative case: the diff really did touch the named symbol."""
+    review = {
+        "login": _BOT,
+        "id": 11,
+        "commit_id": "fff",
+        "incremental_tokens": ["_collect_pr_patches", "cached"],
+        "body": _meta_body(
+            [
+                {
+                    "item_description": "_collect_pr_patches adds an API call",
+                    "status": "RESOLVED",
+                    "evidence": "_collect_pr_patches now reuses cached patches",
+                }
+            ]
+        ),
+    }
+    assert _hard_codes(_resolution_findings([review])) == []
+
+
+def test_resolution_rule_prose_without_code_like_tokens_stays_advisory() -> None:
+    """R2, not R1: 'the patch collection fallback' names no code, so no rejection."""
+    review = {
+        "login": _BOT,
+        "id": 12,
+        "commit_id": "ggg",
+        "incremental_tokens": [],
+        "body": _meta_body(
+            [
+                {
+                    "item_description": "potential latency overhead",
+                    "status": "RESOLVED",
+                    "evidence": "the patch collection fallback now reuses cached data",
+                }
+            ]
+        ),
+    }
+    findings = _resolution_findings([review])
+    assert _hard_codes(findings) == []
+    assert findings == [("soft", "resolution_names_no_symbol", 12)]
+
+
+def test_resolution_rule_flags_file_missing_from_the_diff() -> None:
+    """R1 file signal: 'fixed in github_tools.py' while the diff touched tests only."""
+    review = {
+        "login": _BOT,
+        "id": 13,
+        "commit_id": "hhh",
+        "incremental_tokens": ["test", "context"],
+        "incremental_files": ["tests/unit/review/test_review_tool_validation.py"],
+        "body": _meta_body(
+            [
+                {
+                    "item_description": "latency overhead in the fallback",
+                    "status": "RESOLVED",
+                    "evidence": "fixed in github_tools.py",
+                }
+            ]
+        ),
+    }
+    assert _hard_codes(_resolution_findings([review])) == ["resolved_file_not_in_diff"]
+
+
+def test_resolution_rule_passes_when_named_file_is_in_the_diff() -> None:
+    """File-signal negative case: basename match against the incremental files."""
+    review = {
+        "login": _BOT,
+        "id": 14,
+        "commit_id": "iii",
+        "incremental_tokens": ["patch"],
+        "incremental_files": ["src/webhook_agent/tools/github_tools.py"],
+        "body": _meta_body(
+            [
+                {
+                    "item_description": "latency overhead in the fallback",
+                    "status": "RESOLVED",
+                    "evidence": "fixed in github_tools.py",
+                }
+            ]
+        ),
+    }
+    assert _hard_codes(_resolution_findings([review])) == []
 
 
 @pytest.mark.xfail(

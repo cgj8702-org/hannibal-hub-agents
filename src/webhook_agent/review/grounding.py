@@ -366,6 +366,14 @@ def _issue(
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 _BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+# Bare file paths with a directory or extension: src/foo.py, docs/plan.md,
+# tests/unit/review/test_x.py. Guarded to need a slash or a dot so prose like
+# "the fallback path" does not match.
+_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])"
+    r"(?:(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,5})"
+    r"(?![A-Za-z0-9_.-])"
+)
 
 
 def extract_identifiers(text: str) -> set[str]:
@@ -391,6 +399,47 @@ def extract_cited_symbols(text: str) -> set[str]:
     return symbols
 
 
+def extract_cited_paths(text: str) -> set[str]:
+    """Extract bare file paths a resolution names, lowercased and normalized.
+
+    Catches "fixed in github_tools.py" or "see src/foo.py" with no backticks.
+    """
+    paths: set[str] = set()
+    for match in _PATH_RE.finditer(text or ""):
+        candidate = match.group(0).strip("./").lower()
+        if "/" in candidate or "." in candidate:
+            paths.add(candidate)
+    return paths
+
+
+def extract_bare_symbols(text: str) -> set[str]:
+    """Extract code-like identifiers named without backticks.
+
+    A token counts only when it *looks like code*: snake_case or camelCase, a
+    dunder, or dotted (``pr.get_files``). Plain English words ("fallback",
+    "collection", "latency") are excluded so prose cannot manufacture a match --
+    matching nothing keeps the evidence unverifiable (soft R2) rather than
+    wrongly satisfying the rule.
+    """
+    text = text or ""
+    backticked: set[str] = set()
+    for match in _BACKTICK_RE.finditer(text):
+        backticked.update(t.lower() for t in _IDENTIFIER_RE.findall(match.group(1)))
+    bare = re.sub(_BACKTICK_RE, " ", text)
+    symbols: set[str] = set()
+    for token in _IDENTIFIER_RE.findall(bare):
+        lowered = token.lower()
+        if lowered in _STOPWORDS or lowered in backticked:
+            continue
+        if (
+            "_" in token
+            or token.startswith("__")
+            or (token[0].islower() and any(c.isupper() for c in token[1:]))
+        ):
+            symbols.add(lowered)
+    return symbols
+
+
 __all__ = [
     "PLACEHOLDER_PATHS",
     "CitationOverlap",
@@ -401,6 +450,8 @@ __all__ = [
     "bare_path",
     "citation_overlap",
     "diff_text_from_patches",
+    "extract_bare_symbols",
+    "extract_cited_paths",
     "extract_cited_symbols",
     "extract_identifiers",
     "hard_reasons",
