@@ -364,6 +364,33 @@ def _issue(
     )
 
 
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+
+
+def extract_identifiers(text: str) -> set[str]:
+    """Extract lowercased identifier-like tokens from arbitrary text.
+
+    Used on both sides of a provenance comparison -- the claim (what a review says it
+    verified or resolved) and the artifact (the diff it was reviewing). Kept in one place
+    so the fixture recorder and the offline harness cannot drift apart.
+    """
+    return {match.group(0).lower() for match in _IDENTIFIER_RE.finditer(text or "")}
+
+
+def extract_cited_symbols(text: str) -> set[str]:
+    """Extract the symbols a review explicitly cited in backticks.
+
+    Backticks are the reviewer's own convention for naming code, so this is a
+    high-precision read of "what did this review claim to be talking about".
+    """
+    symbols: set[str] = set()
+    for match in _BACKTICK_RE.finditer(text or ""):
+        for token in _IDENTIFIER_RE.findall(match.group(1)):
+            symbols.add(token.lower())
+    return symbols
+
+
 __all__ = [
     "PLACEHOLDER_PATHS",
     "CitationOverlap",
@@ -374,6 +401,8 @@ __all__ = [
     "bare_path",
     "citation_overlap",
     "diff_text_from_patches",
+    "extract_cited_symbols",
+    "extract_identifiers",
     "hard_reasons",
     "verify_citations",
 ]

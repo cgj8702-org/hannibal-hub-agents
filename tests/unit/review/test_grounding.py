@@ -12,6 +12,8 @@ import pytest
 from webhook_agent.review.grounding import (
     Finding,
     citation_overlap,
+    extract_cited_symbols,
+    extract_identifiers,
     diff_text_from_patches,
     hard_reasons,
     verify_citations,
@@ -160,3 +162,20 @@ def test_diff_text_from_patches_skips_missing_patches() -> None:
     diff = diff_text_from_patches({"a/b.py": None, "b/c.py": "@@ -1,1 +1,1 @@\n+x\n"})
     assert "+++ b/c.py" in diff
     assert "b.py" not in diff.replace("+++ b/c.py", "")
+
+
+def test_extract_identifiers_lowercases_and_drops_digits_and_short_tokens() -> None:
+    """The diff-side tokenizer keeps word-like tokens and lowercases them."""
+    tokens = extract_identifiers("Foo bar _x_ grounding_patches 42 pr")
+    assert tokens == {"foo", "bar", "_x_", "grounding_patches"}
+
+
+def test_extract_cited_symbols_reads_only_backticked_spans() -> None:
+    """The claim-side extractor trusts backticks, which is the reviewer's convention."""
+    text = "`_collect_pr_patches()` and pr.get_files() and `STRICT_REVIEW_GROUNDING`"
+    assert extract_cited_symbols(text) == {"_collect_pr_patches", "strict_review_grounding"}
+
+
+def test_extract_cited_symbols_ignores_unbackticked_code() -> None:
+    """Prose that mentions code without backticks yields no symbols (R2, not R1)."""
+    assert extract_cited_symbols("the patch collection reuses cached data") == set()
