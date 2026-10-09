@@ -395,6 +395,9 @@ def _grounding_ctx(patches, *, files_error=None):
         "gh_client": gh,
         "repo_full_name": "owner/repo",
         "formal_review_eligible": True,
+        # Mirrors the prefetch path: without this the mandatory investigation gate
+        # rejects any PR touching a .py file before the grounding check is reached.
+        "deterministic_precompiled_ast": True,
     }
     return ctx
 
