@@ -140,7 +140,9 @@ class VerifiedInvariant(BaseModel):
         description="The specific invariant, contract, or boundary condition verified."
     )
     path: str = Field(description="Exact file path where the invariant is maintained or tested.")
-    line: int = Field(description="Exact line number demonstrating invariant preservation.")
+    line: int | None = Field(
+        default=None, description="Exact line number demonstrating invariant preservation."
+    )
     evidence: str = Field(
         description="Concrete technical explanation or test citation proving preservation."
     )
@@ -461,10 +463,19 @@ class CodeReviewResponse(BaseModel):
                 if isinstance(item, BaseModel):
                     item = item.model_dump()
                 if isinstance(item, dict):
-                    inv_text = str(item.get("invariant") or item.get("description") or "").strip()
+                    inv_text = str(
+                        item.get("invariant")
+                        or item.get("description")
+                        or item.get("evidence")
+                        or ""
+                    ).strip()
                     path_val = str(item.get("path") or "").strip()
                     line_val = item.get("line")
+                    if isinstance(line_val, str) and line_val.isdigit():
+                        line_val = int(line_val)
                     evid_val = str(item.get("evidence") or item.get("proof") or "").strip()
+                    if not evid_val and not item.get("invariant") and not item.get("description"):
+                        evid_val = inv_text
                     if inv_text:
                         clean_inv.append(
                             {
@@ -474,6 +485,15 @@ class CodeReviewResponse(BaseModel):
                                 "evidence": evid_val,
                             }
                         )
+                elif isinstance(item, str) and item.strip():
+                    clean_inv.append(
+                        {
+                            "invariant": item.strip(),
+                            "path": "codebase",
+                            "line": None,
+                            "evidence": item.strip(),
+                        }
+                    )
         normalized["verified_invariants"] = clean_inv
 
         raw_gaps = normalized.get("context_gaps")
@@ -849,10 +869,19 @@ class SyncReviewResponse(BaseModel):
                 if isinstance(item, BaseModel):
                     item = item.model_dump()
                 if isinstance(item, dict):
-                    inv_text = str(item.get("invariant") or item.get("description") or "").strip()
+                    inv_text = str(
+                        item.get("invariant")
+                        or item.get("description")
+                        or item.get("evidence")
+                        or ""
+                    ).strip()
                     path_val = str(item.get("path") or "").strip()
                     line_val = item.get("line")
+                    if isinstance(line_val, str) and line_val.isdigit():
+                        line_val = int(line_val)
                     evid_val = str(item.get("evidence") or item.get("proof") or "").strip()
+                    if not evid_val and not item.get("invariant") and not item.get("description"):
+                        evid_val = inv_text
                     if inv_text:
                         clean_inv.append(
                             {
@@ -862,6 +891,15 @@ class SyncReviewResponse(BaseModel):
                                 "evidence": evid_val,
                             }
                         )
+                elif isinstance(item, str) and item.strip():
+                    clean_inv.append(
+                        {
+                            "invariant": item.strip(),
+                            "path": "codebase",
+                            "line": None,
+                            "evidence": item.strip(),
+                        }
+                    )
         normalized["verified_invariants"] = clean_inv
 
         return normalized

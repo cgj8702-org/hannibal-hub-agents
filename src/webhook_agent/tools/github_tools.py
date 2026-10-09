@@ -411,11 +411,11 @@ def review(
                     f"{kind} issue on '{issue.path}' lacks valid line number (got '{issue.line}')"
                 )
             fix = (issue.suggested_fix or "").strip().lower()
-            if not fix:
+            if kind == "critical" and not fix:
                 invalid_findings.append(
-                    f"{kind} issue on '{issue.path}:{issue.line}' lacks concrete suggested_fix replacement code"
+                    f"critical issue on '{issue.path}:{issue.line}' lacks concrete suggested_fix replacement code"
                 )
-            elif any(bp in fix for bp in forbidden_boilerplate):
+            elif fix and any(bp in fix for bp in forbidden_boilerplate):
                 invalid_findings.append(
                     f"{kind} issue on '{issue.path}:{issue.line}' has generic boilerplate suggested_fix ('{issue.suggested_fix}')"
                 )

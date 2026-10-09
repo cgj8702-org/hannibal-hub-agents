@@ -275,6 +275,29 @@ async def before_tool_callback(
         with contextlib.suppress(ValueError):
             args["pr_number"] = int(args["pr_number"])
 
+    # Universal Pydantic input validation gate
+    from pydantic import ValidationError
+
+    from webhook_agent.tools.schemas import TOOL_INPUT_SCHEMAS
+
+    schema_cls = TOOL_INPUT_SCHEMAS.get(tool.name)
+    if schema_cls is not None:
+        try:
+            validated = schema_cls.model_validate(args)
+            args.clear()
+            args.update(validated.model_dump(exclude_unset=False))
+        except ValidationError as val_err:
+            logger.warning(
+                "❌ [Tool Gate Failed] Tool '%s' input validation rejected: %s (args=%s)",
+                tool.name,
+                val_err,
+                args,
+            )
+            return {
+                "error": f"Tool '{tool.name}' argument validation failed: {val_err}. "
+                "Please fix the argument types/names and try again."
+            }
+
     # Track executed tools in session state for downstream audit gates
     tools_executed = tool_context.state.setdefault("tools_executed", [])
     if isinstance(tools_executed, list):

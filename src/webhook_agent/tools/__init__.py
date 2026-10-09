@@ -15,9 +15,25 @@ from .github_tools import (
     read_file,
     review,
 )
+from .schemas import (
+    TOOL_INPUT_SCHEMAS,
+    AddLabelInput,
+    CreateIssueInput,
+    GetCommitDiffInput,
+    GetIssueInput,
+    ReadFileInput,
+    ReviewInput,
+)
 from .search_tool import google_search_grounding_tool
 
 __all__ = [
+    "TOOL_INPUT_SCHEMAS",
+    "AddLabelInput",
+    "CreateIssueInput",
+    "GetCommitDiffInput",
+    "GetIssueInput",
+    "ReadFileInput",
+    "ReviewInput",
     "add_label",
     "check_window",
     "create_issue",

@@ -123,16 +123,17 @@ async def test_on_tool_error_callback() -> None:
 async def test_before_tool_callback_allow_multiple_tools() -> None:
     tool = MagicMock()
     tool.name = "review"
-    args = {}
+    args1 = {"pr_number": 1, "body": "{}"}
     ctx = MagicMock()
     ctx.state = {}
 
-    res1 = await before_tool_callback(tool, args, ctx)
+    res1 = await before_tool_callback(tool, args1, ctx)
     assert res1 is None
 
     tool2 = MagicMock()
     tool2.name = "read_file"
-    res2 = await before_tool_callback(tool2, args, ctx)
+    args2 = {"file_path": "main.py"}
+    res2 = await before_tool_callback(tool2, args2, ctx)
     assert res2 is None
 
 
@@ -263,3 +264,38 @@ async def test_after_model_callback_falls_back_to_cache_metadata() -> None:
         ctx.state.get("active_cache_name")
         == "projects/123/locations/us-central1/cachedContents/test-cache-id"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_before_tool_callback_pydantic_validation_success() -> None:
+    """Valid arguments are sanitized and coerced by Pydantic gate."""
+    tool = MagicMock()
+    tool.name = "get_issue"
+    args = {"issue_number": "50", "include_diff": False}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    res = await before_tool_callback(tool, args, ctx)
+    assert res is None
+    # issue_number aliased to number, string coerced to int
+    assert args["number"] == 50
+    assert "get_issue" in ctx.state["tools_executed"]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_before_tool_callback_pydantic_validation_failure() -> None:
+    """Invalid arguments return an error dict to short-circuit execution safely."""
+    tool = MagicMock()
+    tool.name = "read_file"
+    args = {}  # Missing required file_path
+    ctx = MagicMock()
+    ctx.state = {}
+
+    res = await before_tool_callback(tool, args, ctx)
+    assert res is not None
+    assert "error" in res
+    assert "Tool 'read_file' argument validation failed" in res["error"]
