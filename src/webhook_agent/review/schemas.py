@@ -1030,6 +1030,15 @@ class SyncReviewResponse(BaseModel):
                 }
                 for sugg in self.minor_suggestions
             ],
+            "verified_invariants": [
+                {
+                    "invariant": item.invariant,
+                    "path": item.path,
+                    "line": item.line,
+                    "evidence": item.evidence,
+                }
+                for item in self.verified_invariants
+            ],
         }
         metadata_comment = serialize_review_metadata(meta)
 
