@@ -908,7 +908,9 @@ def test_normalize_code_review_dict_rescues_string_invariants():
     assert len(normalized["verified_invariants"]) == 1
     inv = normalized["verified_invariants"][0]
     assert inv["invariant"] == "In-memory cache expiration invariant preserved across threads."
-    assert inv["evidence"] == "In-memory cache expiration invariant preserved across threads."
+    # The claim is kept, but the normalizer must not invent a citation or self-referential evidence.
+    assert inv["path"] == ""
+    assert inv["evidence"] == ""
 
 
 def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
