@@ -30,4 +30,7 @@ DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"
 # Fail closed: citation grounding is measured (logged) first and only enforced once its
 # false-positive rate is known. See docs/plans/reviewer_hardening_plan.md Phase 2.2.
 DEFAULT_STRICT_REVIEW_GROUNDING = "0"
+# Hold automatic reviews until the PR head commit has fully green CI (silent skip on failure).
+# Set REVIEW_WAIT_FOR_CI=0 to restore review-immediately behaviour. See review/ci_gate.py.
+DEFAULT_REVIEW_WAIT_FOR_CI = "1"
 DEFAULT_WEBHOOK_TIER = "free"

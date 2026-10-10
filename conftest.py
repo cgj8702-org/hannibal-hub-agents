@@ -24,3 +24,13 @@ def _isolate_persistence_gates(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force Firestore-backed subsystems onto their local fallback in tests."""
     for gate in _PERSISTENCE_GATES:
         monkeypatch.delenv(gate, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _disable_ci_gate_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Production holds reviews until CI is green; unit tests opt in explicitly.
+
+    Without this, every processor test would depend on how a MagicMock GitHub client
+    happens to answer the CI queries.
+    """
+    monkeypatch.setenv("REVIEW_WAIT_FOR_CI", "0")

@@ -42,6 +42,16 @@ from webhook_agent.github.pr_context import (
     _prefetch_previous_bot_reviews,
     _should_prefetch_diff,
 )
+from webhook_agent.review.ci_gate import (
+    GATED_EVENTS,
+    PASSING_CONCLUSIONS,
+    CIState,
+    build_review_event,
+    evaluate_ci,
+    is_ci_gate_enabled,
+    last_bot_review_sha,
+    pr_numbers_for_suite,
+)
 from webhook_agent.review.fast_path import (
     evaluate_dependency_fast_path,
     is_base_branch_merge_sync,
@@ -327,7 +337,8 @@ class WebhookProcessor:
         * Bot events originating from the app are suppressed.
         * Comments mentioning @dependabot are suppressed.
         * The ``edited`` action is filtered out.
-        * Automated CI noise events (check_suite, check_run, status) are suppressed.
+        * check_suite.completed is let through (it re-triggers reviews held back by the CI
+          gate); other automated CI noise events (check_run, status) are suppressed.
         * Read-only PR lifecycle events (pull_request.closed) are suppressed.
         * pull_request.synchronize is NOT suppressed — it is handled by the agent
           via get_commit_diff for incremental reviews of newly pushed commits.
@@ -335,6 +346,10 @@ class WebhookProcessor:
         delivery_id = ev.get("delivery_id")
         if delivery_id in self._processed_deliveries:
             return False
+        if ev.get("event_name") == "check_suite" and ev.get("action") == "completed":
+            # Finished CI drives deferred reviews (see review/ci_gate.py). Its sender is
+            # usually github-actions[bot], which the bot-sender filter below would drop.
+            return is_ci_gate_enabled()
         if _is_bot_event(ev):
             return False
 
@@ -411,7 +426,54 @@ class WebhookProcessor:
         # Ignore automated CI infrastructure noise and installation lifecycle events
         return event_name not in ("check_suite", "check_run", "status", "installation")
 
-    def process_event(self, payload: dict[str, Any]) -> None:
+    def _handle_ci_completed(self, payload: dict[str, Any]) -> None:
+        """Start reviews that were held back while CI was running.
+
+        A failed suite is ignored (silent skip). A passing one re-checks the whole commit, since
+        other suites may still be running or may have failed.
+        """
+        raw = payload.get("raw_payload") or {}
+        suite = raw.get("check_suite") or {}
+        repo_name = (raw.get("repository") or {}).get("full_name") or ""
+        head_sha = suite.get("head_sha") or ""
+        conclusion = str(suite.get("conclusion") or "").lower()
+        if not repo_name or not head_sha:
+            return
+        if conclusion not in PASSING_CONCLUSIONS:
+            logger.info(
+                "CI gate: suite for %s@%s concluded %r; not reviewing.",
+                repo_name,
+                head_sha[:7],
+                conclusion or "unknown",
+            )
+            return
+
+        gh = self.gh
+        for number in pr_numbers_for_suite(gh, repo_name, suite):
+            try:
+                self._review_if_ci_green(gh, repo_name, number, head_sha)
+            except Exception:
+                logger.exception("CI gate: failed to resume review for %s#%s", repo_name, number)
+
+    def _review_if_ci_green(self, gh: Any, repo_name: str, number: int, head_sha: str) -> None:
+        """Review PR ``number`` now if CI is fully green and the bot has not reviewed this commit."""
+        pr = gh.get_repo(repo_name).get_pull(number)
+        if pr.state != "open" or pr.head.sha != head_sha:
+            return  # closed, or a newer push superseded this commit (its own CI will report)
+        if evaluate_ci(gh, repo_name, head_sha) is not CIState.PASS:
+            return
+        reviewed_head, last_reviewed_sha = last_bot_review_sha(pr, head_sha)
+        if reviewed_head:
+            return
+        logger.info(
+            "CI gate: CI green for %s#%s (%s); starting review.", repo_name, number, head_sha[:7]
+        )
+        event = build_review_event(
+            pr, repo_name, head_sha, last_reviewed_sha, f"ci-gate-{uuid.uuid4()}"
+        )
+        self.process_event(event, ci_verified=True)
+
+    def process_event(self, payload: dict[str, Any], *, ci_verified: bool = False) -> None:
         """Process a Pub/Sub payload.
 
         Logs the canonical event, filters duplication and bot events,
@@ -436,6 +498,10 @@ class WebhookProcessor:
 
         # Set canonical event name in payload for AgentCore and WebhookAgent
         payload["canonical"] = event_key
+
+        if event_key == "check_suite.completed":
+            self._handle_ci_completed(payload)
+            return
 
         gh = self.gh
 
@@ -513,6 +579,28 @@ class WebhookProcessor:
                 return
 
         head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
+
+        # CI gate: automatic reviews wait for fully green CI. Silent on pending or failed CI.
+        # This runs before the in-flight dedup claim below so that a deferred event does not
+        # consume the claim and block the review once CI turns green.
+        if (
+            not ci_verified
+            and canonical in GATED_EVENTS
+            and head_sha
+            and pr_num_int is not None
+            and is_ci_gate_enabled()
+        ):
+            ci_state = evaluate_ci(gh, repo_name, head_sha)
+            if ci_state is not CIState.PASS:
+                logger.info(
+                    "CI gate: PR %s#%s (commit %s) CI is %s; not reviewing now.",
+                    repo_name,
+                    pr_number,
+                    head_sha[:7],
+                    ci_state.value,
+                )
+                return
+
         resumed_checkpoint: dict[str, Any] | None = None
         if is_pr_event and pr_num_int is not None and head_sha:
             resumed_checkpoint = review_checkpoint_manager.get_resumable(
