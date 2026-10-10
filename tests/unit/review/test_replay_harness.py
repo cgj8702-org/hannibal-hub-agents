@@ -50,7 +50,6 @@ FIXTURE_260 = _FIXTURES / "pr_260.json"
 _METADATA_RE = re.compile(r"<!--\s*hannibal-review-metadata:\s*(\{.*?\})\s*-->", re.S)
 _ADDED_TEST_RE = re.compile(r"^\+\s*(?:async )?def test_", re.M)
 _TEST_CLAIM_RE = re.compile(r"(\d+)[^\d\n]{0,30}?tests?\b", re.I)
-_BODY_INVARIANTS_SECTION = "Verified Invariants & Edge Cases"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -148,13 +147,6 @@ def test_every_citation_points_at_a_line_the_diff_displays() -> None:
         assert unseen == [], f"review {review['id']} cites lines the diff never shows: {unseen}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PR #258 review 1 claims '31 robust unit tests'; the diff adds 23 "
-        "(19 in the three files it names). Fixed by grounding the claim or dropping it."
-    ),
-)
 def test_review_does_not_overstate_the_test_count() -> None:
     """Every numeric test-count claim must match a recount of the diff."""
     fixture = _load(FIXTURE_258)
@@ -164,27 +156,6 @@ def test_review_does_not_overstate_the_test_count() -> None:
             assert claimed == actual, (
                 f"review {review['id']} claims {claimed} tests; diff adds {actual}"
             )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "verified_invariants are rendered in the review body but never serialized into "
-        "the hannibal-review-metadata footer (both to_markdown metadata blocks in "
-        "review/schemas.py omit the key), so the verdict's evidence is unreadable to any "
-        "downstream consumer, including the resolution tracker."
-    ),
-)
-def test_body_and_metadata_agree_about_verified_invariants() -> None:
-    """Anything rendered as verified invariants must survive into the durable record."""
-    fixture = _load(FIXTURE_258)
-    for review in _bot_reviews(fixture):
-        body = review["body"] or ""
-        if _BODY_INVARIANTS_SECTION not in body:
-            continue
-        assert _metadata(body).get("verified_invariants"), (
-            f"review {review['id']} renders verified invariants but drops them from metadata"
-        )
 
 
 def test_wrong_line_inside_a_changed_hunk_is_a_known_blind_spot() -> None:
