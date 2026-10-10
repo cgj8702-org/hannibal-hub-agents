@@ -624,6 +624,15 @@ class CodeReviewResponse(BaseModel):
                 }
                 for item in self.risks_and_edge_cases
             ],
+            "verified_invariants": [
+                {
+                    "invariant": item.invariant,
+                    "path": item.path,
+                    "line": item.line,
+                    "evidence": item.evidence,
+                }
+                for item in self.verified_invariants
+            ],
         }
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")

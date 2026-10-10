@@ -21,6 +21,7 @@ from webhook_agent.review.schemas import (
     RiskItem,
     SyncResolutionItem,
     SyncReviewResponse,
+    VerifiedInvariant,
 )
 
 
@@ -112,6 +113,58 @@ def test_code_review_response_embeds_metadata() -> None:
     assert meta["minor_suggestions"][0]["line"] == 25
     assert len(meta["risks"]) == 1
     assert meta["risks"][0]["risk"] == "High concurrency throughput"
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_code_review_metadata_includes_verified_invariants() -> None:
+    """Invariants rendered in the body must also survive into the metadata footer."""
+    cr = CodeReviewResponse(
+        executive_summary="Audit pass.",
+        verdict="APPROVE",
+        verified_invariants=[
+            VerifiedInvariant(
+                invariant="Signature check runs before dispatch",
+                path="src/main.py",
+                line=12,
+                evidence="Covered by tests/unit/test_main.py::test_rejects_bad_signature",
+            )
+        ],
+    )
+    md = cr.to_markdown(verdict="APPROVE")
+    assert "Signature check runs before dispatch" in md
+
+    meta = extract_review_metadata(md)
+    assert meta is not None
+    assert meta["verified_invariants"] == [
+        {
+            "invariant": "Signature check runs before dispatch",
+            "path": "src/main.py",
+            "line": 12,
+            "evidence": "Covered by tests/unit/test_main.py::test_rejects_bad_signature",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_sync_review_metadata_includes_verified_invariants() -> None:
+    """Sync reviews must serialize verified invariants the same way as initial reviews."""
+    sync = SyncReviewResponse(
+        summary="Update preserves the contract.",
+        verdict="APPROVE",
+        verified_invariants=[
+            VerifiedInvariant(
+                invariant="Retry cap is unchanged",
+                path="src/worker.py",
+                line=40,
+                evidence="Constant is untouched in the incremental diff",
+            )
+        ],
+    )
+    meta = extract_review_metadata(sync.to_markdown(verdict="APPROVE"))
+    assert meta is not None
+    assert [i["invariant"] for i in meta["verified_invariants"]] == ["Retry cap is unchanged"]
 
 
 @pytest.mark.unit
