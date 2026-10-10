@@ -417,7 +417,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                 candidate_loc, desc_text = sep_match
                 path_str = candidate_loc.group(1)
                 line_str = candidate_loc.group(2) or candidate_loc.group(3)
-                target_path = path_str if ("/" in path_str or "." in path_str) else "codebase"
+                target_path = path_str if ("/" in path_str or "." in path_str) else ""
                 target_line = int(line_str) if line_str else None
                 clean_desc = desc_text if desc_text else raw_content
                 pending_path = pending_line = None
@@ -445,7 +445,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                     or clean_desc_norm.startswith(("APPROVE", "5/5"))
                 ):
                     continue
-                target_path = raw_path if ("/" in raw_path or "." in raw_path) else "codebase"
+                target_path = raw_path if ("/" in raw_path or "." in raw_path) else ""
                 target_line = None
 
             if clean_desc and clean_desc.strip("`* :."):

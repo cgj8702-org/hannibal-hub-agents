@@ -935,3 +935,52 @@ def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
     md = sync_obj.to_markdown("APPROVE")
     assert "### 🛡️ Verified Invariants & Edge Cases" in md
     assert "`src/webhook_agent/state/review_checkpoint.py:416`" in md
+
+
+def test_string_findings_get_no_placeholder_path() -> None:
+    """Bare-string findings keep their text but never receive an invented file path."""
+    code = normalize_code_review_dict(
+        {
+            "executive_summary": "s",
+            "critical_issues": ["Race in cache refresh"],
+            "minor_suggestions": ["Rename helper"],
+        }
+    )
+    sync = normalize_sync_review_dict(
+        {
+            "summary": "s",
+            "critical_issues": ["Race in cache refresh"],
+            "minor_suggestions": ["Rename helper"],
+        }
+    )
+    for normalized in (code, sync):
+        for item in normalized["critical_issues"] + normalized["minor_suggestions"]:
+            assert item["path"] == ""
+            assert item["line"] is None
+
+
+def test_risk_promotion_does_not_guess_a_file_path() -> None:
+    """A risk promoted to a critical issue must not be assigned a guessed file such as uv.lock."""
+    normalized = normalize_code_review_dict(
+        {
+            "executive_summary": "s",
+            "risks_and_edge_cases": [
+                {
+                    "risk": "Lock marker change causes unauthorized modification of deps",
+                    "recommendation": "Regenerate the lockfile",
+                }
+            ],
+        }
+    )
+    promoted = normalized["critical_issues"]
+    assert promoted, "expected the breaking risk to be promoted"
+    assert all(item["path"] == "" for item in promoted)
+
+
+def test_issue_without_path_does_not_render_empty_or_fake_location() -> None:
+    from webhook_agent.review.schemas import IssueItem
+
+    md = IssueItem(path="", description="Needs a real citation").to_markdown()
+    assert "``" not in md
+    assert "codebase" not in md
+    assert "no file cited" in md

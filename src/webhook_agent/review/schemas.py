@@ -79,11 +79,14 @@ class IssueItem(BaseModel):
 
     def to_markdown(self, prefix: str = "") -> str:
         """Render IssueItem into clean GitHub Markdown bullet point with code block formatting."""
-        loc = (
-            f"`{self.path}:{self.start_line}-{self.line}`"
-            if (self.start_line and self.line and self.start_line < self.line)
-            else (f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`")
-        )
+        if not self.path:
+            loc = "_(no file cited)_"
+        else:
+            loc = (
+                f"`{self.path}:{self.start_line}-{self.line}`"
+                if (self.start_line and self.line and self.start_line < self.line)
+                else (f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`")
+            )
         prefix_str = f"{prefix} " if prefix else ""
         item_str = f"* {prefix_str}{loc}: {self.description}"
         if self.suggested_fix and self.suggested_fix.strip():
@@ -316,7 +319,7 @@ class CodeReviewResponse(BaseModel):
                     if desc.lower() not in ("none", "none found", "critical issue detected."):
                         clean_crit.append(
                             {
-                                "path": "codebase",
+                                "path": "",
                                 "line": None,
                                 "description": desc,
                                 "suggested_fix": "",
@@ -326,7 +329,7 @@ class CodeReviewResponse(BaseModel):
                 elif isinstance(item, dict):
                     desc = str(item.get("description") or "").strip()
                     fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
-                    path_val = str(item.get("path") or "codebase").strip()
+                    path_val = str(item.get("path") or "").strip()
                     steps = str(item.get("verify_steps") or "").strip()
                     window_val = str(item.get("window") or "").strip()
 
@@ -377,7 +380,7 @@ class CodeReviewResponse(BaseModel):
                     ):
                         clean_crit.append(
                             {
-                                "path": str(item.get("path") or "codebase"),
+                                "path": str(item.get("path") or ""),
                                 "line": (
                                     item.get("line") if isinstance(item.get("line"), int) else None
                                 ),
@@ -397,9 +400,7 @@ class CodeReviewResponse(BaseModel):
                         continue
                     clean_crit.append(
                         {
-                            "path": "uv.lock"
-                            if ("lock" in r_lower or "marker" in r_lower)
-                            else "codebase",
+                            "path": "",
                             "line": None,
                             "description": r_item["risk"],
                             "suggested_fix": r_item["recommendation"],
@@ -423,7 +424,7 @@ class CodeReviewResponse(BaseModel):
                     ):
                         clean_minor.append(
                             {
-                                "path": "codebase",
+                                "path": "",
                                 "line": None,
                                 "description": desc,
                                 "suggested_fix": "",
@@ -432,7 +433,7 @@ class CodeReviewResponse(BaseModel):
                 elif isinstance(item, dict):
                     desc = str(item.get("description") or "").strip()
                     fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
-                    path_val = str(item.get("path") or "codebase").strip()
+                    path_val = str(item.get("path") or "").strip()
                     steps = str(item.get("verify_steps") or "").strip()
                     window_val = str(item.get("window") or "").strip()
 
@@ -749,14 +750,14 @@ class SyncReviewResponse(BaseModel):
                     if desc.lower() not in ("none", "none found"):
                         clean_crit.append(
                             {
-                                "path": "codebase",
+                                "path": "",
                                 "line": None,
                                 "description": desc,
                                 "suggested_fix": "",
                             }
                         )
                 elif isinstance(item, dict):
-                    path = str(item.get("path") or "codebase").strip()
+                    path = str(item.get("path") or "").strip()
                     desc = str(
                         item.get("description")
                         or item.get("title")
@@ -797,14 +798,14 @@ class SyncReviewResponse(BaseModel):
                     if desc.lower() not in ("none", "none found"):
                         clean_minor.append(
                             {
-                                "path": "codebase",
+                                "path": "",
                                 "line": None,
                                 "description": desc,
                                 "suggested_fix": "",
                             }
                         )
                 elif isinstance(item, dict):
-                    path = str(item.get("path") or "codebase").strip()
+                    path = str(item.get("path") or "").strip()
                     desc = str(
                         item.get("description")
                         or item.get("title")
@@ -844,14 +845,14 @@ class SyncReviewResponse(BaseModel):
                     if desc.lower() not in ("none", "none found"):
                         clean_crit.append(
                             {
-                                "path": "codebase",
+                                "path": "",
                                 "line": None,
                                 "description": desc,
                                 "suggested_fix": "",
                             }
                         )
                 elif isinstance(item, dict):
-                    path = str(item.get("path") or "codebase").strip()
+                    path = str(item.get("path") or "").strip()
                     title = str(item.get("title") or "").strip()
                     desc = str(
                         item.get("description") or title or item.get("item_description") or ""
