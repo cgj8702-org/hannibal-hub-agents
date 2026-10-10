@@ -468,3 +468,24 @@ def test_prefetch_previous_bot_reviews_extracts_structured_metadata() -> None:
     assert raw["prior_actionable_findings"][0]["description"] == "Auth bypass"
     assert raw["prior_actionable_findings"][0]["file_path"] == "src/api.py"
     assert raw["prior_actionable_findings"][0]["line_number"] == 50
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.parametrize("model", [CodeReviewResponse, SyncReviewResponse])
+def test_string_only_invariant_gets_no_fabricated_citation(model: type) -> None:
+    """A bare-string invariant must not be given an invented path or self-referential evidence."""
+    key = "executive_summary" if model is CodeReviewResponse else "summary"
+    resp = model.model_validate(
+        {key: "s", "verdict": "COMMENT", "verified_invariants": ["Retries are capped"]}
+    )
+    inv = resp.verified_invariants[0]
+    assert inv.invariant == "Retries are capped"
+    assert inv.path == ""
+    assert inv.line is None
+    assert inv.evidence == ""
+
+    md = resp.to_markdown(verdict="COMMENT")
+    assert "`codebase`" not in md
+    assert "no citation provided" in md
+    assert "``" not in md

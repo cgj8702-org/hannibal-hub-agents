@@ -153,8 +153,13 @@ class VerifiedInvariant(BaseModel):
         return clean_field_string(v)
 
     def to_markdown(self) -> str:
-        loc = f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`"
-        return f"* **Invariant**: {self.invariant} ({loc})\n  *Evidence*: {self.evidence}"
+        if self.path:
+            loc = f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`"
+            head = f"* **Invariant**: {self.invariant} ({loc})"
+        else:
+            head = f"* **Invariant**: {self.invariant} (no citation provided)"
+        evidence = self.evidence or "none provided"
+        return f"{head}\n  *Evidence*: {evidence}"
 
 
 BREAKING_RISK_KEYWORDS = (
@@ -486,12 +491,14 @@ class CodeReviewResponse(BaseModel):
                             }
                         )
                 elif isinstance(item, str) and item.strip():
+                    # A bare string carries no citation. Keep the claim, but never invent
+                    # a path or evidence for it: review() rejects the empty fields on APPROVE.
                     clean_inv.append(
                         {
                             "invariant": item.strip(),
-                            "path": "codebase",
+                            "path": "",
                             "line": None,
-                            "evidence": item.strip(),
+                            "evidence": "",
                         }
                     )
         normalized["verified_invariants"] = clean_inv
@@ -901,12 +908,14 @@ class SyncReviewResponse(BaseModel):
                             }
                         )
                 elif isinstance(item, str) and item.strip():
+                    # A bare string carries no citation. Keep the claim, but never invent
+                    # a path or evidence for it: review() rejects the empty fields on APPROVE.
                     clean_inv.append(
                         {
                             "invariant": item.strip(),
-                            "path": "codebase",
+                            "path": "",
                             "line": None,
-                            "evidence": item.strip(),
+                            "evidence": "",
                         }
                     )
         normalized["verified_invariants"] = clean_inv
