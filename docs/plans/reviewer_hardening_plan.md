@@ -66,14 +66,22 @@ written to logs, `extra="ignore"` silently dropping typo'd fields, and a `RiskIt
 mandate the PR did not actually enforce. The bot approved all four and **praised** the withdrawn
 `merge_pr` restore as having "thorough safety gates."
 
-**Caveat to keep honest:** not a controlled trial. CodeRabbit ran paid-Advanced with static
-analysis and an explicit trigger; the bot is free-tier, capped at 6 LLM calls behind a rate
-limiter. The budget explains the shallow *depth*. It does not explain the *direction* — 98%
-approve / ~never-block is a design property, not a resource ceiling. More tokens will not fix a
-reviewer that is structurally unwilling to fail a PR.
+**Caveat to keep honest — this is a hypothesis, not a controlled result.** Not a controlled
+trial: CodeRabbit ran paid-Advanced with static analysis and an explicit trigger; the bot is
+free-tier, capped at 6 LLM calls behind a rate limiter. My *reading* is that the budget explains
+the shallow depth while the near-never-block direction is a design property rather than a
+resource ceiling — i.e. more tokens alone would not fix a reviewer structurally unwilling to fail
+a PR. I have **no controlled evidence for either half**; this is inference from observational
+data (one bot, one codebase, no matched samples). Treat it as a hypothesis to test, not a finding.
+To actually separate design from budget, hold the diff constant and vary only the budget/tooling,
+then compare — the replay PRs are the natural place to run that.
 
-**Use this as the before-number.** Every phase below should move one of these metrics. If a
-change lands and the approve-when-it-shouldn't rate does not move, the change did not work.
+**Use this as the before-number, but measure accuracy, not approval volume.** A raw drop in
+approve-rate is gameable — a bot that blocks everything moves the metric while getting worse. The
+honest success measure is precision/recall against **independently adjudicated** outcomes: on a
+labeled sample of real PRs, did the bot's blocks catch defects a human reviewer agreed were real
+(missed-finding rate), and did its approvals wrongly clear PRs that should have been blocked
+(false-approve rate)? Build that labeled set before Phases 3/7/8 land, then re-score against it.
 
 ---
 
@@ -277,11 +285,21 @@ investigation gate) and `tests/unit/review/test_review_tool_validation.py` (two 
 partial-iteration failure must skip grounding, not reject; an all-`None` patch must hit the skip
 warning).
 
+**Define the verdict on skipped grounding — do not leave it open.** When `STRICT_REVIEW_GROUNDING`
+is on and grounding is skipped because retrieval was attempted-but-failed (or yielded no usable
+patch text), the review must **not** submit `APPROVE`. Grounding was requested and could not run,
+so the citations are *unverified*, and an unverified APPROVE is exactly the failure this flag
+exists to prevent. Downgrade the verdict to `COMMENT` (or block and surface the retrieval error to
+the model to retry) — pick one and encode it, rather than letting the APPROVE branch fall through.
+State explicitly which of the two you chose and why.
+
 **Order:** do this *before* flipping `STRICT_REVIEW_GROUNDING` on. A false-reject bug behind an
 enforcement flag is exactly the reviewer-exhaustion failure the default-off flag exists to prevent.
 
-**Evidence it worked:** the two new tests pass; `grep` confirms no path re-calls `get_files()`
-after a failed gate iteration; the existing five grounding tests stay green.
+**Evidence it worked:** the two new tests pass; a **third** regression test asserts the *final
+verdict and submission result* — a strict-mode review whose grounding was skipped by a failed
+`get_files()` never submits `APPROVE`; `grep` confirms no path re-calls `get_files()` after a
+failed gate iteration; the existing five grounding tests stay green.
 
 ---
 
@@ -417,6 +435,15 @@ diff never changed* — build on it: a resolution must cite a `path` + current-c
 the grounding verifier (Phase 2) should check that citation the same way it checks findings. A
 resolution whose evidence does not appear in the current diff stays **UNRESOLVED**.
 
+**Deletion-only fixes need their own rule — the current-code requirement above has a hole.** A fix
+that *deletes* the offending code leaves no touched current-code line to quote, so the naive rule
+would keep a legitimate deletion fix UNRESOLVED forever. Define **deletion-aware evidence**: when
+the prior finding's cited `path`/line no longer exists in the current tree *and* the diff shows a
+net removal at that location, the evidence is the *absence itself* plus the removal hunk. Require
+the resolution to cite the removed line's pre-image (the `-` side of the hunk) rather than a
+current-code line. Add a deletion-only replay case to the Phase 1 harness asserting it marks
+RESOLVED — and mirror that case in the resolution-integrity task so the two stay in step.
+
 **Also fix the false-invariant class:** a "Verified Invariant" that asserts a *behavior* (not a
 static fact like `X = "0"`) must be backed by a test or a diff quote. `DEFAULT_STRICT_REVIEW_GROUNDING
 = "0"` is verifiable by reading; "grounding skips gracefully when patch text is unavailable" is a
@@ -452,7 +479,7 @@ Keep every enforcement behind an env flag defaulting to **off** until its false-
 - `docs/slash_commands_catalog.md`, `SECURITY.md`, and the prompt agree about what the agent is allowed to do.
 - Phase 7's four CodeRabbit findings are closed (redaction, `add_label`/`create_issue` auth, strict input gate, `recommendation` mandate).
 - Phase 8's resolution-integrity rule is enforced: a RESOLVED claim requires current-code evidence.
-- **The scorecard moves.** Re-run the 55-PR-style metric after Phases 3/7/8: the approve-when-it-shouldn't rate (currently 98% blanket-approve, 92% zero-finding) must drop, and every remaining block must cite a checkable, diff-anchored defect — not a style opinion.
+- **The scorecard moves on accuracy, not approve-volume.** Do not measure success as "approve-rate dropped" — that is gameable (a bot that blocks everything moves the metric while getting worse). Instead, on a labeled sample of real PRs with independently adjudicated outcomes, measure **missed-finding rate** (blocks that catch defects a human agreed were real) and **false-approve rate** (approvals that wrongly cleared a PR that should have been blocked). Both must improve vs. the baseline; build the labeled set first.
 
 ## How to tell it went wrong (watch for these)
 

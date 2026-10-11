@@ -35,13 +35,13 @@ worked" criteria live in the plan's matching phase.
 
 - [ ] **T3.1 — Track `pr.get_files()` retrieval success separately from `patches`.** Partial iteration currently gets treated as the complete file list → strict mode falsely rejects; empty result triggers a second `get_files()` call. Skip grounding on failed retrieval; only fall back when the gate never attempted it. *(Plan 2.5 #1 — 🟠 Major.)*
 - [ ] **T3.2 — Test for *usable patch text*, not mapping non-emptiness.** `if not any(p for p in grounding_patches.values())` so the all-`patch=None` case hits the documented skip. *(Plan 2.5 #2 — 🟡 Minor.)*
-- [ ] **T3.3 — Two regression tests.** Partial-iteration failure → skip, not reject; all-`None` patch → skip warning. *(Plan 2.5.)*
+- [ ] **T3.3 — Three regression tests.** Partial-iteration failure → skip, not reject; all-`None` patch → skip warning; and a **verdict assertion** that a strict-mode review whose grounding was skipped by a failed `get_files()` never submits `APPROVE` (downgrade to COMMENT or block — encode the choice). *(Plan 2.5.)*
 
 ## Priority 4 — Resolution integrity (Phase 8)
 
 - [ ] **T4.1 — Require current-code evidence for RESOLVED.** Build on PR #261's detector: a resolution cites `path` + evidence that must appear in the current diff, else stays UNRESOLVED. *(Plan Phase 8.)*
 - [ ] **T4.2 — Route behavioral "Verified Invariants" through the grounding check.** A behavior claim (e.g. "grounding skips gracefully when patch unavailable") needs a test or diff quote; static facts (`X = "0"`) don't. *(Plan Phase 8 — the #260 false-invariant case.)*
-- [ ] **T4.3 — Replay #260's bot reviews as harness fixtures.** Assert the inverted resolution flips to UNRESOLVED and the false invariant is rejected. *(Plan Phase 8 evidence.)*
+- [ ] **T4.3 — Replay #260's bot reviews + a deletion-only fix as harness fixtures.** Assert the inverted resolution flips to UNRESOLVED and the false invariant is rejected; and assert a **deletion-only fix** (offending code removed, no current-code line to quote) still marks RESOLVED via deletion-aware evidence citing the pre-image. *(Plan Phase 8 evidence.)*
 
 ## Priority 5 — Structural (Phases 3–6; largest, do once the harness is loud)
 
@@ -53,4 +53,4 @@ worked" criteria live in the plan's matching phase.
 
 ## Verify the plan moved the needle
 
-- [ ] **T6.1 — Re-score after Phases 3/7/8.** Re-run the 55-PR-style metric. Blanket-approve (98%) and zero-finding (92%) rates must drop; every remaining block must cite a checkable, diff-anchored defect, not a style opinion. *(Plan Definition of Done.)*
+- [ ] **T6.1 — Build the adjudicated label set, then re-score after Phases 3/7/8.** Label a sample of real PRs with independently adjudicated outcomes. Measure **missed-finding rate** (did blocks catch defects a human agreed were real) and **false-approve rate** (did approvals wrongly clear PRs that should have been blocked). Both must improve vs. baseline. Do **not** use raw approve-rate drop as the success metric — it is gameable. *(Plan Definition of Done.)*
