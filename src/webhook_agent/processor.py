@@ -400,8 +400,15 @@ class WebhookProcessor:
 
         event_name = ev.get("event_name")
         canonical = self.route_event(ev)
-        # Suppress closed PR events and review submission events to prevent self-review feedback loops and reviews on closed PRs
-        if canonical in ("pull_request.closed", "pull_request_review.submitted") or (
+        # Suppress review-submission events to prevent self-review feedback loops. A submitted
+        # review says nothing about whether the PR is closed, so this arm must NOT register the
+        # PR in the closed registry — doing so poisons every later event for the registry's TTL
+        # window and silently skips the agent on an open PR (observed on #267).
+        if canonical == "pull_request_review.submitted":
+            return False
+
+        # Suppress genuinely closed PR events and register them so in-flight agent work short-circuits.
+        if canonical == "pull_request.closed" or (
             event_name == "pull_request" and action == "closed"
         ):
             raw = ev.get("raw_payload") or {}
