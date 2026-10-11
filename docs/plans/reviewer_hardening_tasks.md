@@ -41,7 +41,7 @@ worked" criteria live in the plan's matching phase.
 
 - [ ] **T4.1 — Require current-code evidence for RESOLVED.** Build on PR #261's detector: a resolution cites `path` + evidence that must appear in the current diff, else stays UNRESOLVED. *(Plan Phase 8.)*
 - [ ] **T4.2 — Route behavioral "Verified Invariants" through the grounding check.** A behavior claim (e.g. "grounding skips gracefully when patch unavailable") needs a test or diff quote; static facts (`X = "0"`) don't. *(Plan Phase 8 — the #260 false-invariant case.)*
-- [ ] **T4.3 — Replay #260's bot reviews + a deletion-only fix as harness fixtures.** Assert the inverted resolution flips to UNRESOLVED and the false invariant is rejected; and assert a **deletion-only fix** (offending code removed, no current-code line to quote) still marks RESOLVED via deletion-aware evidence citing the pre-image. *(Plan Phase 8 evidence.)*
+- [ ] **T4.3 — Replay #260's bot reviews + a deletion-only fix as harness fixtures.** Assert the inverted resolution flips to UNRESOLVED and the false invariant is rejected; and assert a **deletion-only fix** (offending code removed, no current-code line to quote) still marks RESOLVED — but *via the current-code check confirming the defect is gone*, with the removal hunk/pre-image as deletion evidence only, not as a substitute for that check. *(Plan Phase 8 evidence.)*
 
 ## Priority 5 — Structural (Phases 3–6; largest, do once the harness is loud)
 
@@ -53,4 +53,4 @@ worked" criteria live in the plan's matching phase.
 
 ## Verify the plan moved the needle
 
-- [ ] **T6.1 — Build the adjudicated label set, then re-score after Phases 3/7/8.** Label a sample of real PRs with independently adjudicated outcomes. Measure **missed-finding rate** (did blocks catch defects a human agreed were real) and **false-approve rate** (did approvals wrongly clear PRs that should have been blocked). Both must improve vs. baseline. Do **not** use raw approve-rate drop as the success metric — it is gameable. *(Plan Definition of Done.)*
+- [ ] **T6.1 — Build the adjudicated label set, then re-score after Phases 3/7/8.** Label a sample of real PRs with independently adjudicated outcomes (human decides which PRs truly had defects). Measure with explicit numerator/denominator: **recall** = adjudicated defects caught ÷ all adjudicated defects (higher better); **missed-finding rate** = 1 − recall (lower better); **false-approve rate** = PRs approved that should have been blocked ÷ all PRs approved (lower better). All must improve vs. baseline. Do **not** use raw approve-rate drop — it is gameable. Keep each metric's name and definition consistent. *(Plan Definition of Done.)*

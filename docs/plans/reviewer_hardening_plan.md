@@ -78,10 +78,13 @@ then compare — the replay PRs are the natural place to run that.
 
 **Use this as the before-number, but measure accuracy, not approval volume.** A raw drop in
 approve-rate is gameable — a bot that blocks everything moves the metric while getting worse. The
-honest success measure is precision/recall against **independently adjudicated** outcomes: on a
-labeled sample of real PRs, did the bot's blocks catch defects a human reviewer agreed were real
-(missed-finding rate), and did its approvals wrongly clear PRs that should have been blocked
-(false-approve rate)? Build that labeled set before Phases 3/7/8 land, then re-score against it.
+honest success measure is precision/recall against **independently adjudicated** outcomes. On a
+labeled sample of real PRs, with a human adjudicator deciding which PRs truly had defects:
+- **Recall** = adjudicated defects the bot's blocks caught ÷ all adjudicated defects (higher is better).
+- **Missed-finding rate** = 1 − recall = adjudicated defects the bot *failed* to catch ÷ all adjudicated defects (lower is better).
+- **False-approve rate** = PRs the bot approved that should have been blocked ÷ all PRs the bot approved (lower is better).
+Build that labeled set before Phases 3/7/8 land, then re-score against it. Do not let a metric's
+name and its definition drift apart — state numerator and denominator for each.
 
 ---
 
@@ -435,14 +438,20 @@ diff never changed* — build on it: a resolution must cite a `path` + current-c
 the grounding verifier (Phase 2) should check that citation the same way it checks findings. A
 resolution whose evidence does not appear in the current diff stays **UNRESOLVED**.
 
-**Deletion-only fixes need their own rule — the current-code requirement above has a hole.** A fix
+**Deletion-only fixes need their own rule — but the current-code check above still applies.** A fix
 that *deletes* the offending code leaves no touched current-code line to quote, so the naive rule
 would keep a legitimate deletion fix UNRESOLVED forever. Define **deletion-aware evidence**: when
 the prior finding's cited `path`/line no longer exists in the current tree *and* the diff shows a
-net removal at that location, the evidence is the *absence itself* plus the removal hunk. Require
-the resolution to cite the removed line's pre-image (the `-` side of the hunk) rather than a
-current-code line. Add a deletion-only replay case to the Phase 1 harness asserting it marks
-RESOLVED — and mirror that case in the resolution-integrity task so the two stay in step.
+net removal at that location, the resolution may cite the removed line's pre-image (the `-` side of
+the hunk) as its **deletion evidence**. Critically, this *supplements* rather than replaces the
+current-code requirement: the removal hunk proves the cited line was deleted at that spot, **not**
+that equivalent bad behavior is absent from the rest of the tree. The reviewer must still confirm
+against the current code that the defect's behavior is gone — including any re-introduction or
+same-pattern copy elsewhere — before marking RESOLVED. Deletion evidence answers "was the cited
+line removed?"; only a current-code check answers "is the defect actually resolved?". Add a
+deletion-only replay case to the Phase 1 harness asserting it marks RESOLVED *via* the current-code
+check (with the removal hunk as supporting evidence) — and mirror that case in the
+resolution-integrity task so the two stay in step.
 
 **Also fix the false-invariant class:** a "Verified Invariant" that asserts a *behavior* (not a
 static fact like `X = "0"`) must be backed by a test or a diff quote. `DEFAULT_STRICT_REVIEW_GROUNDING
@@ -479,7 +488,7 @@ Keep every enforcement behind an env flag defaulting to **off** until its false-
 - `docs/slash_commands_catalog.md`, `SECURITY.md`, and the prompt agree about what the agent is allowed to do.
 - Phase 7's four CodeRabbit findings are closed (redaction, `add_label`/`create_issue` auth, strict input gate, `recommendation` mandate).
 - Phase 8's resolution-integrity rule is enforced: a RESOLVED claim requires current-code evidence.
-- **The scorecard moves on accuracy, not approve-volume.** Do not measure success as "approve-rate dropped" — that is gameable (a bot that blocks everything moves the metric while getting worse). Instead, on a labeled sample of real PRs with independently adjudicated outcomes, measure **missed-finding rate** (blocks that catch defects a human agreed were real) and **false-approve rate** (approvals that wrongly cleared a PR that should have been blocked). Both must improve vs. the baseline; build the labeled set first.
+- **The scorecard moves on accuracy, not approve-volume.** Do not measure success as "approve-rate dropped" — that is gameable (a bot that blocks everything moves the metric while getting worse). Instead, on a labeled sample of real PRs with independently adjudicated outcomes, measure **recall** (adjudicated defects caught ÷ all adjudicated defects, higher is better), **missed-finding rate** (its complement, 1 − recall, lower is better), and **false-approve rate** (PRs approved that should have been blocked ÷ all PRs approved, lower is better). All must improve vs. the baseline; build the labeled set first. Full numerator/denominator definitions live in the Baseline section above.
 
 ## How to tell it went wrong (watch for these)
 
