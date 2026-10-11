@@ -249,3 +249,82 @@ def test_verify_citations_with_touched_dict() -> None:
     )
     assert len(issues) == 1
     assert issues[0].code == "line_outside_diff"
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: Resolution Integrity & Deletion-Aware Evidence Tests
+# ---------------------------------------------------------------------------
+
+DELETION_DIFF = (
+    "--- a/src/worker.py\n"
+    "+++ b/src/worker.py\n"
+    "@@ -20,4 +20,1 @@\n"
+    "-unsafe_fallback_call()\n"
+    "-legacy_clean_step()\n"
+    "-extra_line()\n"
+    "+safe_call()\n"
+)
+
+
+def test_resolution_unresolved_when_evidence_not_in_diff() -> None:
+    """A RESOLVED claim whose evidence is not supported by current diff/code stays UNRESOLVED."""
+    from webhook_agent.review.grounding import verify_resolutions
+
+    # Finding with RESOLVED status, but evidence describes something NOT in the diff
+    res_items = [
+        {
+            "item_description": "pr.get_files() latency overhead risk",
+            "status": "RESOLVED",
+            "evidence": "fallback only runs on un-investigated PR paths",
+            "path": "src/webhook_agent/tools/github_tools.py",
+        }
+    ]
+    # In DELETION_DIFF, src/webhook_agent/tools/github_tools.py isn't even touched, nor is that text present.
+    checked = verify_resolutions(res_items, DELETION_DIFF, ["src/worker.py"])
+    assert len(checked) == 1
+    assert checked[0]["status"] == "UNRESOLVED"
+    assert "not grounded in current code diff" in checked[0].get("grounding_note", "").lower()
+
+
+def test_resolution_deletion_aware_evidence_accepts_removal_hunk() -> None:
+    """When cited code was deleted, pre-image removal hunk ('-') acts as supporting evidence."""
+    from webhook_agent.review.grounding import verify_resolutions
+
+    res_items = [
+        {
+            "item_description": "unsafe_fallback_call security flaw",
+            "status": "RESOLVED",
+            "evidence": "-unsafe_fallback_call() removed from worker",
+            "path": "src/worker.py",
+            "line": 20,
+        }
+    ]
+    checked = verify_resolutions(res_items, DELETION_DIFF, ["src/worker.py"])
+    assert len(checked) == 1
+    assert checked[0]["status"] == "RESOLVED"
+
+
+def test_behavioral_invariant_without_diff_quote_or_test_is_rejected() -> None:
+    """A behavioral invariant claim without test or diff quote evidence fails grounding."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    # Static fact invariant vs Behavioral claim invariant
+    static_inv = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="DEFAULT_STRICT_REVIEW_GROUNDING = '0'",
+    )
+    behavioral_inv = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="grounding skips gracefully when patch text is unavailable",
+    )
+
+    issues_static = verify_citations([static_inv], SAMPLE_DIFF, ["src/main.py"])
+    issues_behavioral = verify_citations([behavioral_inv], SAMPLE_DIFF, ["src/main.py"])
+
+    assert issues_static == []
+    assert len(issues_behavioral) == 1
+    assert issues_behavioral[0].code == "unsubstantiated_behavioral_invariant"
