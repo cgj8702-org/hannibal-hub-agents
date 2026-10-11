@@ -190,6 +190,115 @@ def _norm_evidence(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip().lower()
 
 
+def parse_removal_hunks(diff_text: str) -> dict[str, list[str]]:
+    """Parse left-side removed lines (-) from unified diff text keyed by bare path."""
+    removals: dict[str, list[str]] = {}
+    current_file = ""
+    for line in (diff_text or "").splitlines():
+        if line.startswith("--- a/"):
+            current_file = bare_path(line[6:].strip())
+            removals.setdefault(current_file, [])
+        elif line.startswith("+++ b/"):
+            continue
+        elif line.startswith("-") and not line.startswith("---"):
+            if current_file:
+                removals.setdefault(current_file, []).append(line[1:].strip())
+    return removals
+
+
+def verify_resolutions(
+    resolutions: Sequence[Mapping[str, Any] | Any],
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Verify resolution claims against current code diff and removal hunks.
+
+    A prior finding may be marked RESOLVED only if current code diff or removal hunks
+    support the specific fix. If evidence or cited path/symbols are absent or ungrounded,
+    status is flipped to UNRESOLVED.
+    """
+    anchors, line_text = walk_right_side(diff_text)
+    removals = parse_removal_hunks(diff_text)
+    if changed_paths is None:
+        changed = set(line_text) | set(anchors) | set(removals)
+    else:
+        changed = {bare_path(p) for p in changed_paths if p}
+
+    all_added_text = " ".join(
+        txt for file_lines in line_text.values() for txt in file_lines.values()
+    )
+    all_removed_text = " ".join(
+        line for file_removals in removals.values() for line in file_removals
+    )
+
+    verified_results: list[dict[str, Any]] = []
+
+    for item in resolutions:
+        if isinstance(item, dict):
+            item_dict = dict(item)
+        elif hasattr(item, "model_dump"):
+            item_dict = item.model_dump()
+        else:
+            item_dict = {
+                "item_description": getattr(item, "item_description", ""),
+                "status": getattr(item, "status", "RESOLVED"),
+                "evidence": getattr(item, "evidence", ""),
+                "category": getattr(item, "category", "CRITICAL"),
+            }
+
+        status = item_dict.get("status", "RESOLVED")
+        if status != "RESOLVED":
+            verified_results.append(item_dict)
+            continue
+
+        desc = str(item_dict.get("item_description", ""))
+        ev = str(item_dict.get("evidence", ""))
+        item_path = str(item_dict.get("path", "")).strip()
+        combined_text = f"{desc} {ev}"
+
+        cited_paths = extract_cited_paths(combined_text)
+        if item_path:
+            cited_paths.add(bare_path(item_path))
+
+        cited_symbols = extract_cited_symbols(combined_text) | extract_bare_symbols(combined_text)
+
+        # 1. Path check
+        path_ok = True
+        if cited_paths:
+            if not any(cp in changed for cp in cited_paths):
+                path_ok = False
+
+        # 2. Symbol / Evidence check
+        evidence_ok = True
+        if not cited_symbols and not cited_paths:
+            # Narrative only without any path or symbol reference cannot be grounded -> UNRESOLVED
+            evidence_ok = False
+        elif cited_symbols:
+            target_files = cited_paths if cited_paths else changed
+            path_added_text = (
+                " ".join(txt for cp in target_files for txt in line_text.get(cp, {}).values())
+                or all_added_text
+            )
+            path_removed_text = (
+                " ".join(line for cp in target_files for line in removals.get(cp, []))
+                or all_removed_text
+            )
+            symbol_in_added = any(sym in path_added_text.lower() for sym in cited_symbols)
+            symbol_in_removed = any(sym in path_removed_text.lower() for sym in cited_symbols)
+            if not (symbol_in_added or symbol_in_removed):
+                evidence_ok = False
+
+        if not path_ok or not evidence_ok:
+            item_dict["status"] = "UNRESOLVED"
+            item_dict["grounding_note"] = (
+                "Resolution not grounded in current code diff: cited path or evidence symbol absent from diff"
+            )
+
+        verified_results.append(item_dict)
+
+    return verified_results
+
+
 def verify_citations(
     findings: Sequence[Finding],
     touched_or_diff: dict[str, set[int]] | str,
@@ -395,6 +504,37 @@ def _check_one(
                         f"{finding.kind} on '{path}:{finding.line}' evidence text does not appear in the diff.",
                     )
                 )
+
+    # Behavioral invariant check:
+    # A "Verified Invariant" asserting a behavior (not a static fact or line quote/test citation)
+    # must be backed by a test or diff quote.
+    if finding.kind == "invariant":
+        ev = (finding.evidence or "").lower()
+        BEHAVIORAL_KEYWORDS = (
+            "skips",
+            "skip",
+            "handles",
+            "fails",
+            "retries",
+            "bypasses",
+            "fallback",
+            "runs",
+            "gracefully",
+        )
+        STATIC_FACT_TOKENS = ("=", "==", ":=", "def ", "class ", "assert", "default")
+        is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
+        has_concrete_quote_or_test = any(st in ev for st in STATIC_FACT_TOKENS) or "test_" in ev
+        is_static_fact = re.search(r"^[A-Z0-9_]+\s*=\s*", finding.evidence.strip()) is not None
+        if is_behavioral and not is_static_fact and not has_concrete_quote_or_test:
+            issues.append(
+                _issue(
+                    "hard",
+                    "unsubstantiated_behavioral_invariant",
+                    finding,
+                    f"Invariant claim on '{path}' asserts behavioral logic ('{finding.evidence}') "
+                    f"without a concrete code quote or test function citation.",
+                )
+            )
 
     return issues
 
@@ -650,6 +790,8 @@ __all__ = [
     "extract_identifiers",
     "hard_reasons",
     "ngram_containment",
+    "parse_removal_hunks",
     "touched_lines_by_file",
     "verify_citations",
+    "verify_resolutions",
 ]

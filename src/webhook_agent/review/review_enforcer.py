@@ -206,6 +206,15 @@ def _enforce_verdict(
                             )
                             sync_obj.resolutions = []
 
+                    if diff_text:
+                        from webhook_agent.review.grounding import verify_resolutions
+                        from webhook_agent.review.schemas import SyncResolutionItem
+
+                        grounded_res = verify_resolutions(sync_obj.resolutions, diff_text)
+                        sync_obj.resolutions = [
+                            SyncResolutionItem.model_validate(r) for r in grounded_res
+                        ]
+
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
