@@ -63,7 +63,6 @@ from webhook_agent.review.writeback_policy import (
     evaluate_writeback_policy,
 )
 from webhook_agent.tools.github_tools import (
-    add_label,
     create_issue,
     get_commit_diff,
     get_issue,
@@ -223,7 +222,6 @@ class WebhookAgent:
                 read_file,
                 get_issue,
                 get_commit_diff,
-                add_label,
                 create_issue,
             ],
         )

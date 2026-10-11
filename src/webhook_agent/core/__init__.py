@@ -41,7 +41,6 @@ from webhook_agent.core.loop_helpers import (
 from webhook_agent.core.memory_service import InMemoryMemoryService
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools.github_tools import (
-    add_label,
     create_issue,
     get_commit_diff,
     get_current_time,
@@ -62,7 +61,6 @@ __all__ = [
     "PromptSanitizerPlugin",
     "WebhookAgent",
     "_ensure_bg_loop",
-    "add_label",
     "after_model_callback",
     "after_tool_callback",
     "before_agent_callback",

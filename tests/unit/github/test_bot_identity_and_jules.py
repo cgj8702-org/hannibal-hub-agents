@@ -3,8 +3,30 @@
 from __future__ import annotations
 
 from webhook_agent.core.agent_definition import CONVERSATIONAL_INSTRUCTION
-from webhook_agent.github.bot_identity import _is_bot_event, _is_bot_sender, is_jules_sender
+from webhook_agent.github.bot_identity import (
+    OWNER_LOGIN,
+    _is_bot_event,
+    _is_bot_sender,
+    is_jules_sender,
+    is_owner_sender,
+)
 from webhook_agent.processor import WebhookProcessor
+
+
+def test_is_owner_sender():
+    assert OWNER_LOGIN == "cgj8702"
+    assert is_owner_sender({"login": "cgj8702"}) is True
+    assert is_owner_sender({"login": "CGJ8702"}) is True
+    assert is_owner_sender({"login": "  cgj8702  "}) is True
+    # Machine account and other collaborators must NOT trigger override handling.
+    assert is_owner_sender({"login": "cgj8702-agents"}) is False
+    assert is_owner_sender({"login": "octocat"}) is False
+    assert is_owner_sender({"login": "google-labs-jules[bot]"}) is False
+    assert is_owner_sender(None) is False
+    assert is_owner_sender({}) is False
+    # Raw-payload fallback covers events where only raw sender is populated.
+    assert is_owner_sender({}, {"sender": {"login": "cgj8702"}}) is True
+    assert is_owner_sender(None, {"sender": {"login": "octocat"}}) is False
 
 
 def test_is_jules_sender():

@@ -14,6 +14,11 @@ from typing import Any
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 BOT_APP_SLUG = "hannibal-hub-agents"
 
+# Human repository owner login. Label add/remove events from this account are
+# treated as explicit manual overrides that the agent must never silently reverse.
+# Distinct from the machine account cgj8702-agents; only the human owner counts.
+OWNER_LOGIN = "cgj8702"
+
 # Autonomous coding partner bot logins (Jules)
 JULES_BOT_LOGINS = {
     "google-labs-jules[bot]",
@@ -58,6 +63,31 @@ def is_jules_sender(
                     return True
 
     return False
+
+
+def is_owner_sender(
+    sender: dict[str, Any] | None,
+    raw_payload: dict[str, Any] | None = None,
+) -> bool:
+    """Check whether a sender represents the human repository owner (``cgj8702``).
+
+    Used to flag label add/remove events as an explicit manual override that the
+    agent must respect and never silently reverse. Deliberately narrow: only the
+    owner's own login counts, so the machine account (``cgj8702-agents``) and other
+    collaborators do not trigger override handling.
+    """
+    candidates: list[dict[str, Any]] = []
+    if isinstance(sender, dict):
+        candidates.append(sender)
+    if isinstance(raw_payload, dict):
+        raw_sender = raw_payload.get("sender")
+        if isinstance(raw_sender, dict):
+            candidates.append(raw_sender)
+
+    owner = OWNER_LOGIN.strip().lower()
+    return any(
+        (c.get("login") or "").strip().lower() == owner for c in candidates if isinstance(c, dict)
+    )
 
 
 def _is_bot_sender(sender: dict[str, Any] | None) -> bool:

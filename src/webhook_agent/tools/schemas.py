@@ -73,26 +73,6 @@ class ReviewInput(ToolInputBase):
         return data
 
 
-class AddLabelInput(ToolInputBase):
-    """Input schema for add_label tool."""
-
-    issue_number: int = Field(..., ge=1, description="Issue or PR number.")
-    labels: list[str] = Field(..., min_length=1, description="List of label names to attach.")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_aliases(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "issue_number" not in data:
-                if "pr_number" in data:
-                    data["issue_number"] = data["pr_number"]
-                elif "number" in data:
-                    data["issue_number"] = data["number"]
-            if "labels" in data and isinstance(data["labels"], str):
-                data["labels"] = [lbl.strip() for lbl in data["labels"].split(",") if lbl.strip()]
-        return data
-
-
 class CreateIssueInput(ToolInputBase):
     """Input schema for create_issue tool."""
 
@@ -114,13 +94,11 @@ TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "get_issue": GetIssueInput,
     "get_commit_diff": GetCommitDiffInput,
     "review": ReviewInput,
-    "add_label": AddLabelInput,
     "create_issue": CreateIssueInput,
 }
 
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
-    "AddLabelInput",
     "CreateIssueInput",
     "GetCommitDiffInput",
     "GetIssueInput",

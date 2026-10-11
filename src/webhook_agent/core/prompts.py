@@ -8,6 +8,7 @@ from typing import Any
 
 from google.genai import types as genai_types
 
+from webhook_agent.github.bot_identity import is_owner_sender
 from webhook_agent.models.rate_limiter import _resolve_tier
 
 logger = logging.getLogger("webhook_agent.core.prompts")
@@ -177,7 +178,7 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
 
 ### Grounding & Tools
-- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `add_label`, `create_issue`.
+- You have access to PR metadata, diff context, and inspection/action tools: `read_file`, `get_commit_diff`, `get_issue`, `create_issue`.
 - Verify facts using tools before making assertions about repository files.
 
 ### Code Mutation, GitHub Ops & Jules Delegation Protocol
@@ -197,7 +198,7 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
   4. **MANDATORY TOOL EXECUTION**:
      - You MUST execute the tool function call directly; do NOT simply print markdown instructions for Jules in your text reply without calling the tool!
      - If the task is a new feature, refactoring, standalone bug fix, or separate ticket, call `create_issue(title=..., body=spec, labels=['jules'])` to spawn the issue directly and summon Jules (`google-labs-jules[bot]`).
-     - If the task is addressing the current issue/PR directly in place, call `add_label(issue_number=..., labels=['jules'])` to attach the `jules` label to the current thread.
+     - If the task is addressing the current issue/PR directly in place, do NOT attach labels yourself (the agent has no add-label tool); explain the required change in your reply and let a human maintainer attach the `jules` label to delegate it to Jules.
   5. Explain to the human engineer what action was taken (citing the created issue number or attached label), noting that Jules (`google-labs-jules[bot]`) is summoned to execute the implementation and you will audit the resulting PR.
 """
 
@@ -236,9 +237,24 @@ def build_user_message(event_data: dict[str, Any]) -> genai_types.Content:
     elif canonical.startswith("issues."):
         issue = raw.get("issue", {})
         issue_num = issue.get("number", "unknown")
+        action = raw.get("action")
         parts.append(f"Issue Number: {issue_num}")
         parts.append(f"Issue Title: {issue.get('title', 'N/A')}")
         parts.append(f"Issue Body: {issue.get('body') or ''}")
+        # Label add/remove events: surface which label changed and whether the
+        # acting user is the repository owner. The owner's label action is an
+        # explicit manual override that the agent must respect and never reverse.
+        if action in ("labeled", "unlabeled"):
+            label = raw.get("label") or {}
+            label_name = label.get("name", "unknown") if isinstance(label, dict) else "unknown"
+            parts.append(f"Label Action: {action}")
+            parts.append(f"Label Name: {label_name}")
+            if is_owner_sender(sender, raw):
+                parts.append(
+                    f"OWNER OVERRIDE: '{sender_login}' is the repository owner. This "
+                    f"'{action}' action on label '{label_name}' is an explicit manual "
+                    "override. Respect it and do not reverse or re-add the label."
+                )
     elif canonical.startswith("pull_request."):
         pr = raw.get("pull_request", {})
         pr_num = pr.get("number", "unknown")

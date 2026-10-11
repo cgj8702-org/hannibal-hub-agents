@@ -747,43 +747,6 @@ class TestGetIssue:
 
 
 # ---------------------------------------------------------------------------
-# Tests: add_label tool
-# ---------------------------------------------------------------------------
-
-
-class TestAddLabel:
-    def test_add_label_success(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.tools.github_tools import add_label
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        mock_issue = MagicMock()
-        repo.get_issue.return_value = mock_issue
-
-        result = add_label(ctx, 42, labels=["jules"])
-        assert "Successfully added labels ['jules'] to #42" in result
-        mock_issue.add_to_labels.assert_called_once_with("jules")
-
-    def test_add_label_error_handling(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.tools.github_tools import add_label
-
-        ctx = MagicMock()
-        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
-
-        repo = ctx.state["gh_client"].get_repo.return_value
-        repo.get_issue.side_effect = Exception("Not found")
-
-        result = add_label(ctx, 42, labels=["jules"])
-        assert "Error adding labels to #42" in result
-
-
-# ---------------------------------------------------------------------------
 # Tests: create_issue tool
 # ---------------------------------------------------------------------------
 
@@ -845,7 +808,7 @@ class TestCreateIssue:
             for t in agent._conversational_agent.tools
         }
         assert "create_issue" in tool_names
-        assert "add_label" in tool_names
+        assert "add_label" not in tool_names
 
 
 # Tests: get_max_input_tokens & payload truncation
@@ -1203,7 +1166,9 @@ class TestConversationalAgent:
         # Tools should include codebase grounding tools but NOT review
         assert "read_file" in tool_names
         assert "create_issue" in tool_names
-        assert "add_label" in tool_names
+        # Regression guard: add_label removed entirely (unguarded mutation surface + Jules'
+        # GitHub App ignores machine-actor label events). See reviewer hardening plan 7.2.
+        assert "add_label" not in tool_names
         # Regression guard: unguarded mutating tools must stay unregistered.
         assert "update_issue" not in tool_names
         assert "merge_pr" not in tool_names
