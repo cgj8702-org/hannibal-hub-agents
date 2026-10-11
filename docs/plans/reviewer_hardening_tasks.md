@@ -19,11 +19,12 @@ worked" criteria live in the plan's matching phase.
 - [ ] **T0.1 — De-register `merge_pr` / `update_issue` from `_conversational_agent`.** *(Plan Phase 0.)* Keeps the good Pydantic-gate part of #258, drops the unauthenticated mutation surface. Risk is *registration* + prompt, not the function existing.
 - [ ] **T0.2 — Remove their `TOOL_INPUT_SCHEMAS` entries and prompt lines; revert `docs/slash_commands_catalog.md` tool list.** *(Plan Phase 0.)* Leave no instruction telling the model to call them.
 
-## Priority 1 — Security findings the bot approved (Phase 7)
+## Priority 1 — Security & suppression robustness (Phase 7 + loop avoidance)
 
 - [ ] **T1.1 — Redact the tool-gate failure path.** `core/callbacks.py:290-299` logs full raw `args` and echoes `val_err` to the model. Log tool name + error types/field names only; return a generic error. *(Plan 7.1 — root of CodeRabbit's 🟡 Moderate.)*
 - [ ] **T1.2 — Authorize `add_label` server-side.** No sender-permission check; it's the Jules-delegation trigger, so any commenter can summon an autonomous agent. Deny when sender lacks triage/write. *(Plan 7.2.)*
 - [ ] **T1.3 — Authorize `create_issue` server-side.** Same comment-driven reachability, same fix. *(Plan 7.2.)*
+- [ ] **T1.4 — Make loop-avoidance aware of third-party bots (not just Jules + self).** `should_process_event` (`processor.py:362-379`) suppresses only this bot (`_is_bot_event`) and Jules; any other bot (e.g. `coderabbitai[bot]`) is invisible, so a human/machine reply to a third-party bot's comment wakes the agent → bounded ping-pong. Confirm empirically (post a keyword-free reply on #268 and watch the conversational branch fire, then terminate when the agent's own `hannibal-hub-agents[bot]` reply is suppressed). Fix: generalize suppression to all `*[bot]`/app-originated comments, or add a CodeRabbit-aware allow/deny, so the agent never auto-replies into a third-party bot thread. Add a regression test. *(Discovered live 2026-10-11 on #268; ties to Phase 0 containment.)*
 
 ## Priority 2 — Correctness of the input gate (Phase 7)
 
