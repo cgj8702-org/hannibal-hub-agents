@@ -31,12 +31,16 @@ from webhook_agent.review.grounding import (
     _IDENTIFIER_RE,
     Finding,
     Kind,
+    check_body_metadata_parity,
+    check_test_count_claims,
     citation_overlap,
+    detect_prior_decision_contradiction,
     diff_text_from_patches,
     extract_bare_symbols,
     extract_cited_paths,
     extract_cited_symbols,
     extract_identifiers,
+    ngram_containment,
     verify_citations,
 )
 
@@ -147,15 +151,87 @@ def test_every_citation_points_at_a_line_the_diff_displays() -> None:
         assert unseen == [], f"review {review['id']} cites lines the diff never shows: {unseen}"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known defect: reviews make inaccurate numeric test claims or match "
+        "line numbers (e.g., claiming 2 or 8497 tests when 5 were added)."
+    ),
+)
 def test_review_does_not_overstate_the_test_count() -> None:
-    """Every numeric test-count claim must match a recount of the diff."""
+    """Assertion 2: Every numeric test-count claim must match a recount of added test functions.
+
+    Known-bad: fails on recorded fixtures because bot reviews hallucinate test counts or
+    misinterpret line numbers as test counts.
+    """
+    issues = []
+    for _name, path in _ALL_FIXTURES:
+        fixture = _load(path)
+        diff_text = _diff_text(fixture)
+        for review in _bot_reviews(fixture):
+            issues.extend(check_test_count_claims(review["body"] or "", diff_text))
+    assert issues == [], f"test-count claims mismatch found: {issues}"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known defect: verified_invariants are rendered in the review body "
+        "but never serialized into the hannibal-review-metadata footer."
+    ),
+)
+def test_body_metadata_parity_verified_invariants() -> None:
+    """Assertion 3: Verified invariants rendered in body must be present in footer metadata.
+
+    Known-bad: both to_markdown blocks in review/schemas.py omit verified_invariants from
+    metadata serialization and metadata.py never reads it.
+    """
+    parity_issues = []
+    for _name, path in _ALL_FIXTURES:
+        fixture = _load(path)
+        for review in _bot_reviews(fixture):
+            body = review["body"] or ""
+            metadata = _metadata(body)
+            parity_issues.extend(check_body_metadata_parity(body, metadata))
+    assert parity_issues == [], f"body/metadata parity mismatches found: {parity_issues}"
+
+
+def test_prior_decision_contradiction_detection() -> None:
+    """Assertion 4: #241 approved removing merge_pr; contradiction detector flags unacknowledged reintroduction.
+
+    Detection passes as a pure function check.
+    """
+    p241 = _load(FIXTURE_241)
+    bodies_241 = [r["body"] or "" for r in _bot_reviews(p241)]
+
+    # #258 text without acknowledgment is flagged as contradiction
+    unacknowledged = "This PR restores merge_pr tool without explaining why."
+    assert detect_prior_decision_contradiction(bodies_241, unacknowledged) is True
+
+    # #258 text with reversal acknowledgment is not flagged
+    acknowledged = "This PR reverses a decision from PR #241; merge_pr scope is withdrawn."
+    assert detect_prior_decision_contradiction(bodies_241, acknowledged) is False
+
+
+def test_narrative_echo_metric() -> None:
+    """Assertion 5: Narrative-echo metric ngram_containment(pr_body, review_summary, n=5).
+
+    Calculates n-gram containment of review summary in PR body. Record only; never fail.
+    """
     fixture = _load(FIXTURE_258)
-    actual = _added_test_count(fixture)
-    for review in _bot_reviews(fixture):
-        for claimed in _claimed_test_counts(review["body"] or ""):
-            assert claimed == actual, (
-                f"review {review['id']} claims {claimed} tests; diff adds {actual}"
-            )
+    pr_body = fixture.get("body") or ""
+    bot_reviews = _bot_reviews(fixture)
+    assert len(bot_reviews) > 0
+    first_review = bot_reviews[0].get("body") or ""
+
+    score = ngram_containment(pr_body, first_review, n=5)
+    assert 0.0 <= score <= 1.0
+
+    # Non-vacuous test: known overlapping text must yield non-zero containment score
+    text_a = "Universal Pydantic Input Gating enforced in before_tool_callback converting raw tool arguments"
+    text_b = "Universal Pydantic Input Gating enforced in before_tool_callback"
+    overlap_score = ngram_containment(text_a, text_b, n=5)
+    assert overlap_score > 0.0
 
 
 def test_wrong_line_inside_a_changed_hunk_is_a_known_blind_spot() -> None:
