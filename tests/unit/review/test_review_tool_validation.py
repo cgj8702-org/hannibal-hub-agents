@@ -263,9 +263,7 @@ def test_review_rejects_approve_with_invalid_invariant(mock_ctx):
     }
     res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
     assert res.startswith("Error: Review submission rejected")
-    assert "lacks exact file path" in res
-    assert "lacks valid line number" in res
-    assert "lacks concrete evidence" in res
+    assert "verified_invariants' is empty" in res
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
@@ -469,6 +467,77 @@ def test_grounding_skips_and_logs_when_patch_text_is_unavailable(
         res = review(ctx, 8104, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
     assert res == "Review submitted"
     assert "Grounding check skipped" in caplog.text
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_partial_iteration_failure_skips_grounding(mock_submit, monkeypatch, caplog):
+    """A partial get_files() iteration error marks retrieval_ok=False and skips grounding."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+
+    def _partial_files():
+        f1 = MagicMock()
+        f1.filename = "src/alpha.py"
+        f1.patch = _ALPHA_PATCH
+        yield f1
+        raise RuntimeError("Stream interrupted")
+
+    pr = MagicMock()
+    pr.get_files.side_effect = _partial_files
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    ctx = MagicMock(spec=Context)
+    ctx.state = {
+        "gh_client": gh,
+        "repo_full_name": "owner/repo",
+        "formal_review_eligible": True,
+        "deterministic_precompiled_ast": True,
+    }
+
+    with caplog.at_level(logging.WARNING):
+        res = review(ctx, 8106, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert "Grounding check skipped" in caplog.text
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_grounding_all_none_patches_hits_skip(mock_submit, monkeypatch, caplog):
+    """When all changed files have patch=None, grounding hits the skip warning."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"assets/logo.png": None, "data/bin.dat": None})
+    with caplog.at_level(logging.WARNING):
+        res = review(ctx, 8107, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert "Grounding check skipped" in caplog.text
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_strict_mode_skipped_grounding_downgrades_approve_to_comment(
+    mock_submit, monkeypatch, caplog
+):
+    """Strict-mode review with skipped grounding never submits APPROVE, downgrading to COMMENT."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"assets/logo.png": None})
+    payload = {
+        "executive_summary": "Attempting approval on binary-only PR",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+        "verified_invariants": [{"path": "src/alpha.py", "line": 10, "evidence": "check"}],
+    }
+    with caplog.at_level(logging.WARNING):
+        res = review(ctx, 8108, json.dumps(payload), "APPROVE")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, _submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "COMMENT"
+    assert "downgrading verdict from APPROVE to COMMENT" in caplog.text
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")

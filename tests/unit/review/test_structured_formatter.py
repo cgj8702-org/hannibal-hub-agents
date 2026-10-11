@@ -231,6 +231,7 @@ def test_normalize_code_review_dict_edge_cases():
         "critical_issues": [],
         "minor_suggestions": [],
         "verified_invariants": [],
+        "unverified_claims": [],
         "context_gaps": [],
     }
 
@@ -899,18 +900,18 @@ def test_normalize_code_review_dict_rescues_evidence_only_invariants():
 
 
 def test_normalize_code_review_dict_rescues_string_invariants():
-    """Verify that normalize_code_review_dict coerces plain string invariants."""
+    """Verify that normalize_code_review_dict routes plain string invariants to unverified_claims."""
     raw_data = {
         "executive_summary": "Clean review.",
         "verified_invariants": ["In-memory cache expiration invariant preserved across threads."],
     }
     normalized = normalize_code_review_dict(raw_data)
-    assert len(normalized["verified_invariants"]) == 1
-    inv = normalized["verified_invariants"][0]
-    assert inv["invariant"] == "In-memory cache expiration invariant preserved across threads."
-    # The claim is kept, but the normalizer must not invent a citation or self-referential evidence.
-    assert inv["path"] == ""
-    assert inv["evidence"] == ""
+    assert len(normalized["verified_invariants"]) == 0
+    assert len(normalized["unverified_claims"]) == 1
+    assert (
+        normalized["unverified_claims"][0]
+        == "In-memory cache expiration invariant preserved across threads."
+    )
 
 
 def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
@@ -960,7 +961,7 @@ def test_string_findings_get_no_placeholder_path() -> None:
 
 
 def test_risk_promotion_does_not_guess_a_file_path() -> None:
-    """A risk promoted to a critical issue must not be assigned a guessed file such as uv.lock."""
+    """A risk without a valid file path and line number must not be promoted to critical_issues."""
     normalized = normalize_code_review_dict(
         {
             "executive_summary": "s",
@@ -973,8 +974,7 @@ def test_risk_promotion_does_not_guess_a_file_path() -> None:
         }
     )
     promoted = normalized["critical_issues"]
-    assert promoted, "expected the breaking risk to be promoted"
-    assert all(item["path"] == "" for item in promoted)
+    assert not promoted, "expected breaking risk without citation not to fabricate a critical issue"
 
 
 def test_issue_without_path_does_not_render_empty_or_fake_location() -> None:
