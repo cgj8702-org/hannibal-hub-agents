@@ -78,11 +78,10 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Pull-request context and diffs are hydrated before model evaluation.
    - Structured review output is normalized before writeback.
 2. **Proactive PR Evaluator (`ProactiveEvaluator`)**:
-   - Runs a 30-minute background ticker in the worker process.
+   - Runs a 5-minute background ticker in the worker process (when enabled).
    - Scans open PRs for:
      - **Stale Review Threads**: Unresolved review feedback idle >24h ➔ Posts soft reminder comment.
-     - **Merge Conflicts**: Target branch conflicts (`mergeable_state == "dirty"`) ➔ Posts conflict warning comment.
-     - **Failing CI Runs**: Failed status check runs ➔ Posts targeted diagnostic recommendations.
+     - **Merge Conflicts**: Target branch conflicts (`mergeable_state == "dirty"`) ➔ Logs conflict warning.
 3. **Universal Pydantic Field Validators (`clean_field_string`)**:
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
 4. **Tier-Aware Model Chains & 503 Failover**:
