@@ -300,6 +300,66 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is False
 
+    def test_review_submitted_does_not_mark_open_pr_closed(self):
+        """A review submission must NOT register an open PR in the closed registry.
+
+        Regression guard for the #267 bug: `pull_request_review.submitted` shared a branch with
+        `pull_request.closed` and called `mark_closed`, poisoning the in-memory registry so every
+        later event on that open PR was skipped as 'closed or merged' for the registry TTL.
+        """
+        from webhook_agent.core.cancellation import pr_closed_registry
+
+        ev = _make_normalized(
+            "pull_request_review",
+            action="submitted",
+            include_review=True,
+            comment_author="human-user",
+        )
+        # Attach the PR + repository the real webhook delivers inside raw_payload, so the buggy
+        # mark_closed line is genuinely reachable (it reads raw_payload["repository"]["full_name"]).
+        ev["raw_payload"]["pull_request"] = {"number": 42, "state": "open"}
+        ev["raw_payload"]["repository"] = {"full_name": "owner/repo"}
+
+        # The event is still suppressed (loop avoidance unchanged)...
+        assert self.processor.should_process_event(ev) is False
+        # ...but the open PR must remain un-poisoned, so later events still process.
+        assert pr_closed_registry.is_closed("owner/repo", 42) is False
+
+    def test_closed_pr_event_still_marks_registry(self):
+        """Genuinely closed PRs must still register so in-flight work short-circuits."""
+        from webhook_agent.core.cancellation import pr_closed_registry
+
+        ev = _make_normalized("pull_request", action="closed")
+        ev["raw_payload"]["pull_request"] = {"number": 42, "state": "closed"}
+        ev["raw_payload"]["repository"] = {"full_name": "owner/repo"}
+
+        assert self.processor.should_process_event(ev) is False
+        assert pr_closed_registry.is_closed("owner/repo", 42) is True
+        # Clean up the singleton so it cannot leak into other tests.
+        pr_closed_registry._closed.pop("owner/repo#42", None)
+
+    def test_pr_alias_closed_event_still_marks_registry(self):
+        """The `pr` event-name alias with action=closed must still register as closed.
+
+        CodeRabbit #268 flagged that route_event's fallback returns "pr.closed" (not
+        "pull_request.closed") for event_name="pr", so the closed-PR branch must accept the
+        alias too or a pr-aliased closed event would fall through unregistered. GitHub's
+        X-GitHub-Event header only ever sends "pull_request" today, so this is a defensive guard.
+        """
+        from webhook_agent.core.cancellation import pr_closed_registry
+
+        ev = _make_normalized("pr", action="closed")
+        ev["raw_payload"]["pull_request"] = {"number": 42, "state": "closed"}
+        ev["raw_payload"]["repository"] = {"full_name": "owner/repo"}
+
+        # route_event's fallback maps ("pr", "closed") -> "pr.closed".
+        assert self.processor.route_event(ev) == "pr.closed"
+
+        assert self.processor.should_process_event(ev) is False
+        assert pr_closed_registry.is_closed("owner/repo", 42) is True
+        # Clean up the singleton so it cannot leak into other tests.
+        pr_closed_registry._closed.pop("owner/repo#42", None)
+
     def test_prefetch_pr_diff(self, monkeypatch):
         """_prefetch_pr_diff programmatically populates raw_payload['pr_diff']."""
         from webhook_agent.processor import _prefetch_pr_diff

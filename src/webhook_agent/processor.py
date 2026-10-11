@@ -400,9 +400,20 @@ class WebhookProcessor:
 
         event_name = ev.get("event_name")
         canonical = self.route_event(ev)
-        # Suppress closed PR events and review submission events to prevent self-review feedback loops and reviews on closed PRs
-        if canonical in ("pull_request.closed", "pull_request_review.submitted") or (
-            event_name == "pull_request" and action == "closed"
+        # Suppress review-submission events to prevent self-review feedback loops. A submitted
+        # review says nothing about whether the PR is closed, so this arm must NOT register the
+        # PR in the closed registry — doing so poisons every later event for the registry's TTL
+        # window and silently skips the agent on an open PR (observed on #267).
+        if canonical == "pull_request_review.submitted":
+            return False
+
+        # Suppress genuinely closed PR events and register them so in-flight agent work short-circuits.
+        # Accept both canonical spellings and the "pr" event-name alias: route_event's fallback yields
+        # "pr.closed" for event_name="pr" (not "pull_request.closed"), so without the alias a pr-aliased
+        # closed event would slip through unregistered. Defensive per CodeRabbit #268 — the
+        # X-GitHub-Event header only ever sends "pull_request" today, but the alias keeps the branch total.
+        if canonical in ("pull_request.closed", "pr.closed") or (
+            event_name in ("pull_request", "pr") and action == "closed"
         ):
             raw = ev.get("raw_payload") or {}
             repo = raw.get("repository") or {}
