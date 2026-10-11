@@ -89,12 +89,69 @@ class CreateIssueInput(ToolInputBase):
         return data
 
 
+class UpdateIssueInput(ToolInputBase):
+    """Input schema for update_issue tool."""
+
+    number: int = Field(..., ge=1, description="Issue or PR number.")
+    title: str | None = Field(default=None, description="Optional updated title.")
+    body: str | None = Field(default=None, description="Optional updated body content.")
+    state: Literal["open", "closed"] | None = Field(
+        default=None, description="Optional updated state ('open' or 'closed')."
+    )
+    labels: list[str] | None = Field(default=None, description="Optional list of labels to set.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "number" not in data:
+                if "issue_number" in data:
+                    data["number"] = data["issue_number"]
+                elif "pr_number" in data:
+                    data["number"] = data["pr_number"]
+            if "state" in data and isinstance(data["state"], str):
+                data["state"] = data["state"].lower()
+            if "labels" in data and isinstance(data["labels"], str):
+                data["labels"] = [lbl.strip() for lbl in data["labels"].split(",") if lbl.strip()]
+        return data
+
+
+class MergePRInput(ToolInputBase):
+    """Input schema for merge_pr tool."""
+
+    pr_number: int = Field(..., ge=1, description="Pull request number.")
+    expected_base: str = Field(
+        default="main", description="Expected base branch name (e.g. 'main')."
+    )
+    merge_method: Literal["squash", "merge", "rebase"] = Field(
+        default="squash", description="Merge method to use."
+    )
+    commit_title: str | None = Field(
+        default=None, description="Optional title for the merge commit."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "pr_number" not in data:
+                if "number" in data:
+                    data["pr_number"] = data["number"]
+                elif "issue_number" in data:
+                    data["pr_number"] = data["issue_number"]
+            if "merge_method" in data and isinstance(data["merge_method"], str):
+                data["merge_method"] = data["merge_method"].lower()
+        return data
+
+
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
     "get_issue": GetIssueInput,
     "get_commit_diff": GetCommitDiffInput,
     "review": ReviewInput,
     "create_issue": CreateIssueInput,
+    "update_issue": UpdateIssueInput,
+    "merge_pr": MergePRInput,
 }
 
 __all__ = [
@@ -102,7 +159,9 @@ __all__ = [
     "CreateIssueInput",
     "GetCommitDiffInput",
     "GetIssueInput",
+    "MergePRInput",
     "ReadFileInput",
     "ReviewInput",
     "ToolInputBase",
+    "UpdateIssueInput",
 ]
