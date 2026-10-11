@@ -22,7 +22,7 @@ This project implements several security measures:
 1. **Webhook Authentication at the Edge** - The deployed Cloud Run router is configured with `WEBHOOK_SECRET` and is intended to verify GitHub's `X-Hub-Signature-256` before publishing events. The router deployment configuration is defined locally in [`webhook-router.yaml`](webhook-router.yaml) (not version-controlled); verify the deployed implementation before relying on this claim.
 2. **Short-lived Tokens** - GitHub App installation tokens are cached locally until shortly before their GitHub-issued `expires_at` time, then refreshed; there is no independent hourly rotation schedule in this repository.
 3. **Policy Gates** - `ALLOW_AUTOMATED_MUTATIONS` fails closed (`0`) and requires an explicit opt-in (`1`, `true`, or `True`) for automated changes.
-4. **Least Privilege Tooling** - Agent tool schemas are scoped to specific event types
+4. **Least Privilege Tooling & Server-Side Gates** - Agent tools are scoped by subagent role (code auditor vs conversational pair programming) and all mutating ops tools enforce server-side caller authorization, PR status/checks verification, and writeback policy controls.
 
 ## Supported Versions
 
