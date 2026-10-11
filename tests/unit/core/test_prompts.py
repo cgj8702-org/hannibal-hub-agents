@@ -94,6 +94,72 @@ def test_build_user_message_conversational_comment() -> None:
     assert "Comment: Could you check if this function is idempotent?" in text
 
 
+def test_build_user_message_issues_unlabeled_owner_override() -> None:
+    """Owner removing a label must surface action + label + OWNER OVERRIDE flag."""
+    event_data: dict[str, Any] = {
+        "canonical": "issues.unlabeled",
+        "sender": {"login": "cgj8702"},
+        "raw_payload": {
+            "action": "unlabeled",
+            "sender": {"login": "cgj8702"},
+            "issue": {"number": 271, "title": "Jules task", "body": "Do the thing."},
+            "label": {"name": "jules"},
+        },
+    }
+
+    content = build_user_message(event_data)
+    assert content.role == "user"
+    assert content.parts[0].text is not None
+
+    text = content.parts[0].text
+    assert "Label Action: unlabeled" in text
+    assert "Label Name: jules" in text
+    assert "OWNER OVERRIDE" in text
+    assert "cgj8702" in text
+
+
+def test_build_user_message_issues_labeled_owner_override() -> None:
+    """Owner adding a label must also flag OWNER OVERRIDE."""
+    event_data: dict[str, Any] = {
+        "canonical": "issues.labeled",
+        "sender": {"login": "cgj8702"},
+        "raw_payload": {
+            "action": "labeled",
+            "sender": {"login": "cgj8702"},
+            "issue": {"number": 272, "title": "Jules task", "body": "Do the thing."},
+            "label": {"name": "jules"},
+        },
+    }
+
+    content = build_user_message(event_data)
+    text = content.parts[0].text
+    assert text is not None
+    assert "Label Action: labeled" in text
+    assert "Label Name: jules" in text
+    assert "OWNER OVERRIDE" in text
+
+
+def test_build_user_message_issues_unlabeled_non_owner_no_override() -> None:
+    """Non-owner label events must surface label details without the override flag."""
+    event_data: dict[str, Any] = {
+        "canonical": "issues.unlabeled",
+        "sender": {"login": "octocat"},
+        "raw_payload": {
+            "action": "unlabeled",
+            "sender": {"login": "octocat"},
+            "issue": {"number": 271, "title": "Jules task", "body": "Do the thing."},
+            "label": {"name": "jules"},
+        },
+    }
+
+    content = build_user_message(event_data)
+    text = content.parts[0].text
+    assert text is not None
+    assert "Label Action: unlabeled" in text
+    assert "Label Name: jules" in text
+    assert "OWNER OVERRIDE" not in text
+
+
 def test_instructions_exist_and_non_empty() -> None:
     """Test that all instruction prompt constants are non-empty strings."""
     assert len(SYSTEM_INSTRUCTION) > 100

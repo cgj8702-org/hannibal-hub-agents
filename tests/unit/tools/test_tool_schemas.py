@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from webhook_agent.tools.schemas import (
     TOOL_INPUT_SCHEMAS,
-    AddLabelInput,
     CreateIssueInput,
     GetCommitDiffInput,
     GetIssueInput,
@@ -83,22 +82,6 @@ def test_review_input():
         ReviewInput.model_validate({"pr_number": 1, "body": "test", "event": "INVALID"})
 
 
-def test_add_label_input():
-    # Valid list
-    inp = AddLabelInput.model_validate({"issue_number": 12, "labels": ["jules", "bug"]})
-    assert inp.issue_number == 12
-    assert inp.labels == ["jules", "bug"]
-
-    # Coerced comma-separated string to list
-    inp2 = AddLabelInput.model_validate({"pr_number": "15", "labels": "jules, enhancement"})
-    assert inp2.issue_number == 15
-    assert inp2.labels == ["jules", "enhancement"]
-
-    # Empty labels
-    with pytest.raises(ValidationError):
-        AddLabelInput.model_validate({"issue_number": 1, "labels": []})
-
-
 def test_create_issue_input():
     # Valid
     inp = CreateIssueInput.model_validate(
@@ -124,7 +107,11 @@ def test_tool_input_schemas_registry():
     assert "get_issue" in TOOL_INPUT_SCHEMAS
     assert "get_commit_diff" in TOOL_INPUT_SCHEMAS
     assert "review" in TOOL_INPUT_SCHEMAS
-    assert "add_label" in TOOL_INPUT_SCHEMAS
+    # Regression guard: unguarded mutating tools must not be re-registered without
+    # authorization gates. add_label was removed entirely (Jules' GitHub App ignores
+    # machine-actor label events, and it was an unauthenticated mutation surface).
+    # See the reviewer hardening plan, Phase 6 / 7.2.
+    assert "add_label" not in TOOL_INPUT_SCHEMAS
     assert "create_issue" in TOOL_INPUT_SCHEMAS
     # Regression guard: unguarded mutating tools must not be re-registered without
     # authorization gates. See the reviewer hardening plan, Phase 6.

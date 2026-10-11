@@ -7,7 +7,6 @@ from .diff_tools import (
     walk_right_side,
 )
 from .github_tools import (
-    add_label,
     create_issue,
     get_commit_diff,
     get_current_time,
@@ -17,7 +16,6 @@ from .github_tools import (
 )
 from .schemas import (
     TOOL_INPUT_SCHEMAS,
-    AddLabelInput,
     CreateIssueInput,
     GetCommitDiffInput,
     GetIssueInput,
@@ -28,13 +26,11 @@ from .search_tool import google_search_grounding_tool
 
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
-    "AddLabelInput",
     "CreateIssueInput",
     "GetCommitDiffInput",
     "GetIssueInput",
     "ReadFileInput",
     "ReviewInput",
-    "add_label",
     "check_window",
     "create_issue",
     "get_commit_diff",
