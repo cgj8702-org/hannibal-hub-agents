@@ -227,7 +227,9 @@ def test_review_skips_investigation_gate_when_no_python_files(mock_submit, mock_
     assert mock_submit.called
 
 
-def test_review_rejects_approve_without_verified_invariants(mock_ctx):
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_downgrades_approve_without_verified_invariants(mock_submit, mock_ctx):
+    mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["README.md"]
     payload = {
         "executive_summary": "PR looks great, approving.",
@@ -236,11 +238,16 @@ def test_review_rejects_approve_without_verified_invariants(mock_ctx):
         "critical_issues": [],
         "minor_suggestions": [],
         "verified_invariants": [],
+        "unverified_claims": ["Could not verify performance under heavy load"],
         "context_gaps": [],
     }
     res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
-    assert res.startswith("Error: Review submission rejected")
-    assert "APPROVE event specified, but 'verified_invariants' is empty" in res
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _pr, body_arg, event_arg, _key, _state = mock_submit.call_args[0]
+    assert event_arg == "COMMENT"
+    parsed = json.loads(body_arg)
+    assert parsed["verdict"] == "COMMENT"
 
 
 def test_review_rejects_approve_with_invalid_invariant(mock_ctx):

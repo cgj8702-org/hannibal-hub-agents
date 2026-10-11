@@ -239,6 +239,10 @@ class CodeReviewResponse(BaseModel):
         default_factory=list,
         description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
     )
+    unverified_claims: list[str] = Field(
+        default_factory=list,
+        description="Claims, residual uncertainty, or hypotheses that could not be fully verified against the diff.",
+    )
     context_gaps: list[str] = Field(
         default_factory=list,
         description="Missing context or empty list if fully understood",
@@ -504,6 +508,17 @@ class CodeReviewResponse(BaseModel):
                     )
         normalized["verified_invariants"] = clean_inv
 
+        raw_unverified = (
+            normalized.get("unverified_claims")
+            or normalized.get("residual_uncertainty")
+            or normalized.get("uncertain_claims")
+        )
+        normalized["unverified_claims"] = (
+            [str(u).strip() for u in raw_unverified if str(u).strip()]
+            if isinstance(raw_unverified, list)
+            else []
+        )
+
         raw_gaps = normalized.get("context_gaps")
         normalized["context_gaps"] = (
             [str(g) for g in raw_gaps if g] if isinstance(raw_gaps, list) else []
@@ -584,6 +599,19 @@ class CodeReviewResponse(BaseModel):
                 ]
             )
 
+        if self.unverified_claims:
+            u_lines = [f"* {claim}" for claim in self.unverified_claims]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "### ❓ Unverified Claims & Residual Uncertainty",
+                    "",
+                    "\n".join(u_lines),
+                ]
+            )
+
         if self.context_gaps:
             gaps_str = ", ".join(self.context_gaps)
             markdown_parts.extend(
@@ -641,6 +669,7 @@ class CodeReviewResponse(BaseModel):
                 }
                 for item in self.verified_invariants
             ],
+            "unverified_claims": list(self.unverified_claims),
         }
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
@@ -671,6 +700,10 @@ class SyncReviewResponse(BaseModel):
     verified_invariants: list[VerifiedInvariant] = Field(
         default_factory=list,
         description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
+    )
+    unverified_claims: list[str] = Field(
+        default_factory=list,
+        description="Claims, residual uncertainty, or hypotheses that could not be fully verified against the diff.",
     )
 
     @model_validator(mode="before")
@@ -879,6 +912,17 @@ class SyncReviewResponse(BaseModel):
         normalized["critical_issues"] = clean_crit
         normalized["minor_suggestions"] = clean_minor
 
+        raw_unverified = (
+            normalized.get("unverified_claims")
+            or normalized.get("residual_uncertainty")
+            or normalized.get("uncertain_claims")
+        )
+        normalized["unverified_claims"] = (
+            [str(u).strip() for u in raw_unverified if str(u).strip()]
+            if isinstance(raw_unverified, list)
+            else []
+        )
+
         raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
         clean_inv: list[dict[str, Any]] = []
         if isinstance(raw_inv, list):
@@ -1012,6 +1056,11 @@ class SyncReviewResponse(BaseModel):
                 f"\n---\n\n### 🛡️ Verified Invariants & Edge Cases\n\n{chr(10).join(inv_lines)}\n"
             )
 
+        unverified_section = ""
+        if self.unverified_claims:
+            u_lines = [f"* {claim}" for claim in self.unverified_claims]
+            unverified_section = f"\n---\n\n### ❓ Unverified Claims & Residual Uncertainty\n\n{chr(10).join(u_lines)}\n"
+
         from webhook_agent.review.metadata import serialize_review_metadata
 
         meta = {
@@ -1058,6 +1107,7 @@ class SyncReviewResponse(BaseModel):
                 }
                 for item in self.verified_invariants
             ],
+            "unverified_claims": list(self.unverified_claims),
         }
         metadata_comment = serialize_review_metadata(meta)
 
@@ -1084,5 +1134,6 @@ class SyncReviewResponse(BaseModel):
 #### 🟡 Suggestions & Maintainability
 {chr(10).join(minor_lines)}
 {inv_section}
+{unverified_section}
 {metadata_comment}
 """
