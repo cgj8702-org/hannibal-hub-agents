@@ -143,9 +143,7 @@ class VerifiedInvariant(BaseModel):
         description="The specific invariant, contract, or boundary condition verified."
     )
     path: str = Field(description="Exact file path where the invariant is maintained or tested.")
-    line: int | None = Field(
-        default=None, description="Exact line number demonstrating invariant preservation."
-    )
+    line: int = Field(description="Exact line number demonstrating invariant preservation.")
     evidence: str = Field(
         description="Concrete technical explanation or test citation proving preservation."
     )
@@ -398,14 +396,22 @@ class CodeReviewResponse(BaseModel):
             rec_lower = r_item["recommendation"].lower()
             if any(kw in r_lower or kw in rec_lower for kw in BREAKING_RISK_KEYWORDS):
                 if not any(r_item["risk"] in c.get("description", "") for c in clean_crit):
-                    # Only promote when a concrete recommendation exists.
-                    # Placeholder fixes invent action items with no grounding.
+                    # Only promote when a concrete recommendation and valid citation exist.
                     if not r_item["recommendation"]:
+                        continue
+                    r_path = str(r_item.get("path") or "").strip()
+                    raw_r_line = r_item.get("line")
+                    r_line: int | None = (
+                        int(raw_r_line)
+                        if isinstance(raw_r_line, str) and raw_r_line.isdigit()
+                        else (raw_r_line if isinstance(raw_r_line, int) else None)
+                    )
+                    if not r_path or r_line is None or r_line <= 0:
                         continue
                     clean_crit.append(
                         {
-                            "path": "",
-                            "line": None,
+                            "path": r_path,
+                            "line": r_line,
                             "description": r_item["risk"],
                             "suggested_fix": r_item["recommendation"],
                         }
@@ -468,6 +474,9 @@ class CodeReviewResponse(BaseModel):
 
         raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
         clean_inv: list[dict[str, Any]] = []
+        unverified_list: list[str] = [
+            str(x) for x in (normalized.get("unverified_claims") or []) if x
+        ]
         if isinstance(raw_inv, list):
             for item in raw_inv:
                 if isinstance(item, BaseModel):
@@ -487,26 +496,21 @@ class CodeReviewResponse(BaseModel):
                     if not evid_val and not item.get("invariant") and not item.get("description"):
                         evid_val = inv_text
                     if inv_text:
-                        clean_inv.append(
-                            {
-                                "invariant": inv_text,
-                                "path": path_val,
-                                "line": line_val if isinstance(line_val, int) else None,
-                                "evidence": evid_val,
-                            }
-                        )
+                        if path_val and isinstance(line_val, int) and line_val > 0:
+                            clean_inv.append(
+                                {
+                                    "invariant": inv_text,
+                                    "path": path_val,
+                                    "line": line_val,
+                                    "evidence": evid_val,
+                                }
+                            )
+                        else:
+                            unverified_list.append(inv_text)
                 elif isinstance(item, str) and item.strip():
-                    # A bare string carries no citation. Keep the claim, but never invent
-                    # a path or evidence for it: review() rejects the empty fields on APPROVE.
-                    clean_inv.append(
-                        {
-                            "invariant": item.strip(),
-                            "path": "",
-                            "line": None,
-                            "evidence": "",
-                        }
-                    )
+                    unverified_list.append(item.strip())
         normalized["verified_invariants"] = clean_inv
+        normalized["unverified_claims"] = unverified_list
 
         raw_unverified = (
             normalized.get("unverified_claims")
@@ -925,6 +929,9 @@ class SyncReviewResponse(BaseModel):
 
         raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
         clean_inv: list[dict[str, Any]] = []
+        unverified_list: list[str] = [
+            str(x) for x in (normalized.get("unverified_claims") or []) if x
+        ]
         if isinstance(raw_inv, list):
             for item in raw_inv:
                 if isinstance(item, BaseModel):
@@ -944,26 +951,21 @@ class SyncReviewResponse(BaseModel):
                     if not evid_val and not item.get("invariant") and not item.get("description"):
                         evid_val = inv_text
                     if inv_text:
-                        clean_inv.append(
-                            {
-                                "invariant": inv_text,
-                                "path": path_val,
-                                "line": line_val if isinstance(line_val, int) else None,
-                                "evidence": evid_val,
-                            }
-                        )
+                        if path_val and isinstance(line_val, int) and line_val > 0:
+                            clean_inv.append(
+                                {
+                                    "invariant": inv_text,
+                                    "path": path_val,
+                                    "line": line_val,
+                                    "evidence": evid_val,
+                                }
+                            )
+                        else:
+                            unverified_list.append(inv_text)
                 elif isinstance(item, str) and item.strip():
-                    # A bare string carries no citation. Keep the claim, but never invent
-                    # a path or evidence for it: review() rejects the empty fields on APPROVE.
-                    clean_inv.append(
-                        {
-                            "invariant": item.strip(),
-                            "path": "",
-                            "line": None,
-                            "evidence": "",
-                        }
-                    )
+                    unverified_list.append(item.strip())
         normalized["verified_invariants"] = clean_inv
+        normalized["unverified_claims"] = unverified_list
 
         return normalized
 
