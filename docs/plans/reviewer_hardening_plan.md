@@ -1,8 +1,12 @@
 # Reviewer Hardening Plan
 
 **Status:** draft for implementation
-**Origin:** analysis of PR #258 and its two `hannibal-hub-agents[bot]` reviews
+**Origin:** analysis of PR #258 and its two `hannibal-hub-agents[bot]` reviews, plus the 2026-10-10
+55-PR scorecard and the CodeRabbit-vs-bot head-to-head on the #241/#258/#260 replay diffs.
 **Goal:** make the PR review bot *unable* to lie about what it verified, instead of *asking* it not to.
+
+**Companion file:** `reviewer_hardening_tasks.md` (same directory) turns every phase below into
+checkable tasks with the defect each one closes. Update both when scope changes.
 
 ---
 
@@ -31,6 +35,56 @@ the verifier is already written. Then Step 2.4, the `snippet` field, then Phases
 1. `verified_invariants` are rendered in the review body but never serialized into the
    `hannibal-review-metadata` footer (Phase 1 Step 1.2 assertion 3, fixed in Step 2.4).
 2. Both content extractors in the first draft were silently vacuous (assertion 0).
+
+---
+
+## Baseline: measured, not anecdotal (2026-10-10)
+
+The plan originally rested on reading PR #258's reviews. That sample is now quantified across
+the bot's **full review history — 55 merged PRs** in `cgj8702-org/hannibal-hub-agents`, parsed
+from the `hannibal-review-metadata` footers:
+
+| Metric | Result |
+| :--- | :--- |
+| PRs where **every** bot verdict was APPROVE | **54 / 55 (98%)** |
+| PRs that ever got a REQUEST_CHANGES | **1 / 55** (#242) |
+| PRs with zero critical + zero minor findings | **51 / 55 (92%)** |
+| PRs with >=1 minor suggestion | 3 |
+| PRs with >=1 risk | 23 |
+
+**Read the one block (#242) before trusting the approve rate as caution.** Its single "critical"
+was a subjective module-responsibility opinion about a *future* extension, and it was flipped to
+APPROVE not by changing code but by **adding docstrings**. A reviewer whose only blocking finding
+dissolves under prose is reacting to narrative, not to the diff. The `risks` column (23/55) is the
+mechanism: risks never block, so the bot emits them freely and marks them RESOLVED on the next
+push regardless of whether the code changed.
+
+**Head-to-head, same code.** The replay PRs in `cgj8702/agents-sandbox` are byte-identical diffs
+to #241/#258/#260. CodeRabbit reviewed the replays; the bot reviewed the originals. On #258 alone
+CodeRabbit surfaced an unauthenticated `add_label`/`create_issue` path, raw `args`+`val_err`
+written to logs, `extra="ignore"` silently dropping typo'd fields, and a `RiskItem.recommendation`
+mandate the PR did not actually enforce. The bot approved all four and **praised** the withdrawn
+`merge_pr` restore as having "thorough safety gates."
+
+**Caveat to keep honest — this is a hypothesis, not a controlled result.** Not a controlled
+trial: CodeRabbit ran paid-Advanced with static analysis and an explicit trigger; the bot is
+free-tier, capped at 6 LLM calls behind a rate limiter. My *reading* is that the budget explains
+the shallow depth while the near-never-block direction is a design property rather than a
+resource ceiling — i.e. more tokens alone would not fix a reviewer structurally unwilling to fail
+a PR. I have **no controlled evidence for either half**; this is inference from observational
+data (one bot, one codebase, no matched samples). Treat it as a hypothesis to test, not a finding.
+To actually separate design from budget, hold the diff constant and vary only the budget/tooling,
+then compare — the replay PRs are the natural place to run that.
+
+**Use this as the before-number, but measure accuracy, not approval volume.** A raw drop in
+approve-rate is gameable — a bot that blocks everything moves the metric while getting worse. The
+honest success measure is precision/recall against **independently adjudicated** outcomes. On a
+labeled sample of real PRs, with a human adjudicator deciding which PRs truly had defects:
+- **Recall** = adjudicated defects the bot's blocks caught ÷ all adjudicated defects (higher is better).
+- **Missed-finding rate** = 1 − recall = adjudicated defects the bot *failed* to catch ÷ all adjudicated defects (lower is better).
+- **False-approve rate** = PRs the bot approved that should have been blocked ÷ all PRs the bot approved (lower is better).
+Build that labeled set before Phases 3/7/8 land, then re-score against it. Do not let a metric's
+name and its definition drift apart — state numerator and denominator for each.
 
 ---
 
@@ -210,6 +264,46 @@ forget, which is the point of strict xfail.
 **Evidence it worked:** that test goes green and the fixture round-trips invariants through
 `serialize_review_metadata` / `extract_review_metadata`.
 
+### Step 2.5 -- Fix the two wiring defects CodeRabbit found on the #260 replay
+
+**Why now:** the pure verifier (Step 2.1) is correct, but its *wiring* in `review()` has two
+real bugs that CodeRabbit caught on the replay and the bot approved. Both live at
+`tools/github_tools.py:532-533` (`grounding_patches = patches or _collect_pr_patches(pr)`).
+
+1. **Partial-retrieval false rejection (Major).** The investigation-gate loop fills `patches`
+   inside a `try/except`. If `pr.get_files()` raises *after* yielding some files, `patches` is
+   non-empty and gets treated as the complete file list, so a citation to a later file becomes a
+   hard `unchanged-path` failure and strict mode rejects a valid review. If it raises *before*
+   yielding anything, `patches` is empty and `_collect_pr_patches(pr)` calls `get_files()` a
+   **second** time, breaking the "at most one such call; never two" guarantee. Fix: track
+   *retrieval success* separately from the patches dict; skip grounding when the gate attempted
+   retrieval and it failed; only call `_collect_pr_patches` when the gate never attempted it.
+2. **`patch=None` bypasses the documented skip (Minor).** When every file has `patch=None`
+   (binary/oversized), `grounding_patches` is non-empty, so `if not grounding_patches:` does not
+   fire and the documented "treat as unverified, not valid" path is skipped. Change the check to
+   test for *usable patch text*: `if not any(patch for patch in grounding_patches.values()):`.
+
+**Where:** `tools/github_tools.py` (the two lines + a `retrieval_ok` flag threaded from the
+investigation gate) and `tests/unit/review/test_review_tool_validation.py` (two new cases: a
+partial-iteration failure must skip grounding, not reject; an all-`None` patch must hit the skip
+warning).
+
+**Define the verdict on skipped grounding — do not leave it open.** When `STRICT_REVIEW_GROUNDING`
+is on and grounding is skipped because retrieval was attempted-but-failed (or yielded no usable
+patch text), the review must **not** submit `APPROVE`. Grounding was requested and could not run,
+so the citations are *unverified*, and an unverified APPROVE is exactly the failure this flag
+exists to prevent. Downgrade the verdict to `COMMENT` (or block and surface the retrieval error to
+the model to retry) — pick one and encode it, rather than letting the APPROVE branch fall through.
+State explicitly which of the two you chose and why.
+
+**Order:** do this *before* flipping `STRICT_REVIEW_GROUNDING` on. A false-reject bug behind an
+enforcement flag is exactly the reviewer-exhaustion failure the default-off flag exists to prevent.
+
+**Evidence it worked:** the two new tests pass; a **third** regression test asserts the *final
+verdict and submission result* — a strict-mode review whose grounding was skipped by a failed
+`get_files()` never submits `APPROVE`; `grep` confirms no path re-calls `get_files()` after a
+failed gate iteration; the existing five grounding tests stay green.
+
 ---
 
 ## Phase 3 — Give the model an honest exit (remove the incentive to fabricate)
@@ -283,6 +377,93 @@ forget, which is the point of strict xfail.
 
 ---
 
+## Phase 7 — The CodeRabbit findings the bot approved (close the specific gaps)
+
+**Why:** these four are concrete, verified defects on #258's diff that the bot not only missed but
+in one case praised. They are small, surgical, and independently shippable. Each is a task in the
+companion file. Do them even if Phases 3-6 slip — they are the directly-proven misses.
+
+### 7.1 — Redact the tool-gate failure path (security)
+`core/callbacks.py:290-299` logs `args=%s` (the full raw argument dict — issue bodies, review
+content, ignored extra fields) **and** returns the `ValidationError` text (an echo of the input)
+to the model. Confidential content reaches operational logs before rejection, and back into the
+next inference turn. Log only the tool name + error *types*/field names; return a generic
+validation error without `val_err` details. This is the root of CodeRabbit's 🟡 Moderate security
+rating on the replay.
+
+### 7.2 — Authorize `add_label` / `create_issue` server-side (security)
+Both are reachable from `_conversational_agent`, driven by `issue_comment.created` from **any**
+GitHub user, with no sender-permission check (`tools/github_tools.py::add_label` has none). The
+new "MANDATORY TOOL EXECUTION" text makes the model *more* likely to fire them. `add_label` is the
+Jules-delegation trigger, so an unauthorized commenter can summon an autonomous agent. Phase 6's
+gate list applies here too — prompt prose is not authorization. At minimum: deny when the sender
+lacks triage/write permission on the repo.
+
+### 7.3 — Make the input gate actually strict (correctness)
+Three schema gaps, all in `tools/schemas.py`:
+- `:18` `extra="ignore"` silently drops misspelled fields (`CreateIssueInput` with `lables`
+  validates fine and loses the labels). Switch to `extra="forbid"`, consuming alias keys during
+  normalization *before* strict validation so valid aliases survive.
+- `:80` / `:101` `labels=[""]` passes `min_length=1` (which checks list length, not content), so
+  a blank label reaches the GitHub API. Trim per element and reject blanks.
+
+### 7.4 — Enforce the `RiskItem.recommendation` mandate (correctness)
+The #258 objective was "mandate a non-empty `recommendation`," but `review/schemas.py:278` builds
+`{"risk": r_text, "recommendation": ""}` for string-typed risks and `recommendation` defaults to
+`""`. Either reject/omit risks without a recommendation during normalization and make the field
+required, or delete the mandate from the PR/prompt claims. Note this interacts with the backlog
+item below (the existing `schemas.py:391` guard *disarms* the mandate) — resolve both together.
+
+---
+
+## Phase 8 — Resolution integrity (never mark RESOLVED from narrative)
+
+**Why:** this is the failure the #260 PR body documented against its own bot. The bot marked the
+`pr.get_files()` latency risk **RESOLVED** with evidence that the fallback only runs on
+"un-investigated PR paths" — the exact *inverted* claim the author later had to correct (the
+prefetch path is precisely where the call happens). It then listed as a **"Verified Invariant"**
+that grounding "skips gracefully with a warning when patch text is unavailable" — a behavior
+Step 2.5 above proves is broken. The bot asserted two things as verified that were false, and it
+could only do so because "resolution" is currently a *restatement of the diff's apparent intent*,
+not a *re-check against current code*.
+
+**The rule:** a prior finding may be marked RESOLVED only if the reviewer re-reads the current
+code at that location and the specific defect is absent. "It looks fine," "the author described a
+fix," or "the docs now say X" are not resolutions. This is the mechanical version of the
+"verify, don't assume" rule the bot already claims to follow in prose.
+
+**Where:** the sync-review path (`review/metadata.py` resolution tracking, and the
+`### 2. Resolution Tracker` rendering). PR #261 added a detector for *resolutions the reviewed
+diff never changed* — build on it: a resolution must cite a `path` + current-code evidence, and
+the grounding verifier (Phase 2) should check that citation the same way it checks findings. A
+resolution whose evidence does not appear in the current diff stays **UNRESOLVED**.
+
+**Deletion-only fixes need their own rule — but the current-code check above still applies.** A fix
+that *deletes* the offending code leaves no touched current-code line to quote, so the naive rule
+would keep a legitimate deletion fix UNRESOLVED forever. Define **deletion-aware evidence**: when
+the prior finding's cited `path`/line no longer exists in the current tree *and* the diff shows a
+net removal at that location, the resolution may cite the removed line's pre-image (the `-` side of
+the hunk) as its **deletion evidence**. Critically, this *supplements* rather than replaces the
+current-code requirement: the removal hunk proves the cited line was deleted at that spot, **not**
+that equivalent bad behavior is absent from the rest of the tree. The reviewer must still confirm
+against the current code that the defect's behavior is gone — including any re-introduction or
+same-pattern copy elsewhere — before marking RESOLVED. Deletion evidence answers "was the cited
+line removed?"; only a current-code check answers "is the defect actually resolved?". Add a
+deletion-only replay case to the Phase 1 harness asserting it marks RESOLVED *via* the current-code
+check (with the removal hunk as supporting evidence) — and mirror that case in the
+resolution-integrity task so the two stay in step.
+
+**Also fix the false-invariant class:** a "Verified Invariant" that asserts a *behavior* (not a
+static fact like `X = "0"`) must be backed by a test or a diff quote. `DEFAULT_STRICT_REVIEW_GROUNDING
+= "0"` is verifiable by reading; "grounding skips gracefully when patch text is unavailable" is a
+behavioral claim and was simply wrong. Route behavioral invariants through the same grounding check.
+
+**Evidence it worked:** a replay of #260's bot reviews through the new logic marks the inverted
+resolution **UNRESOLVED** and rejects the false invariant; a legitimate resolution (a real code
+fix) still marks RESOLVED. Both cases become Phase 1 harness fixtures.
+
+---
+
 ## Cross-cutting: the loop for every single step
 
 1. Write the failing test or harness assertion **first**. Show it failing.
@@ -299,11 +480,15 @@ Keep every enforcement behind an env flag defaulting to **off** until its false-
 
 - Phase 1 harness catches all four recorded defects and is in CI.
 - `STRICT_REVIEW_GROUNDING` on, with zero false positives across at least five real PRs.
+- The two Step 2.5 wiring defects are fixed and covered by tests *before* the flag flips on.
 - No code path can fabricate a `path` or `line` for a claim.
 - An uncertainty outlet exists and downgrading APPROVE→COMMENT is cheap and expected.
 - Narrative-echo metric measured and materially reduced.
 - Prompt contains no checkable-but-unenforced rule, or that rule has a tracked backlog entry.
 - `docs/slash_commands_catalog.md`, `SECURITY.md`, and the prompt agree about what the agent is allowed to do.
+- Phase 7's four CodeRabbit findings are closed (redaction, `add_label`/`create_issue` auth, strict input gate, `recommendation` mandate).
+- Phase 8's resolution-integrity rule is enforced: a RESOLVED claim requires current-code evidence.
+- **The scorecard moves on accuracy, not approve-volume.** Do not measure success as "approve-rate dropped" — that is gameable (a bot that blocks everything moves the metric while getting worse). Instead, on a labeled sample of real PRs with independently adjudicated outcomes, measure **recall** (adjudicated defects caught ÷ all adjudicated defects, higher is better), **missed-finding rate** (its complement, 1 − recall, lower is better), and **false-approve rate** (PRs approved that should have been blocked ÷ all PRs approved, lower is better). All must improve vs. the baseline; build the labeled set first. Full numerator/denominator definitions live in the Baseline section above.
 
 ## How to tell it went wrong (watch for these)
 
