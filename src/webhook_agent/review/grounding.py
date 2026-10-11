@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from webhook_agent.tools.diff_tools import walk_right_side
 
@@ -482,6 +482,103 @@ def extract_bare_symbols(text: str) -> set[str]:
     return symbols
 
 
+_TEST_CLAIM_RE = re.compile(r"(\d+)[^\d\n]{0,30}?tests?\b", re.I)
+_ADDED_TEST_RE = re.compile(r"^\+\s*(?:async )?def test_", re.M)
+
+
+def check_test_count_claims(body: str, diff_text: str) -> list[GroundingIssue]:
+    """Extract numeric test-count claims from review body and compare to diff recount.
+
+    Extracts ``(\\d+)[^\\d\\n]{0,30}?tests?\\b`` from review body and compares each claimed
+    number against a recount of added test functions (``^\\+\\s*(?:async )?def test_``).
+    """
+    issues: list[GroundingIssue] = []
+    actual_added = sum(1 for _ in _ADDED_TEST_RE.finditer(diff_text or ""))
+    for match in _TEST_CLAIM_RE.finditer(body or ""):
+        claimed = int(match.group(1))
+        if claimed != actual_added:
+            issues.append(
+                GroundingIssue(
+                    severity="hard",
+                    code="test_count_mismatch",
+                    kind="suggestion",
+                    path="",
+                    line=None,
+                    reason=(
+                        f"Review claims {claimed} tests in '{match.group(0)}', but diff "
+                        f"adds {actual_added} test functions."
+                    ),
+                )
+            )
+    return issues
+
+
+def check_body_metadata_parity(body: str, metadata: Mapping[str, Any]) -> list[GroundingIssue]:
+    """Verify parity between verified_invariants rendered in body vs footer metadata.
+
+    verified_invariants are rendered in the body (e.g. under 'Verified Invariants')
+    but omitted from serialization into the footer metadata (or metadata never reads it).
+    """
+    issues: list[GroundingIssue] = []
+    body_has_invariants = "Verified Invariants" in (body or "")
+    footer_invariants = metadata.get("verified_invariants")
+    if body_has_invariants and not footer_invariants:
+        issues.append(
+            GroundingIssue(
+                severity="hard",
+                code="body_metadata_parity_mismatch",
+                kind="invariant",
+                path="",
+                line=None,
+                reason=(
+                    "Review body renders 'Verified Invariants' section, but "
+                    "verified_invariants is omitted from metadata footer."
+                ),
+            )
+        )
+    return issues
+
+
+def detect_prior_decision_contradiction(
+    prior_bodies: Sequence[str], current_text_or_diff: str
+) -> bool:
+    """Detect unacknowledged reversal of prior architectural decisions.
+
+    For example, if a prior review (#241) approved removing `merge_pr`, and a later PR
+    or review (#258) approves or restores `merge_pr`, this function detects the
+    unacknowledged contradiction.
+    """
+    prior_removed_merge = any(
+        "merge_pr" in b and ("remove" in b.lower() or "purge" in b.lower()) for b in prior_bodies
+    )
+    current_touches_merge = "merge_pr" in (current_text_or_diff or "")
+    current_acknowledges = (
+        "revers" in (current_text_or_diff or "").lower()
+        or "withdraw" in (current_text_or_diff or "").lower()
+    )
+
+    return prior_removed_merge and current_touches_merge and not current_acknowledges
+
+
+def ngram_containment(text_a: str, text_b: str, n: int = 5) -> float:
+    """Calculate the n-gram containment ratio of text_b in text_a.
+
+    Measures what fraction of sequence n-grams in text_b (e.g., review summary)
+    appear in text_a (e.g., PR body). Returns float in [0.0, 1.0].
+    Record only; never fail.
+    """
+    tokens_a = [t.lower() for t in _TOKEN_RE.findall(text_a or "")]
+    tokens_b = [t.lower() for t in _TOKEN_RE.findall(text_b or "")]
+    if len(tokens_b) < n:
+        return 0.0
+    ngrams_a = set(zip(*[tokens_a[i:] for i in range(n)], strict=False))
+    ngrams_b = set(zip(*[tokens_b[i:] for i in range(n)], strict=False))
+    if not ngrams_b:
+        return 0.0
+    intersection = ngrams_a & ngrams_b
+    return round(len(intersection) / len(ngrams_b), 4)
+
+
 __all__ = [
     "PLACEHOLDER_PATHS",
     "CitationOverlap",
@@ -490,12 +587,16 @@ __all__ = [
     "Kind",
     "Severity",
     "bare_path",
+    "check_body_metadata_parity",
+    "check_test_count_claims",
     "citation_overlap",
+    "detect_prior_decision_contradiction",
     "diff_text_from_patches",
     "extract_bare_symbols",
     "extract_cited_paths",
     "extract_cited_symbols",
     "extract_identifiers",
     "hard_reasons",
+    "ngram_containment",
     "verify_citations",
 ]
