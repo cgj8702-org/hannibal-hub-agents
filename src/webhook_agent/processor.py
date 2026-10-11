@@ -408,8 +408,12 @@ class WebhookProcessor:
             return False
 
         # Suppress genuinely closed PR events and register them so in-flight agent work short-circuits.
-        if canonical == "pull_request.closed" or (
-            event_name == "pull_request" and action == "closed"
+        # Accept both canonical spellings and the "pr" event-name alias: route_event's fallback yields
+        # "pr.closed" for event_name="pr" (not "pull_request.closed"), so without the alias a pr-aliased
+        # closed event would slip through unregistered. Defensive per CodeRabbit #268 — the
+        # X-GitHub-Event header only ever sends "pull_request" today, but the alias keeps the branch total.
+        if canonical in ("pull_request.closed", "pr.closed") or (
+            event_name in ("pull_request", "pr") and action == "closed"
         ):
             raw = ev.get("raw_payload") or {}
             repo = raw.get("repository") or {}
