@@ -983,6 +983,7 @@ class SyncReviewResponse(BaseModel):
                 "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],
                 "risks_and_edge_cases": [],
                 "verified_invariants": [item.model_dump() for item in self.verified_invariants],
+                "unverified_claims": list(self.unverified_claims),
             }
             cr_obj = CodeReviewResponse.model_validate(cr_data)
             return cr_obj.to_markdown(verdict)
