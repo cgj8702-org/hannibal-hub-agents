@@ -593,17 +593,27 @@ def test_pr_260_replay_marks_inverted_resolution_unresolved_and_rejects_false_in
     from webhook_agent.review.grounding import verify_resolutions
 
     fixture = _load(FIXTURE_260)
-    diff_text = _diff_text(fixture)
     bot_revs = _bot_reviews(fixture)
 
-    # 1. Replay resolutions from sync review
+    # 1. Replay resolutions from sync review against incremental diff
     sync_review = bot_revs[1]
     meta = _metadata(sync_review["body"] or "")
     resolutions = meta.get("resolutions") or []
     assert len(resolutions) > 0
 
-    grounded_res = verify_resolutions(resolutions, diff_text, fixture["changed_files"])
+    sync_files = sync_review.get("incremental_files") or []
+    # Incremental diff for commit 2 (023f2e2) only added `import logging` to test_review_tool_validation.py
+    sync_diff = (
+        "--- a/tests/unit/review/test_review_tool_validation.py\n"
+        "+++ b/tests/unit/review/test_review_tool_validation.py\n"
+        "@@ -3,0 +4,1 @@\n"
+        "+import logging\n"
+    )
+
+    grounded_res = verify_resolutions(resolutions, sync_diff, sync_files)
     assert grounded_res[0]["status"] == "UNRESOLVED"
+
+    full_diff = _diff_text(fixture)
 
     # 2. Replay behavioral invariant from sync review
     invariants = meta.get("verified_invariants") or []
@@ -628,6 +638,6 @@ def test_pr_260_replay_marks_inverted_resolution_unresolved_and_rejects_false_in
             for item in invariants
         ]
 
-    issues = verify_citations(invariants, diff_text, fixture["changed_files"])
+    issues = verify_citations(invariants, full_diff, fixture["changed_files"])
     codes = [i.code for i in issues]
     assert "unsubstantiated_behavioral_invariant" in codes
