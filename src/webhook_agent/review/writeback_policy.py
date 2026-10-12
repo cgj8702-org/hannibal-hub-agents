@@ -11,7 +11,10 @@ import threading
 import time
 from typing import Any
 
-from webhook_agent.constants import DEFAULT_ALLOW_AUTOMATED_MUTATIONS
+from webhook_agent.constants import (
+    DEFAULT_ALLOW_AUTOMATED_MUTATIONS,
+    DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS,
+)
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.writeback_policy")
@@ -56,6 +59,12 @@ REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
 )
 
 
+def is_automatic_pr_review_enabled() -> bool:
+    """Return whether automatic PR reviews on PR lifecycle events are enabled."""
+    val = os.environ.get("ENABLE_AUTOMATIC_PR_REVIEWS", DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS)
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
     """Return whether an event is allowed to initiate a formal code review."""
     if canonical in {
@@ -65,7 +74,7 @@ def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
         "pull_request.ready_for_review",
         "pull_request_review_requested",
     }:
-        return True
+        return is_automatic_pr_review_enabled()
 
     cb_lower = comment_body.lower()
     return any(keyword in cb_lower for keyword in REVIEW_INTENT_KEYWORDS)
@@ -230,3 +239,14 @@ def evaluate_writeback_policy(
         ]
 
     return None
+
+
+__all__ = [
+    "REVIEW_INTENT_KEYWORDS",
+    "_COMMENT_RATE_LIMITER",
+    "CommentRateLimiter",
+    "_is_formal_review_eligible",
+    "_review_lock",
+    "evaluate_writeback_policy",
+    "is_automatic_pr_review_enabled",
+]

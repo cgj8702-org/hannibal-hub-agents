@@ -104,8 +104,11 @@ def test_submit_deterministic_review_with_session_state() -> None:
         assert results[0].success is True
 
 
-def test_execute_agent_event_checkpoint_short_circuit() -> None:
+def test_execute_agent_event_checkpoint_short_circuit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Test execute_agent_event short-circuits when commit checkpoint is already completed."""
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
     mock_agent = MagicMock()
     mock_agent._derive_session_id.return_value = "owner/repo/42"
     mock_agent._build_user_message.return_value = MagicMock(parts=[MagicMock(text="Audit request")])
@@ -306,8 +309,11 @@ def test_execute_agent_event_resumes_with_precompiled_dossier() -> None:
         assert event_data.get("deterministic_precompiled_ast") is True
 
 
-def test_execute_agent_event_rate_limited_paused_short_circuits() -> None:
+def test_execute_agent_event_rate_limited_paused_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Test execute_agent_event short-circuits when commit checkpoint is rate_limited and backoff active."""
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
     mock_agent = MagicMock()
     mock_agent._derive_session_id.return_value = "owner/repo/42"
 

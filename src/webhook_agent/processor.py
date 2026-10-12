@@ -27,6 +27,7 @@ from typing import Any
 
 from github import Auth, Github
 
+from webhook_agent.constants import DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS
 from webhook_agent.core.cancellation import pr_closed_registry
 from webhook_agent.github.bot_identity import _is_bot_event, is_jules_sender
 from webhook_agent.github.credentials import (
@@ -60,6 +61,7 @@ from webhook_agent.review.fast_path import (
 from webhook_agent.review.formatter import (
     truncate_log_payload,
 )
+from webhook_agent.review.writeback_policy import is_automatic_pr_review_enabled
 
 from .core.agent_definition import WebhookAgent
 from .review.comment_poster import _add_eyes_reaction
@@ -451,6 +453,13 @@ class WebhookProcessor:
         conclusion = str(suite.get("conclusion") or "").lower()
         if not repo_name or not head_sha:
             return
+        if not is_automatic_pr_review_enabled():
+            logger.info(
+                "CI gate: automatic reviews disabled (ENABLE_AUTOMATIC_PR_REVIEWS=%s); ignoring check_suite for %s",
+                os.environ.get("ENABLE_AUTOMATIC_PR_REVIEWS", DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS),
+                repo_name,
+            )
+            return
         if conclusion not in PASSING_CONCLUSIONS:
             logger.info(
                 "CI gate: suite for %s@%s concluded %r; not reviewing.",
@@ -596,6 +605,19 @@ class WebhookProcessor:
                 return
 
         head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
+
+        # Automatic PR reviews gate: skip automatic reviews on PR lifecycle events unless enabled.
+        if (
+            canonical in GATED_EVENTS or canonical == "pull_request_review_requested"
+        ) and not is_automatic_pr_review_enabled():
+            logger.info(
+                "Automatic PR review disabled (ENABLE_AUTOMATIC_PR_REVIEWS=%s); skipping %s for %s#%s",
+                os.environ.get("ENABLE_AUTOMATIC_PR_REVIEWS", DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS),
+                canonical,
+                repo_name,
+                pr_number,
+            )
+            return
 
         # CI gate: automatic reviews wait for fully green CI. Silent on pending or failed CI.
         # This runs before the in-flight dedup claim below so that a deferred event does not

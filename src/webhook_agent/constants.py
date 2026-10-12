@@ -33,4 +33,8 @@ DEFAULT_STRICT_REVIEW_GROUNDING = "0"
 # Hold automatic reviews until the PR head commit has fully green CI (silent skip on failure).
 # Set REVIEW_WAIT_FOR_CI=0 to restore review-immediately behaviour. See review/ci_gate.py.
 DEFAULT_REVIEW_WAIT_FOR_CI = "1"
+# Neuter automatic reviews on every opened/sync PR by default ("0").
+# When "0", reviews must be explicitly requested via /review or review intent keywords.
+# Set ENABLE_AUTOMATIC_PR_REVIEWS=1 to restore auto-review on every PR.
+DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "0"
 DEFAULT_WEBHOOK_TIER = "free"
