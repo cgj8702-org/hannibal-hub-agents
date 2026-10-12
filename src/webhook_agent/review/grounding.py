@@ -145,6 +145,26 @@ def bare_path(path: str) -> str:
     return path
 
 
+def touched_lines_by_file(patches: Mapping[str, str | None]) -> dict[str, set[int]]:
+    """Map each file path to its set of modified or added new-side line numbers.
+
+    Parses unified-diff hunks via :func:`webhook_agent.tools.diff_tools.added_line_anchors`.
+    If patch is None or empty, the path maps to an empty set (unverifiable).
+    """
+    from webhook_agent.tools.diff_tools import added_line_anchors
+
+    result: dict[str, set[int]] = {}
+    for path, patch in patches.items():
+        bp = bare_path(path)
+        if not patch:
+            result[bp] = set()
+        else:
+            diff_text = diff_text_from_patches({path: patch})
+            anchors = added_line_anchors(diff_text)
+            result[bp] = anchors.get(bp, set())
+    return result
+
+
 def diff_text_from_patches(patches: Mapping[str, str | None]) -> str:
     """Synthesize unified-diff-shaped text from a ``{path: patch}`` mapping.
 
@@ -164,34 +184,51 @@ def diff_text_from_patches(patches: Mapping[str, str | None]) -> str:
     return "\n".join(parts)
 
 
+def _norm_evidence(text: str) -> str:
+    """Normalize text by stripping backticks, collapsing whitespace, and lowercasing."""
+    cleaned = (text or "").replace("`", "")
+    return re.sub(r"\s+", " ", cleaned).strip().lower()
+
+
 def verify_citations(
     findings: Sequence[Finding],
-    diff_text: str,
+    touched_or_diff: dict[str, set[int]] | str,
+    diff_text: str | None = None,
     changed_paths: Collection[str] | None = None,
 ) -> list[GroundingIssue]:
     """Return one :class:`GroundingIssue` per citation that fails or cannot be checked.
 
-    Args:
-        findings: Review claims carrying a ``path``/``line`` citation.
-        diff_text: The unified diff the review was performed against.
-        changed_paths: Authoritative list of files the PR changed. Pass this whenever it
-            is available (``pr.get_files()``): without it, a file that was changed but has
-            no patch text is indistinguishable from a file the PR never touched. When
-            ``None``, membership is inferred from the diff itself.
-
-    Returns:
-        Issues in input order. ``hard`` issues are safe to reject on; ``soft`` issues are
-        for instrumentation until their false-positive rate is known.
+    Accepts either ``verify_citations(findings, touched, diff_text)`` or
+    legacy ``verify_citations(findings, diff_text, changed_paths)``.
     """
-    anchors, line_text = walk_right_side(diff_text)
-    if changed_paths is None:
-        changed = set(line_text) | set(anchors)
+    if isinstance(touched_or_diff, dict):
+        anchors = touched_or_diff
+        actual_diff_text = diff_text or ""
+        _, line_text = walk_right_side(actual_diff_text)
+        if changed_paths is None:
+            changed = set(anchors.keys())
+        else:
+            changed = {bare_path(p) for p in changed_paths if p}
     else:
-        changed = {bare_path(p) for p in changed_paths if p}
+        actual_diff_text = touched_or_diff
+        if changed_paths is None and not isinstance(diff_text, str):
+            changed_paths = diff_text
+            actual_diff_text_for_walk = actual_diff_text
+            actual_diff_text = ""
+        else:
+            actual_diff_text_for_walk = actual_diff_text
+
+        anchors, line_text = walk_right_side(actual_diff_text_for_walk)
+        if changed_paths is None:
+            changed = set(line_text) | set(anchors)
+        else:
+            changed = {bare_path(p) for p in changed_paths if p}
+        if not actual_diff_text:
+            actual_diff_text = actual_diff_text_for_walk
 
     issues: list[GroundingIssue] = []
     for finding in findings:
-        issues.extend(_check_one(finding, anchors, line_text, changed))
+        issues.extend(_check_one(finding, anchors, line_text, changed, actual_diff_text))
     return issues
 
 
@@ -249,6 +286,7 @@ def _check_one(
     anchors: dict[str, set[int]],
     line_text: dict[str, dict[int, str]],
     changed: set[str],
+    diff_text: str = "",
 ) -> list[GroundingIssue]:
     """Run every check applicable to a single finding."""
     issues: list[GroundingIssue] = []
@@ -343,6 +381,20 @@ def _check_one(
                 f"proves the claim.",
             )
         )
+    else:
+        code_quote = " ".join(_BACKTICK_RE.findall(finding.evidence or ""))
+        if len(_norm_evidence(code_quote)) > 24 and diff_text:
+            norm_code = _norm_evidence(code_quote)
+            norm_diff = _norm_evidence(diff_text)
+            if norm_code not in norm_diff:
+                issues.append(
+                    _issue(
+                        "hard",
+                        "evidence_not_in_diff",
+                        finding,
+                        f"{finding.kind} on '{path}:{finding.line}' evidence text does not appear in the diff.",
+                    )
+                )
 
     return issues
 
@@ -598,5 +650,6 @@ __all__ = [
     "extract_identifiers",
     "hard_reasons",
     "ngram_containment",
+    "touched_lines_by_file",
     "verify_citations",
 ]

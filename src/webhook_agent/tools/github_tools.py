@@ -363,6 +363,7 @@ def review(
             )
 
         patches: dict[str, str | None] = {}
+        retrieval_ok: bool | None = None
         # Mandatory Investigation Gate: PRs modifying Python code MUST run verify_python_ast before submitting review
         skip_gate = state_dict.get("skip_investigation_gate", False)
         if not skip_gate:
@@ -376,8 +377,10 @@ def review(
                         if isinstance(fn, str):
                             changed_files.append(fn)
                             patches[fn] = getattr(f, "patch", None)
+                    retrieval_ok = True
                 except Exception as files_err:
                     logger.debug("Could not inspect PR files for investigation gate: %s", files_err)
+                    retrieval_ok = False
 
             modifies_python = any(f.endswith(".py") for f in changed_files)
             if modifies_python:
@@ -512,19 +515,33 @@ def review(
             verify_citations,
         )
 
-        grounding_patches = patches or _collect_pr_patches(pr)
-        if not grounding_patches:
+        grounding_patches: dict[str, str | None] = {}
+        if retrieval_ok is True:
+            grounding_patches = patches
+        elif retrieval_ok is None:
+            grounding_patches = _collect_pr_patches(pr)
+
+        has_usable_patches = any(patch for patch in grounding_patches.values())
+        if not has_usable_patches:
             logger.warning(
                 "Grounding check skipped for %s#%s: no patch text available to verify "
                 "citations against. Treating citations as unverified, not as valid.",
                 repo_name,
                 pr_number,
             )
+            if strict_grounding_enabled() and effective_event == "APPROVE":
+                logger.warning(
+                    "Grounding check skipped in strict mode for %s#%s; downgrading verdict from APPROVE to COMMENT",
+                    repo_name,
+                    pr_number,
+                )
+                effective_event = "COMMENT"
+                event = "COMMENT"
         else:
             grounding_issues = verify_citations(
                 _grounding_findings(review_obj),
                 diff_text_from_patches(grounding_patches),
-                list(grounding_patches),
+                changed_paths=list(grounding_patches),
             )
             if grounding_issues:
                 logger.info(

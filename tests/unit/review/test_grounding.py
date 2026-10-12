@@ -18,6 +18,7 @@ from webhook_agent.review.grounding import (
     extract_cited_symbols,
     extract_identifiers,
     hard_reasons,
+    touched_lines_by_file,
     verify_citations,
 )
 
@@ -217,3 +218,34 @@ def test_extract_cited_paths_ignores_dotted_calls() -> None:
     """`subprocess.run` and `gh.api` are symbols, not file paths."""
     assert extract_cited_paths("uses subprocess.run with check=False") == set()
     assert extract_cited_paths("calls gh.api paginate") == set()
+
+
+def test_touched_lines_by_file() -> None:
+    """touched_lines_by_file parses unified diff patches and handles None patch."""
+    patches = {
+        "src/main.py": "@@ -10,2 +10,3 @@\n+new_line_1\n+new_line_2\n context_line\n",
+        "assets/logo.png": None,
+    }
+    touched = touched_lines_by_file(patches)
+    assert touched["src/main.py"] == {10, 11}
+    assert touched["assets/logo.png"] == set()
+
+
+def test_verify_citations_with_touched_dict() -> None:
+    """verify_citations accepts (findings, touched, diff_text)."""
+    patches = {
+        "src/main.py": "@@ -10,2 +10,3 @@\n+new_line_1\n+new_line_2\n context_line\n",
+    }
+    touched = touched_lines_by_file(patches)
+    diff = diff_text_from_patches(patches)
+
+    issues = verify_citations(
+        [
+            Finding("invariant", "src/main.py", 10, "`new_line_1`"),
+            Finding("invariant", "src/main.py", 99, "`new_line_1`"),
+        ],
+        touched,
+        diff,
+    )
+    assert len(issues) == 1
+    assert issues[0].code == "line_outside_diff"
