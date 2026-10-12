@@ -62,6 +62,7 @@ from .writeback_policy import (
     _is_formal_review_eligible,
     _review_lock,
     evaluate_writeback_policy,
+    is_automatic_pr_review_enabled,
 )
 
 __all__ = [
@@ -98,6 +99,7 @@ __all__ = [
     "get_actionable_findings",
     "group_repeated_findings",
     "has_actionable_findings",
+    "is_automatic_pr_review_enabled",
     "is_base_branch_merge_sync",
     "is_echo_description",
     "is_echo_suggestion",

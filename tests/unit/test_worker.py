@@ -501,13 +501,14 @@ class TestShouldProcessEvent:
             self.processor.process_event(ev)
             assert "No repository found" in caplog.text
 
-    def test_process_event_detail_preserves_code_formatting(self, caplog):
+    def test_process_event_detail_preserves_code_formatting(self, caplog, monkeypatch):
         """r.detail in process_event must preserve underscores, dots, and exact patch text."""
         import logging
         from unittest.mock import MagicMock, patch
 
         from webhook_agent.webhook_types import ActionResult
 
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         ev = _make_normalized("pull_request", action="opened")
         mock_result = ActionResult(
             tool="execute_command",
@@ -558,9 +559,10 @@ class TestAgentCoreSingleton:
             },
         }
 
-    def test_agent_core_constructed_once_across_multiple_events(self):
+    def test_agent_core_constructed_once_across_multiple_events(self, monkeypatch):
         from unittest.mock import MagicMock, patch
 
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         with (
             patch("webhook_agent.processor.load_cached_token") as mock_load_token,
             patch("webhook_agent.processor.Github") as mock_github_cls,
@@ -1059,7 +1061,7 @@ class TestBaseBranchMergeSync:
 
         with patch("webhook_agent.review.fast_path._submit_formal_review") as mock_submit_review:
             mock_submit_review.return_value = ("Approved PR #195", True)
-            with patch.dict(os.environ, {"DRY_RUN": "0"}):
+            with patch.dict(os.environ, {"DRY_RUN": "0", "ENABLE_AUTOMATIC_PR_REVIEWS": "1"}):
                 processor.process_event(payload)
 
             # Verified that fast-path submitted review without invoking agent.run
@@ -1069,11 +1071,12 @@ class TestBaseBranchMergeSync:
             assert "pypdf" in call_kwargs["body"]
             processor._agent_core.run.assert_not_called()
 
-    def test_process_event_in_flight_deduplication_skips_duplicate_webhook(self):
+    def test_process_event_in_flight_deduplication_skips_duplicate_webhook(self, monkeypatch):
         from unittest.mock import MagicMock
 
         from webhook_agent.review.proactive_service import clear_reconciliation_cache
 
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         clear_reconciliation_cache()
 
         processor = WebhookProcessor()
@@ -1127,7 +1130,7 @@ class TestBaseBranchMergeSync:
         processor.process_event(payload2)
         assert processor._agent_core.run.call_count == 1
 
-    def test_process_event_proactive_reconciliation_is_not_self_suppressed(self):
+    def test_process_event_proactive_reconciliation_is_not_self_suppressed(self, monkeypatch):
         from unittest.mock import MagicMock
 
         from webhook_agent.review.proactive_service import (
@@ -1136,6 +1139,7 @@ class TestBaseBranchMergeSync:
             try_claim_reconciliation,
         )
 
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         clear_reconciliation_cache()
 
         processor = WebhookProcessor()
@@ -1169,7 +1173,7 @@ class TestBaseBranchMergeSync:
         processor.process_event(payload)
         assert processor._agent_core.run.call_count == 1
 
-    def test_process_event_releases_claim_on_agent_exception(self):
+    def test_process_event_releases_claim_on_agent_exception(self, monkeypatch):
         from unittest.mock import MagicMock
 
         import pytest
@@ -1180,6 +1184,7 @@ class TestBaseBranchMergeSync:
             is_reconciliation_claimed,
         )
 
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         clear_reconciliation_cache()
 
         processor = WebhookProcessor()
@@ -1211,9 +1216,10 @@ class TestBaseBranchMergeSync:
         # Claim must have been released upon error
         assert is_reconciliation_claimed(cache_key) is False
 
-    def test_process_event_skips_prefetch_when_resumable_checkpoint_present(self):
+    def test_process_event_skips_prefetch_when_resumable_checkpoint_present(self, monkeypatch):
         from unittest.mock import MagicMock, patch
 
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         processor = WebhookProcessor()
         processor._gh = MagicMock()
         processor._agent_core = MagicMock()
@@ -1338,3 +1344,76 @@ class TestBaseBranchMergeSync:
             assert call_payload["raw_payload"]["pull_request"]["number"] == 77
             assert call_payload["raw_payload"]["pull_request"]["head"]["sha"] == "sha_res_77"
             assert call_payload["precompiled_dossier"] == "Cached Dossier"
+
+    def test_process_event_skips_pr_lifecycle_events_when_auto_review_disabled(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "0")
+        monkeypatch.setenv("DRY_RUN", "1")
+
+        processor = WebhookProcessor()
+        processor._gh = MagicMock()
+        processor._agent_core = MagicMock()
+
+        for canonical, event_name, action in [
+            ("pull_request.opened", "pull_request", "opened"),
+            ("pull_request.synchronize", "pull_request", "synchronize"),
+            ("pull_request.reopened", "pull_request", "reopened"),
+            ("pull_request.ready_for_review", "pull_request", "ready_for_review"),
+            ("pull_request_review_requested", "pull_request", "review_requested"),
+        ]:
+            payload = {
+                "canonical": canonical,
+                "event_name": event_name,
+                "action": action,
+                "sender": {"login": "developer", "type": "User"},
+                "repository": {"full_name": "owner/repo"},
+                "raw_payload": {
+                    "action": action,
+                    "pull_request": {
+                        "number": 55,
+                        "state": "open",
+                        "head": {"sha": "abc1234"},
+                    },
+                },
+            }
+            processor.process_event(payload)
+
+        processor._agent_core.run.assert_not_called()
+
+    def test_process_event_runs_review_on_explicit_comment_when_auto_review_disabled(
+        self, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "0")
+        monkeypatch.setenv("DRY_RUN", "1")
+
+        processor = WebhookProcessor()
+        processor._gh = MagicMock()
+        processor._agent_core = MagicMock()
+        processor._agent_core.run.return_value = []
+
+        payload = {
+            "canonical": "issue_comment.created",
+            "event_name": "issue_comment",
+            "action": "created",
+            "sender": {"login": "cgj8702", "type": "User"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {
+                "action": "created",
+                "issue": {
+                    "number": 55,
+                    "state": "open",
+                    "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/55"},
+                },
+                "comment": {
+                    "id": 999,
+                    "body": "@hannibal-hub-agents /review please",
+                    "user": {"login": "cgj8702"},
+                },
+            },
+        }
+
+        processor.process_event(payload)
+        processor._agent_core.run.assert_called_once()

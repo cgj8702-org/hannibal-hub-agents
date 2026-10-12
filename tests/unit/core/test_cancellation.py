@@ -71,6 +71,7 @@ def test_process_event_skips_agent_run_on_closed_pr(monkeypatch: pytest.MonkeyPa
     from webhook_agent.processor import WebhookProcessor
 
     monkeypatch.setenv("DRY_RUN", "0")
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
 
     mock_agent = MagicMock()
     mock_gh = MagicMock()

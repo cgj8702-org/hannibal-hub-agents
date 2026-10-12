@@ -173,6 +173,7 @@ def test_build_review_event_covers_commits_the_gate_held_back() -> None:
 
 @pytest.fixture
 def processor(monkeypatch: pytest.MonkeyPatch) -> WebhookProcessor:
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
     monkeypatch.setenv("REVIEW_WAIT_FOR_CI", "1")
     monkeypatch.setenv("DRY_RUN", "1")  # skip network prefetch / reactions
     clear_reconciliation_cache()
@@ -348,3 +349,22 @@ def test_already_reviewed_commit_is_not_reviewed_again(processor: WebhookProcess
     processor._gh = gh
     processor.process_event(_suite_event())
     processor._agent_core.run.assert_not_called()
+
+
+def test_automatic_reviews_disabled_by_default_skips_pr_and_suite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "0")
+    monkeypatch.setenv("DRY_RUN", "1")
+    clear_reconciliation_cache()
+    proc = WebhookProcessor()
+    proc._agent_core = MagicMock()
+    proc._gh = _gh([_run()])
+
+    # PR lifecycle event is skipped silently
+    proc.process_event(_pr_event("opened"))
+    proc._agent_core.run.assert_not_called()
+
+    # check_suite.completed event is skipped silently
+    proc.process_event(_suite_event())
+    proc._agent_core.run.assert_not_called()
