@@ -708,14 +708,7 @@ def review(
         # Check REQUEST_CHANGES without actionable issues
         effective_event = (event or getattr(review_obj, "verdict", None) or "COMMENT").upper()
         if effective_event == "REQUEST_CHANGES":
-            if is_sync:
-                has_unresolved = any(r.status == "UNRESOLVED" for r in resolutions_list)
-                if not critical_list and not has_unresolved:
-                    invalid_findings.append(
-                        "REQUEST_CHANGES event specified, but critical_issues is empty and no prior items are UNRESOLVED. "
-                        "You must provide concrete critical_issues with path, line, and replacement code, or set event to APPROVE."
-                    )
-            elif not critical_list:
+            if not is_sync and not critical_list:
                 invalid_findings.append(
                     "REQUEST_CHANGES event specified, but critical_issues is empty. "
                     "You must provide at least one actionable critical issue with exact path, line, and replacement code, or set event to APPROVE."
@@ -780,6 +773,17 @@ def review(
             from webhook_agent.review.schemas import SyncResolutionItem
 
             review_obj.resolutions = [SyncResolutionItem.model_validate(r) for r in grounded_res]
+            resolutions_list = review_obj.resolutions
+            parsed_data["resolutions"] = [r.model_dump() for r in resolutions_list]
+            body = json.dumps(parsed_data)
+
+        if effective_event == "REQUEST_CHANGES" and is_sync:
+            has_unresolved = any(r.status == "UNRESOLVED" for r in resolutions_list)
+            if not critical_list and not has_unresolved:
+                invalid_findings.append(
+                    "REQUEST_CHANGES event specified, but critical_issues is empty and no prior items are UNRESOLVED. "
+                    "You must provide concrete critical_issues with path, line, and replacement code, or set event to APPROVE."
+                )
 
         has_usable_patches = any(patch for patch in grounding_patches.values())
         if not has_usable_patches:

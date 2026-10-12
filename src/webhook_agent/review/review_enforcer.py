@@ -111,6 +111,7 @@ def _enforce_verdict(
 
     has_prior_reviews = True
     diff_text = ""
+    raw_diff = ""
     bot_reviews: list[Any] = []
     if pr is not None:
         try:
@@ -130,11 +131,12 @@ def _enforce_verdict(
         existing_comments_data: list[dict[str, Any]] = []
         try:
             files = pr.get_files()
-            diff_lines: list[str] = []
+            patches: dict[str, str] = {}
             for f in files:
-                patch = getattr(f, "patch", "") or ""
-                diff_lines.append(f"+++ b/{f.filename}\n{patch}")
-            raw_diff = "\n".join(diff_lines)
+                patches[f.filename] = getattr(f, "patch", "") or ""
+            from webhook_agent.review.grounding import diff_text_from_patches
+
+            raw_diff = diff_text_from_patches(patches)
             filtered_res = filter_review_diff(raw_diff)
             diff_text = filtered_res.filtered_diff or raw_diff
             review_budget = filtered_res.budget
@@ -206,11 +208,12 @@ def _enforce_verdict(
                             )
                             sync_obj.resolutions = []
 
-                    if diff_text:
+                    diff_for_grounding = raw_diff or diff_text
+                    if diff_for_grounding:
                         from webhook_agent.review.grounding import verify_resolutions
                         from webhook_agent.review.schemas import SyncResolutionItem
 
-                        grounded_res = verify_resolutions(sync_obj.resolutions, diff_text)
+                        grounded_res = verify_resolutions(sync_obj.resolutions, diff_for_grounding)
                         sync_obj.resolutions = [
                             SyncResolutionItem.model_validate(r) for r in grounded_res
                         ]

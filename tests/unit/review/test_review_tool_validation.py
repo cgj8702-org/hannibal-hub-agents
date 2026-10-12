@@ -566,3 +566,62 @@ def test_grounding_rejects_unciteable_verified_invariant_when_strict(mock_submit
     res = review(ctx, 8105, json.dumps(payload), "APPROVE")
     assert res.startswith("Error: Review submission rejected")
     assert "src/gamma.py" in res
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_sync_review_request_changes_evaluates_after_grounding_allows_ungrounded_resolution(
+    mock_submit,
+):
+    """Sync review requesting changes with empty critical_issues is allowed when grounding
+    marks an ungrounded resolution as UNRESOLVED, and serialized body reflects grounded status.
+    """
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    payload = {
+        "summary": "Sync review",
+        "resolutions": [
+            {
+                "item_description": "Fix bug in src/alpha.py",
+                "status": "RESOLVED",
+                "evidence": "unrelated_symbol fixed",
+                "path": "src/alpha.py",
+            }
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    res = review(ctx, 8109, json.dumps(payload), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "REQUEST_CHANGES"
+    submitted_data = json.loads(submitted_body)
+    assert submitted_data["resolutions"][0]["status"] == "UNRESOLVED"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_sync_review_request_changes_rejected_when_resolutions_grounded_as_resolved_and_no_critical_issues(
+    mock_submit,
+):
+    """Sync review requesting changes with empty critical_issues is rejected if all resolutions
+    are grounded as RESOLVED.
+    """
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    payload = {
+        "summary": "Sync review",
+        "resolutions": [
+            {
+                "item_description": "Fix bug in src/alpha.py",
+                "status": "RESOLVED",
+                "evidence": "added_line is added",
+                "path": "src/alpha.py",
+            }
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    res = review(ctx, 8110, json.dumps(payload), "REQUEST_CHANGES")
+    assert res.startswith("Error: Review submission rejected")
+    assert "critical_issues is empty and no prior items are UNRESOLVED" in res
+    assert not mock_submit.called

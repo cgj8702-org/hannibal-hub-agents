@@ -616,27 +616,35 @@ def test_pr_260_replay_marks_inverted_resolution_unresolved_and_rejects_false_in
     full_diff = _diff_text(fixture)
 
     # 2. Replay behavioral invariant from sync review
-    invariants = meta.get("verified_invariants") or []
-    if not invariants:
-        # Check parsed body invariants if metadata didn't serialize
-        invariants = [
-            Finding(
-                kind="invariant",
-                path="src/webhook_agent/tools/github_tools.py",
-                line=530,
-                evidence="Grounding verification skips gracefully with a warning when patch text is unavailable",
-            )
-        ]
-    else:
-        invariants = [
-            Finding(
-                kind="invariant",
-                path=item.get("path") or "",
-                line=item.get("line"),
-                evidence=item.get("evidence") or item.get("invariant") or "",
-            )
+    invariant_matches = re.finditer(
+        r"^\* \*\*Invariant\*\*: (?P<invariant>.*?)\.\s+"
+        r"\(`(?P<path>[^`]+):(?P<line>\d+)`\)",
+        sync_review["body"] or "",
+        re.M,
+    )
+    invariants = [
+        Finding(
+            kind="invariant",
+            path=match.group("path"),
+            line=int(match.group("line")),
+            evidence=match.group("invariant"),
+        )
+        for match in invariant_matches
+    ]
+    target = next(
+        (
+            item
             for item in invariants
-        ]
+            if item.evidence
+            == (
+                "Grounding verification skips gracefully with a warning when patch text "
+                "is unavailable, preserving fail-open capabilities on missing diff data"
+            )
+        ),
+        None,
+    )
+    assert target is not None, "PR #260 sync review must retain its recorded false invariant"
+    invariants = [target]
 
     issues = verify_citations(invariants, full_diff, fixture["changed_files"])
     codes = [i.code for i in issues]
