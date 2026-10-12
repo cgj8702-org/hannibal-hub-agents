@@ -148,6 +148,24 @@ def test_code_review_metadata_includes_verified_invariants() -> None:
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
+def test_metadata_roundtrip_includes_unverified_claims() -> None:
+    """Ensure unverified_claims round-trips through serialize and extract metadata."""
+    cr = CodeReviewResponse(
+        executive_summary="Review with residual uncertainty.",
+        verdict="COMMENT",
+        unverified_claims=["Distributed lock behavior under split-brain"],
+    )
+    md = cr.to_markdown(verdict="COMMENT")
+    assert "Unverified Claims & Residual Uncertainty" in md
+    assert "Distributed lock behavior under split-brain" in md
+
+    meta = extract_review_metadata(md)
+    assert meta is not None
+    assert meta["unverified_claims"] == ["Distributed lock behavior under split-brain"]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
 def test_sync_review_metadata_includes_verified_invariants() -> None:
     """Sync reviews must serialize verified invariants the same way as initial reviews."""
     sync = SyncReviewResponse(

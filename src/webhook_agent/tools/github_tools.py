@@ -5,6 +5,7 @@ Extracted from webhook_agent.py as part of Phase 4 modularization.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import UTC, datetime
@@ -477,12 +478,15 @@ def review(
         elif effective_event == "APPROVE":
             verified_invariants = getattr(review_obj, "verified_invariants", []) or []
             if not verified_invariants:
-                invalid_findings.append(
-                    "APPROVE event specified, but 'verified_invariants' is empty. "
-                    "An APPROVE verdict strictly requires at least one concrete invariant, edge case, or contract verified in the code "
-                    "with exact 'path', positive integer 'line', and concrete 'evidence'. "
-                    "If no invariant was verified, change the verdict to COMMENT or REQUEST_CHANGES."
+                logger.info(
+                    "APPROVE event specified without verified_invariants; falling back to COMMENT."
                 )
+                effective_event = "COMMENT"
+                event = "COMMENT"
+                if hasattr(review_obj, "verdict"):
+                    review_obj.verdict = "COMMENT"
+                parsed_data["verdict"] = "COMMENT"
+                body = json.dumps(parsed_data)
             else:
                 for inv in verified_invariants:
                     p = (inv.path or "").strip().lower()
@@ -532,6 +536,11 @@ def review(
                 )
             if strict_grounding_enabled():
                 invalid_findings.extend(hard_reasons(grounding_issues))
+            elif effective_event == "APPROVE":
+                invariant_issues = [
+                    issue for issue in grounding_issues if issue.kind == "invariant"
+                ]
+                invalid_findings.extend(hard_reasons(invariant_issues))
 
         if invalid_findings:
             error_details = "; ".join(invalid_findings)
