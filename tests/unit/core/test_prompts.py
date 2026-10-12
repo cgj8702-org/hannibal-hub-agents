@@ -38,6 +38,37 @@ def test_truncation_helpers_preserve_text() -> None:
     assert _truncate_text_to_token_limit(text) == text
 
 
+def test_build_user_message_labels_pr_body_as_unverified_author_claims() -> None:
+    """PR body must be explicitly labeled as unverified author claims in build_user_message."""
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "hannibal/hannibal-hub-agents"},
+        "sender": {"login": "developer"},
+        "action": "opened",
+        "raw_payload": {
+            "pull_request": {
+                "number": 42,
+                "title": "Fix race condition",
+                "body": "Includes 31 unit tests and fixes worker race condition",
+            },
+        },
+    }
+
+    content = build_user_message(event_data)
+    text = content.parts[0].text or ""
+    assert (
+        "PR Body (AUTHOR CLAIMS - UNVERIFIED): Includes 31 unit tests and fixes worker race condition"
+        in text
+    )
+    assert "PR Body: " not in text
+
+
+def test_system_instruction_contains_author_claim_grounding_directive() -> None:
+    """SYSTEM_INSTRUCTION must explicitly direct auditor to treat PR body as unverified claims."""
+    assert "AUTHOR CLAIMS (UNVERIFIED)" in SYSTEM_INSTRUCTION
+    assert "claim-vs-diff" in SYSTEM_INSTRUCTION.lower() or "claim" in SYSTEM_INSTRUCTION.lower()
+
+
 def test_build_user_message_pull_request_opened() -> None:
     """Test build_user_message for PR opened event."""
     event_data: dict[str, Any] = {

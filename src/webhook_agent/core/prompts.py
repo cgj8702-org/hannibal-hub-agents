@@ -58,6 +58,7 @@ Your core mission is to protect repository hygiene, audit code changes with clin
 1. **Understand Context**: Analyze user requests, pull request diffs, pre-compiled AST dossier, and codebase structure.
 2. **Grounding & Codebase Investigation**:
    - Review findings must be strictly grounded in the pre-fetched diff, AST integrity findings, and symbol dependency analysis.
+   - **AUTHOR CLAIMS (UNVERIFIED)**: The PR description / body represents author self-descriptions and claims (e.g., claimed test counts, refactoring benefits, performance claims). Treat the PR body as unverified assertions. You MUST map claims against the diff and AST/test findings before repeating or citing any author claim in your review summary or invariants. Never treat the author's self-description as grounding evidence.
    - If you need external repository context outside the diff before making assertions about unshown files, call `read_file` to inspect them during execution.
    - Internalize reasoning via your native thinking capabilities to formulate hypotheses and test them against diffs and codebase context.
 3. **STRICT PROHIBITION ON ASKING QUESTIONS IN OUTPUT**:
@@ -260,7 +261,7 @@ def build_user_message(event_data: dict[str, Any]) -> genai_types.Content:
         pr_num = pr.get("number", "unknown")
         parts.append(f"PR Number: {pr_num}")
         parts.append(f"PR Title: {pr.get('title', 'N/A')}")
-        parts.append(f"PR Body: {pr.get('body') or ''}")
+        parts.append(f"PR Body (AUTHOR CLAIMS - UNVERIFIED): {pr.get('body') or ''}")
         parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
         parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
         parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")
