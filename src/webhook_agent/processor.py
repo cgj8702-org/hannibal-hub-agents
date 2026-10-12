@@ -36,6 +36,7 @@ from webhook_agent.github.credentials import (
     load_private_key,
     save_cached_token,
 )
+from webhook_agent.github.jules_proxy import handle_jules_pr_opened
 from webhook_agent.github.pr_context import (
     _prefetch_inline_comment_context,
     _prefetch_pr_diff,
@@ -527,6 +528,11 @@ class WebhookProcessor:
             return
 
         logger.info("Agent starting execution for repo %s", repo_name)
+
+        dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
+        if handle_jules_pr_opened(gh, repo_name, payload, dry_run=dry_run):
+            logger.info("Jules PR adoption proxy handled PR in %s; stopping processing.", repo_name)
+            return
 
         if event_key == "pull_request.synchronize" and is_base_branch_merge_sync(
             gh, repo_name, payload
