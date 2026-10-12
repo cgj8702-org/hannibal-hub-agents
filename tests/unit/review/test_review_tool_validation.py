@@ -262,7 +262,7 @@ def test_review_rejects_approve_with_invalid_invariant(mock_ctx):
             {
                 "invariant": "Preserves backwards compatibility",
                 "path": "codebase",
-                "line": 0,
+                "line": 10,
                 "evidence": "",
             }
         ],
@@ -270,7 +270,8 @@ def test_review_rejects_approve_with_invalid_invariant(mock_ctx):
     }
     res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
     assert res.startswith("Error: Review submission rejected")
-    assert "verified_invariants' is empty" in res
+    assert "lacks exact file path" in res
+    assert "lacks concrete evidence" in res
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
