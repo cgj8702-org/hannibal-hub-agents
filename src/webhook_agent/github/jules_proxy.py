@@ -31,7 +31,7 @@ def get_agents_github_token() -> str | None:
     Checks environment variables first (populated from GCP Secret Manager in
     production), then falls back to local GitHub CLI credentials if available.
     """
-    for env_var in ("CGJ8702_AGENTS_TOKEN", "AGENTS_GITHUB_TOKEN", "GH_TOKEN"):
+    for env_var in ("CGJ8702_AGENTS_TOKEN", "AGENTS_GITHUB_TOKEN"):
         val = (os.environ.get(env_var) or "").strip()
         if val:
             return val
@@ -170,19 +170,31 @@ def reopen_jules_pr_as_agent(
         logger.warning("Could not fetch original Jules PR %s#%s: %s", repo_name, pr_number, exc)
         return None
 
+    if (getattr(original_pr, "state", "") or "").lower() != "open" or getattr(
+        original_pr, "merged", False
+    ) is True:
+        logger.info("Jules PR %s#%s is no longer open; skipping adoption.", repo_name, pr_number)
+        return None
+
     # Step 1: Close original Jules PR
     # GitHub does not allow two open PRs for the exact same head branch targeting the same base.
     # Closing the Jules PR allows the cgj8702-agents PR to immediately claim the head branch.
     try:
-        original_pr.create_issue_comment(
-            "Closing in favor of reopening an identical PR authored by @cgj8702-agents "
-            "for CodeRabbit AI review compatibility."
-        )
         original_pr.edit(state="closed")
         logger.info("Closed original Jules PR %s#%s.", repo_name, pr_number)
     except Exception as exc:
         logger.warning("Failed to close original Jules PR %s#%s: %s", repo_name, pr_number, exc)
         return None
+
+    try:
+        original_pr.create_issue_comment(
+            "Closing in favor of reopening an identical PR authored by @cgj8702-agents "
+            "for CodeRabbit AI review compatibility."
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not post closing comment on Jules PR %s#%s: %s", repo_name, pr_number, exc
+        )
 
     # Step 2: Open replacement PR as cgj8702-agents
     try:

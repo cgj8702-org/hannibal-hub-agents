@@ -22,14 +22,10 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 def test_get_agents_github_token_env_priority(monkeypatch):
     monkeypatch.setenv("CGJ8702_AGENTS_TOKEN", "token_from_cgj_var")
     monkeypatch.setenv("AGENTS_GITHUB_TOKEN", "token_from_agents_var")
-    monkeypatch.setenv("GH_TOKEN", "token_from_gh_var")
     assert get_agents_github_token() == "token_from_cgj_var"
 
     monkeypatch.delenv("CGJ8702_AGENTS_TOKEN")
     assert get_agents_github_token() == "token_from_agents_var"
-
-    monkeypatch.delenv("AGENTS_GITHUB_TOKEN")
-    assert get_agents_github_token() == "token_from_gh_var"
 
 
 def test_get_agents_github_token_fallback_gh(monkeypatch):
@@ -154,7 +150,7 @@ def test_reopen_jules_pr_as_agent_happy_path(monkeypatch):
 
     gh_app = MagicMock()
     app_repo = MagicMock()
-    original_pr = MagicMock()
+    original_pr = MagicMock(state="open", merged=False)
     gh_app.get_repo.return_value = app_repo
     app_repo.get_pull.return_value = original_pr
 
@@ -227,7 +223,7 @@ def test_reopen_jules_pr_as_agent_fork_handling(monkeypatch):
 
     gh_app = MagicMock()
     app_repo = MagicMock()
-    original_pr = MagicMock()
+    original_pr = MagicMock(state="open", merged=False)
     gh_app.get_repo.return_value = app_repo
     app_repo.get_pull.return_value = original_pr
 
@@ -273,7 +269,7 @@ def test_reopen_jules_pr_as_agent_rollback_on_failure(monkeypatch):
 
     gh_app = MagicMock()
     app_repo = MagicMock()
-    original_pr = MagicMock()
+    original_pr = MagicMock(state="open", merged=False)
     gh_app.get_repo.return_value = app_repo
     app_repo.get_pull.return_value = original_pr
 
@@ -307,6 +303,39 @@ def test_reopen_jules_pr_as_agent_rollback_on_failure(monkeypatch):
     assert original_pr.edit.call_count == 2
     assert original_pr.edit.call_args_list[0].kwargs == {"state": "closed"}
     assert original_pr.edit.call_args_list[1].kwargs == {"state": "open"}
+
+
+def test_reopen_jules_pr_as_agent_skips_when_live_pr_closed(monkeypatch):
+    monkeypatch.setenv("CGJ8702_AGENTS_TOKEN", "mock_token")
+
+    gh_app = MagicMock()
+    app_repo = MagicMock()
+    original_pr = MagicMock(state="closed", merged=False)
+    gh_app.get_repo.return_value = app_repo
+    app_repo.get_pull.return_value = original_pr
+
+    mock_agents_gh = MagicMock()
+
+    payload = {
+        "raw_payload": {
+            "pull_request": {
+                "number": 284,
+                "state": "open",
+                "head": {"ref": "jules-branch"},
+                "base": {"ref": "main"},
+            }
+        }
+    }
+
+    with patch(
+        "webhook_agent.github.jules_proxy.get_agents_github_client",
+        return_value=mock_agents_gh,
+    ):
+        res = reopen_jules_pr_as_agent(gh_app, "cgj8702-org/hannibal-hub", payload, dry_run=False)
+
+    assert res is None
+    original_pr.edit.assert_not_called()
+    mock_agents_gh.get_repo.assert_not_called()
 
 
 def test_handle_jules_pr_opened():

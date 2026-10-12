@@ -47,7 +47,8 @@ export GITHUB_PRIVATE_KEY_PATH="/tmp/keys/github-app-private-key.pem"
 export PRIVATE_KEY_PATH="${GITHUB_PRIVATE_KEY_PATH}"
 
 # Fetch cgj8702-agents GitHub token for Jules PR adoption proxy (if configured in Secret Manager)
-export CGJ8702_AGENTS_TOKEN=$(gcloud secrets versions access latest --secret="CGJ8702_AGENTS_TOKEN" --project="${PROJECT_ID}" 2>/dev/null || echo "")
+CGJ8702_AGENTS_TOKEN=$(gcloud secrets versions access latest --secret="CGJ8702_AGENTS_TOKEN" --project="${PROJECT_ID}" 2>/dev/null || echo "")
+export CGJ8702_AGENTS_TOKEN
 
 # Fetch webhook-agent service account key for Pub/Sub & Logging auth
 gcloud secrets versions access latest --secret="WEBHOOK_AGENT_SA_KEY" --project="${PROJECT_ID}" > /tmp/keys/webhook-agent-sa-key.json
