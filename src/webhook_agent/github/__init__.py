@@ -18,6 +18,12 @@ from .credentials import (
     load_private_key,
     save_cached_token,
 )
+from .jules_proxy import (
+    get_agents_github_client,
+    get_agents_github_token,
+    handle_jules_pr_opened,
+    reopen_jules_pr_as_agent,
+)
 from .pr_context import (
     _prefetch_inline_comment_context,
     _prefetch_pr_diff,
@@ -37,9 +43,13 @@ __all__ = [
     "_prefetch_previous_bot_reviews",
     "_should_prefetch_diff",
     "generate_jwt",
+    "get_agents_github_client",
+    "get_agents_github_token",
     "get_installation_token",
+    "handle_jules_pr_opened",
     "is_jules_sender",
     "load_cached_token",
     "load_private_key",
+    "reopen_jules_pr_as_agent",
     "save_cached_token",
 ]
