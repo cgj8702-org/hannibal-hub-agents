@@ -10,8 +10,10 @@ from webhook_agent.tools.schemas import (
     CreateIssueInput,
     GetCommitDiffInput,
     GetIssueInput,
+    MergePRInput,
     ReadFileInput,
     ReviewInput,
+    UpdateIssueInput,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -102,18 +104,42 @@ def test_create_issue_input():
         CreateIssueInput.model_validate({"body": "Test"})
 
 
+def test_update_issue_input():
+    # Valid
+    inp = UpdateIssueInput.model_validate(
+        {
+            "number": 10,
+            "title": "Updated Title",
+            "state": "CLOSED",
+        }
+    )
+    assert inp.number == 10
+    assert inp.title == "Updated Title"
+    assert inp.state == "closed"
+
+
+def test_merge_pr_input():
+    # Valid
+    inp = MergePRInput.model_validate(
+        {
+            "pr_number": 42,
+            "expected_base": "main",
+            "merge_method": "SQUASH",
+        }
+    )
+    assert inp.pr_number == 42
+    assert inp.expected_base == "main"
+    assert inp.merge_method == "squash"
+
+
 def test_tool_input_schemas_registry():
     assert "read_file" in TOOL_INPUT_SCHEMAS
     assert "get_issue" in TOOL_INPUT_SCHEMAS
     assert "get_commit_diff" in TOOL_INPUT_SCHEMAS
     assert "review" in TOOL_INPUT_SCHEMAS
-    # Regression guard: unguarded mutating tools must not be re-registered without
-    # authorization gates. add_label was removed entirely (Jules' GitHub App ignores
+    # Regression guard: add_label was removed entirely (Jules' GitHub App ignores
     # machine-actor label events, and it was an unauthenticated mutation surface).
-    # See the reviewer hardening plan, Phase 6 / 7.2.
     assert "add_label" not in TOOL_INPUT_SCHEMAS
     assert "create_issue" in TOOL_INPUT_SCHEMAS
-    # Regression guard: unguarded mutating tools must not be re-registered without
-    # authorization gates. See the reviewer hardening plan, Phase 6.
-    assert "update_issue" not in TOOL_INPUT_SCHEMAS
-    assert "merge_pr" not in TOOL_INPUT_SCHEMAS
+    assert "update_issue" in TOOL_INPUT_SCHEMAS
+    assert "merge_pr" in TOOL_INPUT_SCHEMAS

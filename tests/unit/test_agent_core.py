@@ -1169,9 +1169,9 @@ class TestConversationalAgent:
         # Regression guard: add_label removed entirely (unguarded mutation surface + Jules'
         # GitHub App ignores machine-actor label events). See reviewer hardening plan 7.2.
         assert "add_label" not in tool_names
-        # Regression guard: unguarded mutating tools must stay unregistered.
-        assert "update_issue" not in tool_names
-        assert "merge_pr" not in tool_names
+        # Phase 6: gated ops tools are registered on conversational agent.
+        assert "update_issue" in tool_names
+        assert "merge_pr" in tool_names
         assert "get_current_time" not in tool_names
         assert "google_search_grounding_tool" not in tool_names
         assert "search_codebase" not in tool_names

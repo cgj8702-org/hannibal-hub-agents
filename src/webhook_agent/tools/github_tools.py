@@ -15,7 +15,10 @@ from github import Github
 from google.adk.agents.context import Context
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.constants import DEFAULT_STRICT_REVIEW_GROUNDING
+from webhook_agent.constants import (
+    DEFAULT_ALLOW_AUTOMATED_MUTATIONS,
+    DEFAULT_STRICT_REVIEW_GROUNDING,
+)
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
 
@@ -58,6 +61,101 @@ def _extract_state_dict(session_state: Any) -> dict[str, Any]:
         except Exception:
             pass
     return {}
+
+
+def _check_automated_mutations_allowed() -> bool:
+    """Return True if ALLOW_AUTOMATED_MUTATIONS is enabled in environment."""
+    return os.environ.get("ALLOW_AUTOMATED_MUTATIONS", DEFAULT_ALLOW_AUTOMATED_MUTATIONS) in (
+        "1",
+        "true",
+        "True",
+    )
+
+
+def _audit_log_call(actor: str, tool: str, target: str, result: str) -> None:
+    """Log an audit entry for a mutating tool invocation."""
+    logger.info("AUDIT: actor=%s tool=%s target=%s result=%s", actor, tool, target, result)
+
+
+def _check_caller_authorization(ctx: Context) -> tuple[bool, str, str]:
+    """Verify server-side that the acting user is a maintainer or collaborator.
+
+    Returns:
+        Tuple of (is_authorized: bool, actor: str, reason: str).
+    """
+    actor = str(ctx.state.get("sender") or ctx.state.get("user:sender") or "unknown")
+    author_assoc = str(
+        ctx.state.get("author_association") or ctx.state.get("user:author_association") or ""
+    ).upper()
+
+    if author_assoc in ("OWNER", "MEMBER", "COLLABORATOR"):
+        return True, actor, f"author_association:{author_assoc}"
+
+    try:
+        gh = _get_gh_from_ctx(ctx)
+        repo_name = _get_repo_full_name(ctx)
+        repo = gh.get_repo(repo_name)
+        perm = repo.get_collaborator_permission(actor)
+        perm_str = str(perm).lower() if perm else ""
+        if perm_str in ("admin", "write", "maintain"):
+            return True, actor, f"collaborator_permission:{perm_str}"
+        has_collab = getattr(repo, "has_in_collaborators", None)
+        if callable(has_collab) and has_collab(actor) is True:
+            return True, actor, "has_in_collaborators"
+    except Exception as exc:
+        logger.debug("Collaborator permission check failed for actor %s: %s", actor, exc)
+
+    return False, actor, "unauthorized"
+
+
+def _check_pr_approval_and_checks(repo: Any, pr: Any) -> tuple[bool, str]:
+    """Verify PR review approval state and required checks green on head SHA."""
+    try:
+        reviews = pr.get_reviews()
+        latest_states: dict[str, str] = {}
+        for r in reviews:
+            user = getattr(r, "user", None)
+            login = str(getattr(user, "login", "")) if user else ""
+            st = str(getattr(r, "state", "")).upper()
+            if login and st in ("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"):
+                latest_states[login] = st
+
+        if any(st == "CHANGES_REQUESTED" for st in latest_states.values()):
+            return False, "PR has requested changes"
+
+        if not any(st == "APPROVED" for st in latest_states.values()):
+            return False, "PR has not received required maintainer approval"
+
+        head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        if not head_sha:
+            return False, "PR head SHA is missing"
+
+        head_commit = repo.get_commit(head_sha)
+        try:
+            comb_status = head_commit.get_combined_status()
+            comb_state = str(getattr(comb_status, "state", "")).lower()
+            if comb_state in ("failure", "error"):
+                return False, f"PR head SHA status is '{comb_state}'"
+        except Exception as status_err:
+            logger.debug("Could not fetch combined status for SHA %s: %s", head_sha[:7], status_err)
+
+        try:
+            check_runs = head_commit.get_check_runs()
+            for run in check_runs:
+                conclusion = str(getattr(run, "conclusion", "") or "").lower()
+                status = str(getattr(run, "status", "") or "").lower()
+                if conclusion in ("failure", "cancelled", "timed_out", "action_required"):
+                    run_name = getattr(run, "name", "check")
+                    return False, f"Check run '{run_name}' failed with conclusion '{conclusion}'"
+                if status in ("queued", "in_progress"):
+                    run_name = getattr(run, "name", "check")
+                    return False, f"Check run '{run_name}' is still in status '{status}'"
+        except Exception as runs_err:
+            logger.debug("Could not fetch check runs for SHA %s: %s", head_sha[:7], runs_err)
+
+        return True, "PR is approved and required checks are green"
+    except Exception as err:
+        return False, f"Failed to verify PR review/checks: {err}"
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +346,150 @@ def create_issue(
         return f"Successfully created issue #{issue.number} ({getattr(issue, 'html_url', 'created')}){labels_str}."
     except Exception as e:
         return f"Error creating issue: {e}"
+
+
+def update_issue(
+    ctx: Context,
+    number: int,
+    title: str | None = None,
+    body: str | None = None,
+    state: str | None = None,
+    labels: list[str] | None = None,
+) -> str:
+    """Update an existing issue or pull request (title, body, state, or labels).
+
+    Args:
+        number: Issue or PR number.
+        title: Optional new title.
+        body: Optional new issue body markdown.
+        state: Optional new state ('open' or 'closed').
+        labels: Optional list of label names to set.
+
+    Returns:
+        Result description string.
+    """
+    repo_name = _get_repo_full_name(ctx)
+    target = f"{repo_name}#{number}"
+
+    if not _check_automated_mutations_allowed():
+        msg = "Error: Automated mutations are disabled by policy (ALLOW_AUTOMATED_MUTATIONS)."
+        _audit_log_call("unknown", "update_issue", target, "REFUSED_MUTATIONS_DISABLED")
+        return msg
+
+    is_auth, actor, _reason = _check_caller_authorization(ctx)
+    if not is_auth:
+        msg = f"Error: Caller '{actor}' is not authorized to update issue/PR (must be maintainer/collaborator)."
+        _audit_log_call(actor, "update_issue", target, "REFUSED_UNAUTHORIZED_CALLER")
+        return msg
+
+    try:
+        gh = _get_gh_from_ctx(ctx)
+        repo = gh.get_repo(repo_name)
+        issue = repo.get_issue(number=number)
+
+        kwargs: dict[str, Any] = {}
+        if title is not None:
+            kwargs["title"] = title
+        if body is not None:
+            kwargs["body"] = body
+        if state is not None:
+            kwargs["state"] = state
+        if labels is not None:
+            kwargs["labels"] = labels
+
+        if kwargs:
+            issue.edit(**kwargs)
+            result_msg = f"Successfully updated issue #{number}."
+        else:
+            result_msg = f"No fields provided to update for issue #{number}."
+
+        _audit_log_call(actor, "update_issue", target, result_msg)
+        return result_msg
+    except Exception as e:
+        err_msg = f"Error updating issue #{number}: {e}"
+        _audit_log_call(actor, "update_issue", target, err_msg)
+        return err_msg
+
+
+def merge_pr(
+    ctx: Context,
+    pr_number: int,
+    expected_base: str = "main",
+    merge_method: str = "squash",
+    commit_title: str | None = None,
+) -> str:
+    """Merge an approved pull request into its base branch.
+
+    Args:
+        pr_number: Pull request number.
+        expected_base: Expected target base branch (e.g. 'main').
+        merge_method: Method used for merge ('squash', 'merge', or 'rebase').
+        commit_title: Optional title for the merge commit.
+
+    Returns:
+        Result description string.
+    """
+    repo_name = _get_repo_full_name(ctx)
+    target = f"{repo_name}#{pr_number}"
+
+    if not _check_automated_mutations_allowed():
+        msg = "Error: Automated mutations are disabled by policy (ALLOW_AUTOMATED_MUTATIONS)."
+        _audit_log_call("unknown", "merge_pr", target, "REFUSED_MUTATIONS_DISABLED")
+        return msg
+
+    is_auth, actor, _reason = _check_caller_authorization(ctx)
+    if not is_auth:
+        msg = f"Error: Caller '{actor}' is not authorized to merge PR (must be maintainer/collaborator)."
+        _audit_log_call(actor, "merge_pr", target, "REFUSED_UNAUTHORIZED_CALLER")
+        return msg
+
+    try:
+        gh = _get_gh_from_ctx(ctx)
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        actual_base = getattr(pr.base, "ref", "")
+        if actual_base != expected_base:
+            msg = f"Error: Base branch mismatch. PR targets '{actual_base}', but expected_base was '{expected_base}'."
+            _audit_log_call(
+                actor,
+                "merge_pr",
+                target,
+                f"REFUSED_BASE_BRANCH_MISMATCH:{actual_base}!={expected_base}",
+            )
+            return msg
+
+        ok_checks, checks_reason = _check_pr_approval_and_checks(repo, pr)
+        if not ok_checks:
+            msg = f"Error: Cannot merge PR #{pr_number}: {checks_reason}."
+            _audit_log_call(
+                actor, "merge_pr", target, f"REFUSED_APPROVAL_OR_CHECKS:{checks_reason}"
+            )
+            return msg
+
+        kwargs: dict[str, Any] = {"merge_method": merge_method}
+        if commit_title:
+            kwargs["commit_title"] = commit_title
+
+        status = pr.merge(**kwargs)
+
+        merged_sha = status.sha[:7] if getattr(status, "sha", None) else "unknown"
+        is_merged = getattr(status, "merged", False) is True
+
+        if is_merged:
+            result_msg = (
+                f"Successfully merged PR #{pr_number} into {actual_base} (commit {merged_sha})."
+            )
+        else:
+            msg_text = getattr(status, "message", "Merge rejected by GitHub")
+            result_msg = f"Error merging PR #{pr_number}: {msg_text}"
+
+        _audit_log_call(actor, "merge_pr", target, result_msg)
+        return result_msg
+    except Exception as e:
+        err_msg = f"Error merging PR #{pr_number}: {e}"
+        _audit_log_call(actor, "merge_pr", target, err_msg)
+        return err_msg
 
 
 # ---------------------------------------------------------------------------
