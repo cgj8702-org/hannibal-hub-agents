@@ -25,6 +25,38 @@ def mock_ctx():
     return ctx
 
 
+_ALPHA_PATCH = "@@ -10,2 +10,3 @@\n existing_line\n+added_line\n"
+
+
+def _grounding_ctx(patches, *, files_error=None):
+    """Build a Context whose PR exposes the given {path: patch} mapping."""
+    pr = MagicMock()
+    if files_error is not None:
+        pr.get_files.side_effect = files_error
+    else:
+        files = []
+        for name, patch in patches.items():
+            file_mock = MagicMock()
+            file_mock.filename = name
+            file_mock.patch = patch
+            files.append(file_mock)
+        pr.get_files.return_value = files
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    ctx = MagicMock(spec=Context)
+    ctx.state = {
+        "gh_client": gh,
+        "repo_full_name": "owner/repo",
+        "formal_review_eligible": True,
+        # Mirrors the prefetch path: without this the mandatory investigation gate
+        # rejects any PR touching a .py file before the grounding check is reached.
+        "deterministic_precompiled_ast": True,
+    }
+    return ctx
+
+
 def test_review_rejects_malformed_json(mock_ctx):
     res = review(mock_ctx, 123, "not a json string", "APPROVE")
     assert res.startswith("Error: Review submission rejected")
@@ -129,7 +161,8 @@ def test_review_rejects_request_changes_without_critical_issues(mock_ctx):
     assert "REQUEST_CHANGES event specified, but critical_issues is empty" in res
 
 
-def test_review_rejects_sync_request_changes_without_actionable_items(mock_ctx):
+def test_review_rejects_sync_request_changes_without_actionable_items():
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
     payload = {
         "summary": "Sync update",
         "confidence": 5,
@@ -137,14 +170,15 @@ def test_review_rejects_sync_request_changes_without_actionable_items(mock_ctx):
             {
                 "item_description": "Prior item",
                 "status": "RESOLVED",
-                "evidence": "fixed",
+                "evidence": "added_line is added",
+                "path": "src/alpha.py",
                 "category": "CRITICAL",
             }
         ],
         "critical_issues": [],
         "minor_suggestions": [],
     }
-    res = review(mock_ctx, 123, json.dumps(payload), "REQUEST_CHANGES")
+    res = review(ctx, 123, json.dumps(payload), "REQUEST_CHANGES")
     assert res.startswith("Error: Review submission rejected")
     assert "critical_issues is empty and no prior items are UNRESOLVED" in res
 
@@ -376,37 +410,6 @@ def test_review_accepts_advisory_minor_suggestion_with_empty_suggested_fix(mock_
 # Phase 2.2: deterministic citation grounding (warn-only unless strict)
 # ---------------------------------------------------------------------------
 
-_ALPHA_PATCH = "@@ -10,2 +10,3 @@\n existing_line\n+added_line\n"
-
-
-def _grounding_ctx(patches, *, files_error=None):
-    """Build a Context whose PR exposes the given {path: patch} mapping."""
-    pr = MagicMock()
-    if files_error is not None:
-        pr.get_files.side_effect = files_error
-    else:
-        files = []
-        for name, patch in patches.items():
-            file_mock = MagicMock()
-            file_mock.filename = name
-            file_mock.patch = patch
-            files.append(file_mock)
-        pr.get_files.return_value = files
-    repo = MagicMock()
-    repo.get_pull.return_value = pr
-    gh = MagicMock()
-    gh.get_repo.return_value = repo
-    ctx = MagicMock(spec=Context)
-    ctx.state = {
-        "gh_client": gh,
-        "repo_full_name": "owner/repo",
-        "formal_review_eligible": True,
-        # Mirrors the prefetch path: without this the mandatory investigation gate
-        # rejects any PR touching a .py file before the grounding check is reached.
-        "deterministic_precompiled_ast": True,
-    }
-    return ctx
-
 
 def _critical_payload(path, line):
     """A REQUEST_CHANGES payload that passes every pre-existing validation rule."""
@@ -625,3 +628,35 @@ def test_sync_review_request_changes_rejected_when_resolutions_grounded_as_resol
     assert res.startswith("Error: Review submission rejected")
     assert "critical_issues is empty and no prior items are UNRESOLVED" in res
     assert not mock_submit.called
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_sync_review_request_changes_grounds_resolutions_when_diff_text_empty(
+    mock_submit,
+):
+    """When patch text is absent or empty, sync review still verifies resolutions,
+    marking ungrounded RESOLVED claims as UNRESOLVED and updating serialized body.
+    """
+    mock_submit.return_value = ("Review submitted", True)
+    # Context with empty patches
+    ctx = _grounding_ctx({})
+    payload = {
+        "summary": "Sync review with empty patches",
+        "resolutions": [
+            {
+                "item_description": "Fix bug in src/alpha.py",
+                "status": "RESOLVED",
+                "evidence": "resolved something",
+                "path": "src/alpha.py",
+            }
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    res = review(ctx, 8111, json.dumps(payload), "REQUEST_CHANGES")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "REQUEST_CHANGES"
+    submitted_data = json.loads(submitted_body)
+    assert submitted_data["resolutions"][0]["status"] == "UNRESOLVED"

@@ -758,16 +758,11 @@ def review(
             grounding_patches = _collect_pr_patches(pr)
 
         diff_text_val = diff_text_from_patches(grounding_patches) if grounding_patches else ""
-        if (
-            is_sync
-            and hasattr(review_obj, "resolutions")
-            and review_obj.resolutions
-            and diff_text_val
-        ):
+        if is_sync and hasattr(review_obj, "resolutions") and review_obj.resolutions:
             grounded_res = verify_resolutions(
                 review_obj.resolutions,
                 diff_text_val,
-                list(grounding_patches),
+                list(grounding_patches or []),
             )
             # Update review_obj.resolutions with grounded status
             from webhook_agent.review.schemas import SyncResolutionItem

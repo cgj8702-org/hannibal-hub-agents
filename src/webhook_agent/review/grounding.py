@@ -269,20 +269,18 @@ def verify_resolutions(
                 path_ok = False
 
         # 2. Symbol / Evidence check
-        evidence_ok = True
-        if not cited_symbols and not cited_paths:
-            # Narrative only without any path or symbol reference cannot be grounded -> UNRESOLVED
-            evidence_ok = False
-        elif cited_symbols:
+        evidence_ok = bool(cited_symbols)
+        if cited_symbols:
             target_files = cited_paths if cited_paths else changed
-            path_added_text = (
-                " ".join(txt for cp in target_files for txt in line_text.get(cp, {}).values())
-                or all_added_text
+            path_added_text = " ".join(
+                txt for cp in target_files for txt in line_text.get(cp, {}).values()
             )
-            path_removed_text = (
-                " ".join(line for cp in target_files for line in removals.get(cp, []))
-                or all_removed_text
+            path_removed_text = " ".join(
+                line for cp in target_files for line in removals.get(cp, [])
             )
+            if not cited_paths:
+                path_added_text = all_added_text
+                path_removed_text = all_removed_text
             symbol_in_added = any(sym in path_added_text.lower() for sym in cited_symbols)
             symbol_in_removed = any(sym in path_removed_text.lower() for sym in cited_symbols)
             if not (symbol_in_added or symbol_in_removed):
@@ -521,10 +519,15 @@ def _check_one(
             "runs",
             "gracefully",
         )
-        STATIC_FACT_TOKENS = ("=", "==", ":=", "def ", "class ", "assert", "default")
         is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
-        has_concrete_quote_or_test = any(st in ev for st in STATIC_FACT_TOKENS) or "test_" in ev
-        is_static_fact = re.search(r"^[A-Z0-9_]+\s*=\s*", finding.evidence.strip()) is not None
+        quotes = [q for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
+        norm_diff = _norm_evidence(diff_text)
+        has_diff_quote = bool(quotes) and all(_norm_evidence(q) in norm_diff for q in quotes)
+        has_test = re.search(r"\btest_\w+", ev) is not None
+        has_concrete_quote_or_test = has_diff_quote or has_test
+        is_static_fact = (
+            re.search(r"^[A-Z0-9_]+\s*=\s*", (finding.evidence or "").strip()) is not None
+        )
         if is_behavioral and not is_static_fact and not has_concrete_quote_or_test:
             issues.append(
                 _issue(
