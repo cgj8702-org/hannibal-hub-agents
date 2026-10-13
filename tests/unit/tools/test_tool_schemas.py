@@ -90,12 +90,11 @@ def test_create_issue_input():
         {
             "title": "Bug in worker",
             "body": "Fix the worker crash",
-            "labels": ["jules"],
         }
     )
     assert inp.title == "Bug in worker"
     assert inp.body == "Fix the worker crash"
-    assert inp.labels == ["jules"]
+    assert not hasattr(inp, "labels")
 
     # Missing title or body
     with pytest.raises(ValidationError):
@@ -116,6 +115,7 @@ def test_update_issue_input():
     assert inp.number == 10
     assert inp.title == "Updated Title"
     assert inp.state == "closed"
+    assert not hasattr(inp, "labels")
 
 
 def test_merge_pr_input():

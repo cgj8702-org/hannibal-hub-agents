@@ -165,3 +165,16 @@ def test_update_issue_happy_path_and_audit_log(monkeypatch, caplog):
     assert "Successfully updated issue #10" in res
     mock_issue.edit.assert_called_once_with(title="Updated Title", state="closed")
     assert "AUDIT" in caplog.text or "update_issue" in caplog.text
+
+
+def test_tools_lack_label_parameters():
+    """Regression guard: neither create_issue nor update_issue may accept labels."""
+    import inspect
+
+    from webhook_agent.tools.github_tools import create_issue, update_issue
+
+    create_params = inspect.signature(create_issue).parameters
+    update_params = inspect.signature(update_issue).parameters
+
+    assert "labels" not in create_params, "create_issue must not have labels parameter"
+    assert "labels" not in update_params, "update_issue must not have labels parameter"

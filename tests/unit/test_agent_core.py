@@ -770,15 +770,13 @@ class TestCreateIssue:
             ctx,
             title="refactor: clean up legacy code",
             body="Task specification for Jules",
-            labels=["jules"],
         )
         assert "Successfully created issue #101" in result
         assert "https://github.com/owner/repo/issues/101" in result
-        assert "labels ['jules']" in result
+        assert "labels" not in result
         repo.create_issue.assert_called_once_with(
             title="refactor: clean up legacy code",
             body="Task specification for Jules",
-            labels=["jules"],
         )
 
     def test_create_issue_error_handling(self):

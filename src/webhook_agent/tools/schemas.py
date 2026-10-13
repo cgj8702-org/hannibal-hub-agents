@@ -78,15 +78,6 @@ class CreateIssueInput(ToolInputBase):
 
     title: str = Field(..., min_length=1, description="Issue title.")
     body: str = Field(..., min_length=1, description="Structured markdown task specification.")
-    labels: list[str] | None = Field(default=None, description="Optional list of labels to attach.")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_aliases(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "labels" in data and isinstance(data["labels"], str):
-                data["labels"] = [lbl.strip() for lbl in data["labels"].split(",") if lbl.strip()]
-        return data
 
 
 class UpdateIssueInput(ToolInputBase):
@@ -98,7 +89,6 @@ class UpdateIssueInput(ToolInputBase):
     state: Literal["open", "closed"] | None = Field(
         default=None, description="Optional updated state ('open' or 'closed')."
     )
-    labels: list[str] | None = Field(default=None, description="Optional list of labels to set.")
 
     @model_validator(mode="before")
     @classmethod
@@ -111,8 +101,6 @@ class UpdateIssueInput(ToolInputBase):
                     data["number"] = data["pr_number"]
             if "state" in data and isinstance(data["state"], str):
                 data["state"] = data["state"].lower()
-            if "labels" in data and isinstance(data["labels"], str):
-                data["labels"] = [lbl.strip() for lbl in data["labels"].split(",") if lbl.strip()]
         return data
 
 

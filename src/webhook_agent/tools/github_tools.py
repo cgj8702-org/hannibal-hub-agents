@@ -318,18 +318,16 @@ def create_issue(
     ctx: Context,
     title: str,
     body: str,
-    labels: list[str] | None = None,
 ) -> str:
     """Create a new GitHub issue in the repository.
 
     Use this tool to autonomously spawn well-defined tasks, bug reports,
-    or refactoring jobs (e.g. attaching the 'jules' label so that Google Labs
-    Jules can execute the implementation).
+    or refactoring task specifications for human maintainer review. Note that
+    the agent cannot label issues; labels must be attached by human maintainers.
 
     Args:
         title: Issue title.
         body: Markdown issue description and structured task specification.
-        labels: Optional list of label names to attach (e.g. ['jules']).
 
     Returns:
         A string describing the result, including issue number and URL.
@@ -338,12 +336,10 @@ def create_issue(
     repo_name = _get_repo_full_name(ctx)
     try:
         repo = gh.get_repo(repo_name)
-        kwargs: dict[str, Any] = {"title": title, "body": body}
-        if labels:
-            kwargs["labels"] = labels
-        issue = repo.create_issue(**kwargs)
-        labels_str = f" with labels {labels}" if labels else ""
-        return f"Successfully created issue #{issue.number} ({getattr(issue, 'html_url', 'created')}){labels_str}."
+        issue = repo.create_issue(title=title, body=body)
+        return (
+            f"Successfully created issue #{issue.number} ({getattr(issue, 'html_url', 'created')})."
+        )
     except Exception as e:
         return f"Error creating issue: {e}"
 
@@ -354,16 +350,14 @@ def update_issue(
     title: str | None = None,
     body: str | None = None,
     state: str | None = None,
-    labels: list[str] | None = None,
 ) -> str:
-    """Update an existing issue or pull request (title, body, state, or labels).
+    """Update an existing issue or pull request (title, body, or state).
 
     Args:
         number: Issue or PR number.
         title: Optional new title.
         body: Optional new issue body markdown.
         state: Optional new state ('open' or 'closed').
-        labels: Optional list of label names to set.
 
     Returns:
         Result description string.
@@ -394,8 +388,6 @@ def update_issue(
             kwargs["body"] = body
         if state is not None:
             kwargs["state"] = state
-        if labels is not None:
-            kwargs["labels"] = labels
 
         if kwargs:
             issue.edit(**kwargs)
