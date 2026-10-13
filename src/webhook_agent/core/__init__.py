@@ -43,7 +43,6 @@ from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools.github_tools import (
     create_issue,
     get_commit_diff,
-    get_current_time,
     get_issue,
     read_file,
     review,
@@ -72,7 +71,6 @@ __all__ = [
     "create_issue",
     "execute_agent_event",
     "get_commit_diff",
-    "get_current_time",
     "get_issue",
     "get_max_input_tokens",
     "get_shared_genai_client",

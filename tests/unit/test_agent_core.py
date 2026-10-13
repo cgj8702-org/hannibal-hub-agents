@@ -450,7 +450,7 @@ class TestToolRegistration:
     def test_agent_tools_count(self):
         """Verify the exact tool count registered on the code auditor sub-agent.
 
-        Code auditor uses 4 focused tools: read_file, get_issue, get_commit_diff, review.
+        Code auditor uses 2 focused tools: read_file, review.
         """
         from webhook_agent.core.agent_definition import WebhookAgent
 
@@ -458,10 +458,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 4
+        assert len(tool_names) == 2
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match the 3 inspection tools plus review fallback."""
+        """Tool names should match read_file plus review fallback."""
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -471,8 +471,6 @@ class TestToolRegistration:
         expected = sorted(
             [
                 "read_file",
-                "get_issue",
-                "get_commit_diff",
                 "review",
             ]
         )
@@ -596,24 +594,6 @@ class TestToolRegistration:
             "issue": {"number": 10},
         }
         assert _should_prefetch_diff("issue_comment.created", raw) is False
-
-
-# ---------------------------------------------------------------------------
-# Tests: get_current_time tool
-# ---------------------------------------------------------------------------
-
-
-class TestGetCurrentTime:
-    def test_returns_iso_utc_timestamp(self):
-        from unittest.mock import MagicMock
-
-        from webhook_agent.tools.github_tools import get_current_time
-
-        ctx = MagicMock()
-        res = get_current_time(ctx)
-        assert "current_utc_time" in res
-        assert "T" in res["current_utc_time"]
-        assert "+00:00" in res["current_utc_time"] or "Z" in res["current_utc_time"]
 
 
 # ---------------------------------------------------------------------------
@@ -1170,15 +1150,13 @@ class TestConversationalAgent:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._conversational_agent.tools
         }
-        # Tools should include codebase grounding tools but NOT review
-        assert "read_file" in tool_names
-        assert "create_issue" in tool_names
-        # Regression guard: add_label removed entirely (unguarded mutation surface + Jules'
-        # GitHub App ignores machine-actor label events). See reviewer hardening plan 7.2.
+        # Tools should include minimal codebase grounding and issue creation tools
+        assert tool_names == {"read_file", "get_issue", "create_issue"}
+        # Regression guard: mutating and removed tools must not be registered
         assert "add_label" not in tool_names
-        # Phase 6: gated ops tools are registered on conversational agent.
-        assert "update_issue" in tool_names
-        assert "merge_pr" in tool_names
+        assert "update_issue" not in tool_names
+        assert "merge_pr" not in tool_names
+        assert "get_commit_diff" not in tool_names
         assert "get_current_time" not in tool_names
         assert "google_search_grounding_tool" not in tool_names
         assert "search_codebase" not in tool_names
