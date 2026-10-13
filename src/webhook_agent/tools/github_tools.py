@@ -162,61 +162,6 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
         return f"Error fetching issue/PR: {e}"
 
 
-def get_commit_diff(ctx: Context, base_sha: str, head_sha: str) -> str:
-    """Fetch incremental code diff between two commits for PR updates.
-
-    Args:
-        base_sha: Base commit SHA (e.g. the PR's previous head before a push).
-        head_sha: Head commit SHA (e.g. the PR's new head after a push).
-
-    Returns:
-        A string describing the incremental diff between the two commits.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-
-        # Safeguard: If head_sha is a merge commit from base branch, do not pull in full base compare
-        head_commit = repo.get_commit(head_sha)
-        parents = getattr(head_commit, "parents", []) or []
-        if len(parents) >= 2:
-            commit_obj = getattr(head_commit, "commit", None)
-            msg = (getattr(commit_obj, "message", "") or "").strip()
-            first_line = msg.splitlines()[0] if msg else ""
-            if any(
-                pat in first_line.lower()
-                for pat in (
-                    "merge branch",
-                    "merge remote-tracking",
-                    "merge https://github.com/",
-                    "merge commit",
-                    "into ",
-                )
-            ):
-                logger.info(
-                    "get_commit_diff: commit %s is a branch update merge commit (%s)",
-                    head_sha[:7],
-                    first_line,
-                )
-                return (
-                    f"Commit {head_sha[:7]} is a branch update merge commit ({first_line}). "
-                    f"No new PR-specific code changes were introduced."
-                )
-
-        comparison = repo.compare(base_sha, head_sha)
-        diff_lines = [f"Incremental Diff ({base_sha[:7]}..{head_sha[:7]}):\n"]
-        for f in comparison.files:
-            diff_lines.append(
-                f"File: {f.filename} ({f.status})\nPatch:\n{f.patch or 'No patch available.'}\n{'-' * 40}"
-            )
-        raw_diff = "\n".join(diff_lines)
-        filtered_res = filter_review_diff(raw_diff)
-        return filtered_res.filtered_diff or raw_diff
-    except Exception as e:
-        return f"Error fetching commit diff: {e}"
-
-
 def create_issue(
     ctx: Context,
     title: str,

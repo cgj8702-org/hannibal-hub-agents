@@ -43,13 +43,6 @@ class GetIssueInput(ToolInputBase):
         return data
 
 
-class GetCommitDiffInput(ToolInputBase):
-    """Input schema for get_commit_diff tool."""
-
-    base_sha: str = Field(..., min_length=1, description="Base commit SHA.")
-    head_sha: str = Field(..., min_length=1, description="Head commit SHA.")
-
-
 class ReviewInput(ToolInputBase):
     """Input schema for review tool."""
 
@@ -83,7 +76,6 @@ class CreateIssueInput(ToolInputBase):
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
     "get_issue": GetIssueInput,
-    "get_commit_diff": GetCommitDiffInput,
     "review": ReviewInput,
     "create_issue": CreateIssueInput,
 }
@@ -91,7 +83,6 @@ TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
     "CreateIssueInput",
-    "GetCommitDiffInput",
     "GetIssueInput",
     "ReadFileInput",
     "ReviewInput",

@@ -8,7 +8,6 @@ from .diff_tools import (
 )
 from .github_tools import (
     create_issue,
-    get_commit_diff,
     get_issue,
     read_file,
     review,
@@ -16,7 +15,6 @@ from .github_tools import (
 from .schemas import (
     TOOL_INPUT_SCHEMAS,
     CreateIssueInput,
-    GetCommitDiffInput,
     GetIssueInput,
     ReadFileInput,
     ReviewInput,
@@ -25,13 +23,11 @@ from .schemas import (
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
     "CreateIssueInput",
-    "GetCommitDiffInput",
     "GetIssueInput",
     "ReadFileInput",
     "ReviewInput",
     "check_window",
     "create_issue",
-    "get_commit_diff",
     "get_issue",
     "read_file",
     "review",
