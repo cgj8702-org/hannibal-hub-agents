@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from webhook_agent.tools.schemas import (
     TOOL_INPUT_SCHEMAS,
     CreateIssueInput,
-    GetCommitDiffInput,
     GetIssueInput,
     ReadFileInput,
     ReviewInput,
@@ -49,17 +48,6 @@ def test_get_issue_input():
     # Invalid number
     with pytest.raises(ValidationError):
         GetIssueInput.model_validate({"number": 0})
-
-
-def test_get_commit_diff_input():
-    # Valid
-    inp = GetCommitDiffInput.model_validate({"base_sha": "abc1234", "head_sha": "def5678"})
-    assert inp.base_sha == "abc1234"
-    assert inp.head_sha == "def5678"
-
-    # Missing head_sha
-    with pytest.raises(ValidationError):
-        GetCommitDiffInput.model_validate({"base_sha": "abc"})
 
 
 def test_review_input():
@@ -104,10 +92,10 @@ def test_create_issue_input():
 def test_tool_input_schemas_registry():
     assert "read_file" in TOOL_INPUT_SCHEMAS
     assert "get_issue" in TOOL_INPUT_SCHEMAS
-    assert "get_commit_diff" in TOOL_INPUT_SCHEMAS
     assert "review" in TOOL_INPUT_SCHEMAS
     assert "create_issue" in TOOL_INPUT_SCHEMAS
     # Regression guard: mutating and removed tools must not be registered.
+    assert "get_commit_diff" not in TOOL_INPUT_SCHEMAS
     assert "add_label" not in TOOL_INPUT_SCHEMAS
     assert "update_issue" not in TOOL_INPUT_SCHEMAS
     assert "merge_pr" not in TOOL_INPUT_SCHEMAS

@@ -54,7 +54,7 @@ flowchart TD
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
 │       ├── review/          # Code review verdict parser, scorecard enforcement, schemas, & formatter
 │       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
-│       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff tools, search)
+│       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff tools)
 │       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
 │       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
 │       └── webhook_types.py # Common dataclasses and ActionResult definitions

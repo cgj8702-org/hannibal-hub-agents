@@ -27,10 +27,10 @@ Hannibal Hub has evolved beyond rigid slash commands. The agent uses a decoupled
 
 ### 1. Dual-Runner Architecture in `WebhookAgent`
 - **`_runner` (`_code_auditor`)**: Configured with strict 1-turn clinical review instructions, precompiled AST dossier, and structured Pydantic response models. Only invoked when `_is_formal_review_eligible` evaluates to `True`.
-- **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with full codebase inspection and GitHub operations tools (`read_file`, `get_issue`, `get_commit_diff`, `create_issue`, `update_issue`, `merge_pr`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
+- **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with codebase inspection and task creation tools (`read_file`, `get_issue`, `create_issue`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
 
 ### 2. Separation of Powers: Hannibal (Auditor) + Jules (Builder)
-- **Zero-Bypass Architecture**: Hannibal operates as an autonomous code auditor and gated ops assistant. Hannibal never pushes git commits directly to code files (code mutations/fixes are handled autonomously by Jules (`google-labs-jules[bot]`) on isolated feature branches via the `jules` issue label). Administrative operations (e.g. `merge_pr`, `update_issue`) are strictly protected by server-side authorization gates, status checks, and writeback policies.
+- **Zero-Bypass Architecture**: Hannibal operates as an autonomous code auditor and peer collaborator. Hannibal never pushes git commits directly to code files (code mutations/fixes are handled autonomously by Jules (`google-labs-jules[bot]`) on isolated feature branches via the `jules` issue label). Hannibal has zero mutating git or administrative operations capabilities.
 - **Owner-only summoning**: Jules' GitHub App only picks up the `jules` label when attached by the human owner (`cgj8702`). Label events from machine accounts (`cgj8702-agents`, bots) are ignored, so agent-created issues must be labeled by a human to summon Jules.
 - **Bot Loop Protection**: Hannibal audits Jules's PRs (`pull_request.opened`, `pull_request.synchronize`) up to a capped feedback cycle on `REQUEST_CHANGES`, but suppresses conversational chatter replies to Jules's general status comments unless review is explicitly requested.
 

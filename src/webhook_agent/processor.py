@@ -344,7 +344,7 @@ class WebhookProcessor:
           gate); other automated CI noise events (check_run, status) are suppressed.
         * Read-only PR lifecycle events (pull_request.closed) are suppressed.
         * pull_request.synchronize is NOT suppressed — it is handled by the agent
-          via get_commit_diff for incremental reviews of newly pushed commits.
+          for incremental reviews of newly pushed commits.
         """
         delivery_id = ev.get("delivery_id")
         if delivery_id in self._processed_deliveries:
