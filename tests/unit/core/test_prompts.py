@@ -69,6 +69,34 @@ def test_system_instruction_contains_author_claim_grounding_directive() -> None:
     assert "claim-vs-diff" in SYSTEM_INSTRUCTION.lower() or "claim" in SYSTEM_INSTRUCTION.lower()
 
 
+def test_system_instruction_clause_group_1_pruned() -> None:
+    """SYSTEM_INSTRUCTION clauses 6 & 7 are concise directives without redundant pipeline explanations."""
+    assert (
+        "Analyze the pre-compiled dossier, diff chunks, and contract impact embedded in your prompt."
+        in SYSTEM_INSTRUCTION
+    )
+    assert (
+        "The deterministic pre-audit compiler already executes syntax parsing"
+        not in SYSTEM_INSTRUCTION
+    )
+    assert (
+        "Do NOT call a review tool — the host pipeline deterministically parses"
+        not in SYSTEM_INSTRUCTION
+    )
+
+
+def test_system_instruction_clause_group_2_pruned() -> None:
+    """SYSTEM_INSTRUCTION diff grounding section is streamlined since filter_echo_suggestions enforces echo filtering."""
+    assert (
+        "Findings must target directly observable defects or concrete code improvements anchored to visible diff lines."
+        in SYSTEM_INSTRUCTION
+    )
+    assert (
+        "Strictly prohibited from repeating existing code verbatim in `suggested_fix`"
+        not in SYSTEM_INSTRUCTION
+    )
+
+
 def test_build_user_message_pull_request_opened() -> None:
     """Test build_user_message for PR opened event."""
     event_data: dict[str, Any] = {
