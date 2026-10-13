@@ -227,3 +227,10 @@ webhook-router.yaml
 
 # Local diagnostic logs
 logs/
+
+
+
+.claude/
+.ocr/
+CLAUDE.md
+
