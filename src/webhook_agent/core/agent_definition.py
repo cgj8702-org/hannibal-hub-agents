@@ -64,12 +64,9 @@ from webhook_agent.review.writeback_policy import (
 )
 from webhook_agent.tools.github_tools import (
     create_issue,
-    get_commit_diff,
     get_issue,
-    merge_pr,
     read_file,
     review,
-    update_issue,
 )
 from webhook_agent.webhook_types import ActionResult
 
@@ -188,8 +185,6 @@ class WebhookAgent:
             on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
-                get_issue,
-                get_commit_diff,
                 review,
             ],
         )
@@ -223,10 +218,7 @@ class WebhookAgent:
             tools=[
                 read_file,
                 get_issue,
-                get_commit_diff,
                 create_issue,
-                update_issue,
-                merge_pr,
             ],
         )
 
