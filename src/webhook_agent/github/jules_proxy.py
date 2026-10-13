@@ -252,6 +252,11 @@ def reopen_jules_pr_as_agent(
         original_pr.create_issue_comment(
             f"Superseded by #{new_pr.number} (authored by @cgj8702-agents)."
         )
+        # Trigger CodeRabbit AI full review on the replacement PR
+        agent_repo = agents_gh.get_repo(repo_name)
+        new_pr_obj = agent_repo.get_pull(new_pr.number)
+        new_pr_obj.create_issue_comment("@coderabbitai full review")
+        logger.info("Triggered CodeRabbit AI review on PR #%s", new_pr.number)
     except Exception as comment_exc:
         logger.warning("Could not add link comment to original PR #%s: %s", pr_number, comment_exc)
 
