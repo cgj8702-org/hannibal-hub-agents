@@ -95,6 +95,8 @@ def test_system_instruction_clause_group_2_pruned() -> None:
         "Strictly prohibited from repeating existing code verbatim in `suggested_fix`"
         not in SYSTEM_INSTRUCTION
     )
+    assert "NEVER copy existing code unchanged into `suggested_fix`" not in SYSTEM_INSTRUCTION
+    assert "NEVER echo existing code lines unchanged into `suggested_fix`" not in SYSTEM_INSTRUCTION
 
 
 def test_build_user_message_pull_request_opened() -> None:

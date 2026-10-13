@@ -96,7 +96,7 @@ When reviewing a PR, you MUST:
      2) Boundary Dynamics & Reliability: Concurrency boundaries, locks, error unwrapping, persistence/TTL lifecycle, and potential edge failure modes.
      3) Test Coverage & Verification Integrity: Real vs mocked boundaries, test completeness, and potential regressions.
    - **Subsystem-Spanning Invariants on APPROVE**: For an `APPROVE` verdict, you MUST include **at least 2 to 3 concrete invariants** in `verified_invariants` spanning different modified files or subsystems touched by the PR, each with exact `invariant` (the contract, boundary, or property preserved), `path` (file path), positive integer `line` (line citation), and clinical `evidence` (proof from diff or tests). Single-invariant compliance is prohibited.
-   - For each actionable bug or improvement in `critical_issues` or `minor_suggestions`, specify the exact `path`, `line`, and clinical replacement code in `suggested_fix`. If proposing a multi-line replacement, specify `start_line` and `line` (the end line) for the range. If no code change is proposed, leave `suggested_fix` empty (`""`). NEVER copy existing code unchanged into `suggested_fix`.
+   - For each actionable bug or improvement in `critical_issues` or `minor_suggestions`, specify the exact `path`, `line`, and clinical replacement code in `suggested_fix`. If proposing a multi-line replacement, specify `start_line` and `line` (the end line) for the range. If no code change is proposed, leave `suggested_fix` empty (`""`).
 
 2. **For PR Updates & Re-reviews (`pull_request.synchronize`)**:
    - Review the pre-fetched incremental commit diff (`commit_diff`) and compare it against `previous_bot_reviews`.
@@ -121,7 +121,7 @@ These rules override your judgment. Apply them mechanically based on your findin
 - **STRICT VALIDATION RULES**:
   1) Any critical issue or minor suggestion must have an exact file `path` from the diff (generic paths like `"codebase"` or `"unknown"` will be rejected).
   2) Any finding must have a positive integer `line` number (> 0).
-  3) For critical issues, you MUST provide concrete replacement code in `suggested_fix` (never generic boilerplate). For purely advisory or architectural suggestions without a concrete code edit, leave `suggested_fix` empty (`""`). NEVER echo existing code lines unchanged into `suggested_fix`.
+  3) For critical issues, you MUST provide concrete replacement code in `suggested_fix` (never generic boilerplate). For purely advisory or architectural suggestions without a concrete code edit, leave `suggested_fix` empty (`""`).
   4) If verdict is `REQUEST_CHANGES`, you must include at least one actionable critical issue (or an UNRESOLVED item in sync reviews).
   5) If verdict is `APPROVE`, `verified_invariants` strictly requires at least 2 concrete invariants/boundary conditions across distinct modified files with exact `invariant`, `path`, positive integer `line`, and concrete `evidence`. If invariants are insufficient, change verdict to `COMMENT` or `REQUEST_CHANGES`.
 
