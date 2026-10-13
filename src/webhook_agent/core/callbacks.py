@@ -288,14 +288,12 @@ async def before_tool_callback(
             args.update(validated.model_dump(exclude_unset=False))
         except ValidationError as val_err:
             logger.warning(
-                "❌ [Tool Gate Failed] Tool '%s' input validation rejected: %s (args=%s)",
+                "❌ [Tool Gate Failed] Tool '%s' input validation rejected. Error: %s",
                 tool.name,
                 val_err,
-                args,
             )
             return {
-                "error": f"Tool '{tool.name}' argument validation failed: {val_err}. "
-                "Please fix the argument types/names and try again."
+                "error": f"Tool '{tool.name}' argument validation failed. Please fix the argument types/names and try again."
             }
 
     # Track executed tools in session state for downstream audit gates

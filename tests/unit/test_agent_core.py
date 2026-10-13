@@ -778,7 +778,7 @@ class TestCreateIssue:
         )
         assert "Error creating issue: API rate limit exceeded" in result
 
-    def test_conversational_agent_equipped_with_create_issue(self):
+    def test_conversational_agent_no_longer_equipped_with_create_issue(self):
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -786,7 +786,7 @@ class TestCreateIssue:
             getattr(t, "name", getattr(t, "__name__", str(t)))
             for t in agent._conversational_agent.tools
         }
-        assert "create_issue" in tool_names
+        assert "create_issue" not in tool_names
         assert "add_label" not in tool_names
 
 
@@ -1129,8 +1129,9 @@ class TestConversationalAgent:
             for t in agent._conversational_agent.tools
         }
         # Tools should include minimal codebase grounding and issue creation tools
-        assert tool_names == {"read_file", "get_issue", "create_issue"}
+        assert tool_names == {"read_file", "get_issue"}
         # Regression guard: mutating and removed tools must not be registered
+        assert "create_issue" not in tool_names
         assert "add_label" not in tool_names
         assert "update_issue" not in tool_names
         assert "merge_pr" not in tool_names
