@@ -249,3 +249,176 @@ def test_verify_citations_with_touched_dict() -> None:
     )
     assert len(issues) == 1
     assert issues[0].code == "line_outside_diff"
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: Resolution Integrity & Deletion-Aware Evidence Tests
+# ---------------------------------------------------------------------------
+
+DELETION_DIFF = (
+    "--- a/src/worker.py\n"
+    "+++ b/src/worker.py\n"
+    "@@ -20,4 +20,1 @@\n"
+    "-unsafe_fallback_call()\n"
+    "-legacy_clean_step()\n"
+    "-extra_line()\n"
+    "+safe_call()\n"
+)
+
+
+def test_resolution_unresolved_when_evidence_not_in_diff() -> None:
+    """A RESOLVED claim whose evidence is not supported by current diff/code stays UNRESOLVED."""
+    from webhook_agent.review.grounding import verify_resolutions
+
+    # Finding with RESOLVED status, but evidence describes something NOT in the diff
+    res_items = [
+        {
+            "item_description": "pr.get_files() latency overhead risk",
+            "status": "RESOLVED",
+            "evidence": "fallback only runs on un-investigated PR paths",
+            "path": "src/webhook_agent/tools/github_tools.py",
+        }
+    ]
+    # In DELETION_DIFF, src/webhook_agent/tools/github_tools.py isn't even touched, nor is that text present.
+    checked = verify_resolutions(res_items, DELETION_DIFF, ["src/worker.py"])
+    assert len(checked) == 1
+    assert checked[0]["status"] == "UNRESOLVED"
+    assert "not grounded in current code diff" in checked[0].get("grounding_note", "").lower()
+
+
+def test_resolution_deletion_aware_evidence_accepts_removal_hunk() -> None:
+    """When cited code was deleted, pre-image removal hunk ('-') acts as supporting evidence."""
+    from webhook_agent.review.grounding import verify_resolutions
+
+    res_items = [
+        {
+            "item_description": "unsafe_fallback_call security flaw",
+            "status": "RESOLVED",
+            "evidence": "-unsafe_fallback_call() removed from worker",
+            "path": "src/worker.py",
+            "line": 20,
+        }
+    ]
+    checked = verify_resolutions(res_items, DELETION_DIFF, ["src/worker.py"])
+    assert len(checked) == 1
+    assert checked[0]["status"] == "RESOLVED"
+
+
+def test_behavioral_invariant_without_diff_quote_or_test_is_rejected() -> None:
+    """A behavioral invariant claim without test or diff quote evidence fails grounding."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    # Static fact invariant vs Behavioral claim invariant
+    static_inv = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="DEFAULT_STRICT_REVIEW_GROUNDING = '0'",
+    )
+    behavioral_inv = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="grounding skips gracefully when patch text is unavailable",
+    )
+
+    issues_static = verify_citations([static_inv], SAMPLE_DIFF, ["src/main.py"])
+    issues_behavioral = verify_citations([behavioral_inv], SAMPLE_DIFF, ["src/main.py"])
+
+    assert issues_static == []
+    assert len(issues_behavioral) == 1
+    assert issues_behavioral[0].code == "unsubstantiated_behavioral_invariant"
+
+
+def test_resolution_path_only_without_symbols_is_unresolved() -> None:
+    """A resolution citing only a changed path but no symbols cannot claim RESOLVED."""
+    from webhook_agent.review.grounding import verify_resolutions
+
+    res_items = [
+        {
+            "item_description": "Cleaned up worker file",
+            "status": "RESOLVED",
+            "evidence": "Fixed things properly",
+            "path": "src/worker.py",
+        }
+    ]
+    checked = verify_resolutions(res_items, DELETION_DIFF, ["src/worker.py"])
+    assert len(checked) == 1
+    assert checked[0]["status"] == "UNRESOLVED"
+
+
+def test_resolution_symbol_evidence_scoped_to_cited_path() -> None:
+    """Symbol evidence from another file cannot ground a resolution for a cited path."""
+    from webhook_agent.review.grounding import verify_resolutions
+
+    multi_file_diff = (
+        "--- a/src/alpha.py\n"
+        "+++ b/src/alpha.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        "+alpha_feature_flag = True\n"
+        "--- a/src/beta.py\n"
+        "+++ b/src/beta.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        "+beta_helper_call()\n"
+    )
+    # Resolution cites src/beta.py, but evidence references a symbol present only in src/alpha.py
+    res_items = [
+        {
+            "item_description": "Update beta logic",
+            "status": "RESOLVED",
+            "evidence": "alpha_feature_flag enables logic",
+            "path": "src/beta.py",
+        }
+    ]
+    checked = verify_resolutions(res_items, multi_file_diff, ["src/alpha.py", "src/beta.py"])
+    assert len(checked) == 1
+    assert checked[0]["status"] == "UNRESOLVED"
+
+    # When citing the symbol that actually appears in src/beta.py, it is grounded as RESOLVED
+    res_items_valid = [
+        {
+            "item_description": "Update beta logic",
+            "status": "RESOLVED",
+            "evidence": "beta_helper_call invoked",
+            "path": "src/beta.py",
+        }
+    ]
+    checked_valid = verify_resolutions(
+        res_items_valid, multi_file_diff, ["src/alpha.py", "src/beta.py"]
+    )
+    assert len(checked_valid) == 1
+    assert checked_valid[0]["status"] == "RESOLVED"
+
+
+def test_behavioral_invariant_with_diff_quote_or_test_passes() -> None:
+    """A behavioral invariant passes when supported by a verified diff quote or test function citation."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    # 1. Backtick quote present in diff passes
+    inv_quote = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="skips processing when `new_line_1` encountered",
+    )
+    assert verify_citations([inv_quote], SAMPLE_DIFF, ["src/main.py"]) == []
+
+    # 2. Test citation token passes
+    inv_test = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="gracefully handles retries verified in test_retry_fallback",
+    )
+    assert verify_citations([inv_test], SAMPLE_DIFF, ["src/main.py"]) == []
+
+    # 3. Prose containing '=' but no diff quote or test citation is rejected
+    inv_prose_equals = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="handles retries when retry_count = None",
+    )
+    issues = verify_citations([inv_prose_equals], SAMPLE_DIFF, ["src/main.py"])
+    assert len(issues) == 1
+    assert issues[0].code == "unsubstantiated_behavioral_invariant"

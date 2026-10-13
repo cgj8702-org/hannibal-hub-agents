@@ -709,6 +709,44 @@ def test_enforce_verdict_sync_review_resolution_guard_preserves_legitimate_resol
     assert "Real bug reported in prior review" in rendered_md
 
 
+def test_enforce_verdict_removal_only_patch_grounds_resolution():
+    from unittest.mock import MagicMock
+
+    from webhook_agent.review.review_enforcer import _enforce_verdict
+
+    mock_pr = MagicMock()
+    mock_rv = MagicMock()
+    mock_rv.state = "CHANGES_REQUESTED"
+    mock_rv.user.login = "hannibal-hub-agents[bot]"
+    mock_rv.body = "Please remove dangerous_call()"
+    mock_pr.get_reviews.return_value = [mock_rv]
+
+    mock_file = MagicMock()
+    mock_file.filename = "src/danger.py"
+    # Pure removal patch (no + lines, only - lines)
+    mock_file.patch = "@@ -10,3 +10,1 @@\n-dangerous_call()\n-cleanup_old()\n existing_line\n"
+    mock_pr.get_files.return_value = [mock_file]
+    mock_pr.get_review_comments.return_value = []
+
+    json_input = """{
+        "summary": "Follow-up review resolving prior change request.",
+        "resolutions": [
+            {
+                "item_description": "dangerous_call security risk in src/danger.py",
+                "status": "RESOLVED",
+                "evidence": "dangerous_call() removed from src/danger.py"
+            }
+        ],
+        "critical_issues": [],
+        "minor_suggestions": []
+    }"""
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
+    assert verdict == "APPROVE"
+    assert "dangerous_call security risk" in rendered_md
+    assert "RESOLVED" in rendered_md
+    assert "UNRESOLVED" not in rendered_md
+
+
 def test_reproduce_pr_155_mangled_formatting():
     from webhook_agent.review.review_enforcer import _enforce_verdict
 

@@ -581,3 +581,71 @@ def test_recorder_tokenizer_matches_grounding_extractor() -> None:
     spec.loader.exec_module(module)
     sample = "`_collect_pr_patches()` and pr.get_files() and STRICT_REVIEW_GROUNDING"
     assert module._identifier_tokens(sample) == sorted(extract_identifiers(sample))
+
+
+def test_pr_260_replay_marks_inverted_resolution_unresolved_and_rejects_false_invariant() -> None:
+    """Replay #260 bot reviews through verify_resolutions and verify_citations.
+
+    Asserts:
+    - Inverted resolution (latency risk claimed RESOLVED when patch fallback runs) is marked UNRESOLVED.
+    - False behavioral invariant (grounding skips gracefully when patch text unavailable) is rejected.
+    """
+    from webhook_agent.review.grounding import verify_resolutions
+
+    fixture = _load(FIXTURE_260)
+    bot_revs = _bot_reviews(fixture)
+
+    # 1. Replay resolutions from sync review against incremental diff
+    sync_review = bot_revs[1]
+    meta = _metadata(sync_review["body"] or "")
+    resolutions = meta.get("resolutions") or []
+    assert len(resolutions) > 0
+
+    sync_files = sync_review.get("incremental_files") or []
+    # Incremental diff for commit 2 (023f2e2) only added `import logging` to test_review_tool_validation.py
+    sync_diff = (
+        "--- a/tests/unit/review/test_review_tool_validation.py\n"
+        "+++ b/tests/unit/review/test_review_tool_validation.py\n"
+        "@@ -3,0 +4,1 @@\n"
+        "+import logging\n"
+    )
+
+    grounded_res = verify_resolutions(resolutions, sync_diff, sync_files)
+    assert grounded_res[0]["status"] == "UNRESOLVED"
+
+    full_diff = _diff_text(fixture)
+
+    # 2. Replay behavioral invariant from sync review
+    invariant_matches = re.finditer(
+        r"^\* \*\*Invariant\*\*: (?P<invariant>.*?)\.\s+"
+        r"\(`(?P<path>[^`]+):(?P<line>\d+)`\)",
+        sync_review["body"] or "",
+        re.M,
+    )
+    invariants = [
+        Finding(
+            kind="invariant",
+            path=match.group("path"),
+            line=int(match.group("line")),
+            evidence=match.group("invariant"),
+        )
+        for match in invariant_matches
+    ]
+    target = next(
+        (
+            item
+            for item in invariants
+            if item.evidence
+            == (
+                "Grounding verification skips gracefully with a warning when patch text "
+                "is unavailable, preserving fail-open capabilities on missing diff data"
+            )
+        ),
+        None,
+    )
+    assert target is not None, "PR #260 sync review must retain its recorded false invariant"
+    invariants = [target]
+
+    issues = verify_citations(invariants, full_diff, fixture["changed_files"])
+    codes = [i.code for i in issues]
+    assert "unsubstantiated_behavioral_invariant" in codes

@@ -700,14 +700,7 @@ def review(
         # Check REQUEST_CHANGES without actionable issues
         effective_event = (event or getattr(review_obj, "verdict", None) or "COMMENT").upper()
         if effective_event == "REQUEST_CHANGES":
-            if is_sync:
-                has_unresolved = any(r.status == "UNRESOLVED" for r in resolutions_list)
-                if not critical_list and not has_unresolved:
-                    invalid_findings.append(
-                        "REQUEST_CHANGES event specified, but critical_issues is empty and no prior items are UNRESOLVED. "
-                        "You must provide concrete critical_issues with path, line, and replacement code, or set event to APPROVE."
-                    )
-            elif not critical_list:
+            if not is_sync and not critical_list:
                 invalid_findings.append(
                     "REQUEST_CHANGES event specified, but critical_issues is empty. "
                     "You must provide at least one actionable critical issue with exact path, line, and replacement code, or set event to APPROVE."
@@ -747,6 +740,7 @@ def review(
             diff_text_from_patches,
             hard_reasons,
             verify_citations,
+            verify_resolutions,
         )
 
         grounding_patches: dict[str, str | None] = {}
@@ -754,6 +748,29 @@ def review(
             grounding_patches = patches
         elif retrieval_ok is None:
             grounding_patches = _collect_pr_patches(pr)
+
+        diff_text_val = diff_text_from_patches(grounding_patches) if grounding_patches else ""
+        if is_sync and hasattr(review_obj, "resolutions") and review_obj.resolutions:
+            grounded_res = verify_resolutions(
+                review_obj.resolutions,
+                diff_text_val,
+                list(grounding_patches or []),
+            )
+            # Update review_obj.resolutions with grounded status
+            from webhook_agent.review.schemas import SyncResolutionItem
+
+            review_obj.resolutions = [SyncResolutionItem.model_validate(r) for r in grounded_res]
+            resolutions_list = review_obj.resolutions
+            parsed_data["resolutions"] = [r.model_dump() for r in resolutions_list]
+            body = json.dumps(parsed_data)
+
+        if effective_event == "REQUEST_CHANGES" and is_sync:
+            has_unresolved = any(r.status == "UNRESOLVED" for r in resolutions_list)
+            if not critical_list and not has_unresolved:
+                invalid_findings.append(
+                    "REQUEST_CHANGES event specified, but critical_issues is empty and no prior items are UNRESOLVED. "
+                    "You must provide concrete critical_issues with path, line, and replacement code, or set event to APPROVE."
+                )
 
         has_usable_patches = any(patch for patch in grounding_patches.values())
         if not has_usable_patches:
@@ -774,7 +791,7 @@ def review(
         else:
             grounding_issues = verify_citations(
                 _grounding_findings(review_obj),
-                diff_text_from_patches(grounding_patches),
+                diff_text_val,
                 changed_paths=list(grounding_patches),
             )
             if grounding_issues:

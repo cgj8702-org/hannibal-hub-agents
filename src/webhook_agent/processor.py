@@ -437,8 +437,17 @@ class WebhookProcessor:
                     )
             return False
 
-        # Ignore automated CI infrastructure noise and installation lifecycle events
-        return event_name not in ("check_suite", "check_run", "status", "installation")
+        if canonical.startswith("pull_request_review_thread."):
+            return False
+
+        # Ignore automated CI infrastructure noise, installation lifecycle events, and review thread state changes
+        return event_name not in (
+            "check_suite",
+            "check_run",
+            "status",
+            "installation",
+            "pull_request_review_thread",
+        )
 
     def _handle_ci_completed(self, payload: dict[str, Any]) -> None:
         """Start reviews that were held back while CI was running.

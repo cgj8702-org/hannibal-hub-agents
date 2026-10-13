@@ -473,6 +473,21 @@ class TestShouldProcessEvent:
             is False
         )
 
+    def test_review_thread_events_ignored(self):
+        """Review thread lifecycle events (resolved/unresolved) must be ignored."""
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("pull_request_review_thread", action="resolved")
+            )
+            is False
+        )
+        assert (
+            self.processor.should_process_event(
+                _make_normalized("pull_request_review_thread", action="unresolved")
+            )
+            is False
+        )
+
     def test_process_event_null_repository_does_not_crash(self, caplog):
         """Payloads with 'repository': null must not crash with AttributeError."""
         import logging
