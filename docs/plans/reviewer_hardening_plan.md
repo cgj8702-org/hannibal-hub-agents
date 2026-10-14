@@ -79,8 +79,7 @@ labeled sample of real PRs, with a human adjudicator deciding which PRs truly ha
 - **Recall** = adjudicated defects the bot's blocks caught ÷ all adjudicated defects (higher is better).
 - **Missed-finding rate** = 1 − recall = adjudicated defects the bot *failed* to catch ÷ all adjudicated defects (lower is better).
 - **False-approve rate** = PRs the bot approved that should have been blocked ÷ all PRs the bot approved (lower is better).
-Build that labeled set before Phases 3/7/8 land, then re-score against it. Do not let a metric's
-name and its definition drift apart — state numerator and denominator for each.
+Build that labeled set to retrospectively evaluate against the frozen baseline and re-score the completed hardening phases (with remaining phases 7.3–7.5 evaluated upon completion). Do not let a metric's name and its definition drift apart — state numerator and denominator for each.
 
 ---
 
