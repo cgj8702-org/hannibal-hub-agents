@@ -32,13 +32,14 @@ this file is the checkable to-do list.
 
 - [ ] **T1.2 — Substantive code vs documentation filter.**  
   *Seam:* `src/webhook_agent/analysis/diff_filter.py`.  
-  *Action:* Classify PR diff into `DOCS_ONLY` vs `CODE_CHANGE`. For `DOCS_ONLY` diffs (`*.md`, `*.txt`, docstrings only), skip CodeRabbit invocation and LLM audit; run deterministic markdown format checks only.  
+  *Action:* Classify PR diff into `DOCS_ONLY` vs `CODE_CHANGE`. For `DOCS_ONLY` diffs (`*.md`, `*.txt`, docstrings only), skip CodeRabbit invocation and LLM audit; run deterministic Markdown format checks only.  
   *Evidence/Test:* Unit test proving docs-only PR does not trigger external review requests.
 
-- [ ] **T1.3 — CI gate synchronization for external triggers.**  
-  *Seam:* `src/webhook_agent/processor.py::should_process_event`.  
-  *Action:* Defer external review tool dispatch until `check_suite.completed` with `conclusion: success` has fired. Prevent burning external quotas on failing builds.  
-  *Evidence/Test:* Unit test proving external review trigger is withheld when check suites are in-progress or failing.
+- [ ] **T1.3 — Aggregate CI gate synchronization for external triggers.**  
+  *Seam:* `src/webhook_agent/processor.py::should_process_event` and `src/webhook_agent/review/ci_gate.py`.  
+  *Action:* Require aggregate CI evaluation via `evaluate_ci(repo, head_sha)` to return `PASS` for the PR head SHA before dispatching external review tools, rather than relying on a single `check_suite.completed` event alone. Maintain blocking for `PENDING` or `FAIL` aggregate signals.  
+  *Evidence/Test:* Unit test proving external review trigger is withheld when one check suite succeeds while other required checks are pending or failing; dispatches only on aggregate `PASS`.
+
 
 ---
 
@@ -139,8 +140,9 @@ this file is the checkable to-do list.
 
 - [ ] **T5.1 — Server-side sender permission validator.**  
   *Seam:* new `src/webhook_agent/github/rbac.py`.  
-  *Action:* Implement `verify_maintainer(event_payload) -> bool`. Check `author_association in ('OWNER', 'MEMBER', 'COLLABORATOR')` or explicit login allowlist (`cgj8702`). Refuse unauthorized callers with silent ignore or generic rejection.  
-  *Evidence/Test:* Unit tests asserting OWNER allowed, NON_MEMBER rejected.
+  *Action:* Implement `verify_maintainer(event_payload, gh_repo=None) -> bool`. Enforce an explicit maintainer allowlist (`ALLOWED_MAINTAINERS = {"cgj8702"}`) or verify repo collaborator write/admin permissions directly via the GitHub API, without relying on webhook `author_association` metadata. Refuse unauthorized callers with silent ignore or generic rejection.  
+  *Evidence/Test:* Unit tests asserting allowlisted maintainer allowed, unauthorized users rejected even if presenting arbitrary association headers.
+
 
 - [ ] **T5.2 — Slash command dispatcher.**  
   *Seam:* `src/webhook_agent/processor.py`.  

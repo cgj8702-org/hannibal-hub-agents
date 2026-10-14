@@ -109,7 +109,7 @@ flowchart TD
 **Why:** The Zero-Mutation policy was an over-correction that deleted tools to avoid unauthenticated caller attacks. We restore maintainer control safely by enforcing server-side role-based access control.
 
 **Capabilities:**
-- **Server-Side Sender Verification:** Validates `author_association in ('OWNER', 'MEMBER', 'COLLABORATOR')` directly on webhook payloads before executing any maintainer command.
+- **Server-Side Sender Verification:** Validates maintainer identity via an explicit maintainer allowlist (e.g. `ALLOWED_MAINTAINERS = {"cgj8702"}`) or a repository collaborator permission check (`repo.get_collaborator_permission()`), preventing reliance on ambiguous or spoofable `author_association` metadata.
 - **Slash Commands Catalog:** Safe commands for maintainers:
   - `/triage` — Run zero-token AST audit and report impact.
   - `/jules-prep` — Generate structured Jules mission specification.

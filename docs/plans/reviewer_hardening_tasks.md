@@ -31,8 +31,8 @@ and sender-permission checks (T1.2, T1.3).
 
 **The project has permanently committed to a Zero-Mutation Architecture:**
 1. Hannibal is strictly a read-only auditor and conversational peer.
-2. All mutating tools have been permanently purged from the repository (`merge_pr`, `update_issue`, `add_label`), alongside orphaned inspection tools (`get_commit_diff`).
-3. `create_issue` has been removed from the conversational agent's toolset (now strictly `[read_file, get_issue]`). The agent provides structured task specifications in thread comments, but repository owner `cgj8702` creates issues and attaches the `jules` label to delegate.
+2. Mutating ops tools (`merge_pr`, `update_issue`, `add_label`) were permanently purged from the codebase, alongside orphaned inspection tools (`get_commit_diff`).
+3. `create_issue` remains implemented in `tools/github_tools.py` for helper/script use, but is strictly excluded from `_conversational_agent`'s tool list in `core/agent_definition.py` (which exposes only `[read_file, get_issue]`). The agent provides structured task specifications in thread comments, but repository owner `cgj8702` creates issues and attaches the `jules` label to delegate.
 4. Jules delegation is initiated exclusively by the human owner (`cgj8702`) attaching the `jules` label on GitHub (Google's backend ignores agent-created labels).
 5. All tasks proposing to authorize, gate, or re-enable mutating tools (**T1.2, T1.3, T2.2, T5.4**) are formally **RETIRED**.
 
