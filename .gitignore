@@ -234,3 +234,5 @@ logs/
 .ocr/
 CLAUDE.md
 
+# Documents & binary artifacts
+*.pdf
