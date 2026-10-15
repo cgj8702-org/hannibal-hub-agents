@@ -32,24 +32,25 @@ class RateLimitedGemini(Gemini):
 
         model_name = getattr(llm_request, "model", getattr(self, "model", get_active_model()))
         active_tier = _resolve_tier()
-        estimated_tokens = 0
-
-        try:
-            if self.api_client:
-                ct_resp = await self.api_client.aio.models.count_tokens(
-                    model=model_name,
-                    contents=llm_request.contents,
-                )
-                if ct_resp and ct_resp.total_tokens:
-                    estimated_tokens = int(ct_resp.total_tokens)
-        except Exception as exc:
-            logger.debug("Free count_tokens API call skipped on model '%s': %s", model_name, exc)
-
-        if estimated_tokens <= 0:
-            contents_str = str(getattr(llm_request, "contents", ""))
-            estimated_tokens = max(1, len(contents_str) // 4)
-
         if not getattr(llm_request, "_rate_limit_checked", False):
+            estimated_tokens = 0
+            try:
+                if self.api_client:
+                    ct_resp = await self.api_client.aio.models.count_tokens(
+                        model=model_name,
+                        contents=llm_request.contents,
+                    )
+                    if ct_resp and ct_resp.total_tokens:
+                        estimated_tokens = int(ct_resp.total_tokens)
+            except Exception as exc:
+                logger.debug(
+                    "Free count_tokens API call skipped on model '%s': %s", model_name, exc
+                )
+
+            if estimated_tokens <= 0:
+                contents_str = str(getattr(llm_request, "contents", ""))
+                estimated_tokens = max(1, len(contents_str) // 4)
+
             try:
                 await rpm_waiter.check_and_wait(
                     model=model_name,

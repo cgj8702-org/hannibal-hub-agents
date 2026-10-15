@@ -1477,3 +1477,91 @@ class TestBaseBranchMergeSync:
 
         processor.process_event(payload)
         processor._agent_core.run.assert_called_once()
+
+
+class TestPubSubLeaseExtender:
+    def test_lease_extender_extends_deadline_periodically(self):
+        import time
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import _lease_extender
+
+        subscriber = MagicMock()
+        subscription_path = "projects/test-project/subscriptions/test-sub"
+        ack_id = "ack-12345"
+
+        with _lease_extender(
+            subscriber=subscriber,
+            subscription_path=subscription_path,
+            ack_id=ack_id,
+            ack_deadline_seconds=30,
+            interval_seconds=0.02,
+        ):
+            time.sleep(0.06)
+
+        assert subscriber.modify_ack_deadline.call_count >= 2
+        call_kwargs = subscriber.modify_ack_deadline.call_args[1]["request"]
+        assert call_kwargs["subscription"] == subscription_path
+        assert call_kwargs["ack_ids"] == [ack_id]
+        assert call_kwargs["ack_deadline_seconds"] == 30
+
+    def test_lease_extender_stops_on_clean_exit(self):
+        import threading
+        import time
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import _lease_extender
+
+        subscriber = MagicMock()
+        with _lease_extender(
+            subscriber=subscriber,
+            subscription_path="test-sub",
+            ack_id="ack-1",
+            interval_seconds=0.01,
+        ):
+            time.sleep(0.02)
+
+        # Heartbeat thread should have finished and not be alive
+        active_names = [t.name for t in threading.enumerate() if t.is_alive()]
+        assert "PubSubLeaseExtender" not in active_names
+
+    def test_lease_extender_stops_on_exception(self):
+        import threading
+        import time
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import _lease_extender
+
+        subscriber = MagicMock()
+        with pytest.raises(ValueError, match="simulated failure"):
+            with _lease_extender(
+                subscriber=subscriber,
+                subscription_path="test-sub",
+                ack_id="ack-1",
+                interval_seconds=0.01,
+            ):
+                time.sleep(0.02)
+                raise ValueError("simulated failure")
+
+        active_names = [t.name for t in threading.enumerate() if t.is_alive()]
+        assert "PubSubLeaseExtender" not in active_names
+
+    def test_lease_extender_ignores_modify_deadline_errors(self):
+        import time
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import _lease_extender
+
+        subscriber = MagicMock()
+        subscriber.modify_ack_deadline.side_effect = RuntimeError("network blip")
+
+        # Context manager should not crash despite background errors
+        with _lease_extender(
+            subscriber=subscriber,
+            subscription_path="test-sub",
+            ack_id="ack-1",
+            interval_seconds=0.01,
+        ):
+            time.sleep(0.03)
+
+        assert subscriber.modify_ack_deadline.call_count >= 2

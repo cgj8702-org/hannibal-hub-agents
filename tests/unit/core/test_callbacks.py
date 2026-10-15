@@ -59,6 +59,48 @@ async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
         estimated_tokens=ctx.state["prompt_tokens"],
         tier="free",
     )
+    assert getattr(req, "_rate_limit_checked", False) is True
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_before_model_callback_uses_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from webhook_agent.models.rate_limiter import rpm_waiter
+
+    ctx = MagicMock()
+    ctx.state = {"active_tier": "paid"}
+
+    req = MagicMock()
+    req.contents = "some pr code content"
+    req.model = "gemini-3.8-flash"
+
+    mock_check = AsyncMock()
+    monkeypatch.setattr(rpm_waiter, "check_and_wait", mock_check)
+
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.total_tokens = 321
+    mock_client.models.count_tokens.return_value = mock_resp
+
+    import webhook_agent.core.loop_helpers as loop_helpers
+
+    monkeypatch.setattr(loop_helpers, "get_shared_genai_client", lambda: mock_client)
+
+    res = await before_model_callback(ctx, req)
+    assert res is None
+    assert ctx.state.get("prompt_tokens") == 321
+    assert getattr(req, "_rate_limit_checked", False) is True
+    mock_client.models.count_tokens.assert_called_once_with(
+        model="gemini-3.8-flash", contents="some pr code content"
+    )
+    mock_check.assert_awaited_once_with(
+        model="gemini-3.8-flash",
+        estimated_tokens=321,
+        tier="paid",
+    )
 
 
 @pytest.mark.unit

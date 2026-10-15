@@ -16,11 +16,14 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import signal
 import sys
+import threading
+import time
 from typing import Any
 
 import google.cloud.pubsub_v1 as pubsub_v1
@@ -71,6 +74,42 @@ def publish_dead_letter(
         logger.debug("💀 Published dead-letter to %s", topic)
     except Exception:
         logger.exception("💥 Failed to publish dead-letter to %s", topic)
+
+
+# ---------------------------------------------------------------------------
+# Pub/Sub Ack Deadline Heartbeat Extender
+# ---------------------------------------------------------------------------
+@contextlib.contextmanager
+def _lease_extender(
+    subscriber: pubsub_v1.SubscriberClient,
+    subscription_path: str,
+    ack_id: str,
+    ack_deadline_seconds: int = 60,
+    interval_seconds: float = 20.0,
+) -> Any:
+    """Periodically extend the Pub/Sub message ack deadline while processing is in flight."""
+    stop_event = threading.Event()
+
+    def _heartbeat() -> None:
+        while not stop_event.wait(interval_seconds):
+            try:
+                subscriber.modify_ack_deadline(
+                    request={
+                        "subscription": subscription_path,
+                        "ack_ids": [ack_id],
+                        "ack_deadline_seconds": ack_deadline_seconds,
+                    }
+                )
+            except Exception as exc:
+                logger.debug("Pub/Sub lease extension heartbeat skipped: %s", exc)
+
+    thread = threading.Thread(target=_heartbeat, name="PubSubLeaseExtender", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        thread.join(timeout=5.0)
 
 
 def setup_cloud_logging() -> None:
@@ -157,9 +196,6 @@ def main() -> int:
 
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
-        # Periodic Proactive Agent Sweep (Every 5 minutes, when enabled)
-        import time
-
         now = time.time()
         if (
             proactive_sweep_enabled
@@ -272,8 +308,9 @@ def main() -> int:
         try:
             payload = json.loads(message.data.decode())
             # Delegate all routing, filtering, and execution to the processor
-            # This is a blocking call; the loop waits until it's done
-            processor.process_event(payload)
+            # Extend Pub/Sub ack deadline periodically during long-running processing
+            with _lease_extender(subscriber, subscription_path, ack_id):
+                processor.process_event(payload)
 
             subscriber.acknowledge(request={"subscription": subscription_path, "ack_ids": [ack_id]})
             logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
