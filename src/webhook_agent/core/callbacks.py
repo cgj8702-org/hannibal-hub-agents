@@ -19,7 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import BaseTool, ToolContext
 
-from webhook_agent.models.rate_limiter import _resolve_tier, get_active_api_key, rpm_waiter
+from webhook_agent.models.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.core.callbacks")
 
@@ -76,7 +76,6 @@ async def before_model_callback(
     """Execute pre-flight token metering, dynamic model TPM chunking, and rate limit waiting."""
     _check_pr_closed_short_circuit(callback_context.state)
     active_tier = callback_context.state.get("active_tier") or _resolve_tier()
-    api_key = get_active_api_key()
     try:
         from webhook_agent.models.model_chain import get_active_model
 
@@ -91,15 +90,16 @@ async def before_model_callback(
 
     exact_tokens = len(input_text) // 4 + 500
     used_heuristic = True
-    if exact_tokens > 0 and api_key:
+    if exact_tokens > 0:
         try:
-            from google import genai
+            from webhook_agent.core.loop_helpers import get_shared_genai_client
 
-            client = genai.Client(api_key=api_key)
-            resp = client.models.count_tokens(model=target_model, contents=input_text)
-            if resp and resp.total_tokens:
-                exact_tokens = int(resp.total_tokens)
-                used_heuristic = False
+            client = get_shared_genai_client()
+            if client:
+                resp = client.models.count_tokens(model=target_model, contents=input_text)
+                if resp and resp.total_tokens:
+                    exact_tokens = int(resp.total_tokens)
+                    used_heuristic = False
         except Exception:
             pass
 
