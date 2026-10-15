@@ -746,7 +746,7 @@ class WebhookProcessor:
                 )
                 and head_sha
             ):
-                from .proactive_service import (
+                from webhook_agent.review.proactive_service import (
                     build_reconciliation_cache_key,
                     try_claim_reconciliation,
                 )
@@ -783,7 +783,9 @@ class WebhookProcessor:
             results = agent.run(payload, repo_name, gh_client=gh)
         except Exception:
             if audit_cache_key:
-                from .proactive_service import release_reconciliation_claim
+                from webhook_agent.review.proactive_service import (
+                    release_reconciliation_claim,
+                )
 
                 release_reconciliation_claim(audit_cache_key)
             raise

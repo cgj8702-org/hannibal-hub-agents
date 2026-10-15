@@ -414,8 +414,8 @@ class TestTokenTruncation:
                     "number": 1,
                     "title": "PR modifying callable",
                 },
-                "pr_diff": "diff --git a/src/webhook_agent/core/github_tools.py b/src/webhook_agent/core/github_tools.py",
-                "changed_files": ["src/webhook_agent/core/github_tools.py"],
+                "pr_diff": "diff --git a/src/webhook_agent/tools/github_tools.py b/src/webhook_agent/tools/github_tools.py",
+                "changed_files": ["src/webhook_agent/tools/github_tools.py"],
             },
         }
         msg = agent._build_user_message(event_data)
