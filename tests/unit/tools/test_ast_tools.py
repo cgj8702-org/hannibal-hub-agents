@@ -155,3 +155,22 @@ def test_verify_python_ast_file_on_disk(tmp_path):
 
     res2 = verify_python_ast(f"b/{test_file}")
     assert "SYNTAX VALID" in res2
+
+
+def test_verify_python_ast_diff_text_priority_over_disk(tmp_path):
+    """Verify diff_text takes priority over file on disk (fixing P0-2 disk bleed)."""
+    test_file = tmp_path / "target.py"
+    test_file.write_text("def valid_disk():\n    return 42\n", encoding="utf-8")
+
+    diff_text = (
+        f"diff --git a/{test_file} b/{test_file}\n"
+        f"--- a/{test_file}\n"
+        f"+++ b/{test_file}\n"
+        "@@ -1,2 +1,3 @@\n"
+        " def valid_disk():\n"
+        "+    if True\n"
+        "     return 42\n"
+    )
+
+    result = verify_python_ast(str(test_file), diff_text=diff_text)
+    assert "SyntaxError" in result

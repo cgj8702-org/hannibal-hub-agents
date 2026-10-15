@@ -90,29 +90,43 @@ def is_owner_sender(
     )
 
 
+def is_hannibal_bot_login(login: str | None) -> bool:
+    """Return True strictly when login belongs to this GitHub App (hannibal-hub-agents)."""
+    norm = (login or "").strip().lower()
+    return norm in {
+        BOT_LOGIN.lower(),
+        BOT_APP_SLUG.lower(),
+        "hannibal-hub-agents[bot]",
+        "hannibal-hub-agents",
+    }
+
+
 def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
-    """Check whether a sender dict represents this app's bot identity.
+    """Check whether a sender dict represents this app's bot identity or a suppressed bot.
 
     Uses multiple signals to avoid false-negatives when GitHub varies
     the sender format across event types or API versions.
     """
     if not isinstance(sender, dict):
         return False
-    login = (sender.get("login") or "").strip().lower()
-    sender_type = (sender.get("type") or "").strip()
+    raw_user = sender.get("user")
+    user: dict[str, Any] = raw_user if isinstance(raw_user, dict) else sender
+    login = str(user.get("login") or "").strip().lower()
+    sender_type = str(user.get("type") or "").strip()
 
-    # Jules is an external mutation partner bot, not this app
+    # Jules is an external mutation partner bot; its PR lifecycle events are reviewed natively
     if is_jules_sender(sender):
         return False
 
-    known_bot_logins = {
-        BOT_LOGIN.lower(),
-        BOT_APP_SLUG.lower(),
-        "hannibal-hub-agents[bot]",
-        "hannibal-hub-agents",
+    if is_hannibal_bot_login(login):
+        return True
+
+    suppressed_bot_logins = {
         "github-actions[bot]",
+        "coderabbitai[bot]",
+        "coderabbitai",
     }
-    if login in known_bot_logins:
+    if login in suppressed_bot_logins:
         return True
 
     if login.endswith("[bot]") and ("hannibal" in login or "agent" in login):

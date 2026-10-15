@@ -96,14 +96,7 @@ def verify_python_ast(
     code_text = code_snippet
     if not code_text or not code_text.strip():
         cleaned_path = _strip_diff_prefix(file_path)
-        candidates = [Path(file_path), Path(cleaned_path)]
-        target_file = next((p for p in candidates if p.is_file()), None)
-        if target_file:
-            try:
-                code_text = target_file.read_text(encoding="utf-8", errors="replace")
-            except Exception as read_err:
-                return f"Error reading file '{file_path}': {read_err}"
-        elif diff_text:
+        if diff_text:
             try:
                 from webhook_agent.tools.diff_tools import walk_right_side
 
@@ -116,6 +109,15 @@ def verify_python_ast(
                 logger.debug(
                     "Could not extract lines from diff_text for %s: %s", file_path, diff_err
                 )
+
+        if not code_text or not code_text.strip():
+            candidates = [Path(file_path), Path(cleaned_path)]
+            target_file = next((p for p in candidates if p.is_file()), None)
+            if target_file:
+                try:
+                    code_text = target_file.read_text(encoding="utf-8", errors="replace")
+                except Exception as read_err:
+                    return f"Error reading file '{file_path}': {read_err}"
 
         if not code_text or not code_text.strip():
             return (

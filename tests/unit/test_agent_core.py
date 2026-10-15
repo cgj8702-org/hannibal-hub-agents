@@ -1071,22 +1071,20 @@ class TestConversationalAgent:
     def test_is_formal_review_eligible(self, monkeypatch: pytest.MonkeyPatch):
         from webhook_agent.review.writeback_policy import _is_formal_review_eligible
 
-        # PR lifecycle events are NOT review eligible by default (ENABLE_AUTOMATIC_PR_REVIEWS=0)
-        assert _is_formal_review_eligible("pull_request.opened") is False
-        assert _is_formal_review_eligible("pull_request.synchronize") is False
-        assert _is_formal_review_eligible("pull_request.ready_for_review") is False
-        assert _is_formal_review_eligible("pull_request.reopened") is False
-        assert _is_formal_review_eligible("pull_request_review_requested") is False
-
-        # PR lifecycle events ARE review eligible when ENABLE_AUTOMATIC_PR_REVIEWS=1
-        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
+        # PR lifecycle events ARE review eligible by default (ENABLE_AUTOMATIC_PR_REVIEWS=1)
         assert _is_formal_review_eligible("pull_request.opened") is True
         assert _is_formal_review_eligible("pull_request.synchronize") is True
         assert _is_formal_review_eligible("pull_request.ready_for_review") is True
         assert _is_formal_review_eligible("pull_request.reopened") is True
         assert _is_formal_review_eligible("pull_request_review_requested") is True
 
+        # PR lifecycle events are NOT review eligible when ENABLE_AUTOMATIC_PR_REVIEWS=0
         monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "0")
+        assert _is_formal_review_eligible("pull_request.opened") is False
+        assert _is_formal_review_eligible("pull_request.synchronize") is False
+        assert _is_formal_review_eligible("pull_request.ready_for_review") is False
+        assert _is_formal_review_eligible("pull_request.reopened") is False
+        assert _is_formal_review_eligible("pull_request_review_requested") is False
         # Comments with review intent are ALWAYS review eligible even when auto reviews disabled
         assert _is_formal_review_eligible("issue_comment.created", "Please /review this") is True
         assert (

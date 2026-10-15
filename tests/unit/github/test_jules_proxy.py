@@ -338,7 +338,7 @@ def test_reopen_jules_pr_as_agent_skips_when_live_pr_closed(monkeypatch):
     mock_agents_gh.get_repo.assert_not_called()
 
 
-def test_handle_jules_pr_opened():
+def test_handle_jules_pr_opened(monkeypatch):
     gh_app = MagicMock()
 
     # Case 1: Non-opened action
@@ -374,7 +374,25 @@ def test_handle_jules_pr_opened():
     )
     assert res is False
 
-    # Case 3: Opened action by Jules, replacement succeeds
+    # Case 3: Opened action by Jules, but proxy disabled by default
+    res = handle_jules_pr_opened(
+        gh_app,
+        "cgj8702-org/hannibal-hub",
+        {
+            "canonical": "pull_request.opened",
+            "raw_payload": {
+                "action": "opened",
+                "pull_request": {
+                    "number": 284,
+                    "user": {"login": "google-labs-jules[bot]"},
+                },
+            },
+        },
+    )
+    assert res is False
+
+    # Case 4: Opened action by Jules with proxy enabled, replacement succeeds
+    monkeypatch.setenv("ENABLE_JULES_PR_PROXY", "1")
     with patch(
         "webhook_agent.github.jules_proxy.reopen_jules_pr_as_agent",
         return_value=291,

@@ -11,6 +11,7 @@ from webhook_agent.github.bot_identity import (
     JULES_BOT_LOGINS,
     _is_bot_event,
     _is_bot_sender,
+    is_hannibal_bot_login,
     is_jules_sender,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "JULES_BOT_LOGINS",
     "_is_bot_event",
     "_is_bot_sender",
+    "is_hannibal_bot_login",
     "is_jules_sender",
 ]

@@ -43,10 +43,32 @@ def test_is_jules_sender():
     assert is_jules_sender({}) is False
 
 
+def test_is_hannibal_bot_login():
+    from webhook_agent.github.bot_identity import is_hannibal_bot_login
+
+    assert is_hannibal_bot_login("hannibal-hub-agents[bot]") is True
+    assert is_hannibal_bot_login("hannibal-hub-agents") is True
+    assert is_hannibal_bot_login("HANNIBAL-HUB-AGENTS[BOT]") is True
+    assert is_hannibal_bot_login("  hannibal-hub-agents[bot]  ") is True
+
+    # Third-party bots MUST return False (fixing P0-1 bot collision bug)
+    assert is_hannibal_bot_login("coderabbitai[bot]") is False
+    assert is_hannibal_bot_login("coderabbitai") is False
+    assert is_hannibal_bot_login("github-actions[bot]") is False
+    assert is_hannibal_bot_login("dependabot[bot]") is False
+    assert is_hannibal_bot_login("google-labs-jules[bot]") is False
+    assert is_hannibal_bot_login("cgj8702") is False
+    assert is_hannibal_bot_login("cgj8702-agents") is False
+    assert is_hannibal_bot_login(None) is False
+    assert is_hannibal_bot_login("") is False
+
+
 def test_is_bot_sender_exempts_jules():
     # Hannibal bot logins should be marked as bot sender
     assert _is_bot_sender({"login": "hannibal-hub-agents[bot]"}) is True
     assert _is_bot_sender({"login": "github-actions[bot]"}) is True
+    assert _is_bot_sender({"login": "coderabbitai[bot]"}) is True
+    assert _is_bot_sender({"login": "coderabbitai"}) is True
 
     # Jules must NOT be classified as this app's bot identity so its PRs can be audited
     assert _is_bot_sender({"login": "google-labs-jules[bot]"}) is False

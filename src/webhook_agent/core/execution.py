@@ -403,8 +403,14 @@ def execute_agent_event(
             getattr(getattr(active_runner, "app", None), "name", agent._app_name) or agent._app_name
         )
 
+        base_prompt_text = (
+            getattr(user_message.parts[0], "text", "") or "" if user_message.parts else ""
+        )
+
         for attempt in range(_MAX_RETRIES):
             try:
+                if user_message.parts and hasattr(user_message.parts[0], "text"):
+                    user_message.parts[0].text = base_prompt_text
                 active_runner = (
                     agent._runner if is_pr_review_event else agent._conversational_runner
                 )

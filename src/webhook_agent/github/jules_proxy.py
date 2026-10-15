@@ -19,6 +19,7 @@ from typing import Any
 
 from github import Auth, Github
 
+from webhook_agent.constants import DEFAULT_ENABLE_JULES_PR_PROXY
 from webhook_agent.core.cancellation import pr_closed_registry
 from webhook_agent.github.bot_identity import is_jules_sender
 
@@ -252,15 +253,16 @@ def reopen_jules_pr_as_agent(
         original_pr.create_issue_comment(
             f"Superseded by #{new_pr.number} (authored by @cgj8702-agents)."
         )
-        # Trigger CodeRabbit AI full review on the replacement PR
-        agent_repo = agents_gh.get_repo(repo_name)
-        new_pr_obj = agent_repo.get_pull(new_pr.number)
-        new_pr_obj.create_issue_comment("@coderabbitai full review")
-        logger.info("Triggered CodeRabbit AI review on PR #%s", new_pr.number)
     except Exception as comment_exc:
         logger.warning("Could not add link comment to original PR #%s: %s", pr_number, comment_exc)
 
     return int(new_pr.number)
+
+
+def is_jules_pr_proxy_enabled() -> bool:
+    """Return True only when ENABLE_JULES_PR_PROXY is explicitly enabled."""
+    val = os.environ.get("ENABLE_JULES_PR_PROXY", DEFAULT_ENABLE_JULES_PR_PROXY)
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 
 def handle_jules_pr_opened(
@@ -269,13 +271,16 @@ def handle_jules_pr_opened(
     payload: dict[str, Any],
     dry_run: bool = False,
 ) -> bool:
-    """Detect and process PR opened events authored by Jules.
+    """Detect and process PR opened events authored by Jules when proxy mode is enabled.
 
     Returns:
-        True if the PR was authored by Jules and successfully superseded under
-        cgj8702-agents (signaling the caller to skip normal processing on the
-        original PR), or False otherwise.
+        True if proxy mode is enabled and the PR was authored by Jules and
+        successfully superseded under cgj8702-agents (signaling the caller to skip
+        normal processing on the original PR), or False otherwise.
     """
+    if not is_jules_pr_proxy_enabled():
+        return False
+
     raw = payload.get("raw_payload") or {}
     action = raw.get("action") or payload.get("action")
     canonical = payload.get("canonical") or ""

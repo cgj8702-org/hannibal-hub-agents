@@ -114,3 +114,61 @@ def test_prefetch_previous_bot_reviews() -> None:
     assert raw["prior_reviews_had_request_changes"] is True
     assert "previous_bot_reviews" in raw
     assert "Please fix line 15" in raw["previous_bot_reviews"]
+
+
+def test_prefetch_linked_issue_spec() -> None:
+    from webhook_agent.github.pr_context import _prefetch_linked_issue_spec
+
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_issue = MagicMock()
+    mock_issue.pull_request = None
+    mock_issue.title = "Memory leak in worker loop"
+    mock_issue.body = "Worker crashes after 500 events."
+    mock_repo.get_issue.return_value = mock_issue
+    mock_gh.get_repo.return_value = mock_repo
+
+    payload = {
+        "raw_payload": {
+            "pull_request": {
+                "number": 42,
+                "body": "This PR resolves #105 and cleans up memory.",
+            }
+        }
+    }
+
+    _prefetch_linked_issue_spec(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert "linked_issue_spec" in raw
+    assert "Linked Issue #105: Memory leak in worker loop" in raw["linked_issue_spec"]
+    assert "Worker crashes after 500 events." in raw["linked_issue_spec"]
+
+
+def test_prefetch_previous_bot_reviews_ignores_other_bots() -> None:
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+
+    mock_user_coderabbit = MagicMock()
+    mock_user_coderabbit.login = "coderabbitai[bot]"
+    mock_review_cr = MagicMock()
+    mock_review_cr.user = mock_user_coderabbit
+    mock_review_cr.state = "CHANGES_REQUESTED"
+    mock_review_cr.body = "CodeRabbit review text."
+
+    mock_pr.get_reviews.return_value = [mock_review_cr]
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+
+    payload = {
+        "raw_payload": {
+            "pull_request": {"number": 102},
+        }
+    }
+
+    _prefetch_previous_bot_reviews(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert raw["prior_reviews_had_request_changes"] is False
+    assert "previous_bot_reviews" not in raw
