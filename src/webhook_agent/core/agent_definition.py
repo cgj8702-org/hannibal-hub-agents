@@ -28,6 +28,7 @@ from webhook_agent.core.callbacks import (
     on_tool_error_callback,
 )
 from webhook_agent.core.execution import execute_agent_event
+from webhook_agent.core.guardrails import GuardrailsPlugin, IterationBudgetPlugin
 from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
 )
@@ -67,6 +68,7 @@ from webhook_agent.tools.github_tools import (
     read_file,
     review,
 )
+from webhook_agent.tools.search_tools import search_files
 from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
@@ -184,6 +186,7 @@ class WebhookAgent:
             on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
+                search_files,
                 review,
             ],
         )
@@ -216,6 +219,7 @@ class WebhookAgent:
             on_tool_error_callback=on_tool_error_callback,
             tools=[
                 read_file,
+                search_files,
                 get_issue,
             ],
         )
@@ -227,6 +231,8 @@ class WebhookAgent:
             ],
         )
 
+        self._iteration_budget_plugin = IterationBudgetPlugin(max_turns=6, max_tool_calls=15)
+        self._guardrails_plugin = GuardrailsPlugin(failure_threshold=3, no_progress_window=3)
         self._history_pruning_plugin = WebhookHistoryPruningPlugin(max_events=12)
         self._tool_pruning_plugin = ToolOutputPruningPlugin()
 
@@ -247,6 +253,8 @@ class WebhookAgent:
             root_agent=self._agent,
             context_cache_config=context_cache_config,
             plugins=[
+                self._iteration_budget_plugin,
+                self._guardrails_plugin,
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,
                 self._sanitizer_plugin,
@@ -258,6 +266,8 @@ class WebhookAgent:
             root_agent=self._conversational_workflow,
             context_cache_config=context_cache_config,
             plugins=[
+                self._iteration_budget_plugin,
+                self._guardrails_plugin,
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,
                 self._sanitizer_plugin,

@@ -32,6 +32,7 @@ from webhook_agent.core.cancellation import (
     PRClosedRegistry,
     pr_closed_registry,
 )
+from webhook_agent.core.guardrails import GuardrailsPlugin, IterationBudgetPlugin
 from webhook_agent.core.loop_helpers import (
     _ensure_bg_loop,
     get_shared_genai_client,
@@ -54,7 +55,9 @@ __all__ = [
     "MAX_INPUT_TOKENS",
     "SYSTEM_INSTRUCTION",
     "AbortAgentExecution",
+    "GuardrailsPlugin",
     "InMemoryMemoryService",
+    "IterationBudgetPlugin",
     "PRClosedRegistry",
     "PromptSanitizerPlugin",
     "WebhookAgent",
