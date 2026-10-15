@@ -111,9 +111,22 @@ def verify_python_ast(
                 )
 
         if not code_text or not code_text.strip():
-            candidates = [Path(file_path), Path(cleaned_path)]
-            target_file = next((p for p in candidates if p.is_file()), None)
-            if target_file:
+            from webhook_agent.tools.paths import resolve_sandboxed_path
+
+            target_file: Path | None = None
+            for p_cand in [Path(file_path), Path(cleaned_path)]:
+                if p_cand.is_absolute() and p_cand.is_file():
+                    target_file = p_cand
+                    break
+
+            if target_file is None:
+                sandboxed_file = resolve_sandboxed_path(cleaned_path) or resolve_sandboxed_path(
+                    file_path
+                )
+                if sandboxed_file and sandboxed_file.is_file():
+                    target_file = sandboxed_file
+
+            if target_file and target_file.is_file():
                 try:
                     code_text = target_file.read_text(encoding="utf-8", errors="replace")
                 except Exception as read_err:
@@ -121,7 +134,7 @@ def verify_python_ast(
 
         if not code_text or not code_text.strip():
             return (
-                f"Error: No code snippet provided and file '{file_path}' was not found on disk. "
+                f"Error: No code snippet provided and file '{file_path}' was not found in diff or sandbox. "
                 "Please pass code_snippet directly to verify_python_ast."
             )
 
