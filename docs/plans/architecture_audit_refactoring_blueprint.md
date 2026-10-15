@@ -509,3 +509,49 @@ Remove the duplicate 105-line `DepletedModelRegistry` class definition from `src
 ./scripts/ruff-all.sh
 uv run pytest --tb=short -q
 ```
+
+---
+
+## 7. Review Competence Architecture: Closing the Quality Gap with CodeRabbit
+
+### The 3 Core Recommendations to Make Hannibal a Competent Reviewer
+1. **Borrow Battle-Tested Review Schemas & Confidence Scoring (`pr-agent` Pattern):**
+   - Require an explicit `confidence_score` (1–10) and `severity` rating (`HIGH`, `MEDIUM`, `LOW`, `NIT`) on every proposed finding.
+   - Strictly suppress any finding with `confidence < 8` or severity == `NIT`.
+   - Silence is golden: if no finding meets the threshold, output a clean, respectful "LGTM / Approved" without posting unsolicited chatter.
+2. **Eliminate 1-Shot Hallucination via Adversarial Critic Pass ("Hunter → Critic → Gate"):**
+   - Replace the monolithic 1-shot prompt with a 2-stage verification loop.
+   - **Stage 1 (Hunter):** Fast high-recall extraction of candidate issues.
+   - **Stage 2 (Adversarial Critic):** A separate model call acting as Senior Principal Engineer specifically tasked with *disproving* the candidate finding against untouched helper files, caller signatures, and framework invariants. If it cannot be proven defective, it is dropped.
+3. **AST-Validate Every Suggested Code Replacement Before Writeback:**
+   - Run Python `ast.parse()` on every proposed code fix in unified diffs.
+   - If a suggested replacement does not parse cleanly into valid AST syntax or violates indentation invariants, strip the replacement and keep only the textual explanation.
+
+---
+
+### In-Depth Analysis: Path 1 (pr-agent Engine) vs. Path 2 (Native 3-Stage Pipeline)
+
+| Dimension | Path 1: Wrap `pr-agent` Core Engine | Path 2: Native 3-Stage "Hunter → Critic → Gate" |
+| :--- | :--- | :--- |
+| **Architecture** | Import `pr-agent` as a library inside Hannibal's worker loop, delegating review parsing, prompt chains, and formatting to Qodo's engine. | Keep Hannibal's native ADK / GenAI SDK execution loop, but structure it into 2 sequential Gemini calls: Candidate Hunter + Adversarial Critic. |
+| **Codebase Footprint** | Heavy external dependency (`pr-agent` brings substantial dependencies: `litellm`, `tokenizers`, `tiktoken`, etc.). | Zero new external dependencies. Uses existing `google-genai` and `webhook_agent.core.execution`. |
+| **Model Compatibility** | `pr-agent` relies heavily on OpenAI-style chat schemas via `litellm`. Adapting to Google ADK and Gemini 2.5/3.5 requires translation wrappers. | 100% native Gemini 2.5 / 3.5 support with exact token tracking, model fallback chains, and Google GenAI SDK types. |
+| **Customizability** | Constrained by `pr-agent` configuration files and upstream prompt designs. | Full programmatic control over Hannibal's persona, repo-specific rules, AST checks, and Firestore checkpoints. |
+| **Latency & Cost** | 1 large multi-turn LLM pass (~15–30s). | 2 targeted Gemini calls (~6–12s total with `gemini-2.5-flash` / `gemini-3.5-flash-lite`). |
+
+---
+
+### 7.1 Areas for Architectural Growth (Path 2 Infrastructure Invariants)
+
+1. **Worker Sandboxing vs. VM Host Execution:**
+   - **Risk:** Running worker daemons on a persistent VM risks tool execution bleeding into the local checkout, environment variables, or disk state (as discovered in the P0-2 AST bug).
+   - **Remediation:** Enforce 100% stateless in-memory tool operations. All diffs, file trees, and AST structures must be parsed from memory/diff buffers or fetched via the GitHub API into virtual abstractions, never reading local host VM repositories.
+2. **Horizontal Scaling & Distributed Locks:**
+   - **Risk:** In-memory or local SQLite checkpoints and deduplication locks introduce split-brain duplicate reviews if multiple worker instances process the queue.
+   - **Remediation:** Ensure all claims, deduplication keys, and review checkpoints are persisted through Firestore distributed transactions (`src/webhook_agent/state/firestore_claims.py`). Local dicts/files are strictly secondary fallback shims for offline testing.
+3. **Debouncing Fast Pushes & Superseded SHA Cancellation:**
+   - **Risk:** Rapid subsequent `git push` events on `pull_request.synchronize` waste Gemini API quota on stale commits and cause race conditions where an older review overwrites a newer one.
+   - **Remediation:**
+     - **Ingress & Writeback Guard:** Check `live_pr.head.sha == event_head_sha` at ingress, before model execution, and immediately before posting the review. Drop if stale.
+     - **Dynamic Cancellation Registry:** Extend `PRClosedRegistry` to track active in-flight review SHAs by `(repo, pr_number)` and immediately trigger `AbortAgentExecution` on any in-flight background task whose SHA has been superseded by a newer push.
+
