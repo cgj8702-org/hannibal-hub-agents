@@ -104,6 +104,68 @@ class IssueItem(BaseModel):
         return item_str
 
 
+class CandidateFinding(BaseModel):
+    """A candidate issue extracted during the high-recall Hunter stage."""
+
+    id: str = Field(default="", description="Unique identifier for candidate tracking")
+    file_path: str = Field(description="Target file path under review")
+    line_number: int = Field(default=1, description="Line number where issue is situated")
+    start_line: int | None = Field(default=None, description="Starting line if multi-line range")
+    severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "NIT"] = Field(
+        default="MEDIUM", description="Assessed impact severity"
+    )
+    confidence_score: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Hunter confidence score from 1 (speculative) to 10 (certain)",
+    )
+    title: str = Field(description="Concise description/headline of the issue")
+    description: str = Field(description="Detailed explanation of the flaw, bug, or risk")
+    suggested_fix: str | None = Field(
+        default=None, description="Actionable replacement code snippet or fix"
+    )
+    falsification_check: str = Field(
+        default="",
+        description="Explicit test or check for an adversarial critic to attempt to disprove this finding",
+    )
+
+    @field_validator("file_path", "title", "description", "falsification_check", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: Any) -> Any:
+        return clean_field_string(v)
+
+    def to_issue_item(self) -> IssueItem:
+        """Convert verified CandidateFinding to an IssueItem for GitHub review submission."""
+        return IssueItem(
+            path=self.file_path,
+            line=self.line_number,
+            start_line=self.start_line,
+            description=f"{self.title}: {self.description}" if self.title else self.description,
+            suggested_fix=self.suggested_fix or "",
+        )
+
+
+class VerificationVerdict(BaseModel):
+    """Adversarial verification result from the Critic stage."""
+
+    finding_id: str = Field(description="ID of candidate finding being audited")
+    verified: bool = Field(description="True if finding withstood adversarial falsification")
+    confidence_score: int = Field(
+        ge=1, le=10, description="Post-criticism confidence score from 1 to 10"
+    )
+    disproof_reason: str | None = Field(
+        default=None,
+        description="Explanation of why finding was disproven or determined to be a false-positive",
+    )
+    revised_description: str | None = Field(
+        default=None, description="Refined description if finding is verified but adjusted"
+    )
+    revised_suggested_fix: str | None = Field(
+        default=None, description="Refined replacement code snippet if applicable"
+    )
+
+
 class SyncResolutionItem(BaseModel):
     """Resolution status of a previously requested review item in incremental commit diff."""
 

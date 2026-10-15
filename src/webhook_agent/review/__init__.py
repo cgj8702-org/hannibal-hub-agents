@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from .ast_gate import (
+    filter_invalid_ast_suggestions,
+    validate_code_suggestion,
+    validate_python_syntax,
+)
 from .comment_poster import (
     _add_eyes_reaction,
     build_github_review_comments,
@@ -10,6 +15,7 @@ from .comment_poster import (
     is_echo_description,
     is_echo_suggestion,
 )
+from .critic import CriticEngine
 from .duplicate_detector import already_raised, build_exclusions, group_repeated_findings
 from .fast_path import (
     evaluate_dependency_fast_path,
@@ -26,6 +32,7 @@ from .formatter import (
     render_sync_review_markdown,
     truncate_log_payload,
 )
+from .hunter import HunterEngine
 from .metadata import (
     extract_review_metadata,
     format_findings_for_agent,
@@ -48,11 +55,13 @@ from .review_enforcer import (
     _submit_formal_review,
 )
 from .schemas import (
+    CandidateFinding,
     CodeReviewResponse,
     IssueItem,
     RiskItem,
     SyncResolutionItem,
     SyncReviewResponse,
+    VerificationVerdict,
     VerifiedInvariant,
 )
 from .verdict_parser import calculate_verdict
@@ -67,13 +76,17 @@ from .writeback_policy import (
 
 __all__ = [
     "_COMMENT_RATE_LIMITER",
+    "CandidateFinding",
     "CodeReviewResponse",
     "CommentRateLimiter",
+    "CriticEngine",
+    "HunterEngine",
     "IssueItem",
     "ProactiveEvaluator",
     "RiskItem",
     "SyncResolutionItem",
     "SyncReviewResponse",
+    "VerificationVerdict",
     "VerifiedInvariant",
     "_add_eyes_reaction",
     "_enforce_verdict",
@@ -94,6 +107,7 @@ __all__ = [
     "extract_json_payload",
     "extract_review_metadata",
     "filter_echo_suggestions",
+    "filter_invalid_ast_suggestions",
     "format_findings_for_agent",
     "format_suggestion_body",
     "get_actionable_findings",
@@ -114,4 +128,6 @@ __all__ = [
     "serialize_review_metadata",
     "truncate_log_payload",
     "try_claim_reconciliation",
+    "validate_code_suggestion",
+    "validate_python_syntax",
 ]

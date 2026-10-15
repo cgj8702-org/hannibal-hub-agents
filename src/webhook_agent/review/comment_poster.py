@@ -138,6 +138,7 @@ def format_suggestion_body(
     description: str,
     suggested_fix: str | None = None,
     is_multiline_anchor: bool = True,
+    file_path: str = "",
 ) -> str:
     """Format an inline review comment body with code formatting.
 
@@ -148,6 +149,13 @@ def format_suggestion_body(
     desc = (description or "").strip()
     if not suggested_fix or not suggested_fix.strip():
         return desc
+
+    if file_path:
+        from webhook_agent.review.ast_gate import validate_code_suggestion
+
+        valid, _ = validate_code_suggestion(suggested_fix, file_path=file_path)
+        if not valid:
+            return desc
 
     code = suggested_fix.strip("\r\n")
     if code.strip().startswith("```"):
@@ -187,14 +195,17 @@ def build_github_review_comments(
           [{"path": path, "line": line, "side": "RIGHT", "body": body}]
         - anchored_keys: set of "{path}:{line}" for issues that were successfully anchored inline.
     """
+    from webhook_agent.review.ast_gate import filter_invalid_ast_suggestions
+
     inline_comments: list[dict[str, Any]] = []
     anchored_keys: set[str] = set()
 
     anchors, text_by_line = walk_right_side(diff_text)
     zones, texts = build_exclusions(existing_comments or []) if existing_comments else ({}, [])
 
-    # Group 3+ repeated defect classes into single comments
+    # Group 3+ repeated defect classes into single comments and filter invalid AST suggestions
     processed_issues = group_repeated_findings(issues)
+    processed_issues = filter_invalid_ast_suggestions(processed_issues)
 
     for issue in processed_issues:
         if max_comments is not None and len(inline_comments) >= max_comments:
@@ -271,7 +282,10 @@ def build_github_review_comments(
             )
 
             body = format_suggestion_body(
-                desc_val, fix_val, is_multiline_anchor=is_multiline_anchor
+                desc_val,
+                fix_val,
+                is_multiline_anchor=is_multiline_anchor,
+                file_path=clean_path,
             )
 
             # Check duplicate suppression against existing comments
