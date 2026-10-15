@@ -114,9 +114,9 @@ def _enforce_verdict(
     raw_diff = ""
     bot_reviews: list[Any] = []
     if pr is not None:
-        try:
-            from webhook_agent.github.bot_identity import is_hannibal_bot_login
+        from webhook_agent.github.bot_identity import is_hannibal_bot_login
 
+        try:
             reviews = list(pr.get_reviews())
             bot_reviews = []
             for r in reviews:
@@ -174,7 +174,9 @@ def _enforce_verdict(
                     initial_budget=review_budget,
                 )
         except Exception as comm_err:
-            logger.debug("Could not fetch existing PR review comments: %s", comm_err)
+            logger.warning(
+                "Could not fetch existing PR review comments or compute review budget: %s", comm_err
+            )
     else:
         review_budget = None
         existing_comments_data = []

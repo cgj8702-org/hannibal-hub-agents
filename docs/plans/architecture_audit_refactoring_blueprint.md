@@ -480,8 +480,7 @@ uv run pytest --tb=short -q
 ### Step 4.1: Update Any Remaining Shim Imports in `src/` and `tests/`
 Run a quick search for any imports still referencing the 11 transitional shim modules:
 ```bash
-grep -rnE "from webhook_agent\.(bot_identity|callbacks|cancellation|fast_path|formatter|github_credential_helper|memory_service|pr_context|proactive_service|sanitizer_plugin|schemas) import" src/ tests/
-grep -rn "from webhook_agent.core.github_tools import" src/ tests/
+rg -n 'webhook_agent\.(bot_identity|callbacks|cancellation|fast_path|formatter|github_credential_helper|memory_service|pr_context|proactive_service|sanitizer_plugin|schemas|core\.github_tools)' src/ tests/ || true
 ```
 Update any matches to their canonical subpackage paths (`webhook_agent.github.*`, `webhook_agent.core.*`, `webhook_agent.review.*`, `webhook_agent.tools.github_tools`).
 
@@ -535,7 +534,7 @@ uv run pytest --tb=short -q
 | :--- | :--- | :--- |
 | **Architecture** | Import `pr-agent` as a library inside Hannibal's worker loop, delegating review parsing, prompt chains, and formatting to Qodo's engine. | Keep Hannibal's native ADK / GenAI SDK execution loop, but structure it into 2 sequential Gemini calls: Candidate Hunter + Adversarial Critic. |
 | **Codebase Footprint** | Heavy external dependency (`pr-agent` brings substantial dependencies: `litellm`, `tokenizers`, `tiktoken`, etc.). | Zero new external dependencies. Uses existing `google-genai` and `webhook_agent.core.execution`. |
-| **Model Compatibility** | `pr-agent` relies heavily on OpenAI-style chat schemas via `litellm`. Adapting to Google ADK and Gemini 2.5/3.5 requires translation wrappers. | 100% native Gemini 2.5 / 3.5 support with exact token tracking, model fallback chains, and Google GenAI SDK types. |
+| **Model Compatibility** | `pr-agent` relies heavily on OpenAI-style chat schemas via `litellm`. Adapting to Google ADK and Gemini 2.5/3.5 requires translation wrappers. | 100% native Gemini 2.5 / 3.5 support with API-backed token tracking and estimate fallback, model fallback chains, and Google GenAI SDK types. |
 | **Customizability** | Constrained by `pr-agent` configuration files and upstream prompt designs. | Full programmatic control over Hannibal's persona, repo-specific rules, AST checks, and Firestore checkpoints. |
 | **Latency & Cost** | 1 large multi-turn LLM pass (~15–30s). | 2 targeted Gemini calls (~6–12s total with `gemini-2.5-flash` / `gemini-3.5-flash-lite`). |
 

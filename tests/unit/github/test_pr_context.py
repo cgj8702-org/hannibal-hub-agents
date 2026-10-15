@@ -143,6 +143,54 @@ def test_prefetch_linked_issue_spec() -> None:
     assert "linked_issue_spec" in raw
     assert "Linked Issue #105: Memory leak in worker loop" in raw["linked_issue_spec"]
     assert "Worker crashes after 500 events." in raw["linked_issue_spec"]
+    assert "UNTRUSTED USER SPECIFICATION" in raw["linked_issue_spec"]
+
+
+def test_prefetch_linked_issue_spec_word_boundary_and_multi() -> None:
+    from webhook_agent.github.pr_context import _prefetch_linked_issue_spec
+
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+
+    issue_1 = MagicMock()
+    issue_1.pull_request = None
+    issue_1.title = "First Bug"
+    issue_1.body = "First bug details"
+
+    issue_2 = MagicMock()
+    issue_2.pull_request = None
+    issue_2.title = "Second Bug"
+    issue_2.body = "Second bug details"
+
+    def get_issue(num: int):
+        if num == 10:
+            return issue_1
+        if num == 20:
+            return issue_2
+        raise ValueError(f"Unexpected issue {num}")
+
+    mock_repo.get_issue.side_effect = get_issue
+    mock_gh.get_repo.return_value = mock_repo
+
+    # 'prefixes #5' and 'unfixed #3' should NOT match due to word boundaries.
+    # 'Fixes #10' and 'Closes: #20' SHOULD match.
+    payload = {
+        "raw_payload": {
+            "pull_request": {
+                "number": 50,
+                "body": "This has prefixes #5 and unfixed #3, but fixes #10 and closes: #20.",
+            }
+        }
+    }
+
+    _prefetch_linked_issue_spec(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert "linked_issue_spec" in raw
+    assert "Linked Issue #10: First Bug" in raw["linked_issue_spec"]
+    assert "Linked Issue #20: Second Bug" in raw["linked_issue_spec"]
+    assert "#5" not in raw["linked_issue_spec"]
+    assert "#3" not in raw["linked_issue_spec"]
 
 
 def test_prefetch_previous_bot_reviews_ignores_other_bots() -> None:

@@ -510,9 +510,7 @@ def execute_agent_event(
                         pr_number=pr_number,
                         head_sha=head_sha,
                         canonical=canonical,
-                        precompiled_dossier=getattr(user_message.parts[0], "text", "")
-                        if user_message.parts
-                        else "",
+                        precompiled_dossier=base_prompt_text,
                         pr_diff=str(raw.get("pr_diff") or ""),
                         changed_files=changed_files_list,
                         status="pending",
