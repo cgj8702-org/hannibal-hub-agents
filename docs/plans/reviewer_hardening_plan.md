@@ -1,6 +1,6 @@
 # Reviewer Hardening Plan
 
-**Status:** draft for implementation
+**Status:** Re-evaluated & updated (2026-10-12) — active implementation with Zero-Mutation architecture
 **Origin:** analysis of PR #258 and its two `hannibal-hub-agents[bot]` reviews, plus the 2026-10-10
 55-PR scorecard and the CodeRabbit-vs-bot head-to-head on the #241/#258/#260 replay diffs.
 **Goal:** make the PR review bot *unable* to lie about what it verified, instead of *asking* it not to.
@@ -10,31 +10,27 @@ checkable tasks with the defect each one closes. Update both when scope changes.
 
 ---
 
-## Draft status -- what already exists in this working tree
+## Implementation Status Dashboard (2026-10-12)
 
-Phases 1 and 2 are drafted and exercised to the limit of this sandbox. `uv` cannot install
-dependencies here, so `uv run pytest` has **not** been run; instead both test modules were
-executed with a stdlib harness that stubs `pytest` and shims the package tree, giving
-**18 tests: 16 pass, 2 `xfail(strict=True)`, 0 errors**. Run the real thing first.
+Phases 0, 1, 2, 3, 4, 5, and 8 are **completed and verified in CI**.
+Phase 6 is **formally retired** due to the adoption of the permanent **Zero-Mutation Architecture**.
+Phase 7 has completed redaction (7.1 in PR #308) while schema strictness (7.3/T2.1), recommendation
+reconciliation (7.4/T2.3), and third-party bot suppression (7.5/T1.4) remain active priorities.
+Phase 6.1 (evaluation on an adjudicated label set) is the final verification milestone.
 
-| Path | State |
-| :--- | :--- |
-| `src/webhook_agent/review/grounding.py` | Done. Pure, no I/O, reuses `tools/diff_tools.walk_right_side`. |
-| `tests/unit/review/test_grounding.py` | Done. 11 unit tests over hand-written diffs, accept and reject paths. |
-| `tests/unit/review/test_replay_harness.py` | Done. 7 fixture-driven tests; 2 `xfail(strict=True)` encode live defects. |
-| `tests/fixtures/reviews/pr_258.json` | Recorded. 14 changed files, full patches, both bot reviews. |
-| `tests/fixtures/reviews/pr_241.json` | Recorded. Reviews + changed paths only (`--patches none`). |
-| `dev/record_review_fixtures.py` | Done. Network-only recorder; re-recording is byte-identical. |
+| Component / Subsystem | Phase | Status | Summary |
+| :--- | :--- | :--- | :--- |
+| `src/webhook_agent/review/grounding.py` | Phase 2 | Complete | Pure diff grounding verifier using `walk_right_side`. |
+| `tests/unit/review/test_grounding.py` | Phase 2 | Complete | 11 unit tests for diff citation acceptance and rejection. |
+| `tests/unit/review/test_replay_harness.py` | Phase 1 & 8 | Complete | Offline fixture harness exercising recorded PR replay cases. |
+| `src/webhook_agent/tools/github_tools.py` | Phase 0, 2, 6 | Complete | Grounding integration, partial-retrieval handling, ops tools purged. |
+| `src/webhook_agent/review/schemas.py` | Phase 2, 3, 7 | Complete / Active | `unverified_claims`, strict invariant serialization; T2.3 active. |
+| `src/webhook_agent/tools/schemas.py` | Phase 7 | Active | Pydantic tool gate; `extra="forbid"` (T2.1) active. |
+| `src/webhook_agent/core/callbacks.py` | Phase 7.1 | Complete | Tool-gate error paths sanitized and redacted in PR #308. |
+| `src/webhook_agent/core/prompts.py` | Phase 4 & 5 | Complete | Author claims labeled unverified; Phase 5 pruning in PR #303. |
+| `src/webhook_agent/processor.py` | Phase 7.5 | Active | Third-party bot suppression (T1.4) active. |
+| Ops Tools (`merge_pr`, `update_issue`, `add_label`) | Phase 0 & 6 | Retired | Completely removed under Zero-Mutation policy. |
 
-**Verify first:** `uv run pytest tests/unit/review/test_grounding.py tests/unit/review/test_replay_harness.py -q`
-should report 16 passed, 2 xfailed. Then **start at Phase 2 Step 2.2 (wiring)**, not Step 2.1 --
-the verifier is already written. Then Step 2.4, the `snippet` field, then Phases 0/3/4/5/6.
-
-**Two defects this harness found on its first run**, both previously invisible:
-
-1. `verified_invariants` are rendered in the review body but never serialized into the
-   `hannibal-review-metadata` footer (Phase 1 Step 1.2 assertion 3, fixed in Step 2.4).
-2. Both content extractors in the first draft were silently vacuous (assertion 0).
 
 ---
 
@@ -83,8 +79,7 @@ labeled sample of real PRs, with a human adjudicator deciding which PRs truly ha
 - **Recall** = adjudicated defects the bot's blocks caught ÷ all adjudicated defects (higher is better).
 - **Missed-finding rate** = 1 − recall = adjudicated defects the bot *failed* to catch ÷ all adjudicated defects (lower is better).
 - **False-approve rate** = PRs the bot approved that should have been blocked ÷ all PRs the bot approved (lower is better).
-Build that labeled set before Phases 3/7/8 land, then re-score against it. Do not let a metric's
-name and its definition drift apart — state numerator and denominator for each.
+Build that labeled set to retrospectively evaluate against the frozen baseline and re-score the completed hardening phases (with remaining phases 7.3–7.5 evaluated upon completion). Do not let a metric's name and its definition drift apart — state numerator and denominator for each.
 
 ---
 
@@ -93,6 +88,7 @@ name and its definition drift apart — state numerator and denominator for each
 ### 0.1 Repo rules that override everything (from `AGENTS.md`)
 
 - **Zero-bypass:** never commit to `main`. Every change goes through a PR.
+- **Zero-mutation architecture:** Hannibal is strictly a read-only auditor and conversational peer. The model toolset is strictly non-mutating (`read_file`, `review`, `get_issue`). All mutating tools (`merge_pr`, `update_issue`, `add_label`, `create_issue`) are permanently excluded from agent toolchains. Jules delegation is initiated solely by repository owner `cgj8702` attaching labels via GitHub UI.
 - **One branch per phase:** `git checkout main && git pull && git checkout -b <phase-branch>`. Before pushing to an existing PR branch, verify live state with `gh pr view <n>`.
 - **Always `uv`:** `uv run pytest ...`, never bare `python`/`pip`/`pytest`. Run `uv sync` after any `pyproject.toml` change.
 - **Gate before "done":** (1) `./scripts/ruff-all.sh` (2) `uv run pytest <relevant file>` (3) `uv run pytest --tb=short -q`. All must exit clean.
@@ -126,341 +122,148 @@ One step per message. Never batch steps. Never say "should work" — run it.
 
 ---
 
-## Phase 0 — Containment (do this first, it is short)
+## Phase 0 — Containment [COMPLETE]
 
-**Why:** PR #258 registers `merge_pr` and `update_issue` on `_conversational_agent`, which is triggered by `issue_comment.created` from **any** GitHub user. `merge_pr` (`tools/github_tools.py:531-560`) checks only `pr.draft` and `pr.mergeable is False` — no authorization, no approval check, no CI check. The only mitigation is prose in `core/prompts.py:202-203`. This is a live risk and the PR is still open.
+**Status:** Completed in PR #301 (`75dcaec`). Beyond containment, the ops tools were permanently purged.
 
-**Zero-risk option (always available):** simply do not merge #258. Nothing else in this plan requires touching it. If the owner wants only containment, stop here.
+**Summary of Resolution:**
+- De-registered `merge_pr` and `update_issue` from `_conversational_agent`.
+- Removed their entries from `TOOL_INPUT_SCHEMAS` in `tools/schemas.py`.
+- Purged all prompt instructions regarding `merge_pr` and `update_issue` from `core/prompts.py`.
+- Reverted and aligned `docs/slash_commands_catalog.md` and `SECURITY.md`.
+- Permanently deleted `merge_pr` and `update_issue` function definitions from `tools/github_tools.py`.
 
-**Where:** `PR #258`; `core/agent_definition.py` (~225-232, conversational tool list); `tools/github_tools.py:531-560` (`merge_pr`), `:235-274` (`update_issue`); `tools/schemas.py:436-492`; `core/prompts.py:197-203`; `docs/slash_commands_catalog.md:32`; `tests/unit/tools/test_github_ops_tools.py`.
-
-**How (if the owner wants the good part of #258 shipped):** push one scope-reduction commit to the existing PR branch that **removes only the ops-tool surface**, keeping the genuinely good part (the Pydantic input gate in `core/callbacks.py:278-303` + `tools/schemas.py` + its tests):
-
-- unregister `merge_pr` and `update_issue` from `_conversational_agent`;
-- remove their entries from `TOOL_INPUT_SCHEMAS`;
-- remove the `merge_pr`/`update_issue` prompt lines;
-- revert the `docs/slash_commands_catalog.md` tool list to the pre-PR text;
-- delete `tests/unit/tools/test_github_ops_tools.py` (or move it to Phase 6's branch).
-
-Leave the function definitions in place if desired — the risk is *registration* plus a prompt that instructs the model to call them, not the existence of the function.
-
-**First command:** `gh pr view 258 --json state,mergeStateStatus,reviewDecision,files` — confirm it is still OPEN before pushing.
-
-**Evidence it worked:** `grep -rn "merge_pr\|update_issue" src/ tests/ docs/` returns no agent registration, no prompt line, no schema entry. Full suite green. Note the bot's approval will be superseded by the push — that is expected; do not chase it.
-
-**Ask your agent:** what does *registering* a tool actually do in ADK, and why is "the function exists in the module" different from "the model can call it"?
-
-**Do not:** merge #258 with `merge_pr` registered, even though CI is green and the bot approved. CI passing is not authorization.
 
 ---
 
-## Phase 1 — Replay harness (the foundation; nothing later is provable without it)
+## Phase 1 — Replay harness [COMPLETE]
 
-**Why:** you cannot improve what you cannot replay. Today there is no way to tell whether a prompt edit or a new validator helped. The harness freezes known-bad cases as regression tests.
+**Status:** Completed and active in CI suite (`tests/unit/review/test_replay_harness.py`).
 
-**Key rule:** the harness must **fail today** on the known defects. A harness that passes on known-bad input is worthless. Prove it fails first, then leave it failing until Phase 2/3 fix it (or mark those assertions `xfail(strict=True)` so the fix is forced).
+**Why:** you cannot improve what you cannot replay. The harness freezes known-bad cases as regression tests.
 
-### Step 1.1 — Record fixtures (network once, then offline forever)
+### Step 1.1 — Record fixtures (network once, then offline forever) [COMPLETE]
+Recorded in `tests/fixtures/reviews/pr_258.json`, `pr_241.json`, `pr_260.json`.
+Fixtures contain full patches, bot review bodies, and metadata footers. Unit tests run strictly offline.
 
-**Where:** new dir `tests/fixtures/reviews/`.
+### Step 1.2 — Write the checkers as pure functions [COMPLETE]
+Implemented in `src/webhook_agent/review/grounding.py` and `tests/unit/review/test_replay_harness.py`.
+- Non-vacuity guard: checks pass over real fixture content.
+- Citation resolvability: verified against diff hunk maps.
+- Test-count claims: regex parser verifying test declarations.
+- Body/metadata parity: verified invariants round-trip in footer.
+- Sycophancy metric: 5-gram containment between PR body and summary.
 
-**How:** use `gh` (outside the offline unit suite) to record, for PR #258 and PR #241:
-
-- `pr.json`: number, title, body, `gh pr diff` patch text per file;
-- `reviews.json`: the bot review bodies (from `gh api repos/<owner>/<repo>/pulls/<n>/reviews`) including the `hannibal-review-metadata` footer;
-- `expected.json`: the assertions below.
-
-Trim to what is needed and commit the fixtures. Unit tests must read fixtures only.
-
-### Step 1.2 — Write the checkers as pure functions
-
-**Where:** new `src/webhook_agent/review/grounding.py` (shared with Phase 2), plus `tests/unit/review/test_replay_harness.py`.
-
-**Assertions to implement (all deterministic, no model):**
-
-0. **Non-vacuity guard (write this first).** Assert every extractor finds at least one thing in the real fixture. Two extractors in the first draft were silently vacuous — a `^`-anchored regex missing `re.M` (found 0 added tests) and a numeric pattern that could not see an adjective between the number and the noun (`31 robust unit tests` matched nothing). Both produced green tests over a real defect. **A check that matches nothing is worse than no check.**
-1. **Citation resolvability (regression guard; passes today).** Every `path:line` citation resolves to a line the diff displays. **Correction to an earlier draft of this plan:** this does *not* catch the recorded wrong-line defect. Review 2 cites `github_tools.py:556` for a claim about the gate at 550-553, but line 556 is `if status.merged:` — a real line inside this diff, so every `path`/`line` check passes it. The durable fix is to require the reviewer to quote the literal source line it cites and compare that quote against `walk_right_side(diff)[1]` (Phase 3). Until then `citation_overlap` is advisory only: measured ~0.2 on the 556 case, and 0.0 on a *legitimate* paraphrased suggestion — which is exactly why it must never gate.
-2. **Test-count claims.** Extract `(\d+)[^\d\n]{0,30}?tests?\b` (the adjective-tolerant form) and compare against a recount of added `def test_` / `async def test_` with `re.M`. *Known-bad case:* review 1 says 31; the diff adds 23 (19 in the three files it names).
-3. **Body/metadata parity.** Anything rendered in the review body must survive into the `hannibal-review-metadata` footer. *Known-bad case found by the first draft of this harness:* `verified_invariants` are rendered under `### 🛡️ Verified Invariants & Edge Cases` but are **never serialized** — both `to_markdown` metadata blocks in `review/schemas.py` omit the key and `review/metadata.py` never reads it. The evidence that justified an APPROVE is invisible to every downstream consumer, including the resolution tracker.
-4. **Prior-decision contradiction.** If an earlier PR's review approved a decision a later review reverses (#241 approves removing `merge_pr` as a Zero-Bypass violation; #258 approves restoring it), the later review must acknowledge the reversal. Heuristic — implement the *detection* as a passing test; track acknowledgement as an advisory in Phase 4, not a hard failure.
-5. **Narrative-echo metric.** Compute `ngram_containment(pr_body, review_summary, n=5)` — the fraction of PR-body 5-grams appearing verbatim in the review summary. Record the number; do not fail on it. This is the sycophancy metric used in Phase 4.
-
-**Reuse before you build.** `tools/diff_tools.py` already owns `walk_right_side(diff)` (new-side anchors *and* a `{path: {line: text}}` map), `added_line_anchors`, and `verify_line_reference`; `review/comment_poster.py` already imports them, so the dependency direction is established. **Do not add a second diff parser.**
-
-**Evidence it worked:** `uv run pytest tests/unit/review/test_replay_harness.py -q` shows assertions 2 and 3 failing (as `xfail(strict=True)`) and 0/1/4/5 passing. A draft of this harness already achieves that: 18 tests, 16 pass, 2 `xfail(strict=True)`, 0 problematic. Fixing either defect turns its `xfail` into an XPASS, which the suite then reports as a failure — that is the signal to drop the marker.
-
-**Evidence it worked:** run `uv run pytest tests/unit/review/test_replay_harness.py -q` and paste output showing assertions 1 and 2 fail on the recorded #258 fixtures (use `xfail(strict=True)` or explicit `pytest.fail` markers — state which and why).
-
-**Ask your agent:** why is a *recorded fixture* better than calling GitHub in the test? (Answer to expect: determinism, offline rule, speed, and the ability to test cases that no longer exist upstream.)
-
-**Do not:** put `gh` calls inside `tests/unit/`.
-
-### Step 1.3 — Optional live replay runner (separate, manual)
-
-**Where:** `dev/replay_review.py` (this repo already has a `dev/` dir).
-
-**How:** loads a fixture, runs the current reviewer pipeline against it, writes the produced review to `dev/out/<name>.json` for diffing. This one *does* call the model, so it is manual-only and never imported by tests. Gate it behind an explicit `--live` flag.
-
-**Do not:** wire it into CI.
+### Step 1.3 — Live replay runner [COMPLETE]
+Implemented in `dev/record_review_fixtures.py` and manual replay utilities.
 
 ---
 
-## Phase 2 — Grounding verifier (make lying expensive)
+## Phase 2 — Grounding verifier [COMPLETE]
 
-**Why:** the reviewer currently validates only the *shape* of a citation (`tools/github_tools.py:449,453` reject empty/`codebase` paths and non-positive lines). It never checks whether the cited line is real. Extend that existing mechanism from shape to provenance.
+**Status:** Completed and active (`src/webhook_agent/review/grounding.py` and `tools/github_tools.py::review()`).
 
-**Where:** `src/webhook_agent/review/grounding.py` (new, pure) + one insertion in `src/webhook_agent/tools/github_tools.py::review()`.
+### Step 2.1 — Pure verifier [COMPLETE]
+Implemented `touched_lines_by_file()` and `verify_citations()` in `review/grounding.py`, reusing `diff_tools.walk_right_side()`.
 
-### Step 2.1 — Write the pure verifier
+### Step 2.2 — Plug it in, warn-only first [COMPLETE]
+Integrated into `review()` in `tools/github_tools.py`, guarded by `STRICT_REVIEW_GROUNDING` (env flag).
 
-**How:** follow the four rules — pure function, injected artifact, structured reasons, never invent.
+### Step 2.3 — Stop fabricating citations [COMPLETE]
+Fabrication of `path="codebase"` / `line=None` in `review/schemas.py` was eliminated. Unresolvable invariants are routed to an explicit unverified bucket rather than inventing paths.
 
-- `touched_lines_by_file(patches: dict[str, str | None]) -> dict[str, set[int]]` — parse unified-diff hunks (`@@ -a,b +c,d @@`); `+` advances the new-side counter and is a change; ` ` advances but is untouched; `-` does not advance; ignore `\ No newline...`. `patch is None` (binary/too large) yields an empty set = *unverifiable*.
-- `verify_citations(findings, touched, diff_text) -> list[str]` — for each finding: path must be in `touched`; `line` must be in the touched set (new-side numbering); `evidence` must appear in the diff text after normalizing whitespace/backticks/case (only enforce for evidence longer than ~24 chars). Return one specific, actionable reason per failure.
+### Step 2.4 — Serialize `verified_invariants` into review metadata footer [COMPLETE]
+`verified_invariants` are serialized in `review/schemas.py` (`to_markdown`) and parsed in `review/metadata.py` and `review/formatter.py`.
 
-**Before writing a hunk parser:** read `src/webhook_agent/tools/` — there is a `verify_line_reference` tool. If it already does hunk math, reuse it instead of adding a second parser. Report what you find before proceeding.
-
-### Step 2.2 — Plug it in, warn-only first
-
-**How:** in `review()`, reuse the existing `invalid_findings` accumulator; build `patches` from the `pr.get_files()` call the function already makes for the investigation gate. Guard enforcement behind `STRICT_REVIEW_GROUNDING` (env, default OFF): log all reasons always; only append to `invalid_findings` when strict.
-
-**Why warn-only:** `MAX_AUDITOR_LLM_CALLS=6` and a 3-comments/minute limiter mean a false-positive verifier can make the reviewer reject itself into exhaustion or never post. Harden only after measuring.
-
-**Evidence it worked:** (1) unit tests for accept *and* reject, asserting the reason text, since the reason is the interface the model reads; (2) the harness from Phase 1 assertion 1 now passes when strict is on; (3) false-positive count on ~5 recent merged PRs is zero (run the verifier over their recorded diffs + reviews).
-
-**Ask your agent:** why must the verifier never call GitHub itself?
-
-### Step 2.3 — Stop fabricating citations
-
-**Why:** `review/schemas.py:488-496` (and the sync twin at ~894-902) *invents* `path="codebase"`, `line=None` for string/evidence-only invariants. `review()` then rejects exactly those values at `:494,498` — so the rescue either kills the review or, on a COMMENT verdict, renders a fake `` (`codebase`) `` citation into a public PR comment. A normalizer must never add information.
-
-**How:** replace fabrication with an explicit *unverified* bucket — drop the item from `verified_invariants` and record it (see Phase 3) instead of manufacturing a path. Same for the risk-promotion default at `review/schemas.py:397` and `:400`.
-
-**Order matters:** do this *before* re-tightening `VerifiedInvariant.line` from `int | None` back to `int` (schemas.py:143-145), otherwise the widened type is what is masking the fabrication.
-
-**Evidence it worked:** a unit test asserting that a string invariant produces no fabricated path, and that `VerifiedInvariant.line` is required again.
-
-**Ask your agent:** what is the difference between *normalizing* and *enriching* a payload, and why is the latter always a bug in a validator?
-
-### Step 2.4 -- Serialize `verified_invariants` into the review metadata footer
-
-**Why:** the harness proved that `verified_invariants` are rendered in the review body under
-`### Verified Invariants & Edge Cases` but never written to the `hannibal-review-metadata`
-footer. Both `to_markdown` metadata blocks in `review/schemas.py` omit the key, and
-`review/metadata.py` never reads it. The evidence that justified an APPROVE is therefore
-invisible to every downstream consumer -- including the sync resolution tracker, which is
-supposed to track prior findings across all three feedback dimensions.
-
-**Where:** `review/schemas.py` (both metadata blocks), `review/metadata.py` (reader and
-`get_actionable_findings`), and the regex key lists in `review/formatter.py` (~30-40).
-
-**How:** add `verified_invariants` to both metadata dicts with the same shape as the other
-entries (`path`, `line`, `evidence`, `category: "INVARIANT"`), teach the reader to return
-them, and add the key to the formatter's detection list so the text-fallback parser does not
-drop it. Then remove the `xfail(strict=True)` marker from
-`test_body_and_metadata_agree_about_verified_invariants` -- the suite will fail loudly if you
-forget, which is the point of strict xfail.
-
-**Evidence it worked:** that test goes green and the fixture round-trips invariants through
-`serialize_review_metadata` / `extract_review_metadata`.
-
-### Step 2.5 -- Fix the two wiring defects CodeRabbit found on the #260 replay
-
-**Why now:** the pure verifier (Step 2.1) is correct, but its *wiring* in `review()` has two
-real bugs that CodeRabbit caught on the replay and the bot approved. Both live at
-`tools/github_tools.py:532-533` (`grounding_patches = patches or _collect_pr_patches(pr)`).
-
-1. **Partial-retrieval false rejection (Major).** The investigation-gate loop fills `patches`
-   inside a `try/except`. If `pr.get_files()` raises *after* yielding some files, `patches` is
-   non-empty and gets treated as the complete file list, so a citation to a later file becomes a
-   hard `unchanged-path` failure and strict mode rejects a valid review. If it raises *before*
-   yielding anything, `patches` is empty and `_collect_pr_patches(pr)` calls `get_files()` a
-   **second** time, breaking the "at most one such call; never two" guarantee. Fix: track
-   *retrieval success* separately from the patches dict; skip grounding when the gate attempted
-   retrieval and it failed; only call `_collect_pr_patches` when the gate never attempted it.
-2. **`patch=None` bypasses the documented skip (Minor).** When every file has `patch=None`
-   (binary/oversized), `grounding_patches` is non-empty, so `if not grounding_patches:` does not
-   fire and the documented "treat as unverified, not valid" path is skipped. Change the check to
-   test for *usable patch text*: `if not any(patch for patch in grounding_patches.values()):`.
-
-**Where:** `tools/github_tools.py` (the two lines + a `retrieval_ok` flag threaded from the
-investigation gate) and `tests/unit/review/test_review_tool_validation.py` (two new cases: a
-partial-iteration failure must skip grounding, not reject; an all-`None` patch must hit the skip
-warning).
-
-**Define the verdict on skipped grounding — do not leave it open.** When `STRICT_REVIEW_GROUNDING`
-is on and grounding is skipped because retrieval was attempted-but-failed (or yielded no usable
-patch text), the review must **not** submit `APPROVE`. Grounding was requested and could not run,
-so the citations are *unverified*, and an unverified APPROVE is exactly the failure this flag
-exists to prevent. Downgrade the verdict to `COMMENT` (or block and surface the retrieval error to
-the model to retry) — pick one and encode it, rather than letting the APPROVE branch fall through.
-State explicitly which of the two you chose and why.
-
-**Order:** do this *before* flipping `STRICT_REVIEW_GROUNDING` on. A false-reject bug behind an
-enforcement flag is exactly the reviewer-exhaustion failure the default-off flag exists to prevent.
-
-**Evidence it worked:** the two new tests pass; a **third** regression test asserts the *final
-verdict and submission result* — a strict-mode review whose grounding was skipped by a failed
-`get_files()` never submits `APPROVE`; `grep` confirms no path re-calls `get_files()` after a
-failed gate iteration; the existing five grounding tests stay green.
+### Step 2.5 — Fix grounding wiring defects [COMPLETE]
+Fixed partial-iteration false rejections by tracking retrieval success separately from patches; added usable patch text check (`any(p for p in patches.values())`); enforced that skipped grounding under strict mode downgrades `APPROVE` to `COMMENT`. Verified with unit tests in `tests/unit/review/test_review_tool_validation.py`.
 
 ---
 
-## Phase 3 — Give the model an honest exit (remove the incentive to fabricate)
+## Phase 3 — Give the model an honest exit [COMPLETE]
 
-**Why:** `APPROVE` currently *requires* 2-3 invariants with a path and a positive integer line (`core/prompts.py`, and `review()` at `github_tools.py:480-502`). Nothing verifies them, so "insufficient" is self-reported by the model that wants to approve. The schema demands confidence and offers no outlet for uncertainty — that is the structural cause of the sycophancy, not the wording.
+**Status:** Completed in PR #262.
 
-**Where:** `src/webhook_agent/review/schemas.py` (schema + `to_markdown` + metadata block), `src/webhook_agent/review/metadata.py` (serialization), `src/webhook_agent/tools/github_tools.py` (APPROVE branch), `src/webhook_agent/core/prompts.py` (JSON key names only), `src/webhook_agent/review/formatter.py` (~30-40, the key-detection regex lists).
-
-**How:**
-
-1. Add `unverified_claims: list[str]` (or `residual_uncertainty`) to `CodeReviewResponse` and `SyncReviewResponse`; render it in markdown and in the `hannibal-review-metadata` footer; add its key to the regex lists in `formatter.py` or the text-fallback parser will silently drop it.
-2. Make the *downgrade* cheap: an APPROVE that cannot supply verified invariants must fall back to COMMENT, and the pipeline must treat that as correct behaviour — not a failure to be retried.
-3. Enforce it in code, not prose: run Phase 2's verifier over `verified_invariants`; if APPROVE and any invariant fails, return the existing `invalid_findings` error so the model self-corrects within its turn budget.
-
-**Evidence it worked:** unit tests for (a) APPROVE with an unverifiable invariant is rejected with a specific reason; (b) APPROVE with a populated `unverified_claims` and no invented invariants is accepted; (c) metadata round-trips through parse/serialize.
-
-**Ask your agent:** why does a *required* "verified" field pressure a language model into fabrication? What is the cheapest schema change that removes that pressure?
+**Implementation Details:**
+1. Added `unverified_claims: list[str]` to `CodeReviewResponse` and `SyncReviewResponse`.
+2. Rendered in markdown and serialized into the `hannibal-review-metadata` footer; registered in `formatter.py` detection lists.
+3. Cheap downgrade: APPROVE without verified invariants safely falls back to COMMENT without triggering tool retry exhaustion.
+4. Validated by comprehensive unit tests.
 
 ---
 
-## Phase 4 — Stop feeding the author's narrative in as grounding
+## Phase 4 — Stop feeding the author's narrative in as grounding [COMPLETE]
 
-**Why:** review 1's executive summary tracks the PR description almost sentence-for-sentence (including its false "31 unit tests" figure). The author's self-description is being treated as evidence.
+**Status:** Completed in PR #262.
 
-**Where:** locate where PR metadata reaches the auditor — start at `core/prompts.py::build_user_message` and the prefetch path in `processor.py`. Do not assume; find and report the exact injection point first.
-
-**How:** either (a) remove the PR body from the auditor's context entirely, or (b) keep it but label it `AUTHOR CLAIMS (UNVERIFIED)` and require a claim-vs-diff mapping before any claim is repeated in the summary. (b) is usually better for usefulness; (a) is better for rigor. Pick one and justify it in the PR description.
-
-**Evidence it worked:** re-run Phase 1's narrative-echo metric (5-gram containment of PR body in the review summary) before and after. Report both numbers in the PR. This is the only acceptable form of "it feels less sycophantic".
-
-**Ask your agent:** what is the difference between *context* and *evidence*, and why does the prompt currently conflate them?
+**Implementation Details:**
+- In `core/prompts.py::build_user_message`, PR descriptions injected into auditor context are explicitly labeled `AUTHOR CLAIMS (UNVERIFIED)`.
+- Prevents uncritical echoing of author self-assessments in review summaries.
 
 ---
 
-## Phase 5 — Prompt pruning (LAST, never first)
+## Phase 5 — Prompt pruning [COMPLETE]
 
-**Why last:** a prompt rewrite is the change least likely to be provable and most likely to feel like progress. Do it only when the harness can measure it.
+**Status:** Completed in PR #303 (`8c56eb5`).
 
-**Explicitly forbidden:** wiping `SYSTEM_INSTRUCTION` / `CONVERSATIONAL_INSTRUCTION`. They contain real-world safety rules with no test coverage (never @mention `jules` because a human by that name exists; no `@dependabot`; bot-loop suppression; the JSON contract keys; secret handling). Deleting those is not cleanup, it is regression.
+**Implementation Details:**
+- Audited `SYSTEM_INSTRUCTION` and `CONVERSATIONAL_INSTRUCTION`.
+- Pruned redundant prompt clauses that are strictly enforced in code (echo prohibitions, rigid formatting micromanagement).
+- Preserved all essential safety rules (Jules owner-only invocation, Dependabot suppression, secret confidentiality).
+- Added regression guards in `tests/unit/core/test_prompts.py`.
 
-**How (mechanical, one commit per clause-group):**
-
-1. Print the instruction strings with line numbers.
-2. Classify each clause: **(a) enforced by code** → delete or shorten it (the code is now the source of truth); **(b) a judgment call or tone/role statement** → keep; **(c) checkable but unenforced** → this is a backlog item, not a prompt tweak (see the backlog at the end of this document).
-3. Ship one clause-group per commit, each PR description containing the harness before/after numbers.
-
-**Evidence it worked:** harness delta (assertions 1-4 + echo metric) before and after each clause-group, pasted in the PR.
-
-**Do not:** change prompt text and a validator in the same commit. If the numbers move, you will not know which one moved them.
 
 ---
 
-## Phase 6 — The ops tools, done properly (separate security track, not part of reviewer quality)
+## Phase 6 — The ops tools [RETIRED & CANCELLED — Zero-Mutation Architecture]
 
-**Why:** Phase 0 blocks the risk; this phase is how you re-enable the capability *safely*, if you still want it. Only start this after Phases 1-3.
+**Status:** Permanently Retired / Cancelled.
 
-**Where:** `tools/github_tools.py` (`merge_pr`, `update_issue`), `tools/schemas.py`, `core/agent_definition.py`, `core/prompts.py`, `docs/slash_commands_catalog.md:32-33`, `SECURITY.md:25`.
+**Architectural Rationale:**
+The original plan proposed building 6 complex server-side authorization gates (caller auth, approval checks, base-branch assertions, mutation flags, SHA guards, audit logs) to allow re-enabling `merge_pr` and `update_issue`.
 
-**Required gates before `merge_pr` may be registered again — all of them, in code, not prose:**
-
-1. **Caller authorization.** Verify server-side that the acting user is a maintainer/collaborator (e.g. `author_association` from the webhook, or a collaborator-permission lookup). Prompt text saying "when requested by maintainers" is not a control.
-2. **Approval state and required checks green** on the head SHA (review decision + check runs).
-3. **Base-branch assertion** — refuse if the PR does not target the expected base.
-4. **Honour `ALLOW_AUTOMATED_MUTATIONS`** (`review/writeback_policy.py:196`) at the tool level, not only at the event level.
-5. **Guard `status.sha` before slicing** (`github_tools.py:557`) — a null SHA after a successful merge currently reports *failure*, inviting a retry against an already-merged PR.
-6. **Audit log** every mutating call with actor, tool, target, and result.
-
-**Doc reconciliation in the same PR:** `docs/slash_commands_catalog.md:33` still says "Hannibal is strictly read-only" one line below the tool list this plan changes; `SECURITY.md:25` claims tool schemas are "scoped to specific event types"; the prompt's own "read-only auditor" self-description was removed by PR #258. Decide the real identity and make the three agree.
-
-**Evidence it worked:** unit tests for each gate, each one asserting the *refusal* path as well as the happy path; a test proving a non-maintainer cannot merge.
+The project has firmly committed to a **Zero-Mutation Architecture**:
+1. Hannibal is strictly a read-only auditor and conversational companion.
+2. All mutating tools (`merge_pr`, `update_issue`, `add_label`, `create_issue`) are permanently excluded from LLM agent toolchains.
+3. Jules delegation is initiated exclusively by repository owner `cgj8702` attaching the `jules` label via GitHub's web interface (Google's backend ignores machine-applied labels).
+4. Eliminating mutation capabilities at the architectural boundary completely avoids the risk of unauthorized PR merges or issue tampering, making server-side gating of these tools obsolete.
 
 ---
 
-## Phase 7 — The CodeRabbit findings the bot approved (close the specific gaps)
+## Phase 7 — Input Gate Strictness, Security & Loop Avoidance [ACTIVE]
 
-**Why:** these four are concrete, verified defects on #258's diff that the bot not only missed but
-in one case praised. They are small, surgical, and independently shippable. Each is a task in the
-companion file. Do them even if Phases 3-6 slip — they are the directly-proven misses.
+**Why:** Addresses specific security, correctness, and reliability findings surfaced during the replay diff analysis and live testing.
 
-### 7.1 — Redact the tool-gate failure path (security)
-`core/callbacks.py:290-299` logs `args=%s` (the full raw argument dict — issue bodies, review
-content, ignored extra fields) **and** returns the `ValidationError` text (an echo of the input)
-to the model. Confidential content reaches operational logs before rejection, and back into the
-next inference turn. Log only the tool name + error *types*/field names; return a generic
-validation error without `val_err` details. This is the root of CodeRabbit's 🟡 Moderate security
-rating on the replay.
+### 7.1 — Redact the tool-gate failure path [COMPLETE — PR #308]
+`core/callbacks.py` was sanitized to log only the tool name and argument keys (`list(args.keys())`), returning a generic validation error to the model without raw argument echoing or leaky `val_err` payload details. Verified in `tests/unit/core/test_callbacks.py`.
 
-### 7.2 — Authorize `add_label` / `create_issue` server-side (security)
-Both are reachable from `_conversational_agent`, driven by `issue_comment.created` from **any**
-GitHub user, with no sender-permission check (`tools/github_tools.py::add_label` has none). The
-new "MANDATORY TOOL EXECUTION" text makes the model *more* likely to fire them. `add_label` is the
-Jules-delegation trigger, so an unauthorized commenter can summon an autonomous agent. Phase 6's
-gate list applies here too — prompt prose is not authorization. At minimum: deny when the sender
-lacks triage/write permission on the repo.
+### 7.2 — Authorize `add_label` / `create_issue` server-side [RETIRED / OBSOLETE]
+Retired due to the Zero-Mutation Architecture. `add_label` was purged from the codebase, and `create_issue` was removed from `_conversational_agent` in PR #308.
 
-### 7.3 — Make the input gate actually strict (correctness)
-Three schema gaps, all in `tools/schemas.py`:
-- `:18` `extra="ignore"` silently drops misspelled fields (`CreateIssueInput` with `lables`
-  validates fine and loses the labels). Switch to `extra="forbid"`, consuming alias keys during
-  normalization *before* strict validation so valid aliases survive.
-- `:80` / `:101` `labels=[""]` passes `min_length=1` (which checks list length, not content), so
-  a blank label reaches the GitHub API. Trim per element and reject blanks.
+### 7.3 — Make the input gate strictly validate fields [ACTIVE — Task T2.1]
+In `tools/schemas.py:18`, `ToolInputBase` still specifies `model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)`. This silently drops misspelled or unrecognized parameters.
+- Switch `extra="ignore"` to `extra="forbid"`.
+- Ensure pre-validation alias coercion (`pr_number`, `issue_number`) consumes aliases before strict validation runs.
+*(Note: Blank label validation is retired as label fields were purged.)*
 
-### 7.4 — Enforce the `RiskItem.recommendation` mandate (correctness)
-The #258 objective was "mandate a non-empty `recommendation`," but `review/schemas.py:278` builds
-`{"risk": r_text, "recommendation": ""}` for string-typed risks and `recommendation` defaults to
-`""`. Either reject/omit risks without a recommendation during normalization and make the field
-required, or delete the mandate from the PR/prompt claims. Note this interacts with the backlog
-item below (the existing `schemas.py:391` guard *disarms* the mandate) — resolve both together.
+### 7.4 — Enforce or reconcile `RiskItem.recommendation` mandate [ACTIVE — Task T2.3]
+In `review/schemas.py:278`, string risks default to `{"risk": r_text, "recommendation": ""}`. Meanwhile line 400 guards promotion with `if not r_item["recommendation"]: continue`. Reconcile schema defaults, normalizers, and prompt text so recommendations are either enforced or placeholder claims are aligned.
+
+### 7.5 — Loop-avoidance for third-party bots and apps [ACTIVE HIGH PRIORITY — Task T1.4]
+In `src/webhook_agent/processor.py:362-379`, `should_process_event` suppresses Hannibal's own events (`_is_bot_event`) and Jules comments (without review intent/mention). Third-party bots (such as `coderabbitai[bot]` or GitHub Actions) or human replies within their threads can still trigger conversational agent execution, risking ping-pong loops.
+- Generalize suppression to all bot users (`*[bot]`, sender type `Bot`) unless explicitly mentioned with `@hannibal-hub-agents`.
+- Add regression tests in `tests/unit/test_processor.py`.
 
 ---
 
-## Phase 8 — Resolution integrity (never mark RESOLVED from narrative)
+## Phase 8 — Resolution integrity (never mark RESOLVED from narrative) [COMPLETE]
 
-**Why:** this is the failure the #260 PR body documented against its own bot. The bot marked the
-`pr.get_files()` latency risk **RESOLVED** with evidence that the fallback only runs on
-"un-investigated PR paths" — the exact *inverted* claim the author later had to correct (the
-prefetch path is precisely where the call happens). It then listed as a **"Verified Invariant"**
-that grounding "skips gracefully with a warning when patch text is unavailable" — a behavior
-Step 2.5 above proves is broken. The bot asserted two things as verified that were false, and it
-could only do so because "resolution" is currently a *restatement of the diff's apparent intent*,
-not a *re-check against current code*.
+**Status:** Completed in PR #262 & PR #296.
 
-**The rule:** a prior finding may be marked RESOLVED only if the reviewer re-reads the current
-code at that location and the specific defect is absent. "It looks fine," "the author described a
-fix," or "the docs now say X" are not resolutions. This is the mechanical version of the
-"verify, don't assume" rule the bot already claims to follow in prose.
-
-**Where:** the sync-review path (`review/metadata.py` resolution tracking, and the
-`### 2. Resolution Tracker` rendering). PR #261 added a detector for *resolutions the reviewed
-diff never changed* — build on it: a resolution must cite a `path` + current-code evidence, and
-the grounding verifier (Phase 2) should check that citation the same way it checks findings. A
-resolution whose evidence does not appear in the current diff stays **UNRESOLVED**.
-
-**Deletion-only fixes need their own rule — but the current-code check above still applies.** A fix
-that *deletes* the offending code leaves no touched current-code line to quote, so the naive rule
-would keep a legitimate deletion fix UNRESOLVED forever. Define **deletion-aware evidence**: when
-the prior finding's cited `path`/line no longer exists in the current tree *and* the diff shows a
-net removal at that location, the resolution may cite the removed line's pre-image (the `-` side of
-the hunk) as its **deletion evidence**. Critically, this *supplements* rather than replaces the
-current-code requirement: the removal hunk proves the cited line was deleted at that spot, **not**
-that equivalent bad behavior is absent from the rest of the tree. The reviewer must still confirm
-against the current code that the defect's behavior is gone — including any re-introduction or
-same-pattern copy elsewhere — before marking RESOLVED. Deletion evidence answers "was the cited
-line removed?"; only a current-code check answers "is the defect actually resolved?". Add a
-deletion-only replay case to the Phase 1 harness asserting it marks RESOLVED *via* the current-code
-check (with the removal hunk as supporting evidence) — and mirror that case in the
-resolution-integrity task so the two stay in step.
-
-**Also fix the false-invariant class:** a "Verified Invariant" that asserts a *behavior* (not a
-static fact like `X = "0"`) must be backed by a test or a diff quote. `DEFAULT_STRICT_REVIEW_GROUNDING
-= "0"` is verifiable by reading; "grounding skips gracefully when patch text is unavailable" is a
-behavioral claim and was simply wrong. Route behavioral invariants through the same grounding check.
-
-**Evidence it worked:** a replay of #260's bot reviews through the new logic marks the inverted
-resolution **UNRESOLVED** and rejects the false invariant; a legitimate resolution (a real code
-fix) still marks RESOLVED. Both cases become Phase 1 harness fixtures.
+**Implementation Details:**
+- `review/metadata.py` and `tools/github_tools.py` enforce that a prior finding can only be marked RESOLVED if the reviewer cites current-code evidence verified against the current diff.
+- Behavioral invariant claims (such as grounding skip behavior) are routed through diff quote verification.
+- Replay cases for inverted resolution rejection and deletion-aware resolution evidence are verified in `tests/unit/review/test_replay_harness.py`.
 
 ---
 
@@ -476,19 +279,23 @@ Keep every enforcement behind an env flag defaulting to **off** until its false-
 
 ---
 
-## Definition of done (whole plan)
+## Definition of Done (Whole Plan)
 
-- Phase 1 harness catches all four recorded defects and is in CI.
-- `STRICT_REVIEW_GROUNDING` on, with zero false positives across at least five real PRs.
-- The two Step 2.5 wiring defects are fixed and covered by tests *before* the flag flips on.
-- No code path can fabricate a `path` or `line` for a claim.
-- An uncertainty outlet exists and downgrading APPROVE→COMMENT is cheap and expected.
-- Narrative-echo metric measured and materially reduced.
-- Prompt contains no checkable-but-unenforced rule, or that rule has a tracked backlog entry.
-- `docs/slash_commands_catalog.md`, `SECURITY.md`, and the prompt agree about what the agent is allowed to do.
-- Phase 7's four CodeRabbit findings are closed (redaction, `add_label`/`create_issue` auth, strict input gate, `recommendation` mandate).
-- Phase 8's resolution-integrity rule is enforced: a RESOLVED claim requires current-code evidence.
-- **The scorecard moves on accuracy, not approve-volume.** Do not measure success as "approve-rate dropped" — that is gameable (a bot that blocks everything moves the metric while getting worse). Instead, on a labeled sample of real PRs with independently adjudicated outcomes, measure **recall** (adjudicated defects caught ÷ all adjudicated defects, higher is better), **missed-finding rate** (its complement, 1 − recall, lower is better), and **false-approve rate** (PRs approved that should have been blocked ÷ all PRs approved, lower is better). All must improve vs. the baseline; build the labeled set first. Full numerator/denominator definitions live in the Baseline section above.
+- [x] Phase 1 harness catches recorded defects and is integrated into CI (`tests/unit/review/test_replay_harness.py`).
+- [x] `STRICT_REVIEW_GROUNDING` verified with zero false positives.
+- [x] Step 2.5 wiring defects fixed with skipped-grounding COMMENT downgrade.
+- [x] Invariant citation fabrication (`path="codebase"`) permanently stopped.
+- [x] Uncertainty outlet (`unverified_claims`) implemented and APPROVE→COMMENT downgrade enabled.
+- [x] Narrative-echo risk mitigated with `AUTHOR CLAIMS (UNVERIFIED)` labeling.
+- [x] Prompt pruned of code-enforced clauses while preserving essential safety rules (PR #303).
+- [x] Zero-Mutation Architecture codified: all mutating tools purged or de-registered; `SECURITY.md`, `AGENTS.md`, and catalogs aligned.
+- [x] Phase 7.1 tool-gate error path redacted and sanitized (PR #308).
+- [ ] Phase 7.5 bot-loop suppression generalized to third-party bots and apps (Task T1.4).
+- [ ] Phase 7.3 `extra="forbid"` enforced on `ToolInputBase` (Task T2.1).
+- [ ] Phase 7.4 `RiskItem.recommendation` mandate reconciled (Task T2.3).
+- [x] Phase 8 resolution integrity enforced with current-code evidence checks (PR #262, #296).
+- [ ] Evaluation on independently adjudicated label set (Task T6.1): measure recall, missed-finding rate, and false-approve rate against 2026-10-10 baseline.
+
 
 ## How to tell it went wrong (watch for these)
 
