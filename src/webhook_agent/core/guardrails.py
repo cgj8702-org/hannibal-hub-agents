@@ -12,6 +12,7 @@ import json
 import logging
 from typing import Any
 
+from google.adk.agents.base_agent import BaseAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
@@ -20,6 +21,32 @@ from google.adk.tools import BaseTool
 from google.adk.tools.tool_context import ToolContext
 
 logger = logging.getLogger("webhook_agent.core.guardrails")
+
+GUARDRAIL_STATE_KEYS = (
+    "guardrail_turn_count",
+    "guardrail_tool_calls_count",
+    "halt_reason",
+    "guardrail_tool_call_history",
+    "guardrail_tool_failures",
+)
+
+
+def reset_guardrail_state(state: Any, keys: tuple[str, ...] | list[str] | None = None) -> None:
+    """Safely reset guardrail budget and failure tracking keys from session state."""
+    target_keys = keys or GUARDRAIL_STATE_KEYS
+    for k in target_keys:
+        if isinstance(state, dict):
+            state.pop(k, None)
+            continue
+        # ADK State class stores keys in private _value and _delta dicts without a pop/del method
+        val = getattr(state, "_value", None)
+        if isinstance(val, dict):
+            val.pop(k, None)
+        delta = getattr(state, "_delta", None)
+        if isinstance(delta, dict):
+            delta.pop(k, None)
+        if hasattr(state, "pop") and callable(state.pop):
+            state.pop(k, None)
 
 
 class IterationBudgetPlugin(BasePlugin):
@@ -35,11 +62,20 @@ class IterationBudgetPlugin(BasePlugin):
         self.max_turns = max_turns
         self.max_tool_calls = max_tool_calls
 
+    async def before_agent_callback(
+        self, *, agent: BaseAgent, callback_context: CallbackContext
+    ) -> Any | None:
+        reset_guardrail_state(
+            callback_context.state,
+            ("guardrail_turn_count", "guardrail_tool_calls_count", "halt_reason"),
+        )
+        return None
+
     async def before_model_callback(
         self, *, callback_context: CallbackContext, llm_request: LlmRequest
     ) -> LlmResponse | None:
         state = callback_context.state
-        turn_count = state.get("guardrail_turn_count", 0) + 1
+        turn_count = (state.get("guardrail_turn_count") or 0) + 1
         state["guardrail_turn_count"] = turn_count
 
         if turn_count > self.max_turns and not state.get("halt_reason"):
@@ -73,7 +109,7 @@ class IterationBudgetPlugin(BasePlugin):
         tool_context: ToolContext,
     ) -> dict[str, Any] | None:
         state = tool_context.state
-        calls_count = state.get("guardrail_tool_calls_count", 0) + 1
+        calls_count = (state.get("guardrail_tool_calls_count") or 0) + 1
         state["guardrail_tool_calls_count"] = calls_count
 
         if calls_count > self.max_tool_calls:
@@ -110,6 +146,15 @@ class GuardrailsPlugin(BasePlugin):
         super().__init__(name=name)
         self.failure_threshold = failure_threshold
         self.no_progress_window = no_progress_window
+
+    async def before_agent_callback(
+        self, *, agent: BaseAgent, callback_context: CallbackContext
+    ) -> Any | None:
+        reset_guardrail_state(
+            callback_context.state,
+            ("guardrail_tool_call_history", "guardrail_tool_failures", "halt_reason"),
+        )
+        return None
 
     async def before_tool_callback(
         self,

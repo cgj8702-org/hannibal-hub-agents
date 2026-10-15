@@ -5,12 +5,14 @@ Extracted from webhook_agent.py as Phase 3 of codebase modularization.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
 from typing import Any
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
+from webhook_agent.review.critic import CriticEngine
 from webhook_agent.review.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -21,6 +23,7 @@ from webhook_agent.review.formatter import (
     render_code_review_markdown,
     render_sync_review_markdown,
 )
+from webhook_agent.review.hunter import HunterEngine
 from webhook_agent.review.schemas import CodeReviewResponse, SyncReviewResponse
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
 from webhook_agent.state.review_idempotency import review_claim_registry
@@ -96,7 +99,7 @@ def _enforce_verdict(
             json_candidates.append(cb_match.group(1))
 
         for json_obj_match in re.finditer(
-            r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions)\"[\s\S]*?\})",
+            r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions|candidate_findings)\"[\s\S]*?\})",
             body,
         ):
             json_candidates.append(json_obj_match.group(1))
@@ -181,11 +184,45 @@ def _enforce_verdict(
         review_budget = None
         existing_comments_data = []
 
+    critic_engine = CriticEngine()
+    hunter_engine = HunterEngine()
+
     for data in data_candidates:
         try:
             if isinstance(data, dict):
                 if is_intended_request_changes and not data.get("verdict"):
                     data["verdict"] = "REQUEST_CHANGES"
+
+                # Process candidate findings through Hunter & Critic if present
+                if "candidate_findings" in data and isinstance(data["candidate_findings"], list):
+                    parsed_candidates = hunter_engine.parse_candidate_findings(
+                        data["candidate_findings"]
+                    )
+                    verdicts = None
+                    if "verification_verdicts" in data and isinstance(
+                        data["verification_verdicts"], list
+                    ):
+                        verdicts = {}
+                        for v in data["verification_verdicts"]:
+                            if isinstance(v, dict) and "finding_id" in v:
+                                from webhook_agent.review.schemas import VerificationVerdict
+
+                                with contextlib.suppress(Exception):
+                                    verdicts[v["finding_id"]] = VerificationVerdict.model_validate(
+                                        v
+                                    )
+                    survivor_issues = critic_engine.filter_and_verify(
+                        parsed_candidates, verdicts=verdicts
+                    )
+                    if "critical_issues" not in data and "minor_suggestions" not in data:
+                        data = dict(data)
+                        data["critical_issues"] = []
+                        data["minor_suggestions"] = []
+                        for issue in survivor_issues:
+                            if getattr(issue, "severity", None) in ("CRITICAL", "HIGH"):
+                                data["critical_issues"].append(issue)
+                            else:
+                                data["minor_suggestions"].append(issue)
 
                 # Webhook mode is authoritative. The model may return the
                 # initial schema for a synchronize event (or vice versa).
@@ -211,6 +248,10 @@ def _enforce_verdict(
                 if use_sync_schema:
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+                    sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
+                    sync_obj.minor_suggestions = critic_engine.filter_issues(
+                        sync_obj.minor_suggestions
+                    )
 
                     # Programmatic hallucination guard: clear resolutions if no prior review
                     # had actionable items (critical issues, suggestions, or risks)
@@ -274,9 +315,12 @@ def _enforce_verdict(
                     "executive_summary" in data
                     or "critical_issues" in data
                     or "minor_suggestions" in data
+                    or "candidate_findings" in data
                 ):
                     normalized_data = normalize_code_review_dict(data)
                     cr_obj = CodeReviewResponse.model_validate(normalized_data)
+                    cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
+                    cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
                     enforced_verdict = calculate_strict_verdict(cr_obj)
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
@@ -322,6 +366,8 @@ def _enforce_verdict(
         if review_mode == "sync":
             normalized_sync = normalize_sync_review_dict(parsed_dict)
             sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+            sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
+            sync_obj.minor_suggestions = critic_engine.filter_issues(sync_obj.minor_suggestions)
             if diff_text:
                 from .comment_poster import filter_echo_suggestions
 
@@ -336,6 +382,8 @@ def _enforce_verdict(
 
         normalized_dict = normalize_code_review_dict(parsed_dict)
         cr_obj = CodeReviewResponse.model_validate(normalized_dict)
+        cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
+        cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
         enforced_verdict = calculate_strict_verdict(cr_obj)
         if is_intended_request_changes and enforced_verdict == "APPROVE":
             logger.warning(

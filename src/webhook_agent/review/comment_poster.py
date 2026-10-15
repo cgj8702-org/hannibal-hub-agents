@@ -11,7 +11,6 @@ from typing import Any
 
 from github import Github
 
-from ..schemas import IssueItem
 from ..tools.diff_tools import (
     _norm,
     _strip_diff_prefix,
@@ -19,6 +18,7 @@ from ..tools.diff_tools import (
     walk_right_side,
 )
 from .duplicate_detector import already_raised, build_exclusions, group_repeated_findings
+from .schemas import IssueItem
 
 logger = logging.getLogger("webhook_agent.review.comment_poster")
 
