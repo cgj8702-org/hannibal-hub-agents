@@ -157,7 +157,7 @@ class WebhookAgent:
             model_name=self._current_model_name,
             api_key=get_active_api_key(),
         )
-        PromptSanitizerPlugin()
+        self._sanitizer_plugin = PromptSanitizerPlugin()
 
         # Streamlined workflow: START -> code_auditor
         # Single-pass high-velocity auditor eliminating redundant sub-agent hops.
@@ -249,6 +249,7 @@ class WebhookAgent:
             plugins=[
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,
+                self._sanitizer_plugin,
             ],
         )
 
@@ -259,6 +260,7 @@ class WebhookAgent:
             plugins=[
                 self._history_pruning_plugin,
                 self._tool_pruning_plugin,
+                self._sanitizer_plugin,
             ],
         )
 

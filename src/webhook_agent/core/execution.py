@@ -391,6 +391,8 @@ def execute_agent_event(
     changed_files_list = list(raw.get("changed_files") or [])
     deterministic_state = {
         "deterministic_changed_files": changed_files_list,
+        "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
+        "formal_review_eligible": _is_formal_review_eligible(canonical, comment_body),
     }
 
     async def _run() -> None:

@@ -300,6 +300,7 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is False
 
+    @pytest.mark.regression
     def test_review_submitted_does_not_mark_open_pr_closed(self):
         """A review submission must NOT register an open PR in the closed registry.
 
@@ -338,6 +339,7 @@ class TestShouldProcessEvent:
         # Clean up the singleton so it cannot leak into other tests.
         pr_closed_registry._closed.pop("owner/repo#42", None)
 
+    @pytest.mark.regression
     def test_pr_alias_closed_event_still_marks_registry(self):
         """The `pr` event-name alias with action=closed must still register as closed.
 
@@ -550,6 +552,7 @@ class TestShouldProcessEvent:
             assert "modified files" not in caplog.text
 
 
+@pytest.mark.regression
 class TestAgentCoreSingleton:
     """Regression test: AgentCore/WebhookAgent must be constructed once per
     WebhookProcessor and reused across events, not rebuilt per event — otherwise
@@ -1289,6 +1292,7 @@ class TestBaseBranchMergeSync:
             assert processor._agent_core.run.call_count == 1
 
     def test_process_event_skips_prefetch_when_pr_closed(self):
+        """When PR payload indicates closed state, process_event must skip prefetch and agent execution."""
         from unittest.mock import MagicMock, patch
 
         processor = WebhookProcessor()
@@ -1315,6 +1319,47 @@ class TestBaseBranchMergeSync:
             processor.process_event(payload)
             mock_prefetch_diff.assert_not_called()
             processor._agent_core.run.assert_not_called()
+
+    def test_process_event_defers_when_live_head_verification_fails(self, caplog):
+        """When live-head verification lookup fails with an exception, process_event must defer rather than review stale data."""
+        from unittest.mock import MagicMock, patch
+
+        processor = WebhookProcessor()
+        mock_gh = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.get_pull.side_effect = RuntimeError("GitHub API connection error")
+        mock_gh.get_repo.return_value = mock_repo
+        processor._gh = mock_gh
+        processor._agent_core = MagicMock()
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-err-1",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "developer"},
+            "repository": {"full_name": "owner/repo"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 102,
+                    "state": "open",
+                    "head": {"sha": "sha_live_err"},
+                }
+            },
+        }
+
+        with (
+            patch("webhook_agent.processor._prefetch_pr_diff") as mock_prefetch_diff,
+            patch(
+                "webhook_agent.processor.review_checkpoint_manager.get_resumable",
+                return_value=None,
+            ),
+        ):
+            processor.process_event(payload)
+            mock_prefetch_diff.assert_not_called()
+            processor._agent_core.run.assert_not_called()
+            assert "Could not verify live PR head" in caplog.text
+            assert "deferring to avoid reviewing stale data" in caplog.text
 
     def test_worker_main_resume_sweep_triggers_processor(self, monkeypatch):
         from unittest.mock import patch

@@ -44,7 +44,7 @@ from webhook_agent.review.grounding import (
     verify_citations,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.regression]
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "reviews"
 FIXTURE_258 = _FIXTURES / "pr_258.json"

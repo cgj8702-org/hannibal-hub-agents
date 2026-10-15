@@ -649,6 +649,46 @@ class WebhookProcessor:
                 )
                 return
 
+        # Fast-push debouncing: abort if head commit has been superseded by a newer push
+        if (
+            is_pr_event
+            and head_sha
+            and pr_num_int is not None
+            and canonical in GATED_EVENTS
+            and gh is not None
+        ):
+            try:
+                live_pr = gh.get_repo(repo_name).get_pull(pr_num_int)
+                live_state = getattr(live_pr, "state", None)
+                if isinstance(live_state, str) and live_state != "open":
+                    logger.info(
+                        "🔒 PR %s#%s is not open (state=%s); skipping.",
+                        repo_name,
+                        pr_number,
+                        live_state,
+                    )
+                    return
+                live_head_sha = getattr(getattr(live_pr, "head", None), "sha", None)
+                if isinstance(live_head_sha, str) and live_head_sha and live_head_sha != head_sha:
+                    logger.info(
+                        "⚡ PR %s#%s commit %s superseded by live head %s; skipping evaluation.",
+                        repo_name,
+                        pr_number,
+                        head_sha[:7],
+                        live_head_sha[:7],
+                    )
+                    return
+            except Exception as live_err:
+                logger.warning(
+                    "⚠️ Could not verify live PR head for %s#%s (commit %s): %s — "
+                    "deferring to avoid reviewing stale data.",
+                    repo_name,
+                    pr_number,
+                    head_sha[:7] if head_sha else "unknown",
+                    live_err,
+                )
+                return
+
         resumed_checkpoint: dict[str, Any] | None = None
         if is_pr_event and pr_num_int is not None and head_sha:
             resumed_checkpoint = review_checkpoint_manager.get_resumable(
