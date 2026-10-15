@@ -423,3 +423,49 @@ def test_retry_loop_resets_user_message_prompt(monkeypatch: pytest.MonkeyPatch):
     assert captured_texts[0].count("[YOUR PREVIOUS REVIEW CRITIQUE]") == 1
     assert captured_texts[1].count("[YOUR PREVIOUS REVIEW CRITIQUE]") == 1
     assert captured_texts[0] == captured_texts[1]
+
+
+def test_deterministic_session_state_contains_ast_flag() -> None:
+    mock_agent = MagicMock()
+    mock_agent._normalize_model_name.side_effect = lambda x: x
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._app_name = "test_app"
+
+    session_service = MagicMock()
+    mock_agent._session_service = session_service
+    created_session = MagicMock()
+    created_session.state = {}
+    session_service.get_session = AsyncMock(side_effect=[None, created_session])
+    session_service.create_session = AsyncMock(return_value=created_session)
+    session_service.user_state = {}
+
+    part = MagicMock()
+    part.text = "Original user message"
+    user_msg = MagicMock()
+    user_msg.parts = [part]
+    mock_agent._build_user_message.return_value = user_msg
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "deterministic_precompiled_ast": True,
+        "raw_payload": {"pull_request": {"number": 1, "head": {"sha": "sha1"}}},
+    }
+
+    with (
+        patch(
+            "webhook_agent.core.execution._execute_adk_runner",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data, gh_client=MagicMock(), trace_id="tr1"
+        )
+
+    session_service.create_session.assert_called_once()
+    state_passed = session_service.create_session.call_args.kwargs.get("state") or {}
+    assert state_passed.get("deterministic_precompiled_ast") is True
+    assert state_passed.get("formal_review_eligible") is True

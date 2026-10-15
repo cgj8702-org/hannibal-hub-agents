@@ -274,7 +274,10 @@ def review(
     repo_name = _get_repo_full_name(ctx)
     target_key = f"{repo_name}#{pr_number}"
     state_dict = _extract_state_dict(getattr(ctx, "state", None))
-    if state_dict.get("formal_review_eligible") is False:
+    formal_eligible = state_dict.get("formal_review_eligible")
+    if formal_eligible is None:
+        formal_eligible = state_dict.get("user:formal_review_eligible")
+    if formal_eligible is False:
         return "Skipped: event is not eligible for a formal code review."
 
     if not _COMMENT_RATE_LIMITER.is_allowed(target_key):
@@ -326,8 +329,13 @@ def review(
 
             modifies_python = any(f.endswith(".py") for f in changed_files)
             if modifies_python:
-                deterministic_precompiled = bool(state_dict.get("deterministic_precompiled_ast"))
-                tools_executed = state_dict.get("tools_executed", [])
+                deterministic_precompiled = bool(
+                    state_dict.get("deterministic_precompiled_ast")
+                    or state_dict.get("user:deterministic_precompiled_ast")
+                )
+                tools_executed = (
+                    state_dict.get("tools_executed") or state_dict.get("user:tools_executed") or []
+                )
                 tools_set = (
                     set(tools_executed) if isinstance(tools_executed, (list, set, tuple)) else set()
                 )
