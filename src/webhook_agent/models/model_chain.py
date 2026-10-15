@@ -7,135 +7,30 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from typing import Any
 
 from google.genai.errors import ServerError as GenAIServerError
 
+from webhook_agent.models.depleted_registry import (
+    FirestoreDepletedModelRegistry as DepletedModelRegistry,
+)
+from webhook_agent.models.depleted_registry import (
+    firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
+)
 from webhook_agent.models.rate_limiter import (
     _resolve_tier,
-    extract_rate_limit_details,
     get_active_api_key,
 )
 
-logger = logging.getLogger("webhook_agent.model_chain")
+logger = logging.getLogger("webhook_agent.models.model_chain")
 
-# ---------------------------------------------------------------------------
-# Process-Wide Model Depletion Registry
-# ---------------------------------------------------------------------------
-
-
-class DepletedModelRegistry:
-    """Tracks models that have hit 429 quota exhaustion to bypass them process-wide across events."""
-
-    def __init__(self, default_cooldown: float = 3600.0) -> None:
-        self.default_cooldown = default_cooldown
-        self._depleted: dict[str, tuple[float, float]] = {}
-
-    def _norm(self, name: str) -> str:
-        return name.replace("models/", "").strip().lower()
-
-    def mark_depleted(self, model_name: str, error: Exception | None = None) -> None:
-        norm_name = self._norm(model_name)
-        cooldown = self.default_cooldown
-        metric_type = "DEFAULT (1h)"
-
-        if error is not None:
-            details = extract_rate_limit_details(error)
-            retry_after = details.get("retry_after_seconds")
-            quota_limit = (details.get("quota_limit") or "").lower()
-            quota_type = details.get("quota_type")
-
-            # Walk cause/context chain to capture nested exceptions
-            err_parts = []
-            curr: Any = error
-            visited: set[int] = set()
-            while curr is not None and id(curr) not in visited:
-                visited.add(id(curr))
-                err_parts.append(str(curr))
-                curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
-            err_str = " ".join(err_parts).lower()
-
-            if (
-                quota_type == "RPD"
-                or "perday" in quota_limit
-                or "dayperproject" in quota_limit
-                or "perday" in err_str
-            ):
-                cooldown = 86400.0
-                metric_type = "RPD (24h)"
-            elif (
-                quota_type == "TPM"
-                or "tokensperminute" in quota_limit
-                or "tokensperminute" in err_str
-                or "token_count" in quota_limit
-            ):
-                cooldown = (
-                    float(retry_after)
-                    if isinstance(retry_after, (int, float)) and retry_after > 0
-                    else 60.0
-                )
-                metric_type = f"TPM ({cooldown:.0f}s)"
-            elif (
-                quota_type == "RPM"
-                or "perminute" in quota_limit
-                or "minuteperproject" in quota_limit
-                or "perminute" in err_str
-                or "429" in err_str
-                or "resource_exhausted" in err_str
-            ):
-                cooldown = (
-                    float(retry_after)
-                    if isinstance(retry_after, (int, float)) and retry_after > 0
-                    else 60.0
-                )
-                metric_type = f"RPM ({cooldown:.0f}s)"
-            elif (
-                "503" in err_str
-                or "unavailable" in err_str
-                or "high demand" in err_str
-                or "overloaded" in err_str
-            ):
-                cooldown = 120.0
-                metric_type = "503 HIGH DEMAND (120s)"
-            elif isinstance(retry_after, (int, float)) and retry_after > 0:
-                cooldown = max(float(retry_after), 120.0)
-                metric_type = f"EXACT ({cooldown:.0f}s)"
-
-        self._depleted[norm_name] = (time.time(), cooldown)
-        logger.warning(
-            "Model '%s' marked DEPLETED [%s] across process",
-            norm_name,
-            metric_type,
-        )
-
-    def is_depleted(self, model_name: str) -> bool:
-        norm_name = self._norm(model_name)
-        if norm_name not in self._depleted:
-            return False
-        timestamp, cooldown = self._depleted[norm_name]
-        if time.time() - timestamp > cooldown:
-            del self._depleted[norm_name]
-            logger.info(
-                "Model '%s' depletion cooldown expired (%ds), restored to pool",
-                norm_name,
-                int(cooldown),
-            )
-            return False
-        return True
-
-    def filter_chain(self, chain: list[str]) -> list[str]:
-        return [m for m in chain if not self.is_depleted(m)]
-
-
-_DEPLETED_MODEL_REGISTRY: Any
-try:
-    from webhook_agent.models.depleted_registry import (
-        firestore_depleted_registry as _DEPLETED_MODEL_REGISTRY,
-    )
-except ImportError:
-    _DEPLETED_MODEL_REGISTRY = DepletedModelRegistry(default_cooldown=3600.0)
-
+__all__ = [
+    "_DEPLETED_MODEL_REGISTRY",
+    "DepletedModelRegistry",
+    "get_active_model",
+    "get_model_chain",
+    "is_gemini_3_plus",
+]
 
 # ---------------------------------------------------------------------------
 # Chain Resolution & Event Selection

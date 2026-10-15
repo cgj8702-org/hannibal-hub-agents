@@ -27,7 +27,7 @@ from .schemas import (
     is_not_cheap_finding as is_not_cheap_finding,
 )
 
-logger = logging.getLogger("webhook_agent.formatter")
+logger = logging.getLogger("webhook_agent.review.formatter")
 
 FINDING_KEYS = (
     "path|line|body|window|verify_steps|description|suggested_fix|executive_summary|"

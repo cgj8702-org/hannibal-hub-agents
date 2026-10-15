@@ -12,7 +12,7 @@ from github import Github
 
 from webhook_agent.review.review_enforcer import _submit_formal_review
 
-logger = logging.getLogger("webhook_agent.fast_path")
+logger = logging.getLogger("webhook_agent.review.fast_path")
 
 
 def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any]) -> bool:
