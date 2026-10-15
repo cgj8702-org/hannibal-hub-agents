@@ -403,8 +403,14 @@ def execute_agent_event(
             getattr(getattr(active_runner, "app", None), "name", agent._app_name) or agent._app_name
         )
 
+        base_prompt_text = (
+            getattr(user_message.parts[0], "text", "") or "" if user_message.parts else ""
+        )
+
         for attempt in range(_MAX_RETRIES):
             try:
+                if user_message.parts and hasattr(user_message.parts[0], "text"):
+                    user_message.parts[0].text = base_prompt_text
                 active_runner = (
                     agent._runner if is_pr_review_event else agent._conversational_runner
                 )
@@ -504,9 +510,7 @@ def execute_agent_event(
                         pr_number=pr_number,
                         head_sha=head_sha,
                         canonical=canonical,
-                        precompiled_dossier=getattr(user_message.parts[0], "text", "")
-                        if user_message.parts
-                        else "",
+                        precompiled_dossier=base_prompt_text,
                         pr_diff=str(raw.get("pr_diff") or ""),
                         changed_files=changed_files_list,
                         status="pending",

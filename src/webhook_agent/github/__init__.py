@@ -8,6 +8,7 @@ from .bot_identity import (
     JULES_BOT_LOGINS,
     _is_bot_event,
     _is_bot_sender,
+    is_hannibal_bot_login,
     is_jules_sender,
 )
 from .credentials import (
@@ -47,6 +48,7 @@ __all__ = [
     "get_agents_github_token",
     "get_installation_token",
     "handle_jules_pr_opened",
+    "is_hannibal_bot_login",
     "is_jules_sender",
     "load_cached_token",
     "load_private_key",

@@ -114,13 +114,15 @@ def _enforce_verdict(
     raw_diff = ""
     bot_reviews: list[Any] = []
     if pr is not None:
+        from webhook_agent.github.bot_identity import is_hannibal_bot_login
+
         try:
             reviews = list(pr.get_reviews())
             bot_reviews = []
             for r in reviews:
                 u = getattr(r, "user", None)
                 login = (getattr(u, "login", "") or "").lower() if u else ""
-                if "hannibal-hub-agents" in login or login.endswith("[bot]"):
+                if is_hannibal_bot_login(login):
                     bot_reviews.append(r)
             has_prior_reviews = bool(bot_reviews)
         except Exception:
@@ -144,7 +146,12 @@ def _enforce_verdict(
             logger.debug("Could not fetch PR diff text in _enforce_verdict: %s", diff_err)
 
         try:
+            bot_review_comments: list[Any] = []
             for c in pr.get_review_comments():
+                c_user = getattr(c, "user", None)
+                c_login = (getattr(c_user, "login", "") or "").lower() if c_user else ""
+                if is_hannibal_bot_login(c_login):
+                    bot_review_comments.append(c)
                 existing_comments_data.append(
                     {
                         "path": getattr(c, "path", ""),
@@ -152,8 +159,24 @@ def _enforce_verdict(
                         "body": getattr(c, "body", ""),
                     }
                 )
+            if review_budget is not None and bot_reviews:
+                from webhook_agent.models.review_budget import (
+                    compute_round_allowance,
+                    summarise_review_history,
+                )
+
+                head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+                hist = summarise_review_history(bot_reviews, bot_review_comments, head_sha=head_sha)
+                review_budget = compute_round_allowance(
+                    round_number=hist.round_number,
+                    previous_round_posted=hist.previous_round_posted,
+                    total_posted_so_far=hist.total_posted_so_far,
+                    initial_budget=review_budget,
+                )
         except Exception as comm_err:
-            logger.debug("Could not fetch existing PR review comments: %s", comm_err)
+            logger.warning(
+                "Could not fetch existing PR review comments or compute review budget: %s", comm_err
+            )
     else:
         review_budget = None
         existing_comments_data = []
@@ -355,11 +378,13 @@ def _submit_formal_review(
     """Submit one guarded review, shared by the tool and deterministic fallback."""
     with _review_lock(target_key):
         head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        from webhook_agent.github.bot_identity import is_hannibal_bot_login
+
         reviews = list(pr.get_reviews())
         bot_reviews = []
         for rv in reviews:
             login = (getattr(getattr(rv, "user", None), "login", "") or "").lower()
-            if "hannibal-hub-agents" in login or login.endswith("[bot]"):
+            if is_hannibal_bot_login(login):
                 bot_reviews.append(rv)
 
         if head_sha and any(

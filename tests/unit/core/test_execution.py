@@ -352,3 +352,74 @@ def test_execute_agent_event_rate_limited_paused_short_circuits(
         assert "paused" in results[0].detail
         mock_runner.assert_not_called()
         mock_agent._build_user_message.assert_not_called()
+
+
+def test_retry_loop_resets_user_message_prompt(monkeypatch: pytest.MonkeyPatch):
+    """Verify that user_message text is reset on each retry attempt to avoid cumulative duplication (P0-5)."""
+    import time
+
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
+    mock_agent = MagicMock()
+    mock_agent._app_name = "test_app"
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._advance_model_chain.return_value = "gemini-3.5-flash-lite"
+    mock_agent._runner = MagicMock()
+    mock_agent._runner.app.name = "test_app"
+
+    # Mock session service
+    mock_session = MagicMock()
+    mock_session.state = {
+        "last_review_timestamp": time.time(),
+        "last_review_critique": "Fix line 10",
+    }
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    # Initial user message
+    part = MagicMock()
+    part.text = "Original user message"
+    user_msg = MagicMock()
+    user_msg.parts = [part]
+    mock_agent._build_user_message.return_value = user_msg
+
+    call_count = 0
+    captured_texts: list[str] = []
+
+    async def fake_execute(*args: Any, **kwargs: Any) -> list[Any]:
+        nonlocal call_count
+        call_count += 1
+        captured_texts.append(str(user_msg.parts[0].text))
+        if call_count == 1:
+            raise Exception("429 Resource exhausted: rate limit exceeded")
+        return []
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {"pull_request": {"number": 1, "head": {"sha": "sha1"}}},
+    }
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute),
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_resumable",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch("webhook_agent.core.execution.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data, gh_client=MagicMock(), trace_id="tr1"
+        )
+
+    assert call_count == 2
+    # Verify that notice / critique is NOT duplicated on the second attempt
+    assert captured_texts[0].count("[YOUR PREVIOUS REVIEW CRITIQUE]") == 1
+    assert captured_texts[1].count("[YOUR PREVIOUS REVIEW CRITIQUE]") == 1
+    assert captured_texts[0] == captured_texts[1]

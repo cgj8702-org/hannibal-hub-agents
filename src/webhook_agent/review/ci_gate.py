@@ -141,9 +141,11 @@ def last_bot_review_sha(pr: Any, head_sha: str) -> tuple[bool, str]:
     """
     last = ""
     reviewed_head = False
+    from webhook_agent.github.bot_identity import is_hannibal_bot_login
+
     for review in pr.get_reviews():
         login = (getattr(getattr(review, "user", None), "login", "") or "").lower()
-        if "hannibal-hub-agents" not in login:
+        if not is_hannibal_bot_login(login):
             continue
         commit_id = getattr(review, "commit_id", "") or ""
         if commit_id:

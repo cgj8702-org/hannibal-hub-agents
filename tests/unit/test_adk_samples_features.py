@@ -451,3 +451,59 @@ def test_build_github_review_comments_with_duplicate_and_budget():
     assert len(comments) == 1
     assert comments[0]["line"] == 10
     assert "src/handler.py:10" in keys
+
+
+def test_enforce_verdict_decays_round_budget():
+    """Verify _enforce_verdict computes decayed comment allowances on sync rounds."""
+    mock_pr = MagicMock()
+    mock_pr.head.sha = "sha_round_2"
+
+    # Prior round 1 review by Hannibal bot
+    mock_rev_user = MagicMock()
+    mock_rev_user.login = "hannibal-hub-agents[bot]"
+    mock_rev = MagicMock()
+    mock_rev.user = mock_rev_user
+    mock_rev.commit_id = "sha_round_1"
+    mock_pr.get_reviews.return_value = [mock_rev]
+
+    # Prior comments: 5 posted in round 1
+    mock_c = MagicMock()
+    mock_c.user = mock_rev_user
+    mock_c.commit_id = "sha_round_1"
+    mock_c.path = "src/foo.py"
+    mock_c.line = 1
+    mock_c.body = "Previous comment"
+    mock_pr.get_review_comments.return_value = [mock_c] * 5
+
+    # File diff with 250 reviewable lines (so initial budget is 5)
+    mock_file = MagicMock()
+    mock_file.filename = "src/foo.py"
+    mock_file.patch = "@@ -0,0 +1,250 @@\n" + "".join(f"+line {i}\n" for i in range(1, 251))
+    mock_pr.get_files.return_value = [mock_file]
+
+    # Review proposing 4 distinct comments
+    body = """
+    ```json
+    {
+      "executive_summary": "PR update",
+      "critical_issues": [
+        {"path": "src/foo.py", "line": 20, "description": "SQL injection vulnerability in handler"},
+        {"path": "src/foo.py", "line": 50, "description": "Memory leak in unclosed file stream"},
+        {"path": "src/foo.py", "line": 80, "description": "Null pointer dereference on null session"},
+        {"path": "src/foo.py", "line": 110, "description": "Insecure cryptographic hash algorithm"}
+      ],
+      "minor_suggestions": []
+    }
+    ```
+    """
+
+    _, _, inline_comments = _enforce_verdict(
+        body,
+        event="pull_request.synchronize",
+        pr=mock_pr,
+        review_mode="sync",
+    )
+
+    # In round 2 with 5 previous comments, budget decays 5 * 0.6 = 3.
+    # So max 3 inline comments can be produced!
+    assert len(inline_comments) == 3
