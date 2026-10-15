@@ -426,6 +426,7 @@ def test_retry_loop_resets_user_message_prompt(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_deterministic_session_state_contains_ast_flag() -> None:
+    """Verify deterministic precompiled AST flag and review eligibility are passed to session state."""
     mock_agent = MagicMock()
     mock_agent._normalize_model_name.side_effect = lambda x: x
     mock_agent._current_model_name = "gemini-3.5-flash-lite"

@@ -329,9 +329,12 @@ def review(
 
             modifies_python = any(f.endswith(".py") for f in changed_files)
             if modifies_python:
+                _sentinel = object()
+                direct_ast = state_dict.get("deterministic_precompiled_ast", _sentinel)
                 deterministic_precompiled = bool(
-                    state_dict.get("deterministic_precompiled_ast")
-                    or state_dict.get("user:deterministic_precompiled_ast")
+                    direct_ast
+                    if direct_ast is not _sentinel
+                    else state_dict.get("user:deterministic_precompiled_ast")
                 )
                 tools_executed = (
                     state_dict.get("tools_executed") or state_dict.get("user:tools_executed") or []

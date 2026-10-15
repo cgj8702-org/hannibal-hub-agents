@@ -49,6 +49,7 @@ class PromptSanitizerPlugin(BasePlugin):
     """ADK Plugin intercepting model responses to strip prompt leakage and secrets."""
 
     def __init__(self, name: str = "prompt_sanitizer_plugin") -> None:
+        """Initialize the prompt sanitizer plugin with a plugin name."""
         super().__init__(name=name)
 
     async def after_model_callback(
@@ -64,4 +65,7 @@ class PromptSanitizerPlugin(BasePlugin):
                     if hasattr(part, "text") and isinstance(part.text, str) and part.text:
                         part.text = sanitize_markdown_text(part.text)
 
-        return llm_response
+        # Return None so ADK continues to the agent-level after_model_callback
+        # (which records token usage and normalizes hallucinated tool prefixes).
+        # The response was already sanitized in place above.
+        return None

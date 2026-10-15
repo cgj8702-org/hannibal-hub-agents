@@ -183,6 +183,7 @@ async def test_tool_output_pruning_skips_already_pruned() -> None:
 @pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_prompt_sanitizer_plugin_string_and_content_parts() -> None:
+    """Verify PromptSanitizerPlugin redacts secrets and returns None for callback chaining."""
     from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
 
     plugin = PromptSanitizerPlugin()
@@ -191,7 +192,8 @@ async def test_prompt_sanitizer_plugin_string_and_content_parts() -> None:
     # Test 1: string content with secret
     resp_str = MagicMock()
     resp_str.content = "Here is key AIzaSy012345678901234567890123456789123 ok"
-    await plugin.after_model_callback(callback_context=ctx, llm_response=resp_str)
+    res1 = await plugin.after_model_callback(callback_context=ctx, llm_response=resp_str)
+    assert res1 is None
     assert "[REDACTED_SECRET]" in resp_str.content
     assert "AIzaSy" not in resp_str.content
 
@@ -201,6 +203,7 @@ async def test_prompt_sanitizer_plugin_string_and_content_parts() -> None:
     part.text = "Here is token ghp_123456789012345678901234567890123456 in part"
     resp_obj.content = MagicMock()
     resp_obj.content.parts = [part]
-    await plugin.after_model_callback(callback_context=ctx, llm_response=resp_obj)
+    res2 = await plugin.after_model_callback(callback_context=ctx, llm_response=resp_obj)
+    assert res2 is None
     assert "[REDACTED_SECRET]" in part.text
     assert "ghp_" not in part.text

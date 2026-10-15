@@ -2,34 +2,50 @@
 
 ## 1. Executive Summary & Target Architecture
 
-By retiring CodeRabbit AI and promoting `hannibal-hub-agents` to your sole autonomous PR reviewer, you eliminate the `jules_proxy.py` PR-duplication workaround, fix five critical P0 bugs discovered in the codebase audit, and upgrade your review engine with right-side line-numbered diffs (`pr-agent` pattern) and linked-issue task specification verification (`ocr` pattern).
+By retiring CodeRabbit AI and promoting `hannibal-hub-agents` to your sole autonomous PR reviewer, you eliminate the `jules_proxy.py` PR-duplication workaround, fix five critical P0 bugs discovered in the codebase audit, and upgrade your review engine into a cutting-edge Google ADK long-horizon reviewer.
+
+Lifting reference patterns from Google's [`adk-recipes/long-horizon-harness`](https://github.com/google/adk-recipes/tree/main/core/python/long-horizon-harness), Hannibal adopts:
+1. **Sandboxed Workspace Execution (`BaseEnvironment`):** Eliminating host VM disk bleed by isolating repo clones and analysis inside disposable, path-contained environments (`path_under_root`).
+2. **Sandboxed Code Search & Workspace Windowing (`search_files` + `workspace_window`):** Sandboxed regex search with binary skipping, snippet capping, and windowed scope so the reviewer traces call sites and references across the repository without exceeding context limits.
+3. **3-Tier Context Architecture for Gemini Context Caching:** Cache-stable static system prompts (Tier 1), semi-stable repo heuristics (Tier 2), and volatile PR diffs / linked issue specs (Tier 3) injected as transient content to maximize cache hit rates (cutting 60–80% of token latency and cost).
+4. **ADK Guardrail Plugins with Graceful Handoff:** Replacing brittle retry loops with `IterationBudgetPlugin` and `GuardrailsPlugin` (`RepeatedFailureGuard`, `NoProgressGuard`, `HaltConsumer`) that convert loop/budget halts into clean, structured review summaries.
+5. **Native 2-Stage "Hunter → Critic → Gate" Sub-Agent Verification:** Broad-recall finding extraction (Hunter) coupled with adversarial falsification (Critic) and syntactic AST validation to eliminate hallucinations.
+6. **Self-Improving Reviewer Memory Loop (`MemoryBank` / Firestore + Judge Fork + Nightly Dream):** Preloading learned maintainer preferences and false-positive heuristics via `PreloadReviewMemoryTool`, logging post-turn feedback via an asynchronous `SiblingAgentPlugin` judge fork, and consolidating repository heuristics through a nightly dream pass.
 
 ```text
 [systemd: hannibal-webhook-agent.service]
-   └── worker.py (single-process entry point + Pub/Sub lease extender)
+   └── worker.py (single-process entry point + Pub/Sub lease heartbeat extender)
          └── WebhookProcessor.process_event(payload)
                ├── Stage 1: Ingress & Strict Bot Identity Gate (bot_identity.py)
                │     ├── Suppress own bot events (`is_hannibal_bot_login`)
                │     ├── Allow `google-labs-jules[bot]` PR lifecycle events natively (no proxy!)
                │     ├── Suppress third-party bot comments (dependabot, github-actions, etc.)
-               │     └── Live PR state & closed-PR short-circuit check
+               │     └── Live PR state, superseded SHA check, & closed-PR short-circuit
                ├── Stage 2: Deterministic Pre-Flight Gates
                │     ├── Base-branch merge sync skip (`is_base_branch_merge_sync`)
                │     ├── Stateless CI Gate (`ci_gate.py`: hold auto-review until CI is 100% green)
                │     └── Dependabot lockfile validator fast-path (0-token instant APPROVE)
-               ├── Stage 3: Single-Pass PR Context Hydration (pr_context.py)
-               │     ├── PR metadata & filtered diff with right-side line numbers (`pr-agent` pattern)
-               │     ├── Linked Issue / Task Spec extraction (`Fixes #N` -> `ocr` spec check)
-               │     └── Prior reviews filtered STRICTLY to `is_hannibal_bot_login()`
-               ├── Stage 4: Diff-First Static Analysis (No Stale VM Disk Reads)
-               │     ├── Diff-first AST & structural defect analyzer (`verify_python_ast`)
-               │     └── Diff-aware symbol & test impact analysis
-               ├── Stage 5: ADK Runner Execution (1-Turn JSON Audit or Conversational Peer)
-               │     ├── Single async token metering + sliding-window RPM/TPM limiter
-               │     └── Registered plugins: HistoryPruning, ToolOutputPruning, PromptSanitizer
-               └── Stage 6: Unified Review Verification, Round Decay, & Writeback
-                     ├── Citation grounding (`grounding.py`) & round-decay budget (`review_budget.py`)
-                     └── Idempotent GitHub review submission (dismisses ONLY prior Hannibal reviews)
+               ├── Stage 3: Single-Pass Context Hydration & 3-Tier Cache Setup (pr_context.py)
+               │     ├── Tier 1 (Static): Cache-stable review instructions, schemas, tool declarations
+               │     ├── Tier 2 (Semi-Stable): Repo profile & preloaded Memory Bank heuristics (`PreloadReviewMemoryTool`)
+               │     └── Tier 3 (Volatile/Transient): Right-side line-numbered diff + linked issue spec (`Fixes #N`)
+               ├── Stage 4: Sandboxed Workspace & Code Search Engine (`BaseEnvironment`)
+               │     ├── Ephemeral workspace container / isolated worktree (Zero VM host disk bleed)
+               │     ├── Strict path containment (`path_under_root`, blocks `..` traversal)
+               │     ├── Sandboxed code search (`search_files`) & windowed file read (`read_file_window`)
+               │     └── Diff-first AST & structural defect analyzer (`verify_python_ast`)
+               ├── Stage 5: ADK Runner Execution — Native "Hunter → Critic → Gate" Pipeline
+               │     ├── Sub-Agent 1 (Hunter): High-recall candidate issue extraction using code search tools
+               │     ├── Sub-Agent 2 (Critic): Adversarial falsification against untouched caller files
+               │     ├── Plugins: `GuardrailsPlugin` (repeated-failure, no-progress), `IterationBudgetPlugin` (graceful handoff), `PromptSanitizerPlugin`
+               │     └── Sliding-window RPM/TPM limiter & single-pass token metering
+               ├── Stage 6: Unified Review Verification, AST Syntactic Gate, & Idempotent Writeback
+               │     ├── AST syntax/indentation gate on suggested code fixes (`ast.parse`)
+               │     ├── Citation grounding (`grounding.py`) & round-decay budget (`review_budget.py`)
+               │     └── Idempotent GitHub review submission (dismisses ONLY prior Hannibal reviews)
+               └── Stage 7 (Asynchronous): Self-Improving Reviewer Memory Loop
+                     ├── Background Judge Fork (`SiblingAgentPlugin` / `review_fork` on maintainer reaction/merge)
+                     └── Nightly Dream Pass (server-side memory consolidation & repo heuristics pruning)
 ```
 
 ---
@@ -264,8 +280,13 @@ Fix **P0-1** and **P0-3** in `src/webhook_agent/review/review_enforcer.py`:
 
 **Branch:** `git checkout -b fix/diff-first-ast-and-agent-wiring`
 
-### Step 2.1: Fix Local VM Disk Bleed in `src/webhook_agent/tools/ast_tools.py` (P0-2)
-Currently, `verify_python_ast(file_path, code_snippet, diff_text)` checks `Path(file_path).is_file()` on the **local VM disk first** (`/home/carly/hannibal-hub-agents` checked out on `main`) before checking `diff_text`. Flip the priority so `diff_text` always takes precedence over disk when provided:
+### Step 2.1: Implement Sandboxed Environment & Fix Local VM Disk Bleed (P0-2)
+Currently, `verify_python_ast(file_path, code_snippet, diff_text)` checks `Path(file_path).is_file()` on the **local VM disk first** (`/home/carly/hannibal-hub-agents` checked out on `main`) before checking `diff_text`. This bleeds host VM code into PR reviews.
+
+Lifting the **Sandboxed Environment** pattern from Google's `long-horizon-harness`:
+1. Introduce `path_under_root(path, root)` in `src/webhook_agent/tools/paths.py` (preventing directory traversal attacks and `..` leaks beyond the designated workspace root).
+2. Establish an ephemeral `BaseEnvironment` context: static analysis and file reads operate strictly over in-memory diff buffers or an isolated, ephemeral workspace clone (`/tmp/hannibal-sandboxes/<repo>/<pr_number>/`), never accessing the persistent host VM checkout.
+3. In `src/webhook_agent/tools/ast_tools.py`, prioritize in-memory diff lines first, then the sandboxed workspace root (if provisioned), and completely prohibit reading relative paths from the current host working directory:
 
 ```python
 # In src/webhook_agent/tools/ast_tools.py — replace lines 85-114 inside verify_python_ast():
@@ -286,18 +307,20 @@ Currently, `verify_python_ast(file_path, code_snippet, diff_text)` checks `Path(
                     "Could not extract lines from diff_text for %s: %s", file_path, diff_err
                 )
 
+        # Fall back to sandboxed environment only if strictly contained under workspace root
         if not code_text or not code_text.strip():
-            candidates = [Path(file_path), Path(cleaned_path)]
-            target_file = next((p for p in candidates if p.is_file()), None)
-            if target_file:
+            from webhook_agent.tools.paths import resolve_sandboxed_path
+
+            sandboxed_file = resolve_sandboxed_path(file_path)
+            if sandboxed_file and sandboxed_file.is_file():
                 try:
-                    code_text = target_file.read_text(encoding="utf-8", errors="replace")
+                    code_text = sandboxed_file.read_text(encoding="utf-8", errors="replace")
                 except Exception as read_err:
                     return f"Error reading file '{file_path}': {read_err}"
 
         if not code_text or not code_text.strip():
             return (
-                f"Error: No code snippet provided and file '{file_path}' was not found on disk. "
+                f"Error: No code snippet provided and file '{file_path}' was not found in diff or sandbox. "
                 "Please pass code_snippet directly to verify_python_ast."
             )
 ```
@@ -515,48 +538,84 @@ uv run pytest --tb=short -q
 
 ---
 
-## 7. Review Competence Architecture: Closing the Quality Gap with CodeRabbit
+## 7. Review Competence & Infrastructure Architecture: The Long-Horizon Harness Standard
 
-### The 3 Core Recommendations to Make Hannibal a Competent Reviewer
-1. **Borrow Battle-Tested Review Schemas & Confidence Scoring (`pr-agent` Pattern):**
-   - Require an explicit `confidence_score` (1–10) and `severity` rating (`HIGH`, `MEDIUM`, `LOW`, `NIT`) on every proposed finding.
-   - Strictly suppress any finding with `confidence < 8` or severity == `NIT`.
-   - Silence is golden: if no finding meets the threshold, output a clean, respectful "LGTM / Approved" without posting unsolicited chatter.
-2. **Eliminate 1-Shot Hallucination via Adversarial Critic Pass ("Hunter → Critic → Gate"):**
-   - Replace the monolithic 1-shot prompt with a 2-stage verification loop.
-   - **Stage 1 (Hunter):** Fast high-recall extraction of candidate issues.
-   - **Stage 2 (Adversarial Critic):** A separate model call acting as Senior Principal Engineer specifically tasked with *disproving* the candidate finding against untouched helper files, caller signatures, and framework invariants. If it cannot be proven defective, it is dropped.
-3. **AST-Validate Every Suggested Code Replacement Before Writeback:**
-   - Run Python `ast.parse()` on every proposed code fix in unified diffs.
-   - If a suggested replacement does not parse cleanly into valid AST syntax or violates indentation invariants, strip the replacement and keep only the textual explanation.
+Lifting patterns from Google's [`adk-recipes/long-horizon-harness`](https://github.com/google/adk-recipes/tree/main/core/python/long-horizon-harness), we address the quality gap with human reviewers and commercial tools (CodeRabbit) not by piling more prose instructions into LLM prompts, but through **architectural harnesses**: isolated execution sandboxes, sandboxed code search, ADK-native guardrails, sub-agent adversarial verification, and a self-improving memory loop.
 
 ---
 
-### In-Depth Analysis: Path 1 (pr-agent Engine) vs. Path 2 (Native 3-Stage Pipeline)
-
-| Dimension | Path 1: Wrap `pr-agent` Core Engine | Path 2: Native 3-Stage "Hunter → Critic → Gate" |
-| :--- | :--- | :--- |
-| **Architecture** | Import `pr-agent` as a library inside Hannibal's worker loop, delegating review parsing, prompt chains, and formatting to Qodo's engine. | Keep Hannibal's native ADK / GenAI SDK execution loop, but structure it into 2 sequential Gemini calls: Candidate Hunter + Adversarial Critic. |
-| **Codebase Footprint** | Heavy external dependency (`pr-agent` brings substantial dependencies: `litellm`, `tokenizers`, `tiktoken`, etc.). | Zero new external dependencies. Uses existing `google-genai` and `webhook_agent.core.execution`. |
-| **Model Compatibility** | `pr-agent` relies heavily on OpenAI-style chat schemas via `litellm`. Adapting to Google ADK and Gemini 2.5/3.5 requires translation wrappers. | 100% native Gemini 2.5 / 3.5 support with API-backed token tracking and estimate fallback, model fallback chains, and Google GenAI SDK types. |
-| **Customizability** | Constrained by `pr-agent` configuration files and upstream prompt designs. | Full programmatic control over Hannibal's persona, repo-specific rules, AST checks, and Firestore checkpoints. |
-| **Latency & Cost** | 1 large multi-turn LLM pass (~15–30s). | 2 targeted Gemini calls (~6–12s total with `gemini-2.5-flash` / `gemini-3.5-flash-lite`). |
+### 7.1 Sandboxed Execution & Environment Abstraction (`BaseEnvironment`)
+* **The Failure Mode:** In a persistent VM deployment (`hannibal-hub-free`), running agent tools directly against the local clone risks bleeding host state, dirty branch checkouts, or host environment variables into reviews (as discovered in the P0-2 AST bug).
+* **The Long-Horizon Standard:**
+  1. **Abstract Environment Layer:** Define an ADK-compatible `BaseEnvironment` protocol (`src/webhook_agent/environment/base.py`) supporting `execute(command)`, `read_file(path)`, and `list_dir(path)` behind an async ContextVar (`active_environment()`).
+  2. **Concrete Implementations:**
+     - `LocalEnvironment`: Scoped to an ephemeral temporary directory (`/tmp/hannibal-sandboxes/<repo>/<pr_number>/`) created during prefetch and destroyed after writeback.
+     - `SandboxEnvironment`: Containerized execution (Docker / Vertex Agent Runtime BYOC sandbox) with CPU/memory caps and hermetic network egress.
+  3. **Strict Path Containment (`path_under_root`):**
+     Every file access runs through `path_under_root(path, root)`. Any attempt to access paths with `..` or traverse outside the assigned PR directory raises an immediate access violation. No file operation ever reads `/home/carly/hannibal-hub-agents` directly.
 
 ---
 
-### 7.1 Areas for Architectural Growth (Path 2 Infrastructure Invariants)
+### 7.2 Sandboxed Code Search & Workspace Windowing (`search_files` + `workspace_window`)
+* **The Failure Mode:** Reviewers reviewing multi-file PRs often hallucinate broken callers or missing imports because they cannot see untouched files in the repository without bloating the prompt context with the whole codebase.
+* **The Long-Horizon Standard:**
+  1. **Sandboxed Regex Search (`search_files`):**
+     Lift Long Horizon's `search_files` tool (`horizon/tools/file_ops.py`), which generates a self-contained Python search script executed inside the active environment:
+     - Directory tree traversal with `.gitignore` and `.git/` skipping.
+     - Binary file extension filtering (`.png`, `.pyc`, `.so`, `.pdf`).
+     - File size cutoff (`_SEARCH_MAX_FILE_SIZE = 500_000` bytes).
+     - Snippet windowing (`_snip_max = 200` chars around matching regex) and delimited JSON envelope (`__LHA_SEARCH_RESULT__`).
+  2. **Workspace Windowing (`workspace_window`):**
+     Maintain a session-scoped lens (`workspace_window`) anchored to the directories touched by the PR. Tools default their search scope to the window (e.g. `src/webhook_agent/review/`), with an explicit `scope="workspace"` option when the agent needs to trace callers across the entire codebase.
+  3. **Multimodal Windowed File Reading (`read_file_window`):**
+     Paginated file reader with line range slices (`start_line`, `end_line`) and output overflow spilling (capping tool results at 50KB to protect context windows).
 
-1. **Worker Sandboxing vs. VM Host Execution:**
-   - **Risk:** Running worker daemons on a persistent VM risks tool execution bleeding into the local checkout, environment variables, or disk state (as discovered in the P0-2 AST bug).
-   - **Remediation:** Enforce 100% stateless in-memory tool operations. All diffs, file trees, and AST structures must be parsed from memory/diff buffers or fetched via the GitHub API into virtual abstractions, never reading local host VM repositories.
-2. **Horizontal Scaling & Distributed Locks:**
-   - **Risk:** In-memory or local SQLite checkpoints and deduplication locks introduce split-brain duplicate reviews if multiple worker instances process the queue.
-   - **Remediation:** Ensure all claims, deduplication keys, and review checkpoints are persisted through Firestore distributed transactions (`src/webhook_agent/state/firestore_claims.py`). Local dicts/files are strictly secondary fallback shims for offline testing.
-3. **Debouncing Fast Pushes & Superseded SHA Cancellation:**
-   - **Risk:** Rapid subsequent `git push` events on `pull_request.synchronize` waste Gemini API quota on stale commits and cause race conditions where an older review overwrites a newer one.
-   - **Remediation:**
-     - **Ingress & Writeback Guard:** Check `live_pr.head.sha == event_head_sha` at ingress, before model execution, and immediately before posting the review. Drop if stale.
-     - **Dynamic Cancellation Registry:** Extend `PRClosedRegistry` to track active in-flight review SHAs by `(repo, pr_number)` and immediately trigger `AbortAgentExecution` on any in-flight background task whose SHA has been superseded by a newer push.
+---
+
+### 7.3 ADK Guardrails Plugin & Graceful Handoff Architecture
+* **The Failure Mode:** Naive retry loops (`for attempt in range(_MAX_RETRIES):`) in `execution.py` silently burn Gemini quota, cause duplicate critique blocks, and crash or drop events when limits are exceeded.
+* **The Long-Horizon Standard:**
+  1. **Unified `GuardrailsPlugin` (`BasePlugin`):**
+     Consolidate runtime guardrails into an ADK `BasePlugin` attached to the `App`:
+     - **`IterationBudgetPlugin`:** Manages per-review turn and tool-call budgets stored directly in `session.state` (surviving process restarts).
+     - **`RepeatedFailureGuard`:** An `after_tool_callback` that detects when the same tool fails 3 consecutive times with errors (e.g., malformed regex, invalid AST file path) and halts execution.
+     - **`NoProgressGuard`:** An `after_model_callback` that detects when the model produces identical tool calls or repeats finding text without progress.
+     - **`HaltConsumer`:** A `before_model_callback` that intercepts `session.state["halt_reason"]`.
+  2. **One-Shot Graceful Handoff:**
+     When a guardrail halts execution (due to iteration budget, repeated failure, or no progress), instead of abruptly dropping the webhook or throwing an unhandled exception, `graceful_halt` strips all tools, injects a text-only handoff prompt, and allows the model one final turn to synthesize a clean, graceful summary of findings gathered so far.
+
+---
+
+### 7.4 Self-Improving Reviewer Memory Loop (`MemoryBank` + Judge Fork + Nightly Dream)
+* **The Failure Mode:** When maintainers dismiss false-positive review comments or clarify repo conventions ("we prefer dataclasses over pydantic here"), the agent forgets immediately and repeats the same false-positive on the next PR.
+* **The Long-Horizon Standard:**
+  1. **Preload Review Memory Tool (`PreloadReviewMemoryTool`):**
+     At turn start, query `FirestoreMemoryService` / Vertex Memory Bank for repo-specific review heuristics (e.g., known test conventions, suppressed warning classes). Hits are injected into the transient contents (not the static system prompt, preserving Gemini context caching).
+  2. **Post-Turn Background Judge Fork (`SiblingAgentPlugin` / `review_fork`):**
+     When a PR review cycle completes or a maintainer responds to a review comment (e.g., resolves thread, replies "intentional", or thumbs-down), an asynchronous background judge fork evaluates the interaction without delaying the webhook response:
+     - Extracts candidate review rules (e.g., `rule: "Do not flag unused imports in __init__.py files in repo X"`).
+     - Writes structured heuristics to the repository's Memory Bank partition.
+  3. **Nightly Dream Consolidation Pass:**
+     A scheduled Cloud Scheduler job runs a consolidation pass (`dream_review`):
+     - Merges duplicate rules and resolves contradictions.
+     - Generates a consolidated "Repository Review Heuristics Profile" that updates the cache-friendly Tier 2 context.
+
+---
+
+### 7.5 Multi-Layer Security Model & Command Safety
+Adopt the Long Horizon 4-layer security ladder:
+* **Layer A (Network & Exfiltration):** Isolated sandbox egress; deny requests targeting cloud metadata servers or exfiltration endpoints.
+* **Layer B (Path Isolation):** Strict `path_under_root` validation on every read/write.
+* **Layer C (Hard Deny Policies):** Absolute prohibition on reading `.env*`, `.git/credentials`, service account keys, or executing mutating shell commands (`git push --force`, `rm -rf /`).
+* **Layer D (Zero-Mutation Invariant):** The PR review agent is strictly read-only. Mutating ops tools (`create_issue`, `merge_pr`, `delete_branch`) are barred from the review toolset.
+
+---
+
+### 7.6 Horizontal Scaling & Distributed Claims
+* **Risk:** Multiple worker VM instances or Cloud Run containers processing the Pub/Sub queue concurrently can produce duplicate reviews.
+* **Remediation:**
+  - Persist all review claims, deduplication keys, and checkpoints in Firestore distributed transactions (`src/webhook_agent/state/firestore_claims.py`).
+  - **Dynamic Cancellation Registry:** Track active in-flight review SHAs by `(repo, pr_number)` in Firestore. If a newer `synchronize` event arrives, immediately signal `AbortAgentExecution` to terminate the superseded review task.
 
 ---
 
@@ -566,43 +625,106 @@ uv run pytest --tb=short -q
 
 ### Step 5.1: Structured Candidate Finding & Confidence Schemas
 In `src/webhook_agent/review/schemas.py`:
-* Define `CandidateFinding` with `severity` (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NIT`), `confidence_score` (`1..10`), `file_path`, `line_number`, `description`, `suggested_fix`, and `falsification_check`.
-* Define `VerificationVerdict` with `verified: bool`, `confidence: int`, `disproof_reason: str | None`, `revised_description: str | None`.
+* Define `CandidateFinding`:
+  ```python
+  class CandidateFinding(BaseModel):
+      file_path: str
+      line_number: int
+      severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "NIT"]
+      confidence_score: int = Field(ge=1, le=10)
+      title: str
+      description: str
+      suggested_fix: str | None = None
+      falsification_check: str = Field(
+          description="How an adversarial critic should attempt to disprove this finding against caller semantics or framework invariants"
+      )
+  ```
+* Define `VerificationVerdict`:
+  ```python
+  class VerificationVerdict(BaseModel):
+      finding_id: str
+      verified: bool
+      confidence_score: int = Field(ge=1, le=10)
+      disproof_reason: str | None = None
+      revised_description: str | None = None
+      revised_suggested_fix: str | None = None
+  ```
 
-### Step 5.2: Stage 1: Candidate Hunter Pass
-* High-recall pass focusing on:
-  1. Contract violations and broken call sites.
-  2. Unhandled edge cases, resource leaks, and security regressions.
+### Step 5.2: Stage 1: Hunter Sub-Agent (High-Recall Candidate Discovery)
+Implement `HunterAgent` (`src/webhook_agent/review/hunter.py`):
+* **Toolset:**
+  - `search_files`: Regex search to locate caller usages across untouched repo files.
+  - `read_file_window`: Windowed file reader to inspect interface definitions.
+  - `verify_python_ast`: Syntactic check on modified functions.
+* **Focus Areas:**
+  1. Broken call sites, signature contract mismatches, and regression risks.
+  2. Unhandled edge cases, resource/connection leaks, and concurrent race conditions.
   3. Acceptance criteria adherence from linked issue specs (`ocr` pattern).
-* Outputs raw candidate issues without writing directly to GitHub.
+* Outputs a list of `CandidateFinding` objects (strictly internal, never posted directly to GitHub).
 
-### Step 5.3: Stage 2: Adversarial Critic Verification Pass
-* A second targeted model invocation (acting as an adversarial Principal Engineer):
-  1. Scrutinizes candidate issues against full PR context, imports, and caller semantics.
-  2. Actively attempts to falsify or disprove each finding (e.g. "Is this already handled in line X?", "Is this an intended framework pattern?").
-  3. Filters out any finding with `confidence_score < 8` or severity == `NIT`.
-  4. If no findings survive verification, emits a clean `APPROVE` with zero noise.
+### Step 5.3: Stage 2: Critic Sub-Agent (Adversarial Falsification Pass)
+Implement `CriticAgent` (`src/webhook_agent/review/critic.py`):
+* Acting as a skeptical Senior Principal Engineer whose explicit goal is to **disprove** each candidate finding:
+  1. Inspects surrounding code and callers using `search_files` to verify whether the concern is already handled elsewhere (e.g., default fallback, higher-level try/except, middleware, framework guarantee).
+  2. Checks repo heuristics preloaded from `MemoryBank`.
+  3. Drops any candidate finding where `confidence_score < 8` or `severity == "NIT"`.
+  4. If all candidates are disproven, emits a clean approval verdict with zero comment noise.
 
-### Step 5.4: Stage 3: AST Diff Validator & Syntactic Gate
-* Before rendering inline suggestions or writebacks, runs `ast.parse()` on every proposed code snippet.
-* If a code suggestion produces an `IndentationError` or `SyntaxError`, strips the diff fence and retains only the architectural rationale.
+### Step 5.4: Stage 3: AST Syntactic Gate on Code Replacements
+In `src/webhook_agent/review/ast_gate.py`:
+* Before rendering suggestions into GitHub review comment payloads, run `ast.parse()` on every proposed unified diff replacement chunk.
+* If a code suggestion produces an `IndentationError` or `SyntaxError`, strip the code fence replacement block and preserve only the architectural explanation.
+
+### Step 5.5: Wire ADK Guardrails & Graceful Handoff
+Attach `GuardrailsPlugin(failure_threshold=3, no_progress_window=5)` and `IterationBudgetPlugin(max_turns=6, max_tool_calls=15)` to the pipeline. If the Hunter or Critic exhausts the budget, the graceful handoff turns the state into a concise review summary.
 
 ---
 
-## 9. Phase 6 (PR #6 — Final Phase): Lean Custom Prompts Redesign & Fluff Elimination
+## 9. Phase 6 (PR #6 — Final Phase): 3-Tier Prompt Architecture & Gemini Context Caching
 
 **Branch:** `refactor/lean-high-efficiency-prompts`
 
 > [!NOTE]
 > Per architectural directive, prompt rewriting is scheduled as the **very last phase** after the engine and verification harnesses are solid.
 
-### 9.1 The Problem with Current Prompts
-* **Negative Prompting Bloat:** Current instructions contain redundant lists of negative prohibitions ("DO NOT do X", "NEVER do Y", "DO NOT mention Z") across `REVIEW_INSTRUCTION`, `SYSTEM_INSTRUCTION`, and `CONVERSATIONAL_INSTRUCTION`. Negative phrasing dilutes LLM attention and wastes context tokens.
-* **Format Repetition:** Output schemas are described in verbose English markdown text *and* in Pydantic schemas, creating token bloat and potential model hallucination on contradictory wording.
+### 9.1 The Problem with Naive Prompts
+* **Cache Invalidation:** Injecting dynamic PR diffs directly into system instructions or early message parts invalidates the prefix cache on every webhook, forfeiting Gemini 2.5/3.5 Context Caching discounts (60–80% savings).
+* **Negative Prompting Bloat:** Current instructions contain verbose lists of negative prohibitions ("DO NOT do X", "NEVER do Y"), which dilute model attention.
+* **Schema Duplication:** Describing schemas in English markdown *and* in Pydantic schema parameters creates token bloat and contradictory instructions.
 
-### 9.2 Brainstorming: Minimal Fluff, High-Density Principles
-1. **Schema-Driven, Not Prose-Driven:** Use terse, structured YAML/JSON field docstrings for output constraints rather than paragraphs of instructional rules.
-2. **Dense Positive Personas:** State what the reviewer *must verify* (e.g., "Verify signature contracts, error branches, and linked issue acceptance criteria") rather than what it *must avoid*.
-3. **Silence by Default:** Explicitly reward empty findings arrays: "If no critical bug or regression is found with confidence >= 8, return empty findings. Clean passes are preferred over noise."
-4. **Context Framing over Preamble:** Eliminate meta-commentary ("You are a world-class AI agent created by..."). Start immediately with operational task bounds and typed variables.
+### 9.2 The 3-Tier Prompt Architecture (Long-Horizon Standard)
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ Tier 1: Static Instruction (100% Cacheable Prefix)                     │
+│ - Base reviewer persona & operational task bounds                      │
+│ - Schema field docstrings & confidence threshold rules                 │
+│ - Tool definitions & formatting conventions                            │
+├────────────────────────────────────────────────────────────────────────┤
+│ Tier 2: Semi-Stable Repository Profile (Cache-Friendly Context)        │
+│ - Repository architecture summary & primary stack conventions         │
+│ - Preloaded Memory Bank review heuristics                              │
+├────────────────────────────────────────────────────────────────────────┤
+│ Tier 3: Transient Turn Content (Injected via Dynamic Content)          │
+│ - Unified diff with right-side line numbers (`pr-agent` pattern)       │
+│ - Pre-fetched Linked Issue Spec (`ocr` pattern)                        │
+│ - Iteration counter & session state reminders                          │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Tier 1 (Static Instruction):**
+   - Built once and passed as `Agent(static_instruction=build_static_review_instruction())`.
+   - Never contains dynamic PR numbers, commit SHAs, or timestamps.
+   - 100% byte-stable across all webhook invocations, triggering Gemini Context Caching automatically.
+2. **Tier 2 (Semi-Stable Repository Context):**
+   - Repository-specific architecture guidelines and consolidated Memory Bank heuristics.
+   - Remains stable for all PRs targeting the same repository.
+3. **Tier 3 (Transient User Content):**
+   - Injected strictly through `LlmRequest._insert_transient_user_content` or user message parts.
+   - Contains the right-side line-numbered diff, linked issue specification, and active turn budget warnings.
+4. **Fluff Elimination Principles:**
+   - **Positive Framing:** State what the reviewer *must verify* (e.g., "Verify signature contracts, error branches, and linked issue acceptance criteria") rather than negative prohibitions.
+   - **Silence by Default:** Explicitly reward empty findings: "If no critical bug or regression is found with confidence >= 8, return empty findings. Clean passes are preferred over noise."
+   - **Schema-Driven Constraints:** Rely on typed Pydantic docstrings rather than verbose prose instructions.
+
 

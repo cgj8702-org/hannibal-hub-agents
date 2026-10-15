@@ -679,7 +679,15 @@ class WebhookProcessor:
                     )
                     return
             except Exception as live_err:
-                logger.debug("Could not verify live PR head SHA: %s", live_err)
+                logger.warning(
+                    "⚠️ Could not verify live PR head for %s#%s (commit %s): %s — "
+                    "deferring to avoid reviewing stale data.",
+                    repo_name,
+                    pr_number,
+                    head_sha[:7] if head_sha else "unknown",
+                    live_err,
+                )
+                return
 
         resumed_checkpoint: dict[str, Any] | None = None
         if is_pr_event and pr_num_int is not None and head_sha:
