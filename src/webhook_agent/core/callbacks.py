@@ -54,6 +54,12 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     active_tier = _resolve_tier()
     callback_context.state["active_tier"] = active_tier
     callback_context.state["review_submitted_in_this_turn"] = False
+
+    # Prevent cross-delivery session state leaks when session IDs are reused across a PR lifetime
+    from webhook_agent.core.guardrails import reset_guardrail_state
+
+    reset_guardrail_state(callback_context.state)
+
     callback_context.state.setdefault("tools_executed", [])
     if callback_context.state.get("deterministic_precompiled_ast"):
         tools_executed = callback_context.state["tools_executed"]

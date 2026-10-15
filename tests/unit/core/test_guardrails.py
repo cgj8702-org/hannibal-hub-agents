@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -167,3 +168,93 @@ async def test_guardrails_failure_resets_on_success() -> None:
     )
     assert ctx.state["guardrail_tool_failures"]["flaky_tool"] == 0
     assert "halt_reason" not in ctx.state
+
+
+@pytest.mark.anyio
+async def test_iteration_budget_before_agent_callback_resets_budget_keys() -> None:
+    plugin = IterationBudgetPlugin(max_turns=3, max_tool_calls=5)
+    ctx = MagicMock()
+    ctx.state = {
+        "guardrail_turn_count": 3,
+        "guardrail_tool_calls_count": 5,
+        "halt_reason": "turn_budget_exceeded:3",
+        "custom_key": "preserve_me",
+    }
+    agent = MagicMock()
+
+    await plugin.before_agent_callback(agent=agent, callback_context=ctx)
+
+    assert "guardrail_turn_count" not in ctx.state
+    assert "guardrail_tool_calls_count" not in ctx.state
+    assert "halt_reason" not in ctx.state
+    assert ctx.state["custom_key"] == "preserve_me"
+
+
+@pytest.mark.anyio
+async def test_guardrails_before_agent_callback_resets_history_and_failures() -> None:
+    plugin = GuardrailsPlugin(failure_threshold=3, no_progress_window=3)
+    ctx = MagicMock()
+    ctx.state = {
+        "guardrail_tool_call_history": ["hash1", "hash2"],
+        "guardrail_tool_failures": {"search_files": 2},
+        "halt_reason": "no_progress_loop:search_files",
+        "custom_key": "preserve_me",
+    }
+    agent = MagicMock()
+
+    await plugin.before_agent_callback(agent=agent, callback_context=ctx)
+
+    assert "guardrail_tool_call_history" not in ctx.state
+    assert "guardrail_tool_failures" not in ctx.state
+    assert "halt_reason" not in ctx.state
+    assert ctx.state["custom_key"] == "preserve_me"
+
+
+@pytest.mark.anyio
+async def test_session_state_leak_prevention_across_deliveries() -> None:
+    """Verify that a session halted in delivery 1 does not strip tools in delivery 2."""
+    from webhook_agent.core.callbacks import before_agent_callback
+
+    shared_session_state: dict[str, Any] = {}
+
+    # Delivery 1: hits turn limit
+    budget_plugin = IterationBudgetPlugin(max_turns=2, max_tool_calls=5)
+    guard_plugin = GuardrailsPlugin(failure_threshold=2, no_progress_window=2)
+
+    ctx1 = MagicMock()
+    ctx1.state = shared_session_state
+    req1 = MagicMock()
+    req1.tools_dict = {"search_files": MagicMock()}
+
+    # Run turn 1 and turn 2
+    await budget_plugin.before_model_callback(callback_context=ctx1, llm_request=req1)
+    await budget_plugin.before_model_callback(callback_context=ctx1, llm_request=req1)
+    # Turn 3 exceeds budget of 2
+    await budget_plugin.before_model_callback(callback_context=ctx1, llm_request=req1)
+
+    assert shared_session_state["halt_reason"] == "turn_budget_exceeded:2"
+    assert len(req1.tools_dict) == 0
+
+    # Delivery 2 on the same PR / session ID:
+    ctx2 = MagicMock()
+    ctx2.state = shared_session_state
+    ctx2.agent_name = "code_auditor"
+    agent2 = MagicMock()
+
+    # Plugins and callbacks run at the start of Delivery 2
+    await budget_plugin.before_agent_callback(agent=agent2, callback_context=ctx2)
+    await guard_plugin.before_agent_callback(agent=agent2, callback_context=ctx2)
+    await before_agent_callback(callback_context=ctx2)
+
+    # State must be completely clean of halt_reason and turn counts
+    assert "halt_reason" not in shared_session_state
+    assert "guardrail_turn_count" not in shared_session_state
+    assert "guardrail_tool_calls_count" not in shared_session_state
+
+    # Delivery 2 model request has tools intact and proceeds
+    req2 = MagicMock()
+    req2.tools_dict = {"read_file": MagicMock()}
+    await budget_plugin.before_model_callback(callback_context=ctx2, llm_request=req2)
+    assert len(req2.tools_dict) == 1
+    assert shared_session_state["guardrail_turn_count"] == 1
+    assert "halt_reason" not in shared_session_state

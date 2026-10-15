@@ -9,6 +9,7 @@ Drops findings with confidence < 8 or severity == 'NIT'.
 from __future__ import annotations
 
 import logging
+import re
 
 from webhook_agent.review.schemas import CandidateFinding, IssueItem, VerificationVerdict
 
@@ -103,4 +104,61 @@ class CriticEngine:
             len(candidates),
             len(survivors),
         )
+        return survivors
+
+    def filter_issues(self, issues: list[IssueItem]) -> list[IssueItem]:
+        """Filter out low-confidence findings (< min_confidence) and NITs from IssueItems."""
+        survivors: list[IssueItem] = []
+        for issue in issues:
+            # 1. Severity or Category check
+            sev = str(getattr(issue, "severity", "") or "").strip().upper()
+            cat = str(getattr(issue, "category", "") or "").strip().upper()
+            if sev == "NIT" or cat == "NIT":
+                logger.info(
+                    "🛡️ Critic dropped IssueItem at %s:%s: NIT severity/category (%s/%s)",
+                    issue.path,
+                    issue.line,
+                    sev,
+                    cat,
+                )
+                continue
+
+            # 2. Confidence score check (if score is explicitly tagged on issue)
+            raw_conf = getattr(issue, "confidence_score", None)
+            if raw_conf is None:
+                raw_conf = getattr(issue, "confidence", None)
+            if raw_conf is not None:
+                try:
+                    conf = int(raw_conf)
+                    if conf < self.min_confidence:
+                        logger.info(
+                            "🛡️ Critic dropped IssueItem at %s:%s: confidence %d < threshold %d",
+                            issue.path,
+                            issue.line,
+                            conf,
+                            self.min_confidence,
+                        )
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            # 3. Description NIT tag check
+            desc = issue.description.strip()
+            if re.match(r"^(?:\[nit\]|\(nit\)|nit[:\s\-]|\bstyle nit\b)", desc, re.IGNORECASE):
+                logger.info(
+                    "🛡️ Critic dropped IssueItem at %s:%s: NIT indicator in description",
+                    issue.path,
+                    issue.line,
+                )
+                continue
+
+            survivors.append(issue)
+
+        if len(survivors) < len(issues):
+            logger.info(
+                "Critic filtered issues: %d input -> %d survivor(s) (dropped %d)",
+                len(issues),
+                len(survivors),
+                len(issues) - len(survivors),
+            )
         return survivors

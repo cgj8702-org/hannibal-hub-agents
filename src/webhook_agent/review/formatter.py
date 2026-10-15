@@ -123,6 +123,7 @@ def _salvage_objects(block: str) -> list[dict[str, Any]]:
                 "item_description",
                 "critical_issues",
                 "resolutions",
+                "candidate_findings",
             )
         ):
             salvaged.append(candidate)

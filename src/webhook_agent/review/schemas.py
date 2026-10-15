@@ -57,6 +57,11 @@ class IssueItem(BaseModel):
         default="", description="Diff rows the finding sits on, prefixed with line numbers"
     )
     verify_steps: str = Field(default="", description="Literal procedure to verify the issue")
+    confidence_score: int | None = Field(default=None, description="Confidence score from 1 to 10")
+    severity: str | None = Field(
+        default=None, description="Finding severity (CRITICAL, HIGH, MEDIUM, LOW, NIT)"
+    )
+    category: str | None = Field(default=None, description="Optional issue category")
 
     @field_validator("path", "description", "window", "verify_steps", mode="before")
     @classmethod
@@ -143,6 +148,8 @@ class CandidateFinding(BaseModel):
             start_line=self.start_line,
             description=f"{self.title}: {self.description}" if self.title else self.description,
             suggested_fix=self.suggested_fix or "",
+            confidence_score=self.confidence_score,
+            severity=self.severity,
         )
 
 
