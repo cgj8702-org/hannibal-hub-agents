@@ -53,9 +53,9 @@ By retiring CodeRabbit AI and promoting `hannibal-hub-agents` to your sole auton
 
 ---
 
-## 3. Phase 1 (PR #1): Cut Over from CodeRabbit, Retire `jules_proxy`, & Fix Bot Identity Collisions
+## 3. Phase 1 (PR #310): Cut Over from CodeRabbit, Retire `jules_proxy`, & Fix Bot Identity Collisions [MERGED]
 
-**Branch:** `git checkout -b feat/native-hannibal-reviews`
+**Branch:** `feat/native-hannibal-reviews` (Merged to `main` via PR #310)
 
 ### Step 1.1: Update Operational Defaults in `src/webhook_agent/constants.py`
 Enable automatic CI-gated PR reviews (`DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"`) and disable the legacy Jules proxy (`DEFAULT_ENABLE_JULES_PR_PROXY = "0"`).
@@ -329,11 +329,10 @@ class PromptSanitizerPlugin(BasePlugin):
         return None
 ```
 
-### Step 2.3: Wire `create_issue` & `PromptSanitizerPlugin` in `src/webhook_agent/core/agent_definition.py` (P0-4)
-1. Import `create_issue` alongside `get_issue, read_file, review` from `webhook_agent.tools.github_tools`.
-2. Store `self._sanitizer_plugin = PromptSanitizerPlugin()` instead of discarding the return value on line 141.
-3. Add `create_issue` to `self._conversational_agent` tools (`tools=[read_file, get_issue, create_issue]`).
-4. Register `self._sanitizer_plugin` in `plugins=[self._history_pruning_plugin, self._tool_pruning_plugin, self._sanitizer_plugin]` for both `self._app` and `self._conversational_app`.
+### Step 2.3: Wire `PromptSanitizerPlugin` & Enforce Zero-Mutation in `src/webhook_agent/core/agent_definition.py` (P0-4)
+1. Store `self._sanitizer_plugin = PromptSanitizerPlugin()` instead of discarding the return value on line 141.
+2. Invariant: Maintain Zero-Mutation architecture. Keep `self._conversational_agent` strictly read-only (`tools=[read_file, get_issue]`). Do not re-introduce mutating ops tools (`create_issue`, `add_label`, `merge_pr`).
+3. Register `self._sanitizer_plugin` in `plugins=[self._history_pruning_plugin, self._tool_pruning_plugin, self._sanitizer_plugin]` for both `self._app` and `self._conversational_app`.
 
 ### Step 2.4: Fix In-Place Prompt Mutation Across Retries in `src/webhook_agent/core/execution.py` (P0-5)
 In `src/webhook_agent/core/execution.py`, capture `base_prompt_text` before `for attempt in range(_MAX_RETRIES):` so retry attempts do not cumulatively append duplicate `[⚠️ SYSTEM NOTICE]` and `[YOUR PREVIOUS REVIEW CRITIQUE]` blocks:
@@ -369,7 +368,12 @@ In `build_user_message()` in `src/webhook_agent/core/prompts.py`:
    is_self_repo = repo_full_name.endswith("/hannibal-hub-agents") or not repo_full_name
    ```
 
-### Step 2.6: Verify PR #2
+### Step 2.6: Fast-Push Debouncing & Whack-a-Mole Regression Test Isolation
+1. **Debounce Fast Pushes:** In `src/webhook_agent/processor.py`, position the live PR head check right after the CI gate so superseded commits (`live_head_sha != head_sha`) and closed PRs skip evaluation immediately before acquiring claims or running static analysis.
+2. **De-whack-a-mole Regression Suite:** Add `regression` marker to `pyproject.toml` and configure `addopts = "--strict-markers -m 'not regression'"` to isolate brittle historical regression tests and replay harnesses from the primary unit test gate.
+3. **Purge Obsolete Plans:** Remove obsolete root and `docs/plans/` markdown files, retaining only the single canonical `architecture_audit_refactoring_blueprint.md`.
+
+### Step 2.7: Verify PR #2
 ```bash
 ./scripts/ruff-all.sh
 uv run pytest tests/unit/tools/test_ast_tools.py tests/unit/core/test_execution.py tests/unit/core/test_prompts.py
@@ -553,4 +557,52 @@ uv run pytest --tb=short -q
    - **Remediation:**
      - **Ingress & Writeback Guard:** Check `live_pr.head.sha == event_head_sha` at ingress, before model execution, and immediately before posting the review. Drop if stale.
      - **Dynamic Cancellation Registry:** Extend `PRClosedRegistry` to track active in-flight review SHAs by `(repo, pr_number)` and immediately trigger `AbortAgentExecution` on any in-flight background task whose SHA has been superseded by a newer push.
+
+---
+
+## 8. Phase 5 (PR #5): Native 3-Stage "Hunter → Critic → Gate" Review Competence Engine
+
+**Branch:** `feat/review-competence-pipeline`
+
+### Step 5.1: Structured Candidate Finding & Confidence Schemas
+In `src/webhook_agent/review/schemas.py`:
+* Define `CandidateFinding` with `severity` (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NIT`), `confidence_score` (`1..10`), `file_path`, `line_number`, `description`, `suggested_fix`, and `falsification_check`.
+* Define `VerificationVerdict` with `verified: bool`, `confidence: int`, `disproof_reason: str | None`, `revised_description: str | None`.
+
+### Step 5.2: Stage 1: Candidate Hunter Pass
+* High-recall pass focusing on:
+  1. Contract violations and broken call sites.
+  2. Unhandled edge cases, resource leaks, and security regressions.
+  3. Acceptance criteria adherence from linked issue specs (`ocr` pattern).
+* Outputs raw candidate issues without writing directly to GitHub.
+
+### Step 5.3: Stage 2: Adversarial Critic Verification Pass
+* A second targeted model invocation (acting as an adversarial Principal Engineer):
+  1. Scrutinizes candidate issues against full PR context, imports, and caller semantics.
+  2. Actively attempts to falsify or disprove each finding (e.g. "Is this already handled in line X?", "Is this an intended framework pattern?").
+  3. Filters out any finding with `confidence_score < 8` or severity == `NIT`.
+  4. If no findings survive verification, emits a clean `APPROVE` with zero noise.
+
+### Step 5.4: Stage 3: AST Diff Validator & Syntactic Gate
+* Before rendering inline suggestions or writebacks, runs `ast.parse()` on every proposed code snippet.
+* If a code suggestion produces an `IndentationError` or `SyntaxError`, strips the diff fence and retains only the architectural rationale.
+
+---
+
+## 9. Phase 6 (PR #6 — Final Phase): Lean Custom Prompts Redesign & Fluff Elimination
+
+**Branch:** `refactor/lean-high-efficiency-prompts`
+
+> [!NOTE]
+> Per architectural directive, prompt rewriting is scheduled as the **very last phase** after the engine and verification harnesses are solid.
+
+### 9.1 The Problem with Current Prompts
+* **Negative Prompting Bloat:** Current instructions contain redundant lists of negative prohibitions ("DO NOT do X", "NEVER do Y", "DO NOT mention Z") across `REVIEW_INSTRUCTION`, `SYSTEM_INSTRUCTION`, and `CONVERSATIONAL_INSTRUCTION`. Negative phrasing dilutes LLM attention and wastes context tokens.
+* **Format Repetition:** Output schemas are described in verbose English markdown text *and* in Pydantic schemas, creating token bloat and potential model hallucination on contradictory wording.
+
+### 9.2 Brainstorming: Minimal Fluff, High-Density Principles
+1. **Schema-Driven, Not Prose-Driven:** Use terse, structured YAML/JSON field docstrings for output constraints rather than paragraphs of instructional rules.
+2. **Dense Positive Personas:** State what the reviewer *must verify* (e.g., "Verify signature contracts, error branches, and linked issue acceptance criteria") rather than what it *must avoid*.
+3. **Silence by Default:** Explicitly reward empty findings arrays: "If no critical bug or regression is found with confidence >= 8, return empty findings. Clean passes are preferred over noise."
+4. **Context Framing over Preamble:** Eliminate meta-commentary ("You are a world-class AI agent created by..."). Start immediately with operational task bounds and typed variables.
 

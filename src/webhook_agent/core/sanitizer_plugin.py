@@ -52,11 +52,16 @@ class PromptSanitizerPlugin(BasePlugin):
         super().__init__(name=name)
 
     async def after_model_callback(
-        self, callback_context: CallbackContext, llm_response: LlmResponse
+        self, *, callback_context: CallbackContext, llm_response: LlmResponse
     ) -> LlmResponse | None:
         """Intercept and sanitize model output before rendering or downstream processing."""
         if hasattr(llm_response, "content") and llm_response.content:
             if isinstance(llm_response.content, str):
                 llm_response.content = sanitize_markdown_text(llm_response.content)
+            else:
+                parts = getattr(llm_response.content, "parts", None) or []
+                for part in parts:
+                    if hasattr(part, "text") and isinstance(part.text, str) and part.text:
+                        part.text = sanitize_markdown_text(part.text)
 
         return llm_response

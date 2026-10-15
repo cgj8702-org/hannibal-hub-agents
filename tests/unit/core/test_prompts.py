@@ -243,3 +243,20 @@ def test_webhook_agent_build_user_message_delegation_parity() -> None:
     direct = build_user_message(event_data)
     assert delegated.role == direct.role
     assert delegated.parts[0].text == direct.parts[0].text
+
+
+def test_build_user_message_injects_linked_issue_spec() -> None:
+    """Verify linked_issue_spec is rendered in build_user_message when present."""
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "hannibal/hannibal-hub-agents"},
+        "sender": {"login": "developer"},
+        "raw_payload": {
+            "pull_request": {"number": 123},
+            "linked_issue_spec": "Linked Issue #42: Must support timeout",
+        },
+    }
+    content = build_user_message(event_data)
+    text = content.parts[0].text or ""
+    assert "Linked Issue / Task Specification" in text
+    assert "Linked Issue #42: Must support timeout" in text

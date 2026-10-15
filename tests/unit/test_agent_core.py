@@ -732,6 +732,7 @@ class TestGetIssue:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.regression
 class TestCreateIssue:
     def test_create_issue_success(self):
         from unittest.mock import MagicMock
@@ -1115,6 +1116,7 @@ class TestConversationalAgent:
         )
         assert _is_formal_review_eligible("issues.opened", "Bug in parser") is False
 
+    @pytest.mark.regression
     def test_conversational_agent_tools_and_instruction(self):
         from webhook_agent.core.agent_definition import WebhookAgent
         from webhook_agent.core.prompts import CONVERSATIONAL_INSTRUCTION

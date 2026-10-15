@@ -11,7 +11,7 @@ from webhook_agent.review.schemas import (
     has_genuine_summary_risk,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.regression]
 
 
 @pytest.mark.unit
