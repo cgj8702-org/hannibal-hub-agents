@@ -27,7 +27,11 @@ from typing import Any
 
 from github import Auth, Github
 
-from webhook_agent.constants import DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS
+from webhook_agent.constants import (
+    DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS,
+    DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS,
+    DEFAULT_TRIGGER_EXEMPT_LOGINS,
+)
 from webhook_agent.core.cancellation import pr_closed_registry
 from webhook_agent.github.bot_identity import _is_bot_event, is_jules_sender
 from webhook_agent.github.credentials import (
@@ -357,6 +361,47 @@ class WebhookProcessor:
             return False
 
         raw = ev.get("raw_payload") or {}
+        event_name = ev.get("event_name")
+
+        # Gated trigger authorization (T-03): restrict agent execution based on author association.
+        association: str | None = None
+        author_login = ""
+
+        if event_name in ("issue_comment", "pull_request_review_comment"):
+            comment = raw.get("comment") or raw.get("review_comment") or {}
+            association = comment.get("author_association")
+            author_login = (comment.get("user") or {}).get("login", "")
+        elif event_name in ("pull_request", "pr"):
+            pr_data = raw.get("pull_request") or {}
+            association = pr_data.get("author_association")
+            author_login = (pr_data.get("user") or {}).get("login", "")
+        else:
+            comment = raw.get("comment") or raw.get("review_comment") or {}
+
+        if association and isinstance(association, str):
+            allowed_raw = os.getenv(
+                "TRIGGER_ALLOWED_ASSOCIATIONS", DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS
+            )
+            allowed_associations = {a.strip().upper() for a in allowed_raw.split(",") if a.strip()}
+
+            if association.strip().upper() not in allowed_associations:
+                exempt_raw = os.getenv("TRIGGER_EXEMPT_LOGINS", DEFAULT_TRIGGER_EXEMPT_LOGINS)
+                exempt_logins = {
+                    login.strip().lower() for login in exempt_raw.split(",") if login.strip()
+                }
+
+                sender_login = (ev.get("sender") or raw.get("sender") or {}).get("login", "")
+                if (
+                    sender_login.lower() not in exempt_logins
+                    and author_login.lower() not in exempt_logins
+                ):
+                    logger.info(
+                        "Ignoring event with unauthorized author_association=%s (delivery_id=%s)",
+                        association,
+                        delivery_id,
+                    )
+                    return False
+
         comment = raw.get("comment") or raw.get("review_comment") or {}
         comment_body = comment.get("body") or ""
         if "@dependabot" in comment_body.lower():
