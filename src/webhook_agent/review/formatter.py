@@ -183,10 +183,13 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
 
 
 def truncate_log_payload(val: Any, max_length: int = 300) -> str:
-    """Return full payload string without truncation for Cloud Logging output."""
+    """Safely format and truncate tool/agent payloads for readable Cloud Logging output."""
     if val is None:
         return ""
-    return str(val)
+    text = str(val)
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + f"... [truncated {len(text) - max_length} chars]"
 
 
 def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:

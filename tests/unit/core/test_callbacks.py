@@ -341,3 +341,47 @@ async def test_before_tool_callback_pydantic_validation_failure() -> None:
     assert res is not None
     assert "error" in res
     assert "Tool 'read_file' argument validation failed" in res["error"]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+def test_format_tool_args_for_logging() -> None:
+    """_format_tool_args_for_logging retains values, redacts sensitive keys, and truncates long strings."""
+    from webhook_agent.core.callbacks import _format_tool_args_for_logging
+
+    args = {
+        "file_path": "src/webhook_agent/worker.py",
+        "pattern": "def main",
+        "github_token": "ghp_secret12345",
+        "api_key": "AIzaSySecret",
+        "huge_content": "X" * 300,
+    }
+    formatted = _format_tool_args_for_logging(args, max_val_len=50)
+    assert formatted["file_path"] == "src/webhook_agent/worker.py"
+    assert formatted["pattern"] == "def main"
+    assert formatted["github_token"] == "[REDACTED]"
+    assert formatted["api_key"] == "[REDACTED]"
+    assert formatted["huge_content"].startswith("'")
+    assert "[truncated" in formatted["huge_content"]
+
+
+@pytest.mark.unit
+@pytest.mark.webhook_agent
+@pytest.mark.anyio
+async def test_before_tool_callback_logs_real_arguments(caplog: pytest.LogCaptureFixture) -> None:
+    """before_tool_callback logs the actual tool arguments rather than just keys."""
+    import logging
+
+    tool = MagicMock()
+    tool.name = "read_file"
+    args = {"file_path": "src/webhook_agent/worker.py", "ref": "main"}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    with caplog.at_level(logging.INFO):
+        await before_tool_callback(tool, args, ctx)
+
+    assert any(
+        "read_file" in record.message and "src/webhook_agent/worker.py" in record.message
+        for record in caplog.records
+    )

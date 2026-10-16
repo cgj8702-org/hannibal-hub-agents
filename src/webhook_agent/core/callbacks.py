@@ -272,6 +272,28 @@ async def after_model_callback(
     return None
 
 
+_SENSITIVE_ARG_SUBSTRINGS = ("token", "key", "secret", "password", "auth", "credential")
+
+
+def _format_tool_args_for_logging(args: dict[str, Any], max_val_len: int = 120) -> dict[str, Any]:
+    """Format tool argument key-value pairs safely for operational logging."""
+    formatted: dict[str, Any] = {}
+    for k, v in args.items():
+        k_lower = k.lower()
+        if any(sens in k_lower for sens in _SENSITIVE_ARG_SUBSTRINGS):
+            formatted[k] = "[REDACTED]"
+            continue
+
+        v_repr = repr(v)
+        if len(v_repr) > max_val_len:
+            formatted[k] = (
+                v_repr[:max_val_len] + f"... [truncated {len(v_repr) - max_val_len} chars]"
+            )
+        else:
+            formatted[k] = v
+    return formatted
+
+
 async def before_tool_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext
 ) -> dict[str, Any] | None:
@@ -310,7 +332,7 @@ async def before_tool_callback(
     elif isinstance(tools_executed, set):
         tools_executed.add(tool.name)
 
-    logger.info("🔧 [Tool Executing] %s (args=%s)", tool.name, list(args.keys()))
+    logger.info("🔧 [Tool Executing] %s (args=%s)", tool.name, _format_tool_args_for_logging(args))
     return None
 
 

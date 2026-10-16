@@ -860,9 +860,12 @@ class WebhookProcessor:
             for r in results:
                 msg = getattr(r, "detail", None) or getattr(r, "message", str(r))
                 status_symbol = "OK" if r.success else "FAIL"
+                tool_name = getattr(r, "tool", "")
+                tool_label = f" (tool: {tool_name})" if tool_name else ""
                 logger.info(
-                    "Agent action [%s]: %s",
+                    "Agent action [%s]%s: %s",
                     status_symbol,
+                    tool_label,
                     truncate_log_payload(msg, 300),
                 )
         else:

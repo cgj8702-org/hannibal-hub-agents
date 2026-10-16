@@ -34,3 +34,19 @@ def _disable_ci_gate_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     happens to answer the CI queries.
     """
     monkeypatch.setenv("REVIEW_WAIT_FOR_CI", "0")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cloud_logging(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent automated tests from attaching live Google Cloud Logging handlers.
+
+    Unit tests must never leak mock exceptions or simulated failures to the live GCP Cloud Logging stream.
+    """
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        import google.cloud.logging
+
+        monkeypatch.setattr(
+            google.cloud.logging.Client, "setup_logging", lambda self, *a, **kw: None
+        )
