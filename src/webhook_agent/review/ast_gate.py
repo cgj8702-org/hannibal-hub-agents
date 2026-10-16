@@ -79,14 +79,14 @@ def validate_python_syntax(code_snippet: str) -> tuple[bool, str | None]:
                 try:
                     ast.parse(template)
                     return True, None
-                except Exception:
+                except Exception:  # noqa: S110 - trial parsing of template wrappers, error expected
                     pass
 
         # If it's a multiline or single line expression/assignment, try evaluating as single statement
         try:
             ast.parse(f"(\n{dedented}\n)")
             return True, None
-        except Exception:
+        except Exception:  # noqa: S110 - trial parsing of expression wrap, error expected
             pass
 
         return False, f"{type(first_err).__name__}: {first_err}"

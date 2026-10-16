@@ -198,6 +198,6 @@ class ProactiveEvaluator:
             for c in comments[-10:]:
                 if substring in (c.body or ""):
                     return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed fetching comments for PR duplicate check: %s", exc)
         return False

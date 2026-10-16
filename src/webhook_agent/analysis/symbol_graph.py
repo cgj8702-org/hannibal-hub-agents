@@ -338,8 +338,8 @@ def compare_signatures(
             is_breaking=False,
             reasons=[],
         )
-
-    assert old_sig is not None and new_sig is not None
+    if old_sig is None or new_sig is None:
+        return SignatureDiff("", "", None, None, False, [])
 
     # Check for parameters added without default values
     old_params_by_name = {p.name: p for p in old_sig.parameters}
@@ -513,7 +513,8 @@ class SymbolImpactAnalyzer:
 
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except OSError as err:
+                logger.debug("Failed reading file %s during symbol search: %s", file_path, err)
                 continue
 
             # Fast substring filter (<5ms total runtime across repo)
@@ -609,7 +610,8 @@ class SymbolImpactAnalyzer:
 
             try:
                 new_code = abs_file.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except OSError as read_err:
+                logger.debug("Failed reading %s: %s", abs_file, read_err)
                 continue
 
             # Fetch baseline code via baseline_loader if provided

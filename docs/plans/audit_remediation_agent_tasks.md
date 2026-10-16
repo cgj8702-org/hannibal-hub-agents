@@ -233,7 +233,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **do:** (1) README repo tree: add `dev/`, `docs/`, `assets/`. (2) Proactive sweep text: 5-minute ticker, disabled unless `ENABLE_PROACTIVE_SWEEP=1`. (3) Document the new env vars (`TRIGGER_ALLOWED_ASSOCIATIONS`, `TRIGGER_EXEMPT_LOGINS`, `ENABLE_PR_WORKSPACE`, `LOG_LEVEL`) in a short configuration section. (4) AGENTS.md: add one line above the OCR managed block saying `.ocr/` is not committed and the block should be skipped if the file is missing (D6). Do not edit the managed block itself. (5) Do not change model names anywhere.
 - **done when:** every path named in README and AGENTS.md exists, except the explicitly annotated `.ocr` one.
 
-## T-16: Tighten lint, typing and coverage
+## T-16: Tighten lint, typing and coverage [COMPLETED - PR #336]
 
 - **depends_on:** all others. **branch:** `chore/lint-typing-coverage` | **commit:** `chore: enable ruff S rules and raise coverage`
 - **files:** `pyproject.toml`, targeted source fixes, new tests

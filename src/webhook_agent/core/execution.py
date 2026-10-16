@@ -400,7 +400,8 @@ def execute_agent_event(
 
         if user_message is None:
             user_message = agent._build_user_message(event_data)
-        assert user_message is not None
+        if user_message is None:
+            raise RuntimeError("Failed to build user message for execution")
 
         active_runner = agent._runner if is_pr_review_event else agent._conversational_runner
         active_app_name = (

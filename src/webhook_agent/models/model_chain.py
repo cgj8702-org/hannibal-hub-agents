@@ -197,8 +197,8 @@ def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int
                         tpm_val = tier_data.get("tpm", 0)
                         if isinstance(tpm_val, (int, float)) and tpm_val > 0:
                             return int(tpm_val)
-    except Exception:
-        pass
+    except Exception as err:
+        logger.debug("Failed reading registry TPM limits, using fallback: %s", err)
     return 15000 if active_tier == "free" else 100000
 
 
@@ -218,8 +218,8 @@ def _count_tokens_exact(text: str, model: str | None = None) -> int:
         resp = client.models.count_tokens(model=target_model, contents=text)
         if resp and resp.total_tokens:
             return int(resp.total_tokens)
-    except Exception:
-        pass
+    except Exception as err:
+        logger.debug("count_tokens API call failed, using heuristic: %s", err)
     return max(1, len(text) // 4)
 
 

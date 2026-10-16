@@ -80,6 +80,166 @@ def test_firestore_uses_centralized_default_when_env_is_absent(monkeypatch) -> N
     assert registry._get_db() is client
 
 
+@pytest.mark.unit
+def test_firestore_init_failure_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _get_db returns None and logs warning when Client fails."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("ENABLE_REVIEW_IDEMPOTENCY", "1")
+    monkeypatch.setattr(review_idempotency, "_HAS_FIRESTORE", True)
+    monkeypatch.setattr(
+        review_idempotency.firestore, "Client", MagicMock(side_effect=Exception("DB unavailable"))
+    )
+    registry = ReviewClaimRegistry()
+    assert registry._get_db() is None
+
+
+@pytest.mark.unit
+def test_firestore_claim_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify claim succeeds when Firestore document does not exist yet."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_snapshot = MagicMock()
+    mock_snapshot.exists = False
+    mock_doc.get.return_value = mock_snapshot
+    mock_db.collection.return_value.document.return_value = mock_doc
+    mock_tx = MagicMock()
+    mock_db.transaction.return_value = mock_tx
+
+    registry = ReviewClaimRegistry()
+    registry._initialized = True
+    registry._db = mock_db
+
+    claim = registry.claim("owner/repo", 10, "sha-1", github_review_exists=False)
+    assert claim is not None
+    assert mock_tx.set.called
+
+
+@pytest.mark.unit
+def test_firestore_claim_already_submitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify claim returns None when Firestore record is already submitted."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_snapshot = MagicMock()
+    mock_snapshot.exists = True
+    mock_snapshot.to_dict.return_value = {"status": "submitted"}
+    mock_doc.get.return_value = mock_snapshot
+    mock_db.collection.return_value.document.return_value = mock_doc
+    mock_tx = MagicMock()
+    mock_db.transaction.return_value = mock_tx
+
+    registry = ReviewClaimRegistry()
+    registry._initialized = True
+    registry._db = mock_db
+
+    claim = registry.claim("owner/repo", 10, "sha-1", github_review_exists=False)
+    assert claim is None
+
+
+@pytest.mark.unit
+def test_firestore_claim_active_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify claim returns None when another worker holds an active lease."""
+    import datetime
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_snapshot = MagicMock()
+    mock_snapshot.exists = True
+    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+    mock_snapshot.to_dict.return_value = {"status": "processing", "lease_until": future}
+    mock_doc.get.return_value = mock_snapshot
+    mock_db.collection.return_value.document.return_value = mock_doc
+    mock_tx = MagicMock()
+    mock_db.transaction.return_value = mock_tx
+
+    registry = ReviewClaimRegistry()
+    registry._initialized = True
+    registry._db = mock_db
+
+    claim = registry.claim("owner/repo", 10, "sha-1", github_review_exists=False)
+    assert claim is None
+
+
+@pytest.mark.unit
+def test_firestore_claim_transaction_error_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify claim falls back to local claim when Firestore transaction fails."""
+    monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
+    from unittest.mock import MagicMock
+
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_doc.get.side_effect = RuntimeError("Transaction conflict")
+    mock_db.collection.return_value.document.return_value = mock_doc
+    mock_tx = MagicMock()
+    mock_db.transaction.return_value = mock_tx
+
+    registry = ReviewClaimRegistry()
+    registry._initialized = True
+    registry._db = mock_db
+
+    claim = registry.claim("owner/repo", 10, "sha-fallback", github_review_exists=False)
+    assert claim is not None
+    assert registry._db is None
+
+
+@pytest.mark.unit
+def test_firestore_mark_submitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify mark_submitted updates Firestore document in transaction."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_snapshot = MagicMock()
+    mock_snapshot.exists = True
+    mock_snapshot.to_dict.return_value = {"claim_token": "token-xyz"}
+    mock_doc.get.return_value = mock_snapshot
+    mock_db.collection.return_value.document.return_value = mock_doc
+    mock_tx = MagicMock()
+    mock_db.transaction.return_value = mock_tx
+
+    registry = ReviewClaimRegistry()
+    registry._initialized = True
+    registry._db = mock_db
+
+    claim = review_idempotency.ReviewClaim(key="test-key", token="token-xyz")
+    registry.mark_submitted(claim, "rev-1", "https://url")
+    assert mock_tx.set.called
+
+
+@pytest.mark.unit
+def test_firestore_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify release deletes Firestore document in transaction."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_snapshot = MagicMock()
+    mock_snapshot.exists = True
+    mock_snapshot.to_dict.return_value = {"claim_token": "token-abc", "status": "processing"}
+    mock_doc.get.return_value = mock_snapshot
+    mock_db.collection.return_value.document.return_value = mock_doc
+    mock_tx = MagicMock()
+    mock_db.transaction.return_value = mock_tx
+
+    registry = ReviewClaimRegistry()
+    registry._initialized = True
+    registry._db = mock_db
+
+    claim = review_idempotency.ReviewClaim(key="test-key", token="token-abc")
+    registry.release(claim)
+    assert mock_tx.delete.called
+
+
 @pytest.mark.integration
 @pytest.mark.firestore
 def test_live_firestore_claim_is_atomic_across_registry_instances(monkeypatch) -> None:

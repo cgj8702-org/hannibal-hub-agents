@@ -109,7 +109,8 @@ def _enforce_verdict(
                 cand_data = json.loads(cand)
                 if isinstance(cand_data, dict):
                     data_candidates.append(cand_data)
-            except Exception:
+            except (json.JSONDecodeError, ValueError) as err:
+                logger.debug("Failed parsing JSON candidate from review body: %s", err)
                 continue
 
     has_prior_reviews = True

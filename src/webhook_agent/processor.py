@@ -213,7 +213,8 @@ class WebhookProcessor:
             "GITHUB_INSTALLATION_ID", int(DEFAULT_GITHUB_INSTALLATION_ID)
         )
         self.private_key_path = os.getenv(
-            "GITHUB_PRIVATE_KEY_PATH", "/tmp/keys/github-app-private-key.pem"
+            "GITHUB_PRIVATE_KEY_PATH",
+            "/tmp/keys/github-app-private-key.pem",  # noqa: S108 - key directory created with mode 0700 by load_secrets.sh
         )
         self.dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
         # Built lazily on first process_event() call — NOT here. Keeps
