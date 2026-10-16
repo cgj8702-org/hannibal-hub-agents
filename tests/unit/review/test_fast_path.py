@@ -282,6 +282,7 @@ def test_is_base_branch_merge_sync_single_parent_returns_false() -> None:
 
 
 def test_is_base_branch_merge_sync_non_synchronize_returns_false() -> None:
+    """Verify that non-synchronize PR actions (e.g. opened) return False."""
     mock_gh = MagicMock()
     payload = {
         "canonical": "pull_request.opened",
@@ -297,6 +298,7 @@ def test_is_base_branch_merge_sync_non_synchronize_returns_false() -> None:
 
 
 def test_evaluate_dependency_fast_path_dry_run_or_none() -> None:
+    """Verify that dependency fast-path returns False when dry_run=True or pr_number is None."""
     mock_gh = MagicMock()
     assert evaluate_dependency_fast_path(mock_gh, "o/r", {}, {}, {}, None, dry_run=False) is False
     assert evaluate_dependency_fast_path(mock_gh, "o/r", {}, {}, {}, 1, dry_run=True) is False
@@ -304,6 +306,7 @@ def test_evaluate_dependency_fast_path_dry_run_or_none() -> None:
 
 @patch("webhook_agent.review.fast_path.logger")
 def test_evaluate_dependency_fast_path_pure_dependency_approval(mock_logger: MagicMock) -> None:
+    """Verify that valid pure-dependency PRs are approved via fast-path submission."""
     mock_gh = MagicMock()
     mock_repo = MagicMock()
     mock_pr = MagicMock()
@@ -344,6 +347,7 @@ def test_evaluate_dependency_fast_path_pure_dependency_approval(mock_logger: Mag
 
 
 def test_evaluate_dependency_fast_path_not_approved() -> None:
+    """Verify that invalid or suspicious dependency updates are not approved by fast-path."""
     mock_gh = MagicMock()
     payload = {"sender": {"login": "dependabot[bot]"}}
     raw = {

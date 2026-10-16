@@ -762,6 +762,7 @@ class TestPreworkPipelines:
 
 class TestBaseBranchMergeSync:
     def test_is_base_branch_merge_sync_fast_path(self):
+        """Verify that commit messages alone cannot spoof a base branch merge sync."""
         from unittest.mock import MagicMock
 
         from webhook_agent.processor import is_base_branch_merge_sync
@@ -792,6 +793,7 @@ class TestBaseBranchMergeSync:
         assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
     def test_is_base_branch_merge_sync_api_check_two_parents(self):
+        """Verify that multi-parent merge commits verified against base via API return True."""
         from unittest.mock import MagicMock
 
         from webhook_agent.processor import is_base_branch_merge_sync
@@ -828,6 +830,7 @@ class TestBaseBranchMergeSync:
         mock_repo.get_commit.assert_called_once_with("0abebcc")
 
     def test_is_base_branch_merge_sync_single_parent_returns_false(self):
+        """Verify that single-parent commits return False and never bypass review."""
         from unittest.mock import MagicMock
 
         from webhook_agent.processor import is_base_branch_merge_sync
@@ -854,6 +857,7 @@ class TestBaseBranchMergeSync:
         assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
     def test_is_base_branch_merge_sync_non_synchronize_returns_false(self):
+        """Verify that non-synchronize events (e.g. pull_request.opened) return False."""
         from unittest.mock import MagicMock
 
         from webhook_agent.processor import is_base_branch_merge_sync
@@ -907,6 +911,7 @@ class TestBaseBranchMergeSync:
         mock_review.dismiss.assert_not_called()
 
     def test_process_event_suppresses_base_branch_merge_sync(self, caplog):
+        """Verify that processor suppresses review execution when base branch merge sync is verified."""
         import logging
         from unittest.mock import MagicMock, patch
 
