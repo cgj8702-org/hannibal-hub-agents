@@ -302,10 +302,6 @@ class CodeReviewResponse(BaseModel):
         default_factory=list,
         description="Key risks or edge cases identified during analysis",
     )
-    verified_invariants: list[VerifiedInvariant] = Field(
-        default_factory=list,
-        description="Verified invariants, boundary conditions, or contracts preserved by the PR, if applicable.",
-    )
     unverified_claims: list[str] = Field(
         default_factory=list,
         description="Claims, residual uncertainty, or hypotheses that could not be fully verified against the diff.",
@@ -541,44 +537,14 @@ class CodeReviewResponse(BaseModel):
                         )
         normalized["minor_suggestions"] = clean_minor
 
-        raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
-        clean_inv: list[dict[str, Any]] = []
+        raw_inv = normalized.pop("verified_invariants", None) or normalized.pop("invariants", None)
         unverified_list: list[str] = [
             str(x) for x in (normalized.get("unverified_claims") or []) if x
         ]
         if isinstance(raw_inv, list):
             for item in raw_inv:
-                if isinstance(item, BaseModel):
-                    item = item.model_dump()
-                if isinstance(item, dict):
-                    inv_text = str(
-                        item.get("invariant")
-                        or item.get("description")
-                        or item.get("evidence")
-                        or ""
-                    ).strip()
-                    path_val = str(item.get("path") or "").strip()
-                    line_val = item.get("line")
-                    if isinstance(line_val, str) and line_val.isdigit():
-                        line_val = int(line_val)
-                    evid_val = str(item.get("evidence") or item.get("proof") or "").strip()
-                    if not evid_val and not item.get("invariant") and not item.get("description"):
-                        evid_val = inv_text
-                    if inv_text:
-                        if path_val and isinstance(line_val, int) and line_val > 0:
-                            clean_inv.append(
-                                {
-                                    "invariant": inv_text,
-                                    "path": path_val,
-                                    "line": line_val,
-                                    "evidence": evid_val,
-                                }
-                            )
-                        else:
-                            unverified_list.append(inv_text)
-                elif isinstance(item, str) and item.strip():
+                if isinstance(item, str) and item.strip():
                     unverified_list.append(item.strip())
-        normalized["verified_invariants"] = clean_inv
         normalized["unverified_claims"] = unverified_list
 
         raw_unverified = (
@@ -715,15 +681,6 @@ class CodeReviewResponse(BaseModel):
                 }
                 for item in self.risks_and_edge_cases
             ],
-            "verified_invariants": [
-                {
-                    "invariant": item.invariant,
-                    "path": item.path,
-                    "line": item.line,
-                    "evidence": item.evidence,
-                }
-                for item in self.verified_invariants
-            ],
             "unverified_claims": list(self.unverified_claims),
         }
         metadata_comment = serialize_review_metadata(meta)
@@ -751,10 +708,6 @@ class SyncReviewResponse(BaseModel):
     minor_suggestions: list[IssueItem] = Field(
         default_factory=list,
         description="Non-blocking minor suggestions or maintainability notes introduced in this update",
-    )
-    verified_invariants: list[VerifiedInvariant] = Field(
-        default_factory=list,
-        description="Verified invariants, boundary conditions, or contracts preserved by the PR, if applicable.",
     )
     unverified_claims: list[str] = Field(
         default_factory=list,
@@ -978,44 +931,14 @@ class SyncReviewResponse(BaseModel):
             else []
         )
 
-        raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
-        clean_inv: list[dict[str, Any]] = []
+        raw_inv = normalized.pop("verified_invariants", None) or normalized.pop("invariants", None)
         unverified_list: list[str] = [
             str(x) for x in (normalized.get("unverified_claims") or []) if x
         ]
         if isinstance(raw_inv, list):
             for item in raw_inv:
-                if isinstance(item, BaseModel):
-                    item = item.model_dump()
-                if isinstance(item, dict):
-                    inv_text = str(
-                        item.get("invariant")
-                        or item.get("description")
-                        or item.get("evidence")
-                        or ""
-                    ).strip()
-                    path_val = str(item.get("path") or "").strip()
-                    line_val = item.get("line")
-                    if isinstance(line_val, str) and line_val.isdigit():
-                        line_val = int(line_val)
-                    evid_val = str(item.get("evidence") or item.get("proof") or "").strip()
-                    if not evid_val and not item.get("invariant") and not item.get("description"):
-                        evid_val = inv_text
-                    if inv_text:
-                        if path_val and isinstance(line_val, int) and line_val > 0:
-                            clean_inv.append(
-                                {
-                                    "invariant": inv_text,
-                                    "path": path_val,
-                                    "line": line_val,
-                                    "evidence": evid_val,
-                                }
-                            )
-                        else:
-                            unverified_list.append(inv_text)
-                elif isinstance(item, str) and item.strip():
+                if isinstance(item, str) and item.strip():
                     unverified_list.append(item.strip())
-        normalized["verified_invariants"] = clean_inv
         normalized["unverified_claims"] = unverified_list
 
         return normalized
@@ -1035,7 +958,6 @@ class SyncReviewResponse(BaseModel):
                 "critical_issues": [item.model_dump() for item in self.critical_issues],
                 "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],
                 "risks_and_edge_cases": [],
-                "verified_invariants": [item.model_dump() for item in self.verified_invariants],
                 "unverified_claims": list(self.unverified_claims),
             }
             cr_obj = CodeReviewResponse.model_validate(cr_data)
@@ -1181,15 +1103,6 @@ class SyncReviewResponse(BaseModel):
                     "category": "SUGGESTION",
                 }
                 for sugg in self.minor_suggestions
-            ],
-            "verified_invariants": [
-                {
-                    "invariant": item.invariant,
-                    "path": item.path,
-                    "line": item.line,
-                    "evidence": item.evidence,
-                }
-                for item in self.verified_invariants
             ],
             "unverified_claims": list(self.unverified_claims),
         }
