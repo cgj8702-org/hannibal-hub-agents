@@ -304,7 +304,7 @@ class CodeReviewResponse(BaseModel):
     )
     verified_invariants: list[VerifiedInvariant] = Field(
         default_factory=list,
-        description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
+        description="Verified invariants, boundary conditions, or contracts preserved by the PR, if applicable.",
     )
     unverified_claims: list[str] = Field(
         default_factory=list,
@@ -610,65 +610,47 @@ class CodeReviewResponse(BaseModel):
         verdict_str = verdict or self.verdict or "COMMENT"
         verdict_badge = f"`{verdict_str}`"
 
-        critical_lines: list[str] = []
-        if self.critical_issues:
-            for issue in self.critical_issues:
-                critical_lines.append(issue.to_markdown())
-        else:
-            critical_lines.append("* *None found.*")
-
-        minor_lines: list[str] = []
-        if self.minor_suggestions:
-            for suggestion in self.minor_suggestions:
-                minor_lines.append(suggestion.to_markdown())
-        else:
-            minor_lines.append("* *None found.*")
-
-        risk_lines: list[str] = []
-        if self.risks_and_edge_cases:
-            for item in self.risks_and_edge_cases:
-                risk_lines.append(f"* **Risk:** {item.risk}")
-                if item.recommendation and item.recommendation.strip():
-                    risk_lines.append(f"  * *Recommendation*: {item.recommendation.strip()}")
-            risk_block = "\n".join(risk_lines).strip()
-        else:
-            risk_block = "* *None identified for this PR scope.*"
-
         markdown_parts = [
             f"## 🛡️ Code Review: {verdict_badge}",
             "",
             "### 1. Executive Summary",
             "",
             self.executive_summary,
-            "",
-            "---",
-            "",
-            "### 2. Action Items",
-            "",
-            "#### 🔴 Critical (Must Fix Before Merge)",
-            "\n".join(critical_lines),
-            "",
-            "#### 🟡 Suggestions & Maintainability",
-            "\n".join(minor_lines),
-            "",
-            "---",
-            "",
-            "### 3. Potential Risks & Edge Cases",
-            "",
-            risk_block,
         ]
 
-        if self.verified_invariants:
-            inv_lines = [item.to_markdown() for item in self.verified_invariants]
-            inv_block = "\n".join(inv_lines)
+        if self.critical_issues or self.minor_suggestions:
+            markdown_parts.extend(["", "---", "", "### 2. Action Items"])
+            if self.critical_issues:
+                markdown_parts.extend(
+                    [
+                        "",
+                        "#### 🔴 Critical (Must Fix Before Merge)",
+                        "\n".join(issue.to_markdown() for issue in self.critical_issues),
+                    ]
+                )
+            if self.minor_suggestions:
+                markdown_parts.extend(
+                    [
+                        "",
+                        "#### 🟡 Suggestions & Maintainability",
+                        "\n".join(sugg.to_markdown() for sugg in self.minor_suggestions),
+                    ]
+                )
+
+        if self.risks_and_edge_cases:
+            risk_lines: list[str] = []
+            for item in self.risks_and_edge_cases:
+                risk_lines.append(f"* **Risk:** {item.risk}")
+                if item.recommendation and item.recommendation.strip():
+                    risk_lines.append(f"  * *Recommendation*: {item.recommendation.strip()}")
             markdown_parts.extend(
                 [
                     "",
                     "---",
                     "",
-                    "### 🛡️ Verified Invariants & Edge Cases",
+                    "### 3. Potential Risks & Edge Cases",
                     "",
-                    inv_block,
+                    "\n".join(risk_lines),
                 ]
             )
 
@@ -772,7 +754,7 @@ class SyncReviewResponse(BaseModel):
     )
     verified_invariants: list[VerifiedInvariant] = Field(
         default_factory=list,
-        description="Mandatory for APPROVE: At least one verified invariant, edge case, or contract preserved by the PR.",
+        description="Verified invariants, boundary conditions, or contracts preserved by the PR, if applicable.",
     )
     unverified_claims: list[str] = Field(
         default_factory=list,
@@ -1111,27 +1093,57 @@ class SyncReviewResponse(BaseModel):
         if self.critical_issues:
             for issue in self.critical_issues:
                 crit_lines.append(issue.to_markdown(prefix="🔴"))
-        else:
-            crit_lines.append("* *None found.*")
 
         minor_lines: list[str] = []
         if self.minor_suggestions:
             for issue in self.minor_suggestions:
                 minor_lines.append(issue.to_markdown(prefix="🟡"))
-        else:
-            minor_lines.append("* *None found.*")
 
-        inv_section = ""
-        if self.verified_invariants:
-            inv_lines = [item.to_markdown() for item in self.verified_invariants]
-            inv_section = (
-                f"\n---\n\n### 🛡️ Verified Invariants & Edge Cases\n\n{chr(10).join(inv_lines)}\n"
-            )
+        markdown_parts = [
+            f"## ⚡ Code Review Update: {verdict_badge}",
+            "",
+            "### 1. Synchronization Summary",
+            "",
+            self.summary,
+            "",
+            "---",
+            "",
+            "### 2. Resolution Tracker",
+            "",
+            "\n".join(res_lines),
+        ]
 
-        unverified_section = ""
+        if self.critical_issues or self.minor_suggestions:
+            markdown_parts.extend(["", "---", "", "### 3. New Findings (Introduced in Update)"])
+            if self.critical_issues:
+                markdown_parts.extend(
+                    [
+                        "",
+                        "#### 🔴 Critical (Must Fix Before Merge)",
+                        "\n".join(crit_lines),
+                    ]
+                )
+            if self.minor_suggestions:
+                markdown_parts.extend(
+                    [
+                        "",
+                        "#### 🟡 Suggestions & Maintainability",
+                        "\n".join(minor_lines),
+                    ]
+                )
+
         if self.unverified_claims:
             u_lines = [f"* {claim}" for claim in self.unverified_claims]
-            unverified_section = f"\n---\n\n### ❓ Unverified Claims & Residual Uncertainty\n\n{chr(10).join(u_lines)}\n"
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "### ❓ Unverified Claims & Residual Uncertainty",
+                    "",
+                    "\n".join(u_lines),
+                ]
+            )
 
         from webhook_agent.review.metadata import serialize_review_metadata
 
@@ -1182,30 +1194,6 @@ class SyncReviewResponse(BaseModel):
             "unverified_claims": list(self.unverified_claims),
         }
         metadata_comment = serialize_review_metadata(meta)
+        markdown_parts.append(f"\n{metadata_comment}")
 
-        return f"""## ⚡ Code Review Update: {verdict_badge}
-
-### 1. Synchronization Summary
-
-{self.summary}
-
----
-
-
-### 2. Resolution Tracker
-
-{chr(10).join(res_lines)}
-
----
-
-### 3. New Findings (Introduced in Update)
-
-#### 🔴 Critical (Must Fix Before Merge)
-{chr(10).join(crit_lines)}
-
-#### 🟡 Suggestions & Maintainability
-{chr(10).join(minor_lines)}
-{inv_section}
-{unverified_section}
-{metadata_comment}
-"""
+        return "\n".join(markdown_parts) + "\n"

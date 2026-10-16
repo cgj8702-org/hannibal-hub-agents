@@ -426,31 +426,20 @@ def review(
                 )
         elif effective_event == "APPROVE":
             verified_invariants = getattr(review_obj, "verified_invariants", []) or []
-            if not verified_invariants:
-                logger.info(
-                    "APPROVE event specified without verified_invariants; falling back to COMMENT."
-                )
-                effective_event = "COMMENT"
-                event = "COMMENT"
-                if hasattr(review_obj, "verdict"):
-                    review_obj.verdict = "COMMENT"
-                parsed_data["verdict"] = "COMMENT"
-                body = json.dumps(parsed_data)
-            else:
-                for inv in verified_invariants:
-                    p = (inv.path or "").strip().lower()
-                    if not p or p in ("codebase", "unknown"):
-                        invalid_findings.append(
-                            f"Verified invariant '{inv.invariant[:50]}' lacks exact file path (got '{inv.path}')"
-                        )
-                    if inv.line is None or inv.line <= 0:
-                        invalid_findings.append(
-                            f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}' lacks valid line number (got '{inv.line}')"
-                        )
-                    if not (inv.evidence or "").strip():
-                        invalid_findings.append(
-                            f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}:{inv.line}' lacks concrete evidence"
-                        )
+            for inv in verified_invariants:
+                p = (inv.path or "").strip().lower()
+                if not p or p in ("codebase", "unknown"):
+                    invalid_findings.append(
+                        f"Verified invariant '{inv.invariant[:50]}' lacks exact file path (got '{inv.path}')"
+                    )
+                if inv.line is None or inv.line <= 0:
+                    invalid_findings.append(
+                        f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}' lacks valid line number (got '{inv.line}')"
+                    )
+                if not (inv.evidence or "").strip():
+                    invalid_findings.append(
+                        f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}:{inv.line}' lacks concrete evidence"
+                    )
 
         # Deterministic citation grounding: check every cited path/line against the diff.
         # Always logged; only enforced when STRICT_REVIEW_GROUNDING is set, because a

@@ -357,8 +357,8 @@ def test_parse_text_review_approval_bullets_not_critical():
 """
     rendered_md, verdict, _inline_comments = _enforce_verdict(text_review, "APPROVE")
     assert verdict == "APPROVE"
-    assert "## 🛡️ Code Review: `APPROVE`" in rendered_md
-    assert "* *None found.*" in rendered_md
+    assert "Action Items" not in rendered_md
+    assert "None found" not in rendered_md
     assert "Summary & Justification:** Summary & Justification:**" not in rendered_md
 
 
@@ -929,12 +929,10 @@ def test_normalize_code_review_dict_rescues_evidence_only_invariants():
     assert invariants[1]["line"] == 556
     assert "Explicitly verifies pr.draft" in invariants[1]["invariant"]
 
-    # Verify rendering into markdown
+    # Verify invariant section is not rendered in lean markdown
     cr_obj = CodeReviewResponse.model_validate(normalized)
     md = cr_obj.to_markdown("APPROVE")
-    assert "### 🛡️ Verified Invariants & Edge Cases" in md
-    assert "`src/webhook_agent/core/callbacks.py:281`" in md
-    assert "`src/webhook_agent/tools/github_tools.py:556`" in md
+    assert "Verified Invariants" not in md
 
 
 def test_normalize_code_review_dict_rescues_string_invariants():
@@ -972,8 +970,7 @@ def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
 
     sync_obj = SyncReviewResponse.model_validate(normalized)
     md = sync_obj.to_markdown("APPROVE")
-    assert "### 🛡️ Verified Invariants & Edge Cases" in md
-    assert "`src/webhook_agent/state/review_checkpoint.py:416`" in md
+    assert "Verified Invariants" not in md
 
 
 def test_string_findings_get_no_placeholder_path() -> None:
