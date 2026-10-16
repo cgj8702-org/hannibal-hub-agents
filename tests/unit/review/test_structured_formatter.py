@@ -1101,14 +1101,52 @@ def test_parse_text_review_scorecard_unknown_and_error() -> None:
         "| :--- | :---: | :--- |\n"
         "| **Logic & Boundaries** | `❓ UNKNOWN` | Could not verify dynamic calls. |\n"
         "| **Contract Integrity** | `💥 ERROR` | Syntax error in file parser. |\n"
+        "| **Concurrency & State** | `💥 EXCEPTION` | AST parser raised an unhandled exception. |\n"
         "| **Security & Secrets** | `✅ PASS` | Verified clean. |\n"
     )
     parsed = parse_text_review_to_dict(review_text)
     scorecard = parsed.get("scorecard", [])
-    assert len(scorecard) == 3
+    assert len(scorecard) == 4
     assert scorecard[0]["status"] == "UNKNOWN"
     assert scorecard[1]["status"] == "ERROR"
-    assert scorecard[2]["status"] == "PASS"
+    assert scorecard[2]["status"] == "ERROR"
+    assert scorecard[3]["status"] == "PASS"
+
+
+def test_response_normalizers_scorecard_missing_status_defaults_to_unknown() -> None:
+    """Verify normalize_code_review_dict and normalize_sync_review_dict default missing status to UNKNOWN."""
+    from webhook_agent.review.formatter import (
+        normalize_code_review_dict,
+        normalize_sync_review_dict,
+    )
+
+    raw_cr = {
+        "executive_summary": "Test summary",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "", "notes": "No status provided."},
+            {"dimension": "Security & Secrets", "notes": "Status key omitted entirely."},
+            "Contract Integrity: Bare string without status.",
+        ],
+    }
+    norm_cr = normalize_code_review_dict(raw_cr)
+    sc_cr = norm_cr.get("scorecard", [])
+    assert len(sc_cr) == 3
+    assert sc_cr[0]["status"] == "UNKNOWN"
+    assert sc_cr[1]["status"] == "UNKNOWN"
+    assert sc_cr[2]["status"] == "UNKNOWN"
+
+    raw_sync = {
+        "summary": "Sync summary",
+        "scorecard": {
+            "Concurrency & State": {"notes": "Dict format with missing status."},
+            "Test Coverage & Regressions": "String note only in dict mapping",
+        },
+    }
+    norm_sync = normalize_sync_review_dict(raw_sync)
+    sc_sync = norm_sync.get("scorecard", [])
+    assert len(sc_sync) == 2
+    assert sc_sync[0]["status"] == "UNKNOWN"
+    assert sc_sync[1]["status"] == "UNKNOWN"
 
 
 def test_string_findings_get_no_placeholder_path() -> None:

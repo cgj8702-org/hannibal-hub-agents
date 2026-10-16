@@ -408,7 +408,7 @@ class CodeReviewResponse(BaseModel):
                     sc_item = sc_item.model_dump()
                 if isinstance(sc_item, dict):
                     dim = str(sc_item.get("dimension") or sc_item.get("name") or "").strip()
-                    st = str(sc_item.get("status") or "PASS").strip()
+                    st = str(sc_item.get("status") or "UNKNOWN").strip()
                     notes = str(
                         sc_item.get("notes")
                         or sc_item.get("description")
@@ -421,25 +421,25 @@ class CodeReviewResponse(BaseModel):
                     if ":" in sc_item:
                         dim, notes = sc_item.split(":", 1)
                         clean_scorecard.append(
-                            {"dimension": dim.strip(), "status": "PASS", "notes": notes.strip()}
+                            {"dimension": dim.strip(), "status": "UNKNOWN", "notes": notes.strip()}
                         )
                     else:
                         clean_scorecard.append(
                             {
                                 "dimension": sc_item.strip(),
-                                "status": "PASS",
-                                "notes": "Verified clean.",
+                                "status": "UNKNOWN",
+                                "notes": "Unverified dimension.",
                             }
                         )
         elif isinstance(raw_scorecard, dict):
             for dim, val in raw_scorecard.items():
                 if isinstance(val, dict):
-                    st = str(val.get("status") or "PASS").strip()
+                    st = str(val.get("status") or "UNKNOWN").strip()
                     notes = str(
                         val.get("notes") or val.get("description") or val.get("evidence") or ""
                     ).strip()
                 else:
-                    st = "PASS"
+                    st = "UNKNOWN"
                     notes = str(val).strip()
                 clean_scorecard.append(
                     {"dimension": str(dim).strip(), "status": st, "notes": notes}
@@ -923,7 +923,7 @@ class SyncReviewResponse(BaseModel):
                     sc_item = sc_item.model_dump()
                 if isinstance(sc_item, dict):
                     dim = str(sc_item.get("dimension") or sc_item.get("name") or "").strip()
-                    st = str(sc_item.get("status") or "PASS").strip()
+                    st = str(sc_item.get("status") or "UNKNOWN").strip()
                     notes = str(
                         sc_item.get("notes")
                         or sc_item.get("description")
@@ -936,25 +936,25 @@ class SyncReviewResponse(BaseModel):
                     if ":" in sc_item:
                         dim, notes = sc_item.split(":", 1)
                         clean_scorecard.append(
-                            {"dimension": dim.strip(), "status": "PASS", "notes": notes.strip()}
+                            {"dimension": dim.strip(), "status": "UNKNOWN", "notes": notes.strip()}
                         )
                     else:
                         clean_scorecard.append(
                             {
                                 "dimension": sc_item.strip(),
-                                "status": "PASS",
-                                "notes": "Verified clean.",
+                                "status": "UNKNOWN",
+                                "notes": "Unverified dimension.",
                             }
                         )
         elif isinstance(raw_scorecard, dict):
             for dim, val in raw_scorecard.items():
                 if isinstance(val, dict):
-                    st = str(val.get("status") or "PASS").strip()
+                    st = str(val.get("status") or "UNKNOWN").strip()
                     notes = str(
                         val.get("notes") or val.get("description") or val.get("evidence") or ""
                     ).strip()
                 else:
-                    st = "PASS"
+                    st = "UNKNOWN"
                     notes = str(val).strip()
                 clean_scorecard.append(
                     {"dimension": str(dim).strip(), "status": st, "notes": notes}

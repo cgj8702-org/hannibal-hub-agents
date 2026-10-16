@@ -511,7 +511,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                     col1_u = cols[1].upper()
                     if "FAIL" in col1_u or "CRIT" in col1_u or "BLOCK" in col1_u:
                         st = "FAIL"
-                    elif "ERR" in col1_u or "CRASH" in col1_u:
+                    elif "ERR" in col1_u or "CRASH" in col1_u or "EXCEPT" in col1_u:
                         st = "ERROR"
                     elif "UNKNOWN" in col1_u or "UNVERIF" in col1_u:
                         st = "UNKNOWN"
