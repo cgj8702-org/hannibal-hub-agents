@@ -34,3 +34,17 @@ def test_run_worker_imports_and_calls_worker_main() -> None:
             main.run_worker()
         assert exc_info.value.code == 0
         mock_worker.main.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("worker_exitcode,expected_exit", [(0, 0), (3, 3), (None, 0)])
+def test_main_propagates_worker_exitcode(worker_exitcode: int | None, expected_exit: int) -> None:
+    mock_proc = MagicMock()
+    mock_proc.exitcode = worker_exitcode
+
+    with patch("multiprocessing.Process", return_value=mock_proc):
+        with pytest.raises(SystemExit) as exc_info:
+            main.main()
+        assert exc_info.value.code == expected_exit
+        mock_proc.start.assert_called_once()
+        mock_proc.join.assert_called_once()

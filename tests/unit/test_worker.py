@@ -13,7 +13,10 @@ os.environ.setdefault("GITHUB_APP_ID", "12345")
 os.environ.setdefault("GITHUB_INSTALLATION_ID", "67890")
 os.environ.setdefault("GITHUB_PRIVATE_KEY_PATH", "/dev/null")
 
+import httpx
 import pytest
+from github import GithubException
+from google.api_core import exceptions as gcp_exceptions
 
 from webhook_agent.processor import WebhookProcessor
 
@@ -1581,3 +1584,462 @@ class TestPubSubLeaseExtender:
             time.sleep(0.03)
 
         assert subscriber.modify_ack_deadline.call_count >= 2
+
+
+class TestWorkerReliability:
+    """Tests for worker reliability, error handling, transient retries, and dead-letter queue."""
+
+    def test_publish_dead_letter_success_returns_true(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import publish_dead_letter
+
+        publisher = MagicMock()
+        future = MagicMock()
+        future.result.return_value = "msg-id"
+        publisher.publish.return_value = future
+
+        result = publish_dead_letter(publisher, "projects/test/topics/dlq", b"payload")
+        assert result is True
+        publisher.publish.assert_called_once_with("projects/test/topics/dlq", b"payload")
+
+    def test_publish_dead_letter_failure_returns_false(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import publish_dead_letter
+
+        publisher = MagicMock()
+        future = MagicMock()
+        future.result.side_effect = RuntimeError("DLQ publish failed")
+        publisher.publish.return_value = future
+
+        result = publish_dead_letter(publisher, "projects/test/topics/dlq", b"payload")
+        assert result is False
+
+    @pytest.mark.parametrize(
+        "exc,expected",
+        [
+            (gcp_exceptions.ServiceUnavailable("unavailable"), True),
+            (gcp_exceptions.ResourceExhausted("exhausted"), True),
+            (gcp_exceptions.DeadlineExceeded("deadline"), True),
+            (gcp_exceptions.InternalServerError("internal"), True),
+            (GithubException(429, {"message": "too many requests"}, {}), True),
+            (GithubException(500, {"message": "internal server error"}, {}), True),
+            (GithubException(502, {"message": "bad gateway"}, {}), True),
+            (GithubException(503, {"message": "unavailable"}, {}), True),
+            (GithubException(504, {"message": "gateway timeout"}, {}), True),
+            (GithubException(403, {"message": "API rate limit exceeded"}, {}), True),
+            (GithubException(403, {"message": "Forbidden"}, {}), False),
+            (GithubException(404, {"message": "Not Found"}, {}), False),
+            (httpx.TransportError("connection dropped"), True),
+            (TimeoutError("timeout"), True),
+            (ConnectionError("conn refused"), True),
+            (ValueError("bad value"), False),
+            (KeyError("missing key"), False),
+            (TypeError("type mismatch"), False),
+        ],
+    )
+    def test_is_transient(self, exc: Exception, expected: bool):
+        from webhook_agent.worker import _is_transient
+
+        assert _is_transient(exc) is expected
+
+    def test_is_transient_genai_server_error(self):
+        from webhook_agent.worker import _is_transient
+
+        try:
+            from google.genai.errors import ServerError
+
+            err = ServerError(503, "Service unavailable")
+            assert _is_transient(err) is True
+        except ImportError:
+            pass
+
+    def test_worker_main_missing_env_key_error_logs_and_returns_3(self, caplog):
+        import logging
+        from unittest.mock import patch
+
+        from webhook_agent.worker import main as worker_main
+
+        with patch("webhook_agent.worker.WebhookProcessor", side_effect=KeyError("MISSING_ENV")):
+            with caplog.at_level(logging.ERROR):
+                exit_code = worker_main()
+            assert exit_code == 3
+            assert "Missing required environment variable: 'MISSING_ENV'" in caplog.text
+
+    def test_worker_dlq_publish_failure_leaves_unacked(self, monkeypatch):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        monkeypatch.setenv("PUBSUB_DEAD_LETTER_TOPIC", "projects/test/topics/dlq")
+
+        mock_processor = MagicMock()
+        mock_processor.process_event.side_effect = RuntimeError("Fatal processor error")
+
+        mock_subscriber = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.message_id = "msg-1234"
+        mock_msg.data = json.dumps({"test": "data"}).encode()
+        received_msg = MagicMock()
+        received_msg.message = mock_msg
+        received_msg.ack_id = "ack-1234"
+
+        mock_response = MagicMock()
+        mock_response.received_messages = [received_msg]
+        mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
+
+        mock_publisher = MagicMock()
+        future = MagicMock()
+        future.result.side_effect = RuntimeError("Pub/Sub DLQ failure")
+        mock_publisher.publish.return_value = future
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient", return_value=mock_publisher),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        # Dead letter publish failed -> message MUST NOT be acked
+        mock_subscriber.acknowledge.assert_not_called()
+
+    def test_worker_dlq_publish_success_acks(self, monkeypatch):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        monkeypatch.setenv("PUBSUB_DEAD_LETTER_TOPIC", "projects/test/topics/dlq")
+
+        mock_processor = MagicMock()
+        mock_processor.process_event.side_effect = RuntimeError("Fatal processor error")
+
+        mock_subscriber = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.message_id = "msg-1234"
+        mock_msg.data = json.dumps({"test": "data"}).encode()
+        received_msg = MagicMock()
+        received_msg.message = mock_msg
+        received_msg.ack_id = "ack-1234"
+
+        mock_response = MagicMock()
+        mock_response.received_messages = [received_msg]
+        mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
+
+        mock_publisher = MagicMock()
+        future = MagicMock()
+        future.result.return_value = "dlq-msg-id"
+        mock_publisher.publish.return_value = future
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient", return_value=mock_publisher),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        # Dead letter publish succeeded -> message acked
+        mock_subscriber.acknowledge.assert_called_once_with(
+            request={
+                "subscription": "projects/cgj8702-webhook-agent/subscriptions/webhooks-sub",
+                "ack_ids": ["ack-1234"],
+            }
+        )
+
+    def test_worker_transient_error_retried_and_succeeds(self, monkeypatch):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        monkeypatch.setattr("webhook_agent.worker._RETRY_DELAYS", (0.0, 0.0))
+
+        mock_processor = MagicMock()
+        # Fails once with transient TimeoutError, then succeeds
+        mock_processor.process_event.side_effect = [TimeoutError("Transient timeout"), None]
+
+        mock_subscriber = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.message_id = "msg-1234"
+        mock_msg.data = json.dumps({"test": "data"}).encode()
+        received_msg = MagicMock()
+        received_msg.message = mock_msg
+        received_msg.ack_id = "ack-1234"
+
+        mock_response = MagicMock()
+        mock_response.received_messages = [received_msg]
+        mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        assert mock_processor.process_event.call_count == 2
+        mock_subscriber.acknowledge.assert_called_once_with(
+            request={
+                "subscription": "projects/cgj8702-webhook-agent/subscriptions/webhooks-sub",
+                "ack_ids": ["ack-1234"],
+            }
+        )
+
+    def test_worker_transient_error_exhausted_goes_to_dlq(self, monkeypatch):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        monkeypatch.setattr("webhook_agent.worker._RETRY_DELAYS", (0.0, 0.0))
+        monkeypatch.setenv("PUBSUB_DEAD_LETTER_TOPIC", "projects/test/topics/dlq")
+
+        mock_processor = MagicMock()
+        # Fails all 3 attempts with transient TimeoutError
+        mock_processor.process_event.side_effect = TimeoutError("Transient timeout")
+
+        mock_subscriber = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.message_id = "msg-1234"
+        mock_msg.data = json.dumps({"test": "data"}).encode()
+        received_msg = MagicMock()
+        received_msg.message = mock_msg
+        received_msg.ack_id = "ack-1234"
+
+        mock_response = MagicMock()
+        mock_response.received_messages = [received_msg]
+        mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
+
+        mock_publisher = MagicMock()
+        future = MagicMock()
+        future.result.return_value = "dlq-msg-id"
+        mock_publisher.publish.return_value = future
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient", return_value=mock_publisher),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        assert mock_processor.process_event.call_count == 3
+        mock_publisher.publish.assert_called_once_with("projects/test/topics/dlq", mock_msg.data)
+        mock_subscriber.acknowledge.assert_called_once()
+
+    def test_worker_non_transient_error_goes_to_dlq_without_retry(self, monkeypatch):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        monkeypatch.setenv("PUBSUB_DEAD_LETTER_TOPIC", "projects/test/topics/dlq")
+
+        mock_processor = MagicMock()
+        mock_processor.process_event.side_effect = ValueError("Fatal invalid format")
+
+        mock_subscriber = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.message_id = "msg-1234"
+        mock_msg.data = json.dumps({"test": "data"}).encode()
+        received_msg = MagicMock()
+        received_msg.message = mock_msg
+        received_msg.ack_id = "ack-1234"
+
+        mock_response = MagicMock()
+        mock_response.received_messages = [received_msg]
+        mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
+
+        mock_publisher = MagicMock()
+        future = MagicMock()
+        future.result.return_value = "dlq-msg-id"
+        mock_publisher.publish.return_value = future
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient", return_value=mock_publisher),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        assert mock_processor.process_event.call_count == 1
+        mock_publisher.publish.assert_called_once_with("projects/test/topics/dlq", mock_msg.data)
+        mock_subscriber.acknowledge.assert_called_once()
+
+    def test_worker_proactive_sweep_overlapping_skipped(self, monkeypatch, caplog):
+        import logging
+        import threading
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        monkeypatch.setenv("ENABLE_PROACTIVE_SWEEP", "1")
+
+        mock_processor = MagicMock()
+        mock_subscriber = MagicMock()
+
+        alive_thread = MagicMock(spec=threading.Thread)
+        alive_thread.is_alive.return_value = True
+
+        current_time = [500.0]
+
+        def fake_pull(*args, **kwargs):
+            if current_time[0] < 900.0:
+                current_time[0] = 900.0
+                raise gcp_exceptions.DeadlineExceeded("deadline")
+            raise KeyboardInterrupt()
+
+        mock_subscriber.pull.side_effect = fake_pull
+
+        with (
+            patch("webhook_agent.worker.setup_cloud_logging"),
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
+            patch("time.time", side_effect=lambda: current_time[0]),
+            patch("threading.Thread", return_value=alive_thread) as mock_thread_cls,
+            caplog.at_level(logging.WARNING),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+            # Filter calls for ProactiveSweepWorker
+            sweep_thread_calls = [
+                c
+                for c in mock_thread_cls.call_args_list
+                if c.kwargs.get("name") == "ProactiveSweepWorker"
+            ]
+            assert len(sweep_thread_calls) == 1
+            assert any("previous sweep still alive" in rec.message for rec in caplog.records)
+
+    def test_processor_exception_unmarks_delivery_id(self):
+        from unittest.mock import patch
+
+        processor = WebhookProcessor()
+        payload = _make_normalized("pull_request", action="opened", delivery_id="deliv-err-1")
+
+        with patch.object(
+            processor, "_dispatch_event", side_effect=RuntimeError("processing blew up")
+        ):
+            with pytest.raises(RuntimeError, match="processing blew up"):
+                processor.process_event(payload)
+
+        # delivery_id should be removed from _processed_deliveries
+        assert "deliv-err-1" not in processor._processed_deliveries
+
+    def test_processor_retry_not_suppressed_as_duplicate(self):
+        from unittest.mock import patch
+
+        processor = WebhookProcessor()
+        payload = _make_normalized("pull_request", action="opened", delivery_id="deliv-retry-1")
+
+        # First attempt raises an error
+        with patch.object(
+            processor, "_dispatch_event", side_effect=RuntimeError("transient error")
+        ):
+            with pytest.raises(RuntimeError):
+                processor.process_event(payload)
+
+        # Retry should NOT be suppressed as duplicate by should_process_event
+        assert processor.should_process_event(payload) is True
+
+        # Second attempt succeeds
+        with patch.object(processor, "_dispatch_event", return_value=None):
+            processor.process_event(payload)
+
+        # Now it IS marked as processed and duplicate suppressed
+        assert "deliv-retry-1" in processor._processed_deliveries
+        assert processor.should_process_event(payload) is False
+
+    def test_worker_pull_error_branches(self):
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        mock_processor = MagicMock()
+        mock_subscriber = MagicMock()
+
+        # Simulate DeadlineExceeded, GoogleAPICallError, generic Exception, empty received_messages, then exit
+        empty_response = MagicMock()
+        empty_response.received_messages = []
+
+        mock_subscriber.pull.side_effect = [
+            gcp_exceptions.DeadlineExceeded("timeout"),
+            gcp_exceptions.GoogleAPICallError("api err"),
+            Exception("generic pull err"),
+            empty_response,
+            KeyboardInterrupt(),
+        ]
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        assert mock_subscriber.pull.call_count == 5
+
+    def test_setup_cloud_logging_success(self):
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import setup_cloud_logging
+
+        mock_client = MagicMock()
+
+        with patch("google.cloud.logging.Client", return_value=mock_client):
+            setup_cloud_logging()
+            mock_client.setup_logging.assert_called_once()
+
+    def test_setup_cloud_logging_failure(self, caplog):
+        import logging
+        from unittest.mock import patch
+
+        from webhook_agent.worker import setup_cloud_logging
+
+        with patch.dict("sys.modules", {"google.cloud.logging": None}):
+            with caplog.at_level(logging.WARNING):
+                setup_cloud_logging()
+            assert "Could not initialize Google Cloud Logging handler" in caplog.text
+
+    def test_worker_clean_message_ack_no_dlq(self, monkeypatch):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from webhook_agent.worker import main as worker_main
+
+        # Empty string disables dead-letter topic
+        monkeypatch.setenv("PUBSUB_DEAD_LETTER_TOPIC", "")
+
+        mock_processor = MagicMock()
+        mock_processor.process_event.side_effect = RuntimeError("Fatal processor error")
+
+        mock_subscriber = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.message_id = "msg-1234"
+        mock_msg.data = json.dumps({"test": "data"}).encode()
+        received_msg = MagicMock()
+        received_msg.message = mock_msg
+        received_msg.ack_id = "ack-1234"
+
+        mock_response = MagicMock()
+        mock_response.received_messages = [received_msg]
+        mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
+
+        with (
+            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
+            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
+            patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
+        ):
+            with contextlib.suppress(KeyboardInterrupt):
+                worker_main()
+
+        # Without DLQ, message should not be acked on failure to allow retry
+        mock_subscriber.acknowledge.assert_not_called()

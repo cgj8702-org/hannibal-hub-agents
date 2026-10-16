@@ -20,6 +20,7 @@ import contextlib
 import json
 import logging
 import os
+import random
 import signal
 import sys
 import threading
@@ -27,6 +28,7 @@ import time
 from typing import Any
 
 import google.cloud.pubsub_v1 as pubsub_v1
+import httpx
 from github import GithubException
 from google.api_core import exceptions as gcp_exceptions
 
@@ -39,12 +41,9 @@ if _src_path not in sys.path:
 
 
 logger = logging.getLogger("webhook_agent.worker")
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="[%(asctime)s] [%(name)s] %(message)s",
-    datefmt="%H:%M:%S",
-    force=True,
-)
+
+# Delays for retrying transient failures (±20% jitter applied at runtime)
+_RETRY_DELAYS = (5.0, 20.0)
 
 # Silence verbose third-party loggers
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -63,17 +62,51 @@ logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 
 
 # ---------------------------------------------------------------------------
-# Dead-letter publishing
+# Dead-letter publishing & transient error detection
 # ---------------------------------------------------------------------------
 def publish_dead_letter(
     publisher: pubsub_v1.PublisherClient, topic: str, original_msg: bytes
-) -> None:
+) -> bool:
+    """Publish a failed message to the dead-letter topic. Returns True on success."""
     try:
         future = publisher.publish(topic, original_msg)
         _ = future.result(timeout=10.0)
         logger.debug("💀 Published dead-letter to %s", topic)
+        return True
     except Exception:
         logger.exception("💥 Failed to publish dead-letter to %s", topic)
+        return False
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Check if an exception represents a transient failure eligible for retry."""
+    if isinstance(
+        exc,
+        (
+            gcp_exceptions.ServiceUnavailable,
+            gcp_exceptions.ResourceExhausted,
+            gcp_exceptions.DeadlineExceeded,
+            gcp_exceptions.InternalServerError,
+        ),
+    ):
+        return True
+    if isinstance(exc, GithubException):
+        if exc.status in (429, 500, 502, 503, 504):
+            return True
+        if exc.status == 403 and "rate limit" in str(exc).lower():
+            return True
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    try:
+        from google.genai.errors import ServerError
+
+        if isinstance(exc, ServerError):
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +192,8 @@ def main() -> int:
     try:
         # We instantiate the processor here to validate environment variables early
         processor = WebhookProcessor()
-    except KeyError:
+    except KeyError as exc:
+        logger.error("Missing required environment variable: %s", exc)
         return 3
 
     subscriber = pubsub_v1.SubscriberClient()
@@ -178,6 +212,7 @@ def main() -> int:
 
     PROACTIVE_SWEEP_INTERVAL_SECONDS = 300  # 5 minutes
     last_proactive_sweep = 0.0
+    active_sweep_thread: threading.Thread | None = None
     # Kill-switch: proactive sweeps disabled by default. Set
     # ENABLE_PROACTIVE_SWEEP=1 to re-enable the 5-minute ticker.
     proactive_sweep_enabled = os.environ.get("ENABLE_PROACTIVE_SWEEP", "0") in (
@@ -202,60 +237,63 @@ def main() -> int:
             and now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS
         ):
             last_proactive_sweep = now
-            try:
-                import threading
+            if active_sweep_thread is not None and active_sweep_thread.is_alive():
+                logger.warning("Proactive background sweep skipped: previous sweep still alive")
+            else:
+                try:
+                    import threading
 
-                from webhook_agent.review.proactive_service import ProactiveEvaluator
+                    from webhook_agent.review.proactive_service import ProactiveEvaluator
 
-                repos_env = os.environ.get(
-                    "TARGET_REPOSITORIES",
-                    "cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents",
-                )
-                target_repos = [r.strip() for r in repos_env.split(",") if r.strip()]
+                    repos_env = os.environ.get(
+                        "TARGET_REPOSITORIES",
+                        "cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents",
+                    )
+                    target_repos = [r.strip() for r in repos_env.split(",") if r.strip()]
 
-                def _run_sweeps(repos: list[str]) -> None:
-                    for repo_name in repos:
-                        try:
-                            evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                            evaluator.evaluate_open_prs()
-                        except GithubException as sweep_err:
-                            if sweep_err.status != 401:
+                    def _run_sweeps(repos: list[str]) -> None:
+                        for repo_name in repos:
+                            try:
+                                evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                                evaluator.evaluate_open_prs()
+                            except GithubException as sweep_err:
+                                if sweep_err.status != 401:
+                                    logger.warning(
+                                        "Proactive sweep error for %s: %s",
+                                        repo_name,
+                                        sweep_err,
+                                    )
+                                    continue
+                                logger.warning(
+                                    "Refreshing GitHub installation token after 401 for %s",
+                                    repo_name,
+                                )
+                                processor.invalidate_github_client()
+                                try:
+                                    evaluator = ProactiveEvaluator(processor.gh, repo_name)
+                                    evaluator.evaluate_open_prs()
+                                except Exception as retry_err:
+                                    logger.warning(
+                                        "Proactive sweep retry failed for %s: %s",
+                                        repo_name,
+                                        retry_err,
+                                    )
+                            except Exception as sweep_err:
                                 logger.warning(
                                     "Proactive sweep error for %s: %s",
                                     repo_name,
                                     sweep_err,
                                 )
-                                continue
-                            logger.warning(
-                                "Refreshing GitHub installation token after 401 for %s",
-                                repo_name,
-                            )
-                            processor.invalidate_github_client()
-                            try:
-                                evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                                evaluator.evaluate_open_prs()
-                            except Exception as retry_err:
-                                logger.warning(
-                                    "Proactive sweep retry failed for %s: %s",
-                                    repo_name,
-                                    retry_err,
-                                )
-                        except Exception as sweep_err:
-                            logger.warning(
-                                "Proactive sweep error for %s: %s",
-                                repo_name,
-                                sweep_err,
-                            )
 
-                sweep_thread = threading.Thread(
-                    target=_run_sweeps,
-                    args=(target_repos,),
-                    name="ProactiveSweepWorker",
-                    daemon=True,
-                )
-                sweep_thread.start()
-            except Exception as exc:
-                logger.warning("Proactive background sweep skipped/failed: %s", exc)
+                    active_sweep_thread = threading.Thread(
+                        target=_run_sweeps,
+                        args=(target_repos,),
+                        name="ProactiveSweepWorker",
+                        daemon=True,
+                    )
+                    active_sweep_thread.start()
+                except Exception as exc:
+                    logger.warning("Proactive background sweep skipped/failed: %s", exc)
 
         # Periodic Review Checkpoint Resume Sweep (Every 60s when ENABLE_REVIEW_RESUME=1)
         if (
@@ -309,8 +347,28 @@ def main() -> int:
             payload = json.loads(message.data.decode())
             # Delegate all routing, filtering, and execution to the processor
             # Extend Pub/Sub ack deadline periodically during long-running processing
+            max_attempts = len(_RETRY_DELAYS) + 1
             with _lease_extender(subscriber, subscription_path, ack_id):
-                processor.process_event(payload)
+                for attempt in range(max_attempts):
+                    try:
+                        processor.process_event(payload)
+                        break
+                    except Exception as exc:
+                        if attempt + 1 < max_attempts and _is_transient(exc):
+                            base_delay = _RETRY_DELAYS[attempt]
+                            jittered_delay = base_delay * random.uniform(0.8, 1.2)
+                            logger.warning(
+                                "⚠️ Transient failure on attempt %d/%d for message %s: %s. Retrying in %.2fs...",
+                                attempt + 1,
+                                max_attempts,
+                                str(message.message_id)[-4:],
+                                exc,
+                                jittered_delay,
+                            )
+                            if jittered_delay > 0:
+                                time.sleep(jittered_delay)
+                            continue
+                        raise
 
             subscriber.acknowledge(request={"subscription": subscription_path, "ack_ids": [ack_id]})
             logger.debug("✅ Acked message: %s", str(message.message_id)[-4:])
@@ -320,10 +378,15 @@ def main() -> int:
                 str(message.message_id)[-4:],
             )
             if dead_letter_topic:
-                publish_dead_letter(publisher, dead_letter_topic, message.data)
-                subscriber.acknowledge(
-                    request={"subscription": subscription_path, "ack_ids": [ack_id]}
-                )
+                if publish_dead_letter(publisher, dead_letter_topic, message.data):
+                    subscriber.acknowledge(
+                        request={"subscription": subscription_path, "ack_ids": [ack_id]}
+                    )
+                else:
+                    logger.error(
+                        "💥 Failed to publish message %s to dead-letter topic; leaving unacked",
+                        str(message.message_id)[-4:],
+                    )
             else:
                 # Let Pub/Sub redeliver by not acking
                 logger.debug("🔄 Not acking message to allow retry")
@@ -332,4 +395,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level_name, logging.INFO),
+        format="[%(asctime)s] [%(name)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
     raise SystemExit(main())

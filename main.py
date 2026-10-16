@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import os
 import signal
 import sys
 from pathlib import Path
@@ -13,8 +14,11 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # Configure logging for the entry point
+log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_name, logging.INFO)
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=log_level,
     format="[%(asctime)s] [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -59,6 +63,7 @@ def main() -> None:
 
     # Keep the main process alive while children are running
     worker_proc.join()
+    sys.exit(worker_proc.exitcode or 0)
 
 
 if __name__ == "__main__":

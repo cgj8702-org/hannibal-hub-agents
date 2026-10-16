@@ -558,7 +558,11 @@ class WebhookProcessor:
         """
         event_key = self.route_event(payload)
         if event_key == "unknown":
-            logger.debug("Unknown event payload: %s", payload.get("raw_payload"))
+            logger.debug(
+                "Unknown event (event_name=%s, delivery_id=%s)",
+                payload.get("event_name"),
+                payload.get("delivery_id"),
+            )
         logger.debug("Processing event: %s", event_key)
         if not self.should_process_event(payload):
             return
@@ -576,6 +580,21 @@ class WebhookProcessor:
         # Set canonical event name in payload for AgentCore and WebhookAgent
         payload["canonical"] = event_key
 
+        try:
+            self._dispatch_event(payload, event_key, delivery_id, ci_verified=ci_verified)
+        except Exception:
+            if delivery_id != "unknown":
+                self._processed_deliveries.pop(delivery_id, None)
+            raise
+
+    def _dispatch_event(
+        self,
+        payload: dict[str, Any],
+        event_key: str,
+        delivery_id: str,
+        *,
+        ci_verified: bool = False,
+    ) -> None:
         if event_key == "check_suite.completed":
             self._handle_ci_completed(payload)
             return
