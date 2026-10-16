@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock

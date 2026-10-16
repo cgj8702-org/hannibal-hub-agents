@@ -20,7 +20,6 @@ from webhook_agent.models.model_chain import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_get_model_chain_free_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify free tier fallback chain defaults."""
     monkeypatch.setenv("WEBHOOK_TIER", "free")
@@ -37,7 +36,6 @@ def test_get_model_chain_free_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "gemma-4-31b-it" in chain
 
 
-@pytest.mark.unit
 def test_get_model_chain_free_tier_token_gating(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify Gemma is omitted for large payloads (>14k tokens) and kept for small ones."""
     monkeypatch.setenv("WEBHOOK_TIER", "free")
@@ -56,7 +54,6 @@ def test_get_model_chain_free_tier_token_gating(monkeypatch: pytest.MonkeyPatch)
     assert "gemma-4-26b-a4b-it" in small_payload_chain
 
 
-@pytest.mark.unit
 def test_get_model_chain_paid_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify paid tier fallback chain defaults."""
     monkeypatch.setenv("WEBHOOK_TIER", "paid")
@@ -69,7 +66,6 @@ def test_get_model_chain_paid_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "gemini-3.5-flash-lite" in chain
 
 
-@pytest.mark.unit
 def test_get_model_chain_custom_primary_with_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify PRIMARY_MODEL with 'models/' prefix is stripped and placed first."""
     monkeypatch.setenv("WEBHOOK_TIER", "free")
@@ -79,7 +75,6 @@ def test_get_model_chain_custom_primary_with_prefix(monkeypatch: pytest.MonkeyPa
     assert chain[0] == "custom-experimental-model"
 
 
-@pytest.mark.unit
 def test_get_model_chain_all_depleted_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify when registry filters all models, fallback to raw deduped chain."""
     monkeypatch.setenv("WEBHOOK_TIER", "free")
@@ -91,7 +86,6 @@ def test_get_model_chain_all_depleted_fallback(monkeypatch: pytest.MonkeyPatch) 
         assert chain[0] == "gemini-3.5-flash-lite"
 
 
-@pytest.mark.unit
 def test_select_model_for_event_dynamic_routing_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify dynamic routing disabled returns primary model directly."""
     monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "0")
@@ -101,7 +95,6 @@ def test_select_model_for_event_dynamic_routing_disabled(monkeypatch: pytest.Mon
     assert _select_model_for_event(event) == "primary-test-model"
 
 
-@pytest.mark.unit
 def test_select_model_for_event_pull_request_opened(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify pull request opened/synchronized routes to primary model."""
     monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
@@ -114,7 +107,6 @@ def test_select_model_for_event_pull_request_opened(monkeypatch: pytest.MonkeyPa
     assert _select_model_for_event(event_sync) == "primary-pr-model"
 
 
-@pytest.mark.unit
 def test_select_model_for_event_comment_with_review_intent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify comment events with review intent keywords or bot mention route to primary."""
     monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
@@ -143,7 +135,6 @@ def test_select_model_for_event_comment_with_review_intent(monkeypatch: pytest.M
     assert _select_model_for_event(routine_event) == "lightweight-comment-model"
 
 
-@pytest.mark.unit
 def test_select_model_for_event_routine_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify routine non-PR events route to lightweight model."""
     monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
@@ -153,7 +144,6 @@ def test_select_model_for_event_routine_lifecycle(monkeypatch: pytest.MonkeyPatc
     assert _select_model_for_event(event) == "lightweight-routine-model"
 
 
-@pytest.mark.unit
 def test_select_model_for_event_depleted_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify that if target model is depleted, it falls back to first available in chain."""
     monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
@@ -170,7 +160,6 @@ def test_select_model_for_event_depleted_fallback(monkeypatch: pytest.MonkeyPatc
             assert _select_model_for_event(event) == "fallback-model"
 
 
-@pytest.mark.unit
 def test_get_active_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify get_active_model delegates to event selection or chain head."""
     # With event data
@@ -195,7 +184,6 @@ def test_get_active_model(monkeypatch: pytest.MonkeyPatch) -> None:
         assert get_active_model() == "gemini-3.5-flash-lite"
 
 
-@pytest.mark.unit
 def test_get_model_tpm_limit() -> None:
     """Verify _get_model_tpm_limit reads from registry or returns safe defaults."""
     # Real read from gemini_models.json for known model
@@ -211,7 +199,6 @@ def test_get_model_tpm_limit() -> None:
     assert tpm_paid_fallback in (100000, 4000000)
 
 
-@pytest.mark.unit
 def test_count_tokens_exact(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _count_tokens_exact handles empty text, API calls, and fallbacks."""
     assert _count_tokens_exact("") == 0
@@ -236,7 +223,6 @@ def test_count_tokens_exact(monkeypatch: pytest.MonkeyPatch) -> None:
             assert _count_tokens_exact("12345678") == 2
 
 
-@pytest.mark.unit
 def test_is_transient_error() -> None:
     """Verify _is_transient_error detects retryable codes and error strings."""
     # GenAIServerError with transient codes
@@ -266,7 +252,6 @@ def test_is_transient_error() -> None:
     assert _is_transient_error(KeyError("missing_key")) is False
 
 
-@pytest.mark.unit
 def test_is_gemini_3_plus() -> None:
     """Verify is_gemini_3_plus distinguishes Gemini 3+ from Gemma and older models."""
     assert is_gemini_3_plus(None) is False

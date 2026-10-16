@@ -5,10 +5,9 @@ from google.adk.models import Gemini
 
 from webhook_agent.models.model_factory import RateLimitedGemini, get_adk_model
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_get_adk_model_defaults() -> None:
     """Verify get_adk_model returns RateLimitedGemini instance with defaults."""
     model = get_adk_model(model_name="gemini-3.5-flash-lite", api_key="test_key")
@@ -17,7 +16,6 @@ def test_get_adk_model_defaults() -> None:
     assert model.model == "gemini-3.5-flash-lite"
 
 
-@pytest.mark.unit
 def test_get_adk_model_standard_gemini() -> None:
     """Verify rate_limited=False returns standard Gemini model."""
     model = get_adk_model(
@@ -30,7 +28,6 @@ def test_get_adk_model_standard_gemini() -> None:
     assert model.model == "gemini-3.6-flash"
 
 
-@pytest.mark.unit
 def test_get_adk_model_paid_tier_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify get_adk_model on paid tier defaults to gemini-3.8-flash."""
     monkeypatch.delenv("GEMMA_MODEL", raising=False)
@@ -40,7 +37,6 @@ def test_get_adk_model_paid_tier_default(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.anyio
-@pytest.mark.unit
 async def test_rate_limited_gemini_fails_fast_on_429(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -81,7 +77,6 @@ async def test_rate_limited_gemini_fails_fast_on_429(
 
 
 @pytest.mark.anyio
-@pytest.mark.unit
 async def test_rate_limited_gemini_propagates_503_for_model_failover(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -113,7 +108,6 @@ async def test_rate_limited_gemini_propagates_503_for_model_failover(
 
 
 @pytest.mark.anyio
-@pytest.mark.unit
 async def test_rate_limited_gemini_skips_count_tokens_when_rate_limit_checked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -151,7 +145,6 @@ async def test_rate_limited_gemini_skips_count_tokens_when_rate_limit_checked(
 
 
 @pytest.mark.anyio
-@pytest.mark.unit
 async def test_rate_limited_gemini_calls_count_tokens_when_not_checked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

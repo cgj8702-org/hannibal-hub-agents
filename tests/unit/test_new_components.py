@@ -10,8 +10,6 @@ from webhook_agent.tools.diff_tools import verify_line_reference
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.guardrails]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.guardrails
 def test_sanitizer_plugin_prompt_leakage_and_secrets() -> None:
     raw_text = (
@@ -23,8 +21,6 @@ def test_sanitizer_plugin_prompt_leakage_and_secrets() -> None:
     assert "[REDACTED_SECRET]" in sanitized
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_diff_tools_line_verification() -> None:
     sample_diff = (
         "diff --git a/src/main.py b/src/main.py\n"

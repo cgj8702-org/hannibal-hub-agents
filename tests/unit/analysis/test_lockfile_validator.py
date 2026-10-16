@@ -1,5 +1,9 @@
 """Unit tests for deterministic lockfile validator and fast-path approval."""
 
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from webhook_agent.analysis.lockfile_validator import (
     is_pure_dependency_pr,
     parse_bumped_packages_from_diff,

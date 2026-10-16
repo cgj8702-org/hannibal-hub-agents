@@ -1093,7 +1093,7 @@ class TestConversationalAgent:
             for t in agent._conversational_agent.tools
         }
         # Tools should include minimal codebase grounding and issue creation tools
-        assert tool_names == {"read_file", "get_issue"}
+        assert tool_names == {"read_file", "search_files", "get_issue"}
         # Regression guard: mutating and removed tools must not be registered
         assert "create_issue" not in tool_names
         assert "add_label" not in tool_names

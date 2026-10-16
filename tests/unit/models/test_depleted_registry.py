@@ -5,7 +5,7 @@ import pytest
 from webhook_agent.models.depleted_registry import FirestoreDepletedModelRegistry
 from webhook_agent.models.model_chain import DepletedModelRegistry
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
 class Fake503Error(Exception):

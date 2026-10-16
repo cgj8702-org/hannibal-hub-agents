@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from webhook_agent.review.metadata import (
     extract_review_metadata,
     format_findings_for_agent,
@@ -25,8 +27,6 @@ from webhook_agent.review.schemas import (
 )
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_metadata_roundtrip_serialization() -> None:
     """Ensure metadata serializes into HTML comments and deserializes cleanly."""
     original = {
@@ -68,8 +68,6 @@ def test_metadata_roundtrip_serialization() -> None:
     assert extracted == original
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_extract_review_metadata_missing_or_invalid() -> None:
     """Ensure extract_review_metadata safely handles missing or malformed metadata."""
     assert extract_review_metadata("") is None
@@ -77,8 +75,6 @@ def test_extract_review_metadata_missing_or_invalid() -> None:
     assert extract_review_metadata("<!-- hannibal-review-metadata: not-valid-json -->") is None
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_code_review_response_embeds_metadata() -> None:
     """Ensure CodeReviewResponse.to_markdown() embeds structured metadata."""
     cr = CodeReviewResponse(
@@ -115,8 +111,6 @@ def test_code_review_response_embeds_metadata() -> None:
     assert meta["risks"][0]["risk"] == "High concurrency throughput"
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_code_review_metadata_omits_verified_invariants() -> None:
     """Verified invariants are purged from review schemas and metadata."""
     cr = CodeReviewResponse(
@@ -131,8 +125,6 @@ def test_code_review_metadata_omits_verified_invariants() -> None:
     assert "verified_invariants" not in meta
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_metadata_roundtrip_includes_unverified_claims() -> None:
     """Ensure unverified_claims round-trips through serialize and extract metadata."""
     cr = CodeReviewResponse(
@@ -149,8 +141,6 @@ def test_metadata_roundtrip_includes_unverified_claims() -> None:
     assert meta["unverified_claims"] == ["Distributed lock behavior under split-brain"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_metadata_omits_verified_invariants() -> None:
     """Sync reviews must omit verified invariants from metadata."""
     sync = SyncReviewResponse(
@@ -162,8 +152,6 @@ def test_sync_review_metadata_omits_verified_invariants() -> None:
     assert "verified_invariants" not in meta
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_response_embeds_metadata() -> None:
     """Ensure SyncReviewResponse.to_markdown() embeds structured metadata."""
     sync = SyncReviewResponse(
@@ -195,8 +183,6 @@ def test_sync_review_response_embeds_metadata() -> None:
     assert meta["resolutions"][0]["item_description"] == "Fixed memory leak in worker"
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.regression
 def test_parse_legacy_review_findings_pr_229_autopsy() -> None:
     """Ensure legacy markdown parser finds critical findings even when other sections are None found."""
@@ -238,8 +224,6 @@ def test_parse_legacy_review_findings_pr_229_autopsy() -> None:
     assert actionable[0]["category"] == "CRITICAL"
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_has_actionable_findings_clean_pass() -> None:
     """Ensure clean pass review without findings returns False for has_actionable_findings."""
     clean_body = """## 🛡️ Code Review: `APPROVE`
@@ -268,8 +252,6 @@ def test_has_actionable_findings_clean_pass() -> None:
     assert len(get_actionable_findings(clean_body)) == 0
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_format_findings_for_agent() -> None:
     """Ensure format_findings_for_agent creates a clean, decoupled checklist."""
     findings = [
@@ -297,8 +279,6 @@ def test_format_findings_for_agent() -> None:
     assert "🛡️" not in formatted
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.regression
 def test_enforce_verdict_preserves_resolutions_on_dismissed_prior_review_with_findings() -> None:
     """End-to-end regression: Verify that _enforce_verdict preserves resolutions
@@ -345,8 +325,6 @@ def test_enforce_verdict_preserves_resolutions_on_dismissed_prior_review_with_fi
     assert "No prior review items tracked." not in rendered_md
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_agent_prompt_builder_decouples_markdown_and_feeds_structured_findings() -> None:
     """Ensure agent user message contains structured checklist and decouples from human Markdown."""
     from webhook_agent.core.agent_definition import WebhookAgent
@@ -393,8 +371,6 @@ def test_agent_prompt_builder_decouples_markdown_and_feeds_structured_findings()
     assert "### 1. Executive Summary" not in user_msg
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_agent_prompt_builder_clean_pass_orders_empty_resolutions() -> None:
     """Ensure agent user message orders empty resolutions when prior review had 0 findings."""
     from webhook_agent.core.agent_definition import WebhookAgent
@@ -422,8 +398,6 @@ def test_agent_prompt_builder_clean_pass_orders_empty_resolutions() -> None:
     assert "## 🛡️ Code Review:" not in user_msg
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_prefetch_previous_bot_reviews_extracts_structured_metadata() -> None:
     """Ensure _prefetch_previous_bot_reviews in processor extracts structured findings from metadata."""
     from webhook_agent.processor import _prefetch_previous_bot_reviews
@@ -467,8 +441,6 @@ def test_prefetch_previous_bot_reviews_extracts_structured_metadata() -> None:
     assert raw["prior_actionable_findings"][0]["line_number"] == 50
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.parametrize("model", [CodeReviewResponse, SyncReviewResponse])
 def test_string_only_invariant_gets_no_fabricated_citation(model: type) -> None:
     """A bare-string invariant produces no fabricated path/line and is recorded in verified_invariants."""

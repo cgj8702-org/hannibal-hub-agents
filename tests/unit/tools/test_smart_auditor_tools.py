@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from webhook_agent.review.formatter import (
     render_code_review_markdown,
 )

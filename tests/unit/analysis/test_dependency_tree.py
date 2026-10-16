@@ -1,5 +1,9 @@
 """Unit tests for dependency_tree transitive closure and grounding."""
 
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from webhook_agent.analysis.dependency_tree import (
     build_dependency_grounding_context,
     get_transitive_closure,

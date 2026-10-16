@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from webhook_agent.core.agent_definition import CONVERSATIONAL_INSTRUCTION
 from webhook_agent.github.bot_identity import (
     OWNER_LOGIN,
