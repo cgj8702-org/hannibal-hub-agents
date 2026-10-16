@@ -12,7 +12,6 @@ import logging
 import shlex
 from typing import Any
 
-from webhook_agent.environment.base import BaseEnvironment
 from webhook_agent.environment.context import active_environment
 
 logger = logging.getLogger(__name__)
@@ -158,7 +157,6 @@ async def search_files(
     limit: int = 50,
     ignore_case: bool = False,
     no_ignore: bool = False,
-    env: BaseEnvironment | None = None,
 ) -> dict[str, Any]:
     """Search text files within the environment for regex `pattern`.
 
@@ -169,7 +167,6 @@ async def search_files(
         limit: Maximum number of matches to return (default: 50).
         ignore_case: Whether to perform case-insensitive regex matching.
         no_ignore: If True, do not skip ignored directories (e.g. .venv).
-        env: Optional BaseEnvironment override. Defaults to active_environment().
 
     Returns:
         Dict with "matches" (list of match dicts) and "total" (int count), or
@@ -178,7 +175,7 @@ async def search_files(
     if not pattern:
         return {"error": "Search pattern cannot be empty", "matches": [], "total": 0}
 
-    target_env = env or active_environment()
+    target_env = active_environment()
     root_resolved = target_env.resolve_path(path)
     if root_resolved is None:
         return {
