@@ -215,7 +215,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** update or delete only the tests asserting the gate; all other review-validation tests unchanged.
 - **done when:** a Python-modifying PR review is no longer rejected for a missing `verify_python_ast`.
 
-## T-14: Trim dependencies and dead code
+## T-14: Trim dependencies and dead code [COMPLETED - PR #332]
 
 - **depends_on:** T-13. **branch:** `chore/remove-dead-code` | **commit:** `chore: remove unused dependencies and dead code`
 - **files:** `pyproject.toml`, `uv.lock`, `src/webhook_agent/models/secret_manager.py`, `src/webhook_agent/github/credentials.py`, `src/webhook_agent/tools/github_tools.py`, `src/webhook_agent/tools/schemas.py`, `src/webhook_agent/tools/__init__.py`, related tests

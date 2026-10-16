@@ -1,7 +1,5 @@
 """Unit tests for centralized constants and Secret Manager secret resolution."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from webhook_agent.constants import (
@@ -39,17 +37,15 @@ def test_resolve_secret_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_resolve_secret_fallback_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_secret_unset_or_dummy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WEBHOOK_FREE_KEY", raising=False)
+    assert resolve_secret("WEBHOOK_FREE_KEY", default="fallback_val") == "fallback_val"
 
-    mock_sm = MagicMock()
-    mock_payload = MagicMock()
-    mock_payload.payload.data.decode.return_value = "resolved_from_secret_manager"
-    mock_sm.SecretManagerServiceClient.return_value.access_secret_version.return_value = (
-        mock_payload
-    )
+    monkeypatch.setenv("WEBHOOK_FREE_KEY", "dummy")
+    assert resolve_secret("WEBHOOK_FREE_KEY", default="fallback_val") == "fallback_val"
 
-    with patch.dict("sys.modules", {"google.cloud.secretmanager": mock_sm}):
-        with patch.dict("webhook_agent.models.secret_manager._SECRET_CACHE", {}, clear=True):
-            val = resolve_secret("WEBHOOK_FREE_KEY")
-            assert val == "resolved_from_secret_manager"
+    monkeypatch.setenv("WEBHOOK_FREE_KEY", "dummy-key-for-dev")
+    assert resolve_secret("WEBHOOK_FREE_KEY") == ""
+
+    monkeypatch.setenv("WEBHOOK_FREE_KEY", "none")
+    assert resolve_secret("WEBHOOK_FREE_KEY") == ""

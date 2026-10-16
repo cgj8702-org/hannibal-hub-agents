@@ -1,11 +1,4 @@
-"""GitHub App credential helper
-
-Usage (CLI):
-
-    python github_app_credential_helper.py \
-        --app-id 12345 \
-        --installation-id 67890 \
-        --private-key ./path/to/private-key.pem
+"""GitHub App credential helper.
 
 Functions:
 - generate_jwt(app_id, private_key_pem)
@@ -18,7 +11,6 @@ GitHub App installation tokens. Do NOT commit private keys to source control.
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import json
 import os
@@ -125,56 +117,3 @@ def load_private_key(path: str) -> str:
     if not p.exists():
         raise FileNotFoundError(f"private key not found: {path}")
     return p.read_text()
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="GitHub App credential helper: get/cached installation token"
-    )
-    ap.add_argument("--app-id", required=True, type=int, help="GitHub App numeric ID")
-    ap.add_argument(
-        "--installation-id",
-        required=True,
-        type=int,
-        help="Installation ID to request token for",
-    )
-    ap.add_argument("--private-key", required=True, help="Path to GitHub App private key (PEM)")
-    ap.add_argument(
-        "--force-refresh",
-        action="store_true",
-        help="Ignore cache and fetch a new token",
-    )
-    ap.add_argument("--print-only-token", action="store_true", help="Print only the token string")
-    ap.add_argument("--github-api", default="https://api.github.com", help="GitHub API base URL")
-    args = ap.parse_args()
-
-    if not args.force_refresh:
-        cached = load_cached_token(args.installation_id)
-        if cached:
-            if args.print_only_token:
-                pass
-            else:
-                pass
-            return 0
-
-    private_key_pem = load_private_key(args.private_key)
-    jwt_token = generate_jwt(args.app_id, private_key_pem)
-    try:
-        inst_tok = get_installation_token(
-            jwt_token, args.installation_id, github_api=args.github_api
-        )
-    except httpx.HTTPStatusError:
-        return 2
-    except httpx.HTTPError:  # network or other errors
-        return 3
-
-    save_cached_token(args.installation_id, inst_tok)
-    if args.print_only_token:
-        pass
-    else:
-        pass
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
