@@ -226,7 +226,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
   4. Delete `create_issue`, `CreateIssueInput`, its `TOOL_INPUT_SCHEMAS` entry and `__all__`/lazy-import entries, and tests that exist only for it.
 - **done when:** full suite and mypy are green and `uv run python -c "import webhook_agent.worker"` succeeds.
 
-## T-15: Fix docs drift
+## T-15: Fix docs drift [COMPLETED - PR #335]
 
 - **depends_on:** T-12, T-14. **branch:** `docs/readme-agents-accuracy` | **commit:** `docs: correct README and AGENTS.md drift`
 - **files:** `README.md`, `AGENTS.md`
