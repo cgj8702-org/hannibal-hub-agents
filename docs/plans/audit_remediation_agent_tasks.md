@@ -190,7 +190,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **done when:** `actionlint` passes if available (otherwise state it was unavailable), and the diff contains no secrets.
 - **do not:** remove `GH_TOKEN` (D4).
 
-## T-12: Make the worker fail safely
+## T-12: Make the worker fail safely [COMPLETED - PR #330]
 
 - **branch:** `fix/worker-reliability` | **commit:** `fix(worker): retry transient errors and never ack lost dead-letters`
 - **files:** `src/webhook_agent/worker.py`, `src/webhook_agent/processor.py`, `main.py`, `tests/unit/test_worker.py`, `tests/unit/test_main_entrypoint.py`
