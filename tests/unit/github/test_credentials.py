@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timezone
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -118,6 +119,61 @@ def test_load_cached_token_missing_or_corrupt(
     # Incomplete JSON
     path.write_text(json.dumps({"token": "ghs_no_exp"}))
     assert load_cached_token(999) is None
+
+
+def test_cache_permissions_with_umask(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    # Ensure umask is 022 (standard default in many environments)
+    old_umask = os.umask(0o022)
+    try:
+        token = InstallationToken(token="ghs_test_perms", expires_at="2030-01-01T00:00:00Z")
+        save_cached_token(200, token)
+
+        target_file = cache_path_for_installation(200)
+        cache_dir = target_file.parent
+
+        dir_mode = cache_dir.stat().st_mode & 0o777
+        file_mode = target_file.stat().st_mode & 0o777
+
+        assert dir_mode == 0o700, f"Cache dir permissions {oct(dir_mode)} != 0o700"
+        assert file_mode == 0o600, f"Cache file permissions {oct(file_mode)} != 0o600"
+    finally:
+        os.umask(old_umask)
+
+
+def test_cache_directory_chmod_if_already_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache_dir = tmp_path / "github_app_helper"
+    cache_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+    os.chmod(cache_dir, 0o755)
+    assert cache_dir.stat().st_mode & 0o777 == 0o755
+
+    # Calling cache_path_for_installation should ensure 0700 mode
+    cache_path_for_installation(201)
+    assert cache_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_save_cached_token_atomic_no_partial_on_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    target_file = cache_path_for_installation(202)
+    cache_dir = target_file.parent
+
+    token = InstallationToken(token="ghs_test_fail", expires_at="2030-01-01T00:00:00Z")
+
+    # Simulate error during write
+    with patch("os.replace", side_effect=OSError("Disk full")):
+        with pytest.raises(OSError, match="Disk full"):
+            save_cached_token(202, token)
+
+    # Target file must not exist
+    assert not target_file.exists()
+    # No dangling .tmp files in cache directory
+    temp_files = list(cache_dir.glob("install_token_202.json.tmp*"))
+    assert temp_files == []
 
 
 def test_get_installation_token_success() -> None:

@@ -152,7 +152,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** one positive test per format, one negative test (ordinary prose and short `ghs_` look-alikes), existing tests unchanged.
 - **done when:** all six leak cases from the audit redact.
 
-## T-09: Lock down credential file permissions
+## T-09: Lock down credential file permissions [COMPLETED - PR #326]
 
 - **branch:** `fix/credential-file-perms` | **commit:** `fix(security): restrict token cache and key file permissions`
 - **files:** `src/webhook_agent/github/credentials.py`, `scripts/load_secrets.sh`, `tests/unit/github/test_credentials.py`

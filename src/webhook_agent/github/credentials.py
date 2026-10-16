@@ -19,6 +19,7 @@ GitHub App installation tokens. Do NOT commit private keys to source control.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import time
@@ -74,7 +75,8 @@ def get_installation_token(
 
 def cache_path_for_installation(installation_id: int) -> Path:
     cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "github_app_helper"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(cache_dir, 0o700)
     return cache_dir / f"install_token_{installation_id}.json"
 
 
@@ -101,8 +103,21 @@ def load_cached_token(installation_id: int, min_ttl_seconds: int = 60) -> Instal
 
 
 def save_cached_token(installation_id: int, token: InstallationToken) -> None:
-    p = cache_path_for_installation(installation_id)
-    p.write_text(json.dumps({"token": token.token, "expires_at": token.expires_at}))
+    target_path = cache_path_for_installation(installation_id)
+    temp_path = target_path.with_name(f"{target_path.name}.tmp.{os.getpid()}.{time.time_ns()}")
+    data = json.dumps({"token": token.token, "expires_at": token.expires_at})
+    fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(temp_path, target_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            temp_path.unlink(missing_ok=True)
+        raise
 
 
 def load_private_key(path: str) -> str:

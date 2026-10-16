@@ -40,8 +40,8 @@ if [ -z "$WEBHOOK_SECRET" ]; then
 fi
 
 # Save private key to ephemeral path
-mkdir -p /tmp/keys
-gcloud secrets versions access latest --secret="GITHUB_PRIVATE_KEY" --project="${PROJECT_ID}" > /tmp/keys/github-app-private-key.pem
+mkdir -p -m 700 /tmp/keys && chmod 700 /tmp/keys
+( umask 077; gcloud secrets versions access latest --secret="GITHUB_PRIVATE_KEY" --project="${PROJECT_ID}" > /tmp/keys/github-app-private-key.pem )
 chmod 600 /tmp/keys/github-app-private-key.pem
 export GITHUB_PRIVATE_KEY_PATH="/tmp/keys/github-app-private-key.pem"
 export PRIVATE_KEY_PATH="${GITHUB_PRIVATE_KEY_PATH}"
@@ -51,7 +51,7 @@ CGJ8702_AGENTS_TOKEN=$(gcloud secrets versions access latest --secret="CGJ8702_A
 export CGJ8702_AGENTS_TOKEN
 
 # Fetch webhook-agent service account key for Pub/Sub & Logging auth
-gcloud secrets versions access latest --secret="WEBHOOK_AGENT_SA_KEY" --project="${PROJECT_ID}" > /tmp/keys/webhook-agent-sa-key.json
+( umask 077; gcloud secrets versions access latest --secret="WEBHOOK_AGENT_SA_KEY" --project="${PROJECT_ID}" > /tmp/keys/webhook-agent-sa-key.json )
 chmod 600 /tmp/keys/webhook-agent-sa-key.json
 export GOOGLE_APPLICATION_CREDENTIALS="/tmp/keys/webhook-agent-sa-key.json"
 
