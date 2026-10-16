@@ -61,10 +61,6 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     reset_guardrail_state(callback_context.state)
 
     callback_context.state.setdefault("tools_executed", [])
-    if callback_context.state.get("deterministic_precompiled_ast"):
-        tools_executed = callback_context.state["tools_executed"]
-        if "verify_python_ast" not in tools_executed:
-            tools_executed.append("verify_python_ast")
     agent_name = getattr(callback_context, "agent_name", None) or getattr(
         getattr(callback_context, "agent", None), "name", "unknown_agent"
     )

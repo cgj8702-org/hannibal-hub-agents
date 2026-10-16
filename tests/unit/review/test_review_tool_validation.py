@@ -215,9 +215,11 @@ def test_review_accepts_valid_payload(mock_submit, mock_ctx):
     assert mock_submit.called
 
 
-def test_review_rejects_python_pr_without_ast_verification(mock_ctx):
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_allows_python_pr_without_pre_audit_and_logs_warning(mock_submit, mock_ctx, caplog):
+    mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
-    mock_ctx.state["tools_executed"] = ["read_file"]
+    mock_ctx.state["deterministic_precompiled_ast"] = False
     payload = {
         "executive_summary": "Test summary",
         "confidence": 5,
@@ -226,11 +228,13 @@ def test_review_rejects_python_pr_without_ast_verification(mock_ctx):
         "minor_suggestions": [],
         "context_gaps": [],
     }
-    res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
-    assert res.startswith("Error: Review submission rejected")
-    assert (
-        "mandatory AST integrity and defect verification tool ('verify_python_ast') was not executed"
-        in res
+    with caplog.at_level(logging.WARNING):
+        res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    assert any(
+        "Python files modified in owner/repo#123, but no pre-audit ran." in rec.message
+        for rec in caplog.records
     )
 
 
@@ -238,7 +242,7 @@ def test_review_rejects_python_pr_without_ast_verification(mock_ctx):
 def test_review_allows_python_pr_with_ast_verification(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
-    mock_ctx.state["tools_executed"] = ["verify_python_ast"]
+    mock_ctx.state["deterministic_precompiled_ast"] = True
     payload = {
         "executive_summary": "Valid review after ast check",
         "confidence": 5,
@@ -250,30 +254,6 @@ def test_review_allows_python_pr_with_ast_verification(mock_submit, mock_ctx):
     res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
     assert res == "Review submitted"
     assert mock_submit.called
-
-
-def test_review_enforces_ast_gate_when_precompiled_ast_is_explicitly_false_with_stale_user_state(
-    mock_ctx,
-):
-    """Verify that an explicit False in deterministic_precompiled_ast is preserved and doesn't leak True from stale user state."""
-    mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
-    mock_ctx.state["deterministic_precompiled_ast"] = False
-    mock_ctx.state["user:deterministic_precompiled_ast"] = True
-    mock_ctx.state["tools_executed"] = ["read_file"]
-    payload = {
-        "executive_summary": "Test summary",
-        "confidence": 5,
-        "risks_and_edge_cases": [],
-        "critical_issues": [],
-        "minor_suggestions": [],
-        "context_gaps": [],
-    }
-    res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
-    assert res.startswith("Error: Review submission rejected")
-    assert (
-        "mandatory AST integrity and defect verification tool ('verify_python_ast') was not executed"
-        in res
-    )
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")

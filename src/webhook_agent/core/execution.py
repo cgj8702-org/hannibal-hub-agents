@@ -503,11 +503,6 @@ def execute_agent_event(
                     canonical,
                     comment_body,
                 )
-                if event_data.get("deterministic_precompiled_ast"):
-                    user_state_map["deterministic_precompiled_ast"] = True
-                    tools_exec = user_state_map.setdefault("tools_executed", [])
-                    if "verify_python_ast" not in tools_exec:
-                        tools_exec.append("verify_python_ast")
                 if is_pr_review_event and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")
                     installation_id = event_data.get("installation_id")
