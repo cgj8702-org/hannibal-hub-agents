@@ -143,7 +143,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **done when:** a test shows `search_files` run during an agent event resolves paths inside the PR workspace and never inside `Path.cwd()`.
 - **do not:** remove the `is_self_repo` guard in `core/prompts.py`.
 
-## T-08: Widen the output sanitizer
+## T-08: Widen the output sanitizer [COMPLETED - PR #325]
 
 - **branch:** `fix/sanitizer-token-formats` | **commit:** `fix(security): redact more secret formats in model output`
 - **files:** `src/webhook_agent/core/sanitizer_plugin.py`, `tests/unit/core/test_plugins.py` (or the sanitizer's existing test file)
