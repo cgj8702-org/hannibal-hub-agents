@@ -422,7 +422,7 @@ class TestShouldProcessEvent:
         assert _should_prefetch_diff("pull_request.closed", {}) is False
 
     def test_truncate_log_payload(self):
-        """truncate_log_payload returns full payload strings for Cloud Logging output without truncation."""
+        """truncate_log_payload safely truncates long payload strings for Cloud Logging output."""
         from webhook_agent.review.formatter import truncate_log_payload
 
         short_msg = "Short message"
@@ -430,8 +430,9 @@ class TestShouldProcessEvent:
 
         long_msg = "A" * 500
         output = truncate_log_payload(long_msg, 100)
-        assert len(output) == 500
-        assert output == long_msg
+        assert len(output) < 500
+        assert output.startswith("A" * 100)
+        assert "[truncated 400 chars]" in output
 
     def test_logger_hierarchy_named_loggers(self):
         """All webhook agent modules use unified 'webhook_agent.*' logger namespace."""
@@ -2034,6 +2035,7 @@ class TestWorkerReliability:
         mock_subscriber.pull.side_effect = [mock_response, KeyboardInterrupt()]
 
         with (
+            patch("webhook_agent.worker.setup_cloud_logging"),
             patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
             patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
             patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
