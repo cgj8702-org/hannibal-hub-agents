@@ -17,6 +17,8 @@ __all__ = [
     "check_window",
     "get_issue",
     "read_file",
+    "resolve_bot_review_threads",
+    "resolve_review_thread",
     "review",
     "search_files",
     "verify_line_reference",
@@ -35,7 +37,13 @@ def __getattr__(name: str) -> Any:
         mod = importlib.import_module(".schemas", __package__)
         return getattr(mod, name)
 
-    if name in {"get_issue", "read_file", "review"}:
+    if name in {
+        "get_issue",
+        "read_file",
+        "resolve_bot_review_threads",
+        "resolve_review_thread",
+        "review",
+    }:
         mod = importlib.import_module(".github_tools", __package__)
         return getattr(mod, name)
 

@@ -489,3 +489,75 @@ def review(
         if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(e)):
             raise
         return f"Error submitting review: {e}"
+
+
+def resolve_review_thread(ctx: Context, thread_id: str) -> str:
+    """Resolve an inline review comment thread on GitHub by GraphQL thread ID.
+
+    Args:
+        ctx: Agent execution context.
+        thread_id: The GraphQL node ID of the review thread to resolve (e.g., 'PRRT_kwDOTKuocc5...').
+
+    Returns:
+        A clinical status string reporting whether the thread was resolved.
+    """
+    from webhook_agent.github.thread_resolver import (
+        extract_token_from_gh,
+    )
+    from webhook_agent.github.thread_resolver import (
+        resolve_review_thread as _resolve_graphql_thread,
+    )
+
+    try:
+        gh = _get_gh_from_ctx(ctx)
+        token = extract_token_from_gh(gh)
+        if not token:
+            return "Error: Could not extract authentication token to resolve thread."
+
+        success = _resolve_graphql_thread(thread_id, token)
+        if success:
+            return f"Successfully resolved review thread {thread_id}."
+        return f"Failed to resolve review thread {thread_id}. Check permissions or thread ID."
+    except Exception as exc:
+        return f"Error resolving review thread: {exc}"
+
+
+def resolve_bot_review_threads(
+    ctx: Context, pr_number: int, bot_login: str = "coderabbitai"
+) -> str:
+    """Find and resolve all open inline review comment threads started by a bot on a PR.
+
+    Args:
+        ctx: Agent execution context.
+        pr_number: The pull request number.
+        bot_login: The GitHub username/slug of the bot whose threads should be resolved (default: 'coderabbitai').
+
+    Returns:
+        A clinical summary string reporting which review threads were resolved.
+    """
+    from webhook_agent.github.thread_resolver import (
+        auto_resolve_coderabbit_threads,
+        extract_token_from_gh,
+    )
+
+    try:
+        gh = _get_gh_from_ctx(ctx)
+        repo_name = _get_repo_full_name(ctx)
+        token = extract_token_from_gh(gh)
+        if not token:
+            return "Error: Could not extract authentication token to resolve bot threads."
+
+        resolved = auto_resolve_coderabbit_threads(
+            repo_name,
+            pr_number,
+            token,
+            target_logins=(bot_login, f"{bot_login}[bot]"),
+        )
+        if resolved:
+            return (
+                f"Successfully resolved {len(resolved)} review thread(s) from {bot_login} "
+                f"on {repo_name}#{pr_number}: {', '.join(resolved)}."
+            )
+        return f"No open review threads from {bot_login} were found to resolve on {repo_name}#{pr_number}."
+    except Exception as exc:
+        return f"Error resolving bot review threads: {exc}"
