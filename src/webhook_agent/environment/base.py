@@ -39,6 +39,11 @@ class BaseEnvironment(abc.ABC):
         """The root working directory of this environment."""
         return self._working_dir
 
+    @property
+    def root(self) -> Path:
+        """Alias for working_dir."""
+        return self._working_dir
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, BaseEnvironment):
             return False

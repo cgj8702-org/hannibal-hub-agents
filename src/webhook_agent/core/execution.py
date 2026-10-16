@@ -18,6 +18,7 @@ from google.adk.runners import RunConfig
 from google.genai import types as genai_types
 
 from webhook_agent.core.loop_helpers import run_in_bg_loop
+from webhook_agent.environment import pr_workspace, use_environment
 from webhook_agent.models.model_chain import (
     _is_transient_error,
     _select_model_for_event,
@@ -271,6 +272,9 @@ def execute_agent_event(
     canonical = event_data.get("canonical", "")
     raw = event_data.get("raw_payload", {})
 
+    if gh_client is not None and "gh_client" not in event_data:
+        event_data["gh_client"] = gh_client
+
     logger.debug(
         "✅ All policy checks passed, building session context (trace: %s)",
         trace_id[-4:],
@@ -345,27 +349,6 @@ def execute_agent_event(
                 return results
             event_data["resumed_checkpoint"] = resumable
 
-    # Build user message (fast-path from stored precompiled dossier on resume if present)
-    resumed_dossier = event_data.get("precompiled_dossier") or (
-        event_data.get("resumed_checkpoint") or {}
-    ).get("precompiled_dossier")
-    if resumed_dossier:
-        logger.info(
-            "⚡ Fast-path: using stored precompiled dossier from review checkpoint (skipping AST/symbol pre-audit)"
-        )
-        user_message = genai_types.Content(
-            role="user",
-            parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
-        )
-        event_data["deterministic_precompiled_ast"] = True
-    else:
-        user_message = agent._build_user_message(event_data)
-
-    logger.debug(
-        "📝 Built user message for agent (length: %d chars)",
-        len(getattr(user_message.parts[0], "text", "") or "") if user_message.parts else 0,
-    )
-
     # Dynamic model routing
     selected_model = _select_model_for_event(event_data)
     if agent._current_model_name != selected_model:
@@ -395,10 +378,29 @@ def execute_agent_event(
         "formal_review_eligible": _is_formal_review_eligible(canonical, comment_body),
     }
 
+    user_message: genai_types.Content | None = None
+    resumed_dossier = event_data.get("precompiled_dossier") or (
+        event_data.get("resumed_checkpoint") or {}
+    ).get("precompiled_dossier")
+    if resumed_dossier:
+        logger.info(
+            "⚡ Fast-path: using stored precompiled dossier from review checkpoint (skipping AST/symbol pre-audit)"
+        )
+        user_message = genai_types.Content(
+            role="user",
+            parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
+        )
+        event_data["deterministic_precompiled_ast"] = True
+        deterministic_state["deterministic_precompiled_ast"] = True
+
     async def _run() -> None:
-        nonlocal results, final_session
+        nonlocal results, final_session, user_message
         last_error = None
         agent._attempted_model_names = {agent._normalize_model_name(agent._current_model_name)}
+
+        if user_message is None:
+            user_message = agent._build_user_message(event_data)
+        assert user_message is not None
 
         active_runner = agent._runner if is_pr_review_event else agent._conversational_runner
         active_app_name = (
@@ -406,7 +408,9 @@ def execute_agent_event(
         )
 
         base_prompt_text = (
-            getattr(user_message.parts[0], "text", "") or "" if user_message.parts else ""
+            getattr(user_message.parts[0], "text", "") or ""
+            if (user_message and user_message.parts)
+            else ""
         )
 
         for attempt in range(_MAX_RETRIES):
@@ -635,7 +639,36 @@ def execute_agent_event(
                 )
             )
 
-    run_in_bg_loop(_run())
+    async def _execute_with_workspace() -> None:
+        nonlocal user_message
+        async with pr_workspace(gh_client, repo_full_name, head_sha) as ws_env:
+            if ws_env is not None:
+                with use_environment(ws_env):
+                    if user_message is None:
+                        user_message = agent._build_user_message(event_data)
+                        deterministic_state["deterministic_precompiled_ast"] = bool(
+                            event_data.get("deterministic_precompiled_ast")
+                        )
+                        if user_message and user_message.parts:
+                            logger.debug(
+                                "📝 Built user message for agent (length: %d chars)",
+                                len(getattr(user_message.parts[0], "text", "") or ""),
+                            )
+                    await _run()
+            else:
+                if user_message is None:
+                    user_message = agent._build_user_message(event_data)
+                    deterministic_state["deterministic_precompiled_ast"] = bool(
+                        event_data.get("deterministic_precompiled_ast")
+                    )
+                    if user_message and user_message.parts:
+                        logger.debug(
+                            "📝 Built user message for agent (length: %d chars)",
+                            len(getattr(user_message.parts[0], "text", "") or ""),
+                        )
+                await _run()
+
+    run_in_bg_loop(_execute_with_workspace())
 
     # Deterministic review submission
     has_review_action = any(r.tool == "review" and r.success for r in results)

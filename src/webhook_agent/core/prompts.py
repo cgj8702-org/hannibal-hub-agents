@@ -324,14 +324,44 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                     )
                 event_data["deterministic_precompiled_ast"] = True
 
+                from webhook_agent.environment.context import get_active_environment
+
+                active_env = get_active_environment()
                 repo_full_name = (event_data.get("repository") or {}).get("full_name", "")
                 is_self_repo = repo_full_name.endswith("/hannibal-hub-agents") or not repo_full_name
-                if is_self_repo:
+                if active_env is not None and is_self_repo:
+                    base_sha = str(
+                        (raw.get("pull_request") or {}).get("base", {}).get("sha")
+                        or event_data.get("base_sha")
+                        or ""
+                    )
+                    gh_client = event_data.get("gh_client")
+
+                    baseline_loader = None
+                    if gh_client and repo_full_name and base_sha:
+
+                        def _gh_baseline_loader(file_path: str) -> str | None:
+                            try:
+                                repo_obj = gh_client.get_repo(repo_full_name)
+                                content_file = repo_obj.get_contents(file_path, ref=base_sha)
+                                if hasattr(content_file, "decoded_content"):
+                                    return content_file.decoded_content.decode(
+                                        "utf-8", errors="replace"
+                                    )
+                                return None
+                            except Exception:
+                                return None
+
+                        baseline_loader = _gh_baseline_loader
+
                     # Cross-File Symbol Dependency & Breaking Signature Graph
                     from webhook_agent.analysis.symbol_graph import SymbolImpactAnalyzer
 
-                    sym_analyzer = SymbolImpactAnalyzer()
-                    impact_reports = sym_analyzer.analyze_modified_files(changed_files)
+                    sym_analyzer = SymbolImpactAnalyzer(repo_root=active_env.root)
+                    impact_reports = sym_analyzer.analyze_modified_files(
+                        changed_files,
+                        baseline_loader=baseline_loader,
+                    )
                     impact_blocks = [
                         r.to_markdown()
                         for r in impact_reports
@@ -349,7 +379,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                     # Test Impact & Coverage Verification
                     from webhook_agent.analysis.test_impact import TestImpactAnalyzer
 
-                    test_analyzer = TestImpactAnalyzer()
+                    test_analyzer = TestImpactAnalyzer(repo_root=active_env.root)
                     test_report = test_analyzer.analyze(changed_files)
                     if test_report.coverages:
                         test_md = test_report.to_markdown()

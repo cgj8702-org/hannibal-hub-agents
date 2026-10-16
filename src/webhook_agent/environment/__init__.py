@@ -4,12 +4,14 @@ from webhook_agent.environment.base import BaseEnvironment, ExecutionResult
 from webhook_agent.environment.context import (
     active_environment,
     ephemeral_environment,
+    get_active_environment,
     reset_active_environment,
     set_active_environment,
     use_environment,
 )
 from webhook_agent.environment.local import LocalEnvironment
 from webhook_agent.environment.paths import path_under_root, resolve_sandboxed_path
+from webhook_agent.environment.pr_workspace import pr_workspace
 
 __all__ = [
     "BaseEnvironment",
@@ -17,7 +19,9 @@ __all__ = [
     "LocalEnvironment",
     "active_environment",
     "ephemeral_environment",
+    "get_active_environment",
     "path_under_root",
+    "pr_workspace",
     "reset_active_environment",
     "resolve_sandboxed_path",
     "set_active_environment",

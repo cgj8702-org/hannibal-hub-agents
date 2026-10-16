@@ -126,7 +126,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** symlink to an outside file yields no matches (workspace in a temp dir); `WEBHOOK_PAID_KEY` set in the parent env is not visible to the subprocess; after a timeout the child PID no longer exists (`os.kill(pid, 0)` raises `ProcessLookupError`); over-long pattern error.
 - **done when:** all new tests pass and existing `search_tools` tests still pass.
 
-## T-07: Run analysis against the PR head, not the worker's checkout
+## T-07: Run analysis against the PR head, not the worker's checkout [COMPLETED - PR #329]
 
 - **depends_on:** T-06. **branch:** `feat/pr-workspace` | **commit:** `feat(environment): analyze PR head via ephemeral workspace`
 - **files:** new `src/webhook_agent/environment/pr_workspace.py`, `src/webhook_agent/core/execution.py`, `src/webhook_agent/core/prompts.py`, `src/webhook_agent/analysis/symbol_graph.py`, `src/webhook_agent/analysis/test_impact.py`, `src/webhook_agent/processor.py` (wiring only), matching tests
