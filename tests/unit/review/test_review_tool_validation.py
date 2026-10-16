@@ -308,7 +308,9 @@ def test_review_allows_approve_without_verified_invariants(mock_submit, mock_ctx
     assert parsed.get("verdict") in ("APPROVE", None)
 
 
-def test_review_rejects_approve_with_invalid_invariant(mock_ctx):
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_ignores_legacy_invariants_on_approve(mock_submit, mock_ctx):
+    mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["README.md"]
     payload = {
         "executive_summary": "PR looks great, approving.",
@@ -327,9 +329,8 @@ def test_review_rejects_approve_with_invalid_invariant(mock_ctx):
         "context_gaps": [],
     }
     res = review(mock_ctx, 123, json.dumps(payload), "APPROVE")
-    assert res.startswith("Error: Review submission rejected")
-    assert "lacks exact file path" in res
-    assert "lacks concrete evidence" in res
+    assert res == "Review submitted"
+    assert mock_submit.called
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
@@ -576,19 +577,25 @@ def test_strict_mode_skipped_grounding_downgrades_approve_to_comment(
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
-def test_grounding_rejects_unciteable_verified_invariant_when_strict(mock_submit, monkeypatch):
-    """The APPROVE path is grounded too: an invariant on an unchanged path is rejected."""
+def test_grounding_rejects_unciteable_finding_when_strict(mock_submit, monkeypatch):
+    """The APPROVE path is grounded too: a suggestion on an unchanged path is rejected."""
     monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
     mock_submit.return_value = ("Review submitted", True)
     ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
     payload = {
         "executive_summary": "Grounding test summary",
-        "confidence": 5,
+        "confidence": 8,
         "risks_and_edge_cases": [],
         "critical_issues": [],
-        "minor_suggestions": [],
+        "minor_suggestions": [
+            {
+                "path": "src/gamma.py",
+                "line": 5,
+                "description": "Unchecked parameter",
+                "suggested_fix": "check_param(x)",
+            }
+        ],
         "context_gaps": [],
-        "verified_invariants": [{"path": "src/gamma.py", "line": 5, "evidence": "guard holds"}],
     }
     res = review(ctx, 8105, json.dumps(payload), "APPROVE")
     assert res.startswith("Error: Review submission rejected")

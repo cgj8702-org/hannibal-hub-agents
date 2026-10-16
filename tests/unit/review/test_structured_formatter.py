@@ -230,7 +230,6 @@ def test_normalize_code_review_dict_edge_cases():
         "risks_and_edge_cases": [],
         "critical_issues": [],
         "minor_suggestions": [],
-        "verified_invariants": [],
         "unverified_claims": [],
         "context_gaps": [],
     }
@@ -899,8 +898,8 @@ def test_normalize_sync_review_dict_preserves_categories():
     assert resolutions[2]["category"] == "RISK"
 
 
-def test_normalize_code_review_dict_rescues_evidence_only_invariants():
-    """Verify that normalize_code_review_dict rescues invariants emitted with only path/line/evidence."""
+def test_normalize_code_review_dict_purges_legacy_invariants():
+    """Verify that normalize_code_review_dict purges legacy invariants without breaking validation."""
     raw_data = {
         "executive_summary": "Comprehensive tool input gate PR.",
         "critical_issues": [],
@@ -919,18 +918,11 @@ def test_normalize_code_review_dict_rescues_evidence_only_invariants():
         ],
     }
     normalized = normalize_code_review_dict(raw_data)
-    invariants = normalized["verified_invariants"]
-    assert len(invariants) == 2
-    assert invariants[0]["path"] == "src/webhook_agent/core/callbacks.py"
-    assert invariants[0]["line"] == 281
-    assert "Universal Pydantic schema lookup" in invariants[0]["invariant"]
-    assert "Universal Pydantic schema lookup" in invariants[0]["evidence"]
+    assert "verified_invariants" not in normalized
 
-    assert invariants[1]["line"] == 556
-    assert "Explicitly verifies pr.draft" in invariants[1]["invariant"]
-
-    # Verify invariant section is not rendered in lean markdown
+    # Verify invariant section is not rendered in lean markdown and field is not present
     cr_obj = CodeReviewResponse.model_validate(normalized)
+    assert not hasattr(cr_obj, "verified_invariants")
     md = cr_obj.to_markdown("APPROVE")
     assert "Verified Invariants" not in md
 
@@ -942,7 +934,7 @@ def test_normalize_code_review_dict_rescues_string_invariants():
         "verified_invariants": ["In-memory cache expiration invariant preserved across threads."],
     }
     normalized = normalize_code_review_dict(raw_data)
-    assert len(normalized["verified_invariants"]) == 0
+    assert "verified_invariants" not in normalized
     assert len(normalized["unverified_claims"]) == 1
     assert (
         normalized["unverified_claims"][0]
@@ -950,8 +942,8 @@ def test_normalize_code_review_dict_rescues_string_invariants():
     )
 
 
-def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
-    """Verify that normalize_sync_review_dict rescues invariants in synchronization reviews."""
+def test_normalize_sync_review_dict_purges_legacy_invariants():
+    """Verify that normalize_sync_review_dict purges legacy invariants in synchronization reviews."""
     raw_data = {
         "summary": "Incremental sync diff verified.",
         "resolutions": [],
@@ -964,11 +956,10 @@ def test_normalize_sync_review_dict_rescues_evidence_only_invariants():
         ],
     }
     normalized = normalize_sync_review_dict(raw_data)
-    assert len(normalized["verified_invariants"]) == 1
-    assert normalized["verified_invariants"][0]["line"] == 416
-    assert "Checkpoint marked completed" in normalized["verified_invariants"][0]["invariant"]
+    assert "verified_invariants" not in normalized
 
     sync_obj = SyncReviewResponse.model_validate(normalized)
+    assert not hasattr(sync_obj, "verified_invariants")
     md = sync_obj.to_markdown("APPROVE")
     assert "Verified Invariants" not in md
 

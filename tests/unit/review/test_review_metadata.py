@@ -117,33 +117,18 @@ def test_code_review_response_embeds_metadata() -> None:
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_code_review_metadata_includes_verified_invariants() -> None:
-    """Invariants rendered in the body must also survive into the metadata footer."""
+def test_code_review_metadata_omits_verified_invariants() -> None:
+    """Verified invariants are purged from review schemas and metadata."""
     cr = CodeReviewResponse(
         executive_summary="Audit pass.",
         verdict="APPROVE",
-        verified_invariants=[
-            VerifiedInvariant(
-                invariant="Signature check runs before dispatch",
-                path="src/main.py",
-                line=12,
-                evidence="Covered by tests/unit/test_main.py::test_rejects_bad_signature",
-            )
-        ],
     )
     md = cr.to_markdown(verdict="APPROVE")
-    assert "Signature check runs before dispatch" in md
+    assert "Verified Invariants" not in md
 
     meta = extract_review_metadata(md)
     assert meta is not None
-    assert meta["verified_invariants"] == [
-        {
-            "invariant": "Signature check runs before dispatch",
-            "path": "src/main.py",
-            "line": 12,
-            "evidence": "Covered by tests/unit/test_main.py::test_rejects_bad_signature",
-        }
-    ]
+    assert "verified_invariants" not in meta
 
 
 @pytest.mark.unit
@@ -166,23 +151,15 @@ def test_metadata_roundtrip_includes_unverified_claims() -> None:
 
 @pytest.mark.unit
 @pytest.mark.webhook_agent
-def test_sync_review_metadata_includes_verified_invariants() -> None:
-    """Sync reviews must serialize verified invariants the same way as initial reviews."""
+def test_sync_review_metadata_omits_verified_invariants() -> None:
+    """Sync reviews must omit verified invariants from metadata."""
     sync = SyncReviewResponse(
         summary="Update preserves the contract.",
         verdict="APPROVE",
-        verified_invariants=[
-            VerifiedInvariant(
-                invariant="Retry cap is unchanged",
-                path="src/worker.py",
-                line=40,
-                evidence="Constant is untouched in the incremental diff",
-            )
-        ],
     )
     meta = extract_review_metadata(sync.to_markdown(verdict="APPROVE"))
     assert meta is not None
-    assert [i["invariant"] for i in meta["verified_invariants"]] == ["Retry cap is unchanged"]
+    assert "verified_invariants" not in meta
 
 
 @pytest.mark.unit
@@ -499,7 +476,7 @@ def test_string_only_invariant_gets_no_fabricated_citation(model: type) -> None:
     resp = model.model_validate(
         {key: "s", "verdict": "COMMENT", "verified_invariants": ["Retries are capped"]}
     )
-    assert resp.verified_invariants == []
+    assert not hasattr(resp, "verified_invariants")
     assert resp.unverified_claims == ["Retries are capped"]
 
     md = resp.to_markdown(verdict="COMMENT")

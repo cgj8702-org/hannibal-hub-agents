@@ -236,8 +236,6 @@ def _grounding_findings(review_obj: Any) -> list[Finding]:
         findings.append(_citation_finding(kind="critical", item=item))
     for item in getattr(review_obj, "minor_suggestions", None) or []:
         findings.append(_citation_finding(kind="suggestion", item=item))
-    for item in getattr(review_obj, "verified_invariants", None) or []:
-        findings.append(_citation_finding(kind="invariant", item=item))
     return findings
 
 
@@ -384,6 +382,15 @@ def review(
                 "Please fix the schema fields and call review() again."
             )
 
+        # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement
+        from webhook_agent.review.critic import CriticEngine
+
+        critic_engine = CriticEngine()
+        review_obj.critical_issues = critic_engine.filter_issues(review_obj.critical_issues)
+        review_obj.minor_suggestions = critic_engine.filter_issues(review_obj.minor_suggestions)
+        critical_list = review_obj.critical_issues
+        minor_list = review_obj.minor_suggestions
+
         # Enforce non-boilerplate and concrete path/line/suggested_fix
         forbidden_boilerplate = (
             "address requested changes",
@@ -424,22 +431,6 @@ def review(
                     "REQUEST_CHANGES event specified, but critical_issues is empty. "
                     "You must provide at least one actionable critical issue with exact path, line, and replacement code, or set event to APPROVE."
                 )
-        elif effective_event == "APPROVE":
-            verified_invariants = getattr(review_obj, "verified_invariants", []) or []
-            for inv in verified_invariants:
-                p = (inv.path or "").strip().lower()
-                if not p or p in ("codebase", "unknown"):
-                    invalid_findings.append(
-                        f"Verified invariant '{inv.invariant[:50]}' lacks exact file path (got '{inv.path}')"
-                    )
-                if inv.line is None or inv.line <= 0:
-                    invalid_findings.append(
-                        f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}' lacks valid line number (got '{inv.line}')"
-                    )
-                if not (inv.evidence or "").strip():
-                    invalid_findings.append(
-                        f"Verified invariant '{inv.invariant[:50]}' on '{inv.path}:{inv.line}' lacks concrete evidence"
-                    )
 
         # Deterministic citation grounding: check every cited path/line against the diff.
         # Always logged; only enforced when STRICT_REVIEW_GROUNDING is set, because a
@@ -512,18 +503,13 @@ def review(
                 )
             if strict_grounding_enabled():
                 invalid_findings.extend(hard_reasons(grounding_issues))
-            elif effective_event == "APPROVE":
-                invariant_issues = [
-                    issue for issue in grounding_issues if issue.kind == "invariant"
-                ]
-                invalid_findings.extend(hard_reasons(invariant_issues))
 
         if invalid_findings:
             error_details = "; ".join(invalid_findings)
             logger.warning("Rejecting invalid review tool call: %s", error_details)
             return (
                 f"Error: Review submission rejected. Invalid findings: {error_details}. "
-                "Please re-examine the diff and call review() again with precise file paths, line numbers, actionable replacement code in suggested_fix, and verified invariant proofs."
+                "Please re-examine the diff and call review() again with precise file paths, line numbers, and actionable replacement code in suggested_fix."
             )
 
         result, _submitted = _submit_formal_review(
