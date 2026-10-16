@@ -41,6 +41,53 @@ class RiskItem(BaseModel):
         return clean_field_string(v)
 
 
+class ScorecardItem(BaseModel):
+    """Evaluation status and clinical notes for an audit dimension."""
+
+    dimension: str = Field(
+        description="Audit dimension (e.g. 'Logic & Boundaries', 'Concurrency & State', 'Security & Secrets', 'Contract Integrity', 'Test Coverage & Regressions')"
+    )
+    status: Literal["PASS", "WARN", "FAIL", "N/A"] = Field(
+        default="PASS",
+        description="Audit dimension status: PASS, WARN, FAIL, or N/A",
+    )
+    notes: str = Field(
+        default="",
+        description="Concrete technical evaluation notes, diff citations, or rationale",
+    )
+
+    @field_validator("dimension", "notes", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: Any) -> Any:
+        return clean_field_string(v)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def sanitize_status(cls, v: Any) -> str:
+        if not v:
+            return "PASS"
+        s = str(v).strip().upper()
+        if "FAIL" in s or "CRIT" in s or "BLOCK" in s:
+            return "FAIL"
+        if "WARN" in s or "CAUTION" in s:
+            return "WARN"
+        if "N/A" in s or "NA" in s or "SKIP" in s:
+            return "N/A"
+        return "PASS"
+
+    def to_table_row(self) -> str:
+        """Render a clean Markdown table row."""
+        badge_map = {
+            "PASS": "`✅ PASS`",
+            "WARN": "`⚠️ WARN`",
+            "FAIL": "`❌ FAIL`",
+            "N/A": "`⚪ N/A`",
+        }
+        badge = badge_map.get(self.status, f"`{self.status}`")
+        safe_notes = self.notes.replace("|", "\\|").strip() or "Verified clean."
+        return f"| **{self.dimension}** | {badge} | {safe_notes} |"
+
+
 class IssueItem(BaseModel):
     """Actionable code issue or suggestion."""
 
@@ -290,6 +337,10 @@ class CodeReviewResponse(BaseModel):
         default=None,
         description="Optional explicit review verdict (APPROVE, REQUEST_CHANGES, COMMENT)",
     )
+    scorecard: list[ScorecardItem] = Field(
+        default_factory=list,
+        description="Systematic evaluation across mandatory audit dimensions",
+    )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,
         description="Blocking critical issues (syntax errors, security flaws, broken contracts)",
@@ -301,6 +352,10 @@ class CodeReviewResponse(BaseModel):
     risks_and_edge_cases: list[RiskItem] = Field(
         default_factory=list,
         description="Key risks or edge cases identified during analysis",
+    )
+    verified_invariants: list[str] = Field(
+        default_factory=list,
+        description="Concrete, diff-grounded behavioral guarantees or invariants verified during audit",
     )
     unverified_claims: list[str] = Field(
         default_factory=list,
@@ -332,6 +387,56 @@ class CodeReviewResponse(BaseModel):
             )
         else:
             normalized["executive_summary"] = "Autonomous PR code review report."
+
+        raw_scorecard = (
+            normalized.get("scorecard")
+            or normalized.get("audit_scorecard")
+            or normalized.get("dimensions")
+        )
+        clean_scorecard: list[dict[str, Any]] = []
+        if isinstance(raw_scorecard, list):
+            for sc_item in raw_scorecard:
+                if isinstance(sc_item, BaseModel):
+                    sc_item = sc_item.model_dump()
+                if isinstance(sc_item, dict):
+                    dim = str(sc_item.get("dimension") or sc_item.get("name") or "").strip()
+                    st = str(sc_item.get("status") or "PASS").strip()
+                    notes = str(
+                        sc_item.get("notes")
+                        or sc_item.get("description")
+                        or sc_item.get("evidence")
+                        or ""
+                    ).strip()
+                    if dim:
+                        clean_scorecard.append({"dimension": dim, "status": st, "notes": notes})
+                elif isinstance(sc_item, str) and sc_item.strip():
+                    if ":" in sc_item:
+                        dim, notes = sc_item.split(":", 1)
+                        clean_scorecard.append(
+                            {"dimension": dim.strip(), "status": "PASS", "notes": notes.strip()}
+                        )
+                    else:
+                        clean_scorecard.append(
+                            {
+                                "dimension": sc_item.strip(),
+                                "status": "PASS",
+                                "notes": "Verified clean.",
+                            }
+                        )
+        elif isinstance(raw_scorecard, dict):
+            for dim, val in raw_scorecard.items():
+                if isinstance(val, dict):
+                    st = str(val.get("status") or "PASS").strip()
+                    notes = str(
+                        val.get("notes") or val.get("description") or val.get("evidence") or ""
+                    ).strip()
+                else:
+                    st = "PASS"
+                    notes = str(val).strip()
+                clean_scorecard.append(
+                    {"dimension": str(dim).strip(), "status": st, "notes": notes}
+                )
+        normalized["scorecard"] = clean_scorecard
 
         raw_risks = normalized.get("risks_and_edge_cases") or normalized.get("risks")
         clean_risks: list[dict[str, str]] = []
@@ -537,15 +642,28 @@ class CodeReviewResponse(BaseModel):
                         )
         normalized["minor_suggestions"] = clean_minor
 
-        raw_inv = normalized.pop("verified_invariants", None) or normalized.pop("invariants", None)
-        unverified_list: list[str] = [
-            str(x) for x in (normalized.get("unverified_claims") or []) if x
-        ]
+        raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
+        clean_inv: list[str] = []
         if isinstance(raw_inv, list):
             for item in raw_inv:
+                if isinstance(item, BaseModel):
+                    item = item.model_dump()
                 if isinstance(item, str) and item.strip():
-                    unverified_list.append(item.strip())
-        normalized["unverified_claims"] = unverified_list
+                    clean_inv.append(clean_field_string(item.strip()))
+                elif isinstance(item, dict):
+                    inv_text = str(
+                        item.get("invariant")
+                        or item.get("description")
+                        or item.get("evidence")
+                        or ""
+                    ).strip()
+                    path_val = str(item.get("path") or "").strip()
+                    line_val = item.get("line")
+                    if path_val and line_val:
+                        clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
+                    elif inv_text:
+                        clean_inv.append(inv_text)
+        normalized["verified_invariants"] = clean_inv
 
         raw_unverified = (
             normalized.get("unverified_claims")
@@ -584,8 +702,26 @@ class CodeReviewResponse(BaseModel):
             self.executive_summary,
         ]
 
+        section_counter = 2
+
+        if self.scorecard:
+            scorecard_rows = [item.to_table_row() for item in self.scorecard]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Audit Dimension Scorecard",
+                    "",
+                    "| Dimension | Status | Notes |",
+                    "| :--- | :---: | :--- |",
+                    *scorecard_rows,
+                ]
+            )
+            section_counter += 1
+
         if self.critical_issues or self.minor_suggestions:
-            markdown_parts.extend(["", "---", "", "### 2. Action Items"])
+            markdown_parts.extend(["", "---", "", f"### {section_counter}. Action Items"])
             if self.critical_issues:
                 markdown_parts.extend(
                     [
@@ -602,6 +738,7 @@ class CodeReviewResponse(BaseModel):
                         "\n".join(sugg.to_markdown() for sugg in self.minor_suggestions),
                     ]
                 )
+            section_counter += 1
 
         if self.risks_and_edge_cases:
             risk_lines: list[str] = []
@@ -614,11 +751,26 @@ class CodeReviewResponse(BaseModel):
                     "",
                     "---",
                     "",
-                    "### 3. Potential Risks & Edge Cases",
+                    f"### {section_counter}. Potential Risks & Edge Cases",
                     "",
                     "\n".join(risk_lines),
                 ]
             )
+            section_counter += 1
+
+        if self.verified_invariants:
+            inv_lines = [f"- [x] {inv}" for inv in self.verified_invariants]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Verified Invariants",
+                    "",
+                    "\n".join(inv_lines),
+                ]
+            )
+            section_counter += 1
 
         if self.unverified_claims:
             u_lines = [f"* {claim}" for claim in self.unverified_claims]
@@ -640,7 +792,7 @@ class CodeReviewResponse(BaseModel):
                     "",
                     "---",
                     "",
-                    "### 4. Verification Notes",
+                    "### Verification Notes",
                     f"* **Context Gaps:** {gaps_str}",
                 ]
             )
@@ -683,6 +835,13 @@ class CodeReviewResponse(BaseModel):
             ],
             "unverified_claims": list(self.unverified_claims),
         }
+        if self.scorecard:
+            meta["scorecard"] = [
+                {"dimension": s.dimension, "status": s.status, "notes": s.notes}
+                for s in self.scorecard
+            ]
+        if self.verified_invariants:
+            meta["verified_invariants"] = list(self.verified_invariants)
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
 
@@ -701,6 +860,10 @@ class SyncReviewResponse(BaseModel):
         default_factory=list,
         description="Resolution status for all previously requested findings",
     )
+    scorecard: list[ScorecardItem] = Field(
+        default_factory=list,
+        description="Systematic evaluation across mandatory audit dimensions for incremental diff",
+    )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,
         description="Critical or blocking issues introduced in this update",
@@ -708,6 +871,10 @@ class SyncReviewResponse(BaseModel):
     minor_suggestions: list[IssueItem] = Field(
         default_factory=list,
         description="Non-blocking minor suggestions or maintainability notes introduced in this update",
+    )
+    verified_invariants: list[str] = Field(
+        default_factory=list,
+        description="Concrete, diff-grounded behavioral guarantees or invariants verified during audit",
     )
     unverified_claims: list[str] = Field(
         default_factory=list,
@@ -735,6 +902,56 @@ class SyncReviewResponse(BaseModel):
             )
         else:
             normalized["summary"] = "Pull request synchronization review update."
+
+        raw_scorecard = (
+            normalized.get("scorecard")
+            or normalized.get("audit_scorecard")
+            or normalized.get("dimensions")
+        )
+        clean_scorecard: list[dict[str, Any]] = []
+        if isinstance(raw_scorecard, list):
+            for sc_item in raw_scorecard:
+                if isinstance(sc_item, BaseModel):
+                    sc_item = sc_item.model_dump()
+                if isinstance(sc_item, dict):
+                    dim = str(sc_item.get("dimension") or sc_item.get("name") or "").strip()
+                    st = str(sc_item.get("status") or "PASS").strip()
+                    notes = str(
+                        sc_item.get("notes")
+                        or sc_item.get("description")
+                        or sc_item.get("evidence")
+                        or ""
+                    ).strip()
+                    if dim:
+                        clean_scorecard.append({"dimension": dim, "status": st, "notes": notes})
+                elif isinstance(sc_item, str) and sc_item.strip():
+                    if ":" in sc_item:
+                        dim, notes = sc_item.split(":", 1)
+                        clean_scorecard.append(
+                            {"dimension": dim.strip(), "status": "PASS", "notes": notes.strip()}
+                        )
+                    else:
+                        clean_scorecard.append(
+                            {
+                                "dimension": sc_item.strip(),
+                                "status": "PASS",
+                                "notes": "Verified clean.",
+                            }
+                        )
+        elif isinstance(raw_scorecard, dict):
+            for dim, val in raw_scorecard.items():
+                if isinstance(val, dict):
+                    st = str(val.get("status") or "PASS").strip()
+                    notes = str(
+                        val.get("notes") or val.get("description") or val.get("evidence") or ""
+                    ).strip()
+                else:
+                    st = "PASS"
+                    notes = str(val).strip()
+                clean_scorecard.append(
+                    {"dimension": str(dim).strip(), "status": st, "notes": notes}
+                )
+        normalized["scorecard"] = clean_scorecard
 
         raw_res = normalized.get("resolutions")
         clean_res: list[dict[str, str]] = []
@@ -931,15 +1148,28 @@ class SyncReviewResponse(BaseModel):
             else []
         )
 
-        raw_inv = normalized.pop("verified_invariants", None) or normalized.pop("invariants", None)
-        unverified_list: list[str] = [
-            str(x) for x in (normalized.get("unverified_claims") or []) if x
-        ]
+        raw_inv = normalized.get("verified_invariants") or normalized.get("invariants")
+        clean_inv: list[str] = []
         if isinstance(raw_inv, list):
             for item in raw_inv:
+                if isinstance(item, BaseModel):
+                    item = item.model_dump()
                 if isinstance(item, str) and item.strip():
-                    unverified_list.append(item.strip())
-        normalized["unverified_claims"] = unverified_list
+                    clean_inv.append(clean_field_string(item.strip()))
+                elif isinstance(item, dict):
+                    inv_text = str(
+                        item.get("invariant")
+                        or item.get("description")
+                        or item.get("evidence")
+                        or ""
+                    ).strip()
+                    path_val = str(item.get("path") or "").strip()
+                    line_val = item.get("line")
+                    if path_val and line_val:
+                        clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
+                    elif inv_text:
+                        clean_inv.append(inv_text)
+        normalized["verified_invariants"] = clean_inv
 
         return normalized
 
@@ -955,9 +1185,11 @@ class SyncReviewResponse(BaseModel):
             cr_data = {
                 "executive_summary": self.summary or "Autonomous PR code review report.",
                 "verdict": self.verdict or verdict,
+                "scorecard": [s.model_dump() for s in self.scorecard],
                 "critical_issues": [item.model_dump() for item in self.critical_issues],
                 "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],
                 "risks_and_edge_cases": [],
+                "verified_invariants": list(self.verified_invariants),
                 "unverified_claims": list(self.unverified_claims),
             }
             cr_obj = CodeReviewResponse.model_validate(cr_data)
@@ -1035,8 +1267,28 @@ class SyncReviewResponse(BaseModel):
             "\n".join(res_lines),
         ]
 
+        section_counter = 3
+
+        if self.scorecard:
+            scorecard_rows = [item.to_table_row() for item in self.scorecard]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Audit Dimension Scorecard",
+                    "",
+                    "| Dimension | Status | Notes |",
+                    "| :--- | :---: | :--- |",
+                    *scorecard_rows,
+                ]
+            )
+            section_counter += 1
+
         if self.critical_issues or self.minor_suggestions:
-            markdown_parts.extend(["", "---", "", "### 3. New Findings (Introduced in Update)"])
+            markdown_parts.extend(
+                ["", "---", "", f"### {section_counter}. New Findings (Introduced in Update)"]
+            )
             if self.critical_issues:
                 markdown_parts.extend(
                     [
@@ -1053,6 +1305,21 @@ class SyncReviewResponse(BaseModel):
                         "\n".join(minor_lines),
                     ]
                 )
+            section_counter += 1
+
+        if self.verified_invariants:
+            inv_lines = [f"- [x] {inv}" for inv in self.verified_invariants]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Verified Invariants",
+                    "",
+                    "\n".join(inv_lines),
+                ]
+            )
+            section_counter += 1
 
         if self.unverified_claims:
             u_lines = [f"* {claim}" for claim in self.unverified_claims]
@@ -1106,6 +1373,13 @@ class SyncReviewResponse(BaseModel):
             ],
             "unverified_claims": list(self.unverified_claims),
         }
+        if self.scorecard:
+            meta["scorecard"] = [
+                {"dimension": s.dimension, "status": s.status, "notes": s.notes}
+                for s in self.scorecard
+            ]
+        if self.verified_invariants:
+            meta["verified_invariants"] = list(self.verified_invariants)
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
 

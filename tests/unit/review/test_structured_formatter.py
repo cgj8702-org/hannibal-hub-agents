@@ -227,9 +227,11 @@ def test_normalize_code_review_dict_edge_cases():
     """Verify self-healing normalizer handles empty inputs, non-dict objects, and string lists."""
     assert normalize_code_review_dict({}) == {
         "executive_summary": "Autonomous PR code review report.",
+        "scorecard": [],
         "risks_and_edge_cases": [],
         "critical_issues": [],
         "minor_suggestions": [],
+        "verified_invariants": [],
         "unverified_claims": [],
         "context_gaps": [],
     }
@@ -898,8 +900,8 @@ def test_normalize_sync_review_dict_preserves_categories():
     assert resolutions[2]["category"] == "RISK"
 
 
-def test_normalize_code_review_dict_purges_legacy_invariants():
-    """Verify that normalize_code_review_dict purges legacy invariants without breaking validation."""
+def test_normalize_code_review_dict_preserves_invariants():
+    """Verify that normalize_code_review_dict preserves invariants with formatted citations."""
     raw_data = {
         "executive_summary": "Comprehensive tool input gate PR.",
         "critical_issues": [],
@@ -918,32 +920,43 @@ def test_normalize_code_review_dict_purges_legacy_invariants():
         ],
     }
     normalized = normalize_code_review_dict(raw_data)
-    assert "verified_invariants" not in normalized
+    assert "verified_invariants" in normalized
+    invariants = normalized["verified_invariants"]
+    assert len(invariants) == 2
+    assert "src/webhook_agent/core/callbacks.py:281" in invariants[0]
+    assert "src/webhook_agent/tools/github_tools.py:556" in invariants[1]
 
-    # Verify invariant section is not rendered in lean markdown and field is not present
+    # Verify invariant section is rendered in clean markdown
     cr_obj = CodeReviewResponse.model_validate(normalized)
-    assert not hasattr(cr_obj, "verified_invariants")
+    assert hasattr(cr_obj, "verified_invariants")
     md = cr_obj.to_markdown("APPROVE")
-    assert "Verified Invariants" not in md
+    assert "Verified Invariants" in md
+    assert "- [x]" in md
 
 
-def test_normalize_code_review_dict_rescues_string_invariants():
-    """Verify that normalize_code_review_dict routes plain string invariants to unverified_claims."""
+def test_normalize_code_review_dict_preserves_string_invariants():
+    """Verify that normalize_code_review_dict preserves plain string invariants."""
     raw_data = {
         "executive_summary": "Clean review.",
         "verified_invariants": ["In-memory cache expiration invariant preserved across threads."],
     }
     normalized = normalize_code_review_dict(raw_data)
-    assert "verified_invariants" not in normalized
-    assert len(normalized["unverified_claims"]) == 1
-    assert (
-        normalized["unverified_claims"][0]
-        == "In-memory cache expiration invariant preserved across threads."
-    )
+    assert "verified_invariants" in normalized
+    assert normalized["verified_invariants"] == [
+        "In-memory cache expiration invariant preserved across threads."
+    ]
+
+    cr_obj = CodeReviewResponse.model_validate(normalized)
+    assert cr_obj.verified_invariants == [
+        "In-memory cache expiration invariant preserved across threads."
+    ]
+    md = cr_obj.to_markdown("APPROVE")
+    assert "Verified Invariants" in md
+    assert "- [x] In-memory cache expiration invariant preserved across threads." in md
 
 
-def test_normalize_sync_review_dict_purges_legacy_invariants():
-    """Verify that normalize_sync_review_dict purges legacy invariants in synchronization reviews."""
+def test_normalize_sync_review_dict_preserves_invariants():
+    """Verify that normalize_sync_review_dict preserves invariants in synchronization reviews."""
     raw_data = {
         "summary": "Incremental sync diff verified.",
         "resolutions": [],
@@ -956,12 +969,80 @@ def test_normalize_sync_review_dict_purges_legacy_invariants():
         ],
     }
     normalized = normalize_sync_review_dict(raw_data)
-    assert "verified_invariants" not in normalized
+    assert "verified_invariants" in normalized
 
     sync_obj = SyncReviewResponse.model_validate(normalized)
-    assert not hasattr(sync_obj, "verified_invariants")
+    assert len(sync_obj.verified_invariants) == 1
+    assert "src/webhook_agent/state/review_checkpoint.py:416" in sync_obj.verified_invariants[0]
     md = sync_obj.to_markdown("APPROVE")
-    assert "Verified Invariants" not in md
+    assert "Verified Invariants" in md
+    assert "- [x]" in md
+
+
+def test_audit_dimension_scorecard_rendering():
+    """Verify CodeReviewResponse renders Audit Dimension Scorecard table correctly."""
+    from webhook_agent.review.schemas import ScorecardItem
+
+    cr = CodeReviewResponse(
+        executive_summary="Sound PR implementation.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Logic & Boundaries",
+                status="PASS",
+                notes="Off-by-one errors guarded by boundary check.",
+            ),
+            ScorecardItem(
+                dimension="Concurrency & State",
+                status="PASS",
+                notes="Locks held across state mutation.",
+            ),
+            ScorecardItem(
+                dimension="Security & Secrets",
+                status="PASS",
+                notes="No credentials in code.",
+            ),
+            ScorecardItem(
+                dimension="Contract Integrity",
+                status="PASS",
+                notes="Signatures backward compatible.",
+            ),
+            ScorecardItem(
+                dimension="Test Coverage & Regressions",
+                status="PASS",
+                notes="Full unit test coverage added.",
+            ),
+        ],
+        verified_invariants=[
+            "Rate limiter fast-fail executes without thread blocking.",
+        ],
+    )
+    md = cr.to_markdown(verdict="APPROVE")
+    assert "### 2. Audit Dimension Scorecard" in md
+    assert (
+        "| **Logic & Boundaries** | `✅ PASS` | Off-by-one errors guarded by boundary check. |"
+        in md
+    )
+    assert "| **Concurrency & State** | `✅ PASS` | Locks held across state mutation. |" in md
+    assert "### 3. Verified Invariants" in md
+    assert "- [x] Rate limiter fast-fail executes without thread blocking." in md
+
+
+def test_scorecard_fail_triggers_request_changes():
+    """Verify that a failing dimension on scorecard causes mechanical REQUEST_CHANGES."""
+    from webhook_agent.review.schemas import ScorecardItem
+
+    cr = CodeReviewResponse(
+        executive_summary="PR has broken contract.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Contract Integrity",
+                status="FAIL",
+                notes="Breaking signature change without caller migration.",
+            )
+        ],
+    )
+    verdict = calculate_strict_verdict(cr)
+    assert verdict == "REQUEST_CHANGES"
 
 
 def test_string_findings_get_no_placeholder_path() -> None:
