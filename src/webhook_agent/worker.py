@@ -356,7 +356,9 @@ def main() -> int:
                     except Exception as exc:
                         if attempt + 1 < max_attempts and _is_transient(exc):
                             base_delay = _RETRY_DELAYS[attempt]
-                            jittered_delay = base_delay * random.uniform(0.8, 1.2)
+                            jittered_delay = base_delay * random.uniform(  # noqa: S311 - pseudo-random jitter for network retry, non-cryptographic
+                                0.8, 1.2
+                            )
                             logger.warning(
                                 "⚠️ Transient failure on attempt %d/%d for message %s: %s. Retrying in %.2fs...",
                                 attempt + 1,

@@ -80,6 +80,7 @@ select = [
     "PIE",   # flake8-pie
     "T20",   # flake8-print
     "RUF",   # ruff-specific rules
+    "S",     # flake8-bandit (security)
 ]
 ignore = [
     "E501",      # line length handled by formatter
@@ -97,9 +98,9 @@ known-first-party = ["webhook_agent"]
 
 [tool.ruff.lint.per-file-ignores]
 ".agents/**" = ["F821", "T201"]
-"dev/**" = ["E402", "T201", "B008", "RUF012"]
+"dev/**" = ["E402", "T201", "B008", "RUF012", "S603", "S607"]
 "scripts/**" = ["T201"]
-"tests/**" = ["F841", "F401", "E402", "T201", "S101"]
+"tests/**" = ["F841", "F401", "E402", "T201", "S101", "S103", "S105", "S106", "S108"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -141,25 +142,9 @@ ignore_errors = true
 # These libraries lack type stubs or have complex C-extensions
 [[tool.mypy.overrides]]
 module = [
-    "cryptography.*",
-    "fastapi.*",
-    "github.*",
-    "google",
-    "google.*",
-    "google.adk",
     "google.adk.*",
-    "google.cloud",
     "google.cloud.*",
-    "google.genai.*",
-    "httpx.*",
-    "jwt.*",
     "nest_asyncio.*",
-    "pdfplumber.*",
-    "pypdf.*",
-    "pydantic.*",
-    "pytest.*",
-    "pytz.*",
-    "tenacity.*",
-    "uvicorn.*",
 ]
 ignore_missing_imports = true
+

@@ -49,15 +49,15 @@ def _extract_state_dict(session_state: Any) -> dict[str, Any]:
     if hasattr(session_state, "to_dict"):
         try:
             return session_state.to_dict()
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug("session_state.to_dict() failed: %s", err)
     if isinstance(session_state, dict):
         return session_state
     if hasattr(session_state, "get") and hasattr(session_state, "__iter__"):
         try:
             return {k: session_state[k] for k in session_state}
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug("Extracting session_state mapping failed: %s", err)
     return {}
 
 

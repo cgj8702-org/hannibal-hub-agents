@@ -102,8 +102,8 @@ async def before_model_callback(
                 if resp and resp.total_tokens:
                     exact_tokens = int(resp.total_tokens)
                     used_heuristic = False
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug("Exact token counting failed, falling back to heuristic: %s", err)
 
     # Apply safety margin when using heuristic (char-to-token ratio is unreliable)
     if used_heuristic:

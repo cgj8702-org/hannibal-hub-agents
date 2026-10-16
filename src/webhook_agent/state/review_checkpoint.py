@@ -309,8 +309,10 @@ class ReviewCheckpointManager:
                             and payload["status"] == "pending"
                         ):
                             payload["status"] = remote_status
-                except Exception:
-                    pass
+                except Exception as doc_err:
+                    logger.debug(
+                        "Failed reading existing remote doc for status reconciliation: %s", doc_err
+                    )
 
                 # Incremental attempts if document exists
                 db_payload = dict(payload)

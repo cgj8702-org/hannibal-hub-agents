@@ -47,7 +47,7 @@ FAILING_STATUS_STATES = frozenset({"failure", "error"})
 class CIState(StrEnum):
     """Aggregate CI verdict for one commit."""
 
-    PASS = "pass"
+    PASS = "pass"  # noqa: S105 - CI check pass status enum, not a hardcoded secret
     PENDING = "pending"
     FAIL = "fail"
 

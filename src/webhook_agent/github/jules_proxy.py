@@ -41,7 +41,7 @@ def get_agents_github_token() -> str | None:
     gh_path = shutil.which("gh")
     if gh_path:
         try:
-            res = subprocess.run(
+            res = subprocess.run(  # noqa: S603 - gh_path is resolved via shutil.which and arguments are fixed constants
                 [gh_path, "auth", "token", "--user", "cgj8702-agents"],
                 capture_output=True,
                 text=True,

@@ -210,13 +210,13 @@ def _get_gce_metadata_tier() -> str | None:
             "http://metadata.google.internal/computeMetadata/v1/instance/attributes/WEBHOOK_TIER",
             headers={"Metadata-Flavor": "Google"},
         )
-        with urllib.request.urlopen(req, timeout=1.0) as resp:
+        with urllib.request.urlopen(req, timeout=1.0) as resp:  # noqa: S310 - internal GCE metadata endpoint
             val = resp.read().decode("utf-8").strip().lower()
             if val in ("free", "paid"):
                 _METADATA_CACHE = (now, val)
                 return val
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed resolving WEBHOOK_TIER from metadata server: %s", exc)
 
     _METADATA_CACHE = (now, None)
     return None

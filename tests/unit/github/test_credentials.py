@@ -57,7 +57,15 @@ def test_generate_jwt(rsa_private_key_pem: str) -> None:
     assert decoded["exp"] > decoded["iat"]
 
 
+def test_generate_jwt_bytes_token(rsa_private_key_pem: str) -> None:
+    """Verify generate_jwt decodes token when jwt.encode returns bytes."""
+    with patch("jwt.encode", return_value=b"bytes.encoded.jwt"):
+        token_str = generate_jwt(123456, rsa_private_key_pem)
+        assert token_str == "bytes.encoded.jwt"
+
+
 def test_load_private_key(tmp_path: Path) -> None:
+
     key_file = tmp_path / "test_key.pem"
     content = (
         "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----"
