@@ -176,7 +176,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** indented hunk with `eval()` is not "docs-only"; the two-hunk diff from the audit produces no "Unreachable statement" warning; a real syntax error in a full file is still reported.
 - **done when:** `uv run pytest tests/unit/analysis tests/unit/tools` is green.
 
-## T-11: Harden deploy and CI workflows (HUMAN REVIEW REQUIRED)
+## T-11: Harden deploy and CI workflows (HUMAN REVIEW REQUIRED) [IN REVIEW - DRAFT PR #334]
 
 - **branch:** `ci/harden-workflows` | **commit:** `ci: harden deploy and PR gate workflows`
 - **files:** `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`, `.github/dependabot.yml` (explicitly assigned exception to rule 8)

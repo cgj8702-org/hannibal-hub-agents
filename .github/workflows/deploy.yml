@@ -13,6 +13,10 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -21,18 +25,18 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
 
       - name: Auth to GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: 'projects/1023782330414/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider'
           service_account: 'webhook-agent-sa@cgj8702-webhook-agent.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Setup Persistent SSH Key
         env:
@@ -57,16 +61,21 @@ jobs:
               set -e
               cd /home/carly/hannibal-hub-agents
 
+              cleanup() {
+                git remote set-url origin https://github.com/cgj8702-org/hannibal-hub-agents.git 2>/dev/null || true
+              }
+              trap cleanup EXIT
+
               # Authenticate, fetch, then immediately scrub token from git config
               git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/cgj8702-org/hannibal-hub-agents.git
               git fetch --quiet origin
-              git remote set-url origin https://github.com/cgj8702-org/hannibal-hub-agents.git
+              cleanup
 
               git checkout --quiet main
               git reset --quiet --hard origin/main
               git clean -fd --quiet
 
-              uv sync --no-dev
+              uv sync --no-dev --frozen
 
               mkdir -p ~/.config/systemd/user
               cp scripts/hannibal-webhook-agent.service ~/.config/systemd/user/
@@ -77,13 +86,15 @@ jobs:
               systemctl --user restart hannibal-webhook-agent
 
               # Verify service actually started and is healthy
-              sleep 3
-              if systemctl --user is-active --quiet hannibal-webhook-agent; then
-                echo 'Deployment Complete. Service is active.'
+              sleep 15
+              ACTIVE=\$(systemctl --user is-active hannibal-webhook-agent || true)
+              RESTARTS=\$(systemctl --user show -p NRestarts --value hannibal-webhook-agent || true)
+              if [ \"\$ACTIVE\" = 'active' ] && [ \"\$RESTARTS\" = '0' ]; then
+                echo 'Deployment Complete. Service is active with 0 restarts.'
               else
-                echo 'ERROR: Service failed to start after restart!'
+                echo \"ERROR: Service check failed (active=\$ACTIVE, restarts=\$RESTARTS)!\"
                 systemctl --user status hannibal-webhook-agent --no-pager || true
-                journalctl --user -u hannibal-webhook-agent --no-pager -n 20 || true
+                journalctl --user -u hannibal-webhook-agent --no-pager -n 50 || true
                 exit 1
               fi
             "
