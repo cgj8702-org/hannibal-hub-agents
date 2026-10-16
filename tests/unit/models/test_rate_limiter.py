@@ -53,6 +53,18 @@ async def test_zero_quota_fast_fail(mock_registry: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.anyio
+async def test_tpm_limit_fast_fail(mock_registry: Path) -> None:
+    waiter = RPMWaiter(registry_path=mock_registry)
+    with pytest.raises(ValueError, match=r"TPM limit .* exceeded"):
+        await waiter.check_and_wait(
+            model="gemini-3.5-flash-lite",
+            estimated_tokens=250,
+            tier="free",
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
 async def test_rpm_burst_pacing(mock_registry: Path) -> None:
     curr_time = 100.0
 

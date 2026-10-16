@@ -321,6 +321,17 @@ class RPMWaiter:
             rpm_limit = self.default_limit
 
         tpm_limit = tier_entry.get("tpm", 0)
+        if tpm_limit > 0 and estimated_tokens > tpm_limit:
+            logger.warning(
+                "FAST FAIL TPM (%s): Estimated tokens %d exceeds model TPM limit %d on tier '%s'. Rejecting.",
+                norm_model,
+                estimated_tokens,
+                tpm_limit,
+                tier,
+            )
+            raise ValueError(
+                f"Model '{norm_model}' TPM limit ({tpm_limit}) exceeded by request ({estimated_tokens} tokens)."
+            )
 
         async with self.lock:
             now = self.clock()
