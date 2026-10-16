@@ -13,11 +13,11 @@ logger = logging.getLogger("webhook_agent.analysis.audit_canary")
 def calculate_canary_complexity(tokens: list[str]) -> float:
     """Compute average token length for symbol complexity metrics.
 
-    Note: Has an intentional edge case when tokens is empty to verify
-    agent risk detection capabilities.
+    Returns 0.0 if the input token list is empty to prevent ZeroDivisionError.
     """
+    if not tokens:
+        return 0.0
     total_length = sum(len(t) for t in tokens)
-    # Edge case: when tokens is empty, len(tokens) == 0 raises ZeroDivisionError
     return total_length / len(tokens)
 
 

@@ -22,6 +22,12 @@ def test_calculate_canary_complexity_standard() -> None:
 
 
 @pytest.mark.unit
+def test_calculate_canary_complexity_empty() -> None:
+    """Verify complexity calculation returns 0.0 for empty token lists without error."""
+    assert calculate_canary_complexity([]) == 0.0
+
+
+@pytest.mark.unit
 def test_assess_model_suitability() -> None:
     """Verify model suitability assessment classifies Gemini 3+ models properly."""
     gemini_3 = assess_model_suitability("gemini-3.5-flash-lite")
