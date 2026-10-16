@@ -106,7 +106,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **done when:** no code path submits an LLM-driven APPROVE while patches are unavailable.
 - **do not:** change `calculate_verdict` (D3) or the strict-mode default (D2).
 
-## T-05: Make SECURITY.md match the code
+## T-05: Make SECURITY.md match the code [COMPLETED - PR #333]
 
 - **branch:** `docs/security-md-accuracy` | **commit:** `docs(security): align claims with actual behavior`
 - **files:** `SECURITY.md`
