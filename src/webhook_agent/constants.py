@@ -39,3 +39,7 @@ DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"
 # Legacy CodeRabbit workaround proxy disabled by default; Hannibal reviews Jules PRs natively.
 DEFAULT_ENABLE_JULES_PR_PROXY = "0"
 DEFAULT_WEBHOOK_TIER = "free"
+# Author associations allowed to trigger agent runs (comma-separated).
+DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS = "OWNER,MEMBER,COLLABORATOR"
+# Exempt logins that bypass author association trigger gate (comma-separated).
+DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]"

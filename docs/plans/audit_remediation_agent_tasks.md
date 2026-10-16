@@ -79,7 +79,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** spoofed single-parent commit with a "Merge branch" message returns `False` and never skips; legitimate merge of base returns `True`; evil merge (extra file content not in base) returns `False`; >100 files returns `False`; API error returns `False`. Use `MagicMock` GitHub objects.
 - **done when:** tests pass and the old spoof scenario (single parent, merge-like message) returns `False`.
 
-## T-03: Restrict who can trigger the agent
+## T-03: Restrict who can trigger the agent [COMPLETED - PR #323]
 
 - **branch:** `feat/trigger-authorization` | **commit:** `feat(processor): gate triggers on author association`
 - **files:** `src/webhook_agent/processor.py`, `src/webhook_agent/constants.py`, `tests/unit/test_worker.py` (or a new `tests/unit/test_trigger_authorization.py`)
