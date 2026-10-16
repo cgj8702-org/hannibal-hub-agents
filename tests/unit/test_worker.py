@@ -788,8 +788,8 @@ class TestBaseBranchMergeSync:
             },
         }
 
-        assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is True
-        mock_gh.get_repo.assert_not_called()
+        # Message shortcut deleted; without before_sha and valid API parents returns False
+        assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
     def test_is_base_branch_merge_sync_api_check_two_parents(self):
         from unittest.mock import MagicMock
@@ -800,13 +800,21 @@ class TestBaseBranchMergeSync:
         mock_repo = mock_gh.get_repo.return_value
         mock_commit = MagicMock()
         mock_commit.parents = [MagicMock(sha="parent1"), MagicMock(sha="parent2")]
-        mock_commit.commit.message = "Merge branch 'main' into feature-branch"
         mock_repo.get_commit.return_value = mock_commit
+
+        mock_base_comp = MagicMock(status="identical")
+        mock_diff_comp = MagicMock(files=[MagicMock(filename="file.py", sha="blob1")])
+        mock_repo.compare.side_effect = lambda base, head: (
+            mock_base_comp if base == "main" else mock_diff_comp
+        )
+        mock_repo.get_contents.return_value = MagicMock(sha="blob1")
 
         payload = {
             "canonical": "pull_request.synchronize",
             "raw_payload": {
                 "action": "synchronize",
+                "before": "parent1",
+                "after": "0abebcc",
                 "pull_request": {
                     "number": 125,
                     "head": {"sha": "0abebcc", "ref": "feature-branch"},
@@ -936,6 +944,10 @@ class TestBaseBranchMergeSync:
                 return_value=MagicMock(token="fake"),
             ),
             patch("webhook_agent.processor.Github"),
+            patch(
+                "webhook_agent.processor.is_base_branch_merge_sync",
+                return_value=True,
+            ),
             patch("webhook_agent.processor.AgentCore") as mock_core_cls,
             patch("webhook_agent.processor._add_eyes_reaction") as mock_eyes,
             caplog.at_level(logging.INFO),

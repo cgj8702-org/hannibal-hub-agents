@@ -16,11 +16,15 @@ logger = logging.getLogger("webhook_agent.review.fast_path")
 
 
 def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any]) -> bool:
-    """Check if a pull_request.synchronize event is an update from the base branch (e.g. merging main).
+    """Check if a pull_request.synchronize event is an authentic update from the base branch (e.g. merging main).
 
-    When a PR branch is updated with the base branch (via GitHub's 'Update branch' button
-    or `git merge main`), the head commit is a merge commit from the base branch.
-    Such events should NOT trigger automated re-reviews or dismiss existing approvals.
+    Returns True only if all verification checks pass via GitHub API:
+    1. Head commit has >= 2 parents.
+    2. One parent equals before_sha, and the other (base_parent) satisfies
+       repo.compare(base_ref, base_parent).status in ("behind", "identical").
+    3. Every file changed between before_sha and head_sha (capped at 100 files) matches the exact blob sha
+       of repo.get_contents(path, ref=base_parent).
+    Fails closed (returns False) on any error, missing field, or cap overflow.
     """
     try:
         raw = payload.get("raw_payload")
@@ -42,29 +46,11 @@ def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any
             return False
 
         base = pr_data.get("base") or {}
-        base_ref = (base.get("ref") or "").lower()
-        base_sha = base.get("sha") or ""
-        head_ref = (head.get("ref") or "").lower()
+        base_ref = base.get("ref") or ""
         before_sha = raw.get("before") or ""
 
-        # Fast-path: Check raw_payload commits if available
-        commits = raw.get("commits")
-        if isinstance(commits, list) and commits:
-            for c in commits:
-                if isinstance(c, dict) and c.get("id") == head_sha:
-                    msg = (c.get("message") or "").strip().lower()
-                    first_line = msg.splitlines()[0] if msg else ""
-                    if any(
-                        pat in first_line
-                        for pat in (
-                            f"merge branch '{base_ref}'",
-                            f"merge branch '{base_ref}' of",
-                            f"merge remote-tracking branch 'origin/{base_ref}'",
-                            "merge https://github.com/",
-                            f"into {head_ref}",
-                        )
-                    ):
-                        return True
+        if not before_sha or not base_ref:
+            return False
 
         repo = gh.get_repo(repo_name)
         commit = repo.get_commit(head_sha)
@@ -72,26 +58,44 @@ def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any
         if len(parents) < 2:
             return False
 
-        commit_obj = getattr(commit, "commit", None)
-        msg = (getattr(commit_obj, "message", "") or "").strip().lower()
-        first_line = msg.splitlines()[0] if msg else ""
+        parent_shas = [getattr(p, "sha", str(p)) for p in parents]
+        if before_sha not in parent_shas:
+            return False
 
-        merge_patterns = (
-            f"merge branch '{base_ref}'",
-            f"merge branch '{base_ref}' of",
-            f"merge remote-tracking branch 'origin/{base_ref}'",
-            "merge https://github.com/",
-            "merge commit",
-            f"into {head_ref}",
+        other_parents = [sha for sha in parent_shas if sha != before_sha]
+        if len(other_parents) != 1:
+            return False
+        base_parent = other_parents[0]
+
+        # Verify base_parent is contained in base_ref (behind or identical)
+        base_compare = repo.compare(base_ref, base_parent)
+        if getattr(base_compare, "status", None) not in ("behind", "identical"):
+            return False
+
+        # Verify files changed between before_sha and head_sha match base_parent exactly
+        diff_compare = repo.compare(before_sha, head_sha)
+        diff_files = getattr(diff_compare, "files", None)
+        if diff_files is None or len(diff_files) > 100:
+            return False
+
+        for f in diff_files:
+            file_path = getattr(f, "filename", None)
+            head_blob_sha = getattr(f, "sha", None)
+            if not file_path or not head_blob_sha:
+                return False
+            base_content = repo.get_contents(file_path, ref=base_parent)
+            base_blob_sha = getattr(base_content, "sha", None)
+            if not base_blob_sha or base_blob_sha != head_blob_sha:
+                return False
+
+        logger.info(
+            "Verified base-branch merge sync for %s (head=%s, base_parent=%s, files=%d)",
+            repo_name,
+            head_sha[:8],
+            base_parent[:8],
+            len(diff_files),
         )
-        is_merge_msg = any(pat in first_line for pat in merge_patterns)
-
-        parent_shas = [p.sha for p in parents if hasattr(p, "sha")]
-        is_base_parent = base_sha in parent_shas or is_merge_msg
-
-        return bool(
-            is_merge_msg or (is_base_parent and (not before_sha or before_sha in parent_shas))
-        )
+        return True
     except Exception as exc:
         logger.debug("Could not verify base branch merge sync: %s", exc)
         return False

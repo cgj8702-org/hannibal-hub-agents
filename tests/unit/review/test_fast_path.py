@@ -14,12 +14,24 @@ from webhook_agent.review.fast_path import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-def test_is_base_branch_merge_sync_fast_path_commit_msg() -> None:
+def test_is_base_branch_merge_sync_spoofed_single_parent_returns_false() -> None:
+    """Spoofed single-parent commit with a 'Merge branch' message must return False."""
     mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_commit = MagicMock()
+    p1 = MagicMock()
+    p1.sha = "beforesha000"
+    mock_commit.parents = [p1]
+
+    mock_repo.get_commit.return_value = mock_commit
+    mock_gh.get_repo.return_value = mock_repo
+
     payload = {
         "canonical": "pull_request.synchronize",
         "raw_payload": {
             "action": "synchronize",
+            "before": "beforesha000",
+            "after": "headsha123",
             "pull_request": {
                 "head": {"ref": "feature-x", "sha": "headsha123"},
                 "base": {"ref": "main", "sha": "basesha456"},
@@ -33,40 +45,217 @@ def test_is_base_branch_merge_sync_fast_path_commit_msg() -> None:
         },
     }
 
-    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is True
+    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
 
-def test_is_base_branch_merge_sync_two_parents_api() -> None:
+def test_is_base_branch_merge_sync_legitimate_merge_returns_true() -> None:
+    """Legitimate merge of base branch with matching file blobs returns True."""
     mock_gh = MagicMock()
     mock_repo = MagicMock()
     mock_commit = MagicMock()
     p1 = MagicMock()
     p1.sha = "basesha456"
     p2 = MagicMock()
-    p2.sha = "prevhead123"
+    p2.sha = "beforesha000"
     mock_commit.parents = [p1, p2]
-    mock_commit.commit = MagicMock()
-    mock_commit.commit.message = "Merge branch 'main' into feature-x"
 
     mock_repo.get_commit.return_value = mock_commit
+    mock_gh.get_repo.return_value = mock_repo
+
+    mock_base_comp = MagicMock()
+    mock_base_comp.status = "identical"
+
+    mock_file = MagicMock()
+    mock_file.filename = "src/foo.py"
+    mock_file.sha = "blob_abc_123"
+    mock_diff_comp = MagicMock()
+    mock_diff_comp.files = [mock_file]
+
+    def _compare_side_effect(base: str, head: str) -> MagicMock:
+        if base == "main" and head == "basesha456":
+            return mock_base_comp
+        if base == "beforesha000" and head == "headsha123":
+            return mock_diff_comp
+        raise AssertionError(f"Unexpected compare call: {base} ... {head}")
+
+    mock_repo.compare.side_effect = _compare_side_effect
+
+    mock_content = MagicMock()
+    mock_content.sha = "blob_abc_123"
+    mock_repo.get_contents.return_value = mock_content
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "raw_payload": {
+            "action": "synchronize",
+            "before": "beforesha000",
+            "after": "headsha123",
+            "pull_request": {
+                "head": {"ref": "feature-x", "sha": "headsha123"},
+                "base": {"ref": "main", "sha": "basesha456"},
+            },
+        },
+    }
+
+    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is True
+    mock_repo.get_contents.assert_called_once_with("src/foo.py", ref="basesha456")
+
+
+def test_is_base_branch_merge_sync_evil_merge_returns_false() -> None:
+    """Evil merge (extra file or modified file differing from base) returns False."""
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_commit = MagicMock()
+    p1 = MagicMock()
+    p1.sha = "basesha456"
+    p2 = MagicMock()
+    p2.sha = "beforesha000"
+    mock_commit.parents = [p1, p2]
+    mock_repo.get_commit.return_value = mock_commit
+    mock_gh.get_repo.return_value = mock_repo
+
+    mock_base_comp = MagicMock()
+    mock_base_comp.status = "behind"
+
+    mock_file = MagicMock()
+    mock_file.filename = "src/evil.py"
+    mock_file.sha = "blob_head_evil"
+    mock_diff_comp = MagicMock()
+    mock_diff_comp.files = [mock_file]
+
+    def _compare_side_effect(base: str, head: str) -> MagicMock:
+        if base == "main" and head == "basesha456":
+            return mock_base_comp
+        if base == "beforesha000" and head == "headsha123":
+            return mock_diff_comp
+        raise AssertionError(f"Unexpected compare call: {base} ... {head}")
+
+    mock_repo.compare.side_effect = _compare_side_effect
+
+    mock_content = MagicMock()
+    mock_content.sha = "blob_base_clean"
+    mock_repo.get_contents.return_value = mock_content
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "raw_payload": {
+            "action": "synchronize",
+            "before": "beforesha000",
+            "after": "headsha123",
+            "pull_request": {
+                "head": {"ref": "feature-x", "sha": "headsha123"},
+                "base": {"ref": "main", "sha": "basesha456"},
+            },
+        },
+    }
+
+    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
+
+
+def test_is_base_branch_merge_sync_over_100_files_returns_false() -> None:
+    """Diffs touching > 100 files exceed cap and fail closed (return False)."""
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_commit = MagicMock()
+    p1 = MagicMock()
+    p1.sha = "basesha456"
+    p2 = MagicMock()
+    p2.sha = "beforesha000"
+    mock_commit.parents = [p1, p2]
+    mock_repo.get_commit.return_value = mock_commit
+    mock_gh.get_repo.return_value = mock_repo
+
+    mock_base_comp = MagicMock()
+    mock_base_comp.status = "behind"
+
+    mock_diff_comp = MagicMock()
+    mock_diff_comp.files = [
+        MagicMock(filename=f"src/file_{i}.py", sha=f"sha_{i}") for i in range(101)
+    ]
+
+    def _compare_side_effect(base: str, head: str) -> MagicMock:
+        if base == "main" and head == "basesha456":
+            return mock_base_comp
+        if base == "beforesha000" and head == "headsha123":
+            return mock_diff_comp
+        raise AssertionError(f"Unexpected compare call: {base} ... {head}")
+
+    mock_repo.compare.side_effect = _compare_side_effect
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "raw_payload": {
+            "action": "synchronize",
+            "before": "beforesha000",
+            "after": "headsha123",
+            "pull_request": {
+                "head": {"ref": "feature-x", "sha": "headsha123"},
+                "base": {"ref": "main", "sha": "basesha456"},
+            },
+        },
+    }
+
+    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
+
+
+def test_is_base_branch_merge_sync_api_error_returns_false() -> None:
+    """Any GitHub API error fails closed and returns False."""
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_repo.get_commit.side_effect = RuntimeError("GitHub API connection error")
     mock_gh.get_repo.return_value = mock_repo
 
     payload = {
         "canonical": "pull_request.synchronize",
         "raw_payload": {
             "action": "synchronize",
+            "before": "beforesha000",
+            "after": "headsha123",
             "pull_request": {
                 "head": {"ref": "feature-x", "sha": "headsha123"},
                 "base": {"ref": "main", "sha": "basesha456"},
             },
-            "commits": [],
         },
     }
 
-    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is True
+    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
+
+
+def test_is_base_branch_merge_sync_diverged_base_parent_returns_false() -> None:
+    """If base_parent is diverged or ahead of base_ref, returns False."""
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_commit = MagicMock()
+    p1 = MagicMock()
+    p1.sha = "roguesha789"
+    p2 = MagicMock()
+    p2.sha = "beforesha000"
+    mock_commit.parents = [p1, p2]
+    mock_repo.get_commit.return_value = mock_commit
+    mock_gh.get_repo.return_value = mock_repo
+
+    mock_base_comp = MagicMock()
+    mock_base_comp.status = "diverged"
+    mock_repo.compare.return_value = mock_base_comp
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "raw_payload": {
+            "action": "synchronize",
+            "before": "beforesha000",
+            "after": "headsha123",
+            "pull_request": {
+                "head": {"ref": "feature-x", "sha": "headsha123"},
+                "base": {"ref": "main", "sha": "basesha456"},
+            },
+        },
+    }
+
+    assert is_base_branch_merge_sync(mock_gh, "owner/repo", payload) is False
 
 
 def test_is_base_branch_merge_sync_single_parent_returns_false() -> None:
+    """Commit with < 2 parents returns False."""
     mock_gh = MagicMock()
     mock_repo = MagicMock()
     mock_commit = MagicMock()
@@ -81,11 +270,11 @@ def test_is_base_branch_merge_sync_single_parent_returns_false() -> None:
         "canonical": "pull_request.synchronize",
         "raw_payload": {
             "action": "synchronize",
+            "before": "beforesha000",
             "pull_request": {
                 "head": {"ref": "feature-x", "sha": "headsha123"},
                 "base": {"ref": "main", "sha": "basesha456"},
             },
-            "commits": [],
         },
     }
 
