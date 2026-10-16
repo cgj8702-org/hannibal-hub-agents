@@ -48,7 +48,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 
 ---
 
-## T-01: Scope guardrail state to a single invocation
+## T-01: Scope guardrail state to a single invocation [COMPLETED - PR #318]
 
 - **branch:** `fix/guardrails-per-invocation` | **commit:** `fix(guardrails): scope budgets to one invocation`
 - **files:** `src/webhook_agent/core/guardrails.py`, `tests/unit/core/test_guardrails.py`
@@ -67,7 +67,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **done when:** the above tests pass and `uv run pytest tests/unit/core` is green.
 - **do not:** change budget values in `agent_definition.py`.
 
-## T-02: Make base-branch merge detection unspoofable
+## T-02: Make base-branch merge detection unspoofable [COMPLETED - PR #322]
 
 - **branch:** `fix/merge-sync-spoof` | **commit:** `fix(review): verify base-branch merge syncs via API`
 - **files:** `src/webhook_agent/review/fast_path.py`, `tests/unit/review/test_fast_path.py`
