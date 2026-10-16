@@ -28,7 +28,37 @@ GUARDRAIL_STATE_KEYS = (
     "halt_reason",
     "guardrail_tool_call_history",
     "guardrail_tool_failures",
+    "guardrail_run",
 )
+
+
+def _run_state(state: Any, invocation_id: str | None) -> dict[str, Any]:
+    """Retrieve or initialize the guardrail run state dict scoped to invocation_id."""
+    existing = state.get("guardrail_run") if hasattr(state, "get") else None
+    if (
+        isinstance(existing, dict)
+        and invocation_id is not None
+        and existing.get("invocation_id") == invocation_id
+    ):
+        return existing
+    if (
+        isinstance(existing, dict)
+        and invocation_id is None
+        and existing.get("invocation_id") is None
+        and "invocation_id" in existing
+    ):
+        return existing
+
+    fresh: dict[str, Any] = {
+        "invocation_id": invocation_id,
+        "turns": 0,
+        "tool_calls": 0,
+        "halt_reason": None,
+        "history": [],
+        "failures": {},
+    }
+    state["guardrail_run"] = fresh
+    return fresh
 
 
 def reset_guardrail_state(state: Any, keys: tuple[str, ...] | list[str] | None = None) -> None:
@@ -65,29 +95,30 @@ class IterationBudgetPlugin(BasePlugin):
     async def before_agent_callback(
         self, *, agent: BaseAgent, callback_context: CallbackContext
     ) -> Any | None:
-        reset_guardrail_state(
-            callback_context.state,
-            ("guardrail_turn_count", "guardrail_tool_calls_count", "halt_reason"),
-        )
+        inv_id = getattr(callback_context, "invocation_id", None)
+        _run_state(callback_context.state, inv_id)
         return None
 
     async def before_model_callback(
         self, *, callback_context: CallbackContext, llm_request: LlmRequest
     ) -> LlmResponse | None:
         state = callback_context.state
-        turn_count = (state.get("guardrail_turn_count") or 0) + 1
-        state["guardrail_turn_count"] = turn_count
+        inv_id = getattr(callback_context, "invocation_id", None)
+        run = _run_state(state, inv_id)
+        run["turns"] = run.get("turns", 0) + 1
+        state["guardrail_run"] = run
 
-        if turn_count > self.max_turns and not state.get("halt_reason"):
-            state["halt_reason"] = f"turn_budget_exceeded:{self.max_turns}"
+        if run["turns"] > self.max_turns and not run.get("halt_reason"):
+            run["halt_reason"] = f"turn_budget_exceeded:{self.max_turns}"
+            state["guardrail_run"] = run
             logger.warning(
                 "🛑 [IterationBudgetPlugin] Turn budget of %d exceeded on turn %d",
                 self.max_turns,
-                turn_count,
+                run["turns"],
             )
 
         # If halt reason is set, perform graceful handoff: strip tools and request final summary
-        halt_reason = state.get("halt_reason")
+        halt_reason = run.get("halt_reason")
         if halt_reason:
             if hasattr(llm_request, "tools_dict") and isinstance(llm_request.tools_dict, dict):
                 llm_request.tools_dict.clear()
@@ -109,15 +140,18 @@ class IterationBudgetPlugin(BasePlugin):
         tool_context: ToolContext,
     ) -> dict[str, Any] | None:
         state = tool_context.state
-        calls_count = (state.get("guardrail_tool_calls_count") or 0) + 1
-        state["guardrail_tool_calls_count"] = calls_count
+        inv_id = getattr(tool_context, "invocation_id", None)
+        run = _run_state(state, inv_id)
+        run["tool_calls"] = run.get("tool_calls", 0) + 1
+        state["guardrail_run"] = run
 
-        if calls_count > self.max_tool_calls:
-            state["halt_reason"] = f"tool_budget_exceeded:{self.max_tool_calls}"
+        if run["tool_calls"] > self.max_tool_calls:
+            run["halt_reason"] = f"tool_budget_exceeded:{self.max_tool_calls}"
+            state["guardrail_run"] = run
             logger.warning(
                 "🛑 [IterationBudgetPlugin] Tool call budget of %d exceeded on call %d for '%s'",
                 self.max_tool_calls,
-                calls_count,
+                run["tool_calls"],
                 getattr(tool, "name", "tool"),
             )
             return {
@@ -125,9 +159,9 @@ class IterationBudgetPlugin(BasePlugin):
                 "Please output your formal review JSON immediately."
             }
 
-        if state.get("halt_reason"):
+        if run.get("halt_reason"):
             return {
-                "error": f"Tool execution halted: {state['halt_reason']}. "
+                "error": f"Tool execution halted: {run['halt_reason']}. "
                 "Please output your formal review JSON immediately."
             }
 
@@ -150,10 +184,8 @@ class GuardrailsPlugin(BasePlugin):
     async def before_agent_callback(
         self, *, agent: BaseAgent, callback_context: CallbackContext
     ) -> Any | None:
-        reset_guardrail_state(
-            callback_context.state,
-            ("guardrail_tool_call_history", "guardrail_tool_failures", "halt_reason"),
-        )
+        inv_id = getattr(callback_context, "invocation_id", None)
+        _run_state(callback_context.state, inv_id)
         return None
 
     async def before_tool_callback(
@@ -164,22 +196,26 @@ class GuardrailsPlugin(BasePlugin):
         tool_context: ToolContext,
     ) -> dict[str, Any] | None:
         state = tool_context.state
+        inv_id = getattr(tool_context, "invocation_id", None)
+        run = _run_state(state, inv_id)
         tool_name = getattr(tool, "name", "unknown_tool")
 
         # Check for repetitive identical tool calls (NoProgressGuard)
-        history: list[str] = state.setdefault("guardrail_tool_call_history", [])
+        history: list[str] = run.setdefault("history", [])
         try:
             call_repr = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
         except Exception:
             call_repr = f"{tool_name}:{tool_args!s}"
         call_hash = hashlib.sha256(call_repr.encode()).hexdigest()[:12]
         history.append(call_hash)
+        state["guardrail_run"] = run
 
         # Check if the last N calls are identical
         if len(history) >= self.no_progress_window:
             recent = history[-self.no_progress_window :]
             if len(set(recent)) == 1:
-                state["halt_reason"] = f"no_progress_loop:{tool_name}"
+                run["halt_reason"] = f"no_progress_loop:{tool_name}"
+                state["guardrail_run"] = run
                 logger.warning(
                     "🛑 [GuardrailsPlugin] Detected %d identical calls to '%s'. Halting loop.",
                     self.no_progress_window,
@@ -201,6 +237,8 @@ class GuardrailsPlugin(BasePlugin):
         result: dict[str, Any],
     ) -> dict[str, Any] | None:
         state = tool_context.state
+        inv_id = getattr(tool_context, "invocation_id", None)
+        run = _run_state(state, inv_id)
         tool_name = getattr(tool, "name", "unknown_tool")
 
         # Determine if tool result indicates an error
@@ -215,11 +253,11 @@ class GuardrailsPlugin(BasePlugin):
         elif isinstance(result, str) and result.startswith(("Error:", "Traceback")):
             is_error = True
 
-        failures: dict[str, int] = state.setdefault("guardrail_tool_failures", {})
+        failures: dict[str, int] = run.setdefault("failures", {})
         if is_error:
             failures[tool_name] = failures.get(tool_name, 0) + 1
             if failures[tool_name] >= self.failure_threshold:
-                state["halt_reason"] = f"repeated_failure:{tool_name}"
+                run["halt_reason"] = f"repeated_failure:{tool_name}"
                 logger.warning(
                     "🛑 [GuardrailsPlugin] Tool '%s' failed %d consecutive times. Halting execution.",
                     tool_name,
@@ -228,4 +266,5 @@ class GuardrailsPlugin(BasePlugin):
         else:
             failures[tool_name] = 0
 
+        state["guardrail_run"] = run
         return None
