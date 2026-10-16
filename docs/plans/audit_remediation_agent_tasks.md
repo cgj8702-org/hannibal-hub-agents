@@ -113,7 +113,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **do:** (1) State that `ALLOW_AUTOMATED_MUTATIONS` defaults to `1` (enabled) in `constants.py` and `scripts/load_secrets.sh`. (2) Update the tool-allowlist item: both agents expose `read_file` and `search_files`; the auditor also has `review`, the conversational agent `get_issue`. (3) Describe the trigger authorization from T-03 and the APPROVE rule from T-04, with env var names. (4) Replace the `webhook-router.yaml` sentence with: signature verification happens in a router that is not in this repository and cannot be audited here. (5) Remove or correct any claim now false after T-13 and T-14.
 - **done when:** every factual statement in SECURITY.md can be traced to code. List the file and symbol you checked for each in the PR body.
 
-## T-06: Harden `search_files` and the local executor
+## T-06: Harden `search_files` and the local executor [COMPLETED - PR #324]
 
 - **branch:** `fix/search-files-hardening` | **commit:** `fix(tools): block symlink escape and scrub subprocess env`
 - **files:** `src/webhook_agent/tools/search_tools.py`, `src/webhook_agent/environment/local.py`, tests under `tests/unit/tools/` and `tests/unit/environment/`
