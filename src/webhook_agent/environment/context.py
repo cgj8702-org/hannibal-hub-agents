@@ -28,6 +28,11 @@ def active_environment() -> BaseEnvironment:
     return _DEFAULT_ENV
 
 
+def get_active_environment() -> BaseEnvironment | None:
+    """Return the currently set active execution environment, or None if none is set."""
+    return _ACTIVE_ENV.get()
+
+
 def set_active_environment(env: BaseEnvironment) -> Token[BaseEnvironment | None]:
     """Set the active execution environment for the current task/context."""
     return _ACTIVE_ENV.set(env)

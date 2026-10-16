@@ -163,6 +163,8 @@ class AgentCore:
         )
 
         gh = gh_client if gh_client is not None else self.gh
+        if gh is not None and "gh_client" not in event_data:
+            event_data["gh_client"] = gh
 
         results = self._webhook_agent.plan_and_execute(
             event_data=event_data,

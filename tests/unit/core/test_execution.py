@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -470,3 +471,126 @@ def test_deterministic_session_state_contains_ast_flag() -> None:
     state_passed = session_service.create_session.call_args.kwargs.get("state") or {}
     assert state_passed.get("deterministic_precompiled_ast") is True
     assert state_passed.get("formal_review_eligible") is True
+
+
+def test_execute_agent_event_scopes_workspace_during_execution(tmp_path: Path) -> None:
+    """Verify execute_agent_event activates pr_workspace around prompt building and runner execution."""
+    from contextlib import asynccontextmanager
+
+    from webhook_agent.environment import LocalEnvironment, get_active_environment
+
+    mock_agent = MagicMock()
+    mock_agent._normalize_model_name.side_effect = lambda x: x
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._app_name = "test_app"
+
+    session_service = MagicMock()
+    mock_agent._session_service = session_service
+    created_session = MagicMock()
+    created_session.state = {}
+    session_service.get_session = AsyncMock(return_value=created_session)
+    session_service.append_event = AsyncMock()
+    session_service.user_state = {}
+
+    env = LocalEnvironment(tmp_path)
+    active_env_during_prompt: Any = None
+    active_env_during_runner: Any = None
+
+    def fake_build_message(data: Any) -> Any:
+        nonlocal active_env_during_prompt
+        active_env_during_prompt = get_active_environment()
+        part = MagicMock()
+        part.text = "prompt"
+        msg = MagicMock()
+        msg.parts = [part]
+        return msg
+
+    mock_agent._build_user_message.side_effect = fake_build_message
+
+    async def fake_execute(*args: Any, **kwargs: Any) -> list[Any]:
+        nonlocal active_env_during_runner
+        active_env_during_runner = get_active_environment()
+        return []
+
+    @asynccontextmanager
+    async def fake_pr_workspace(gh: Any, repo: str, sha: str):
+        yield env
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {"pull_request": {"number": 1, "head": {"sha": "sha_pr_head"}}},
+    }
+
+    with (
+        patch("webhook_agent.core.execution.pr_workspace", side_effect=fake_pr_workspace),
+        patch("webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data, gh_client=MagicMock(), trace_id="tr1"
+        )
+
+    assert active_env_during_prompt == env
+    assert active_env_during_runner == env
+    assert get_active_environment() is None
+
+
+def test_search_files_during_agent_event_resolves_inside_pr_workspace(tmp_path: Path) -> None:
+    """Verify search_files executed during an agent event resolves files inside the PR workspace."""
+    from contextlib import asynccontextmanager
+
+    from webhook_agent.environment import LocalEnvironment
+    from webhook_agent.tools.search_tools import search_files
+
+    mock_agent = MagicMock()
+    mock_agent._normalize_model_name.side_effect = lambda x: x
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._app_name = "test_app"
+
+    session_service = MagicMock()
+    mock_agent._session_service = session_service
+    created_session = MagicMock()
+    created_session.state = {}
+    session_service.get_session = AsyncMock(return_value=created_session)
+    session_service.append_event = AsyncMock()
+    session_service.user_state = {}
+
+    # Write a unique marker file inside tmp_path (PR workspace)
+    pr_file = tmp_path / "pr_unique_marker.py"
+    pr_file.write_text("UNIQUE_PR_WORKSPACE_TARGET_TOKEN = 12345\n")
+
+    env = LocalEnvironment(tmp_path)
+    search_results: list[dict[str, Any]] = []
+
+    async def fake_execute(*args: Any, **kwargs: Any) -> list[Any]:
+        # Tool call executed by runner
+        res = await search_files(pattern="UNIQUE_PR_WORKSPACE_TARGET_TOKEN")
+        search_results.append(res)
+        return []
+
+    @asynccontextmanager
+    async def fake_pr_workspace(gh: Any, repo: str, sha: str):
+        yield env
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {"pull_request": {"number": 1, "head": {"sha": "head123"}}},
+    }
+
+    with (
+        patch("webhook_agent.core.execution.pr_workspace", side_effect=fake_pr_workspace),
+        patch("webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data, gh_client=MagicMock(), trace_id="tr1"
+        )
+
+    assert len(search_results) == 1
+    matches = search_results[0].get("matches", [])
+    assert len(matches) == 1
+    assert matches[0]["path"] == "pr_unique_marker.py"

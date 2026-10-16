@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from webhook_agent.analysis.symbol_graph import (
@@ -218,3 +220,43 @@ def test_symbol_impact_analyzer_real_repo():
     md = report.to_markdown()
     assert "verify_python_ast" in md
     assert "All External Call Sites Compatible" in md
+
+
+def test_symbol_impact_analyzer_with_baseline_loader(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    mod_file = src_dir / "service.py"
+    mod_file.write_text("def run(a, b, new_required_arg): pass\n")
+    caller_file = src_dir / "caller.py"
+    caller_file.write_text("from src.service import run\nrun(1, 2)\n")
+
+    baseline_code = "def run(a, b): pass\n"
+
+    def baseline_loader(rel_path: str) -> str | None:
+        if rel_path == "src/service.py":
+            return baseline_code
+        return None
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/service.py"], baseline_loader=baseline_loader)
+    assert len(reports) == 1
+    assert reports[0].symbol_name == "run"
+    assert reports[0].sig_diff is not None
+    assert reports[0].sig_diff.is_breaking is True
+    assert len(reports[0].broken_call_sites) == 1
+
+
+def test_symbol_impact_analyzer_without_baseline_loader(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    mod_file = src_dir / "service.py"
+    mod_file.write_text("def run(a, b, c): pass\n")
+    caller_file = src_dir / "caller.py"
+    caller_file.write_text("run(1, 2)\n")
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/service.py"], baseline_loader=None)
+    assert len(reports) == 1
+    assert reports[0].symbol_name == "run"
+    assert reports[0].sig_diff is None
+    assert len(reports[0].broken_call_sites) == 1

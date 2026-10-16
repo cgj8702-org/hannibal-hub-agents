@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ast
 import logging
-import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -596,7 +596,7 @@ class SymbolImpactAnalyzer:
     def analyze_modified_files(
         self,
         changed_files: list[str],
-        base_ref: str = "HEAD~1",
+        baseline_loader: Callable[[str], str | None] | None = None,
     ) -> list[SymbolImpactReport]:
         """Audit all modified Python callables across repository callers."""
         py_files = [f for f in changed_files if f.endswith(".py")]
@@ -612,22 +612,13 @@ class SymbolImpactAnalyzer:
             except Exception:
                 continue
 
-            # Attempt fetching baseline code from git
+            # Fetch baseline code via baseline_loader if provided
             old_code: str | None = None
-            try:
-                cmd = ["git", "show", f"{base_ref}:{rel_path}"]
-                res = subprocess.run(
-                    cmd,
-                    cwd=self.repo_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                )
-                if res.returncode == 0:
-                    old_code = res.stdout
-            except Exception as git_err:
-                logger.debug("Could not fetch git baseline for %s: %s", rel_path, git_err)
+            if baseline_loader is not None:
+                try:
+                    old_code = baseline_loader(rel_path)
+                except Exception as load_err:
+                    logger.debug("Could not fetch baseline for %s: %s", rel_path, load_err)
 
             new_sigs = extract_signatures_from_code(new_code, file_path=rel_path)
             old_sigs = (

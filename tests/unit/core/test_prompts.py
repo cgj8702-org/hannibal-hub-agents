@@ -257,3 +257,73 @@ def test_build_user_message_injects_linked_issue_spec() -> None:
     text = content.parts[0].text or ""
     assert "Linked Issue / Task Specification" in text
     assert "Linked Issue #42: Must support timeout" in text
+
+
+def test_build_user_message_omits_symbol_and_test_impact_when_no_workspace() -> None:
+    """When no workspace is active, SymbolImpactAnalyzer and TestImpactAnalyzer sections are omitted."""
+    from webhook_agent.environment.context import get_active_environment
+
+    assert get_active_environment() is None
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "hannibal/hannibal-hub-agents"},
+        "sender": {"login": "developer"},
+        "raw_payload": {
+            "pull_request": {
+                "number": 123,
+                "base": {"sha": "base123"},
+                "head": {"sha": "head123"},
+            },
+            "changed_files": ["src/service.py"],
+            "pr_diff": "diff --git a/src/service.py b/src/service.py\n+def foo(): pass",
+        },
+    }
+    content = build_user_message(event_data)
+    text = content.parts[0].text or ""
+    assert "Cross-File Contract & Symbol Impact Analysis" not in text
+
+
+def test_build_user_message_runs_symbol_and_test_impact_when_workspace_active(
+    tmp_path,
+) -> None:
+    """When workspace is active, SymbolImpactAnalyzer and TestImpactAnalyzer run against workspace root."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.environment import LocalEnvironment, use_environment
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    (src_dir / "service.py").write_text("def run(a, b, new_req): pass\n")
+    (src_dir / "caller.py").write_text("run(1, 2)\n")
+
+    env = LocalEnvironment(tmp_path)
+    mock_gh = MagicMock()
+    mock_repo = mock_gh.get_repo.return_value
+    mock_content = MagicMock()
+    mock_content.decoded_content = b"def run(a, b): pass\n"
+    mock_repo.get_contents.return_value = mock_content
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/hannibal-hub-agents"},
+        "sender": {"login": "developer"},
+        "gh_client": mock_gh,
+        "raw_payload": {
+            "pull_request": {
+                "number": 123,
+                "base": {"sha": "base123"},
+                "head": {"sha": "head123"},
+            },
+            "changed_files": ["src/service.py"],
+            "pr_diff": "diff --git a/src/service.py b/src/service.py\n+def run(a, b, new_req): pass",
+        },
+    }
+
+    with use_environment(env):
+        content = build_user_message(event_data)
+
+    text = content.parts[0].text or ""
+    assert "Cross-File Contract & Symbol Impact Analysis" in text
+    assert "MISSING_REQUIRED_ARG" in text
+    mock_repo.get_contents.assert_called_once_with("src/service.py", ref="base123")
