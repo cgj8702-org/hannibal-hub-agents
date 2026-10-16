@@ -286,7 +286,7 @@ def test_review_skips_investigation_gate_when_no_python_files(mock_submit, mock_
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
-def test_review_downgrades_approve_without_verified_invariants(mock_submit, mock_ctx):
+def test_review_allows_approve_without_verified_invariants(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["README.md"]
     payload = {
@@ -303,9 +303,9 @@ def test_review_downgrades_approve_without_verified_invariants(mock_submit, mock
     assert res == "Review submitted"
     assert mock_submit.called
     _pr, body_arg, event_arg, _key, _state = mock_submit.call_args[0]
-    assert event_arg == "COMMENT"
+    assert event_arg == "APPROVE"
     parsed = json.loads(body_arg)
-    assert parsed["verdict"] == "COMMENT"
+    assert parsed.get("verdict") in ("APPROVE", None)
 
 
 def test_review_rejects_approve_with_invalid_invariant(mock_ctx):

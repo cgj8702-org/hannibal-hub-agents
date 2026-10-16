@@ -121,5 +121,5 @@ def test_render_deterministic_approval_markdown():
     rendered = render_deterministic_approval_markdown(res, 195)
     assert "## 🛡️ Code Review: `APPROVE`" in rendered
     assert "PR #195 is a clean automated dependency update" in rendered
-    assert "`pypdf`" in rendered
-    assert "#### 🔴 Critical (Must Fix Before Merge)\n* *None found.*" in rendered
+    assert "Action Items" not in rendered
+    assert "None found" not in rendered

@@ -56,17 +56,14 @@ def test_build_user_message_labels_pr_body_as_unverified_author_claims() -> None
 
     content = build_user_message(event_data)
     text = content.parts[0].text or ""
-    assert (
-        "PR Body (AUTHOR CLAIMS - UNVERIFIED): Includes 31 unit tests and fixes worker race condition"
-        in text
-    )
-    assert "PR Body: " not in text
+    assert "PR Body" not in text
+    assert "Includes 31 unit tests" not in text
 
 
 def test_system_instruction_contains_author_claim_grounding_directive() -> None:
-    """SYSTEM_INSTRUCTION must explicitly direct auditor to treat PR body as unverified claims."""
-    assert "AUTHOR CLAIMS (UNVERIFIED)" in SYSTEM_INSTRUCTION
-    assert "claim-vs-diff" in SYSTEM_INSTRUCTION.lower() or "claim" in SYSTEM_INSTRUCTION.lower()
+    """SYSTEM_INSTRUCTION must explicitly direct auditor to use diff-first grounding."""
+    assert "Diff-First Grounding" in SYSTEM_INSTRUCTION
+    assert "untrusted self-descriptions" in SYSTEM_INSTRUCTION
 
 
 def test_system_instruction_clause_group_1_pruned() -> None:
