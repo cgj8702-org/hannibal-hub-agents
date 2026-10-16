@@ -307,7 +307,7 @@ def review(
 
         patches: dict[str, str | None] = {}
         retrieval_ok: bool | None = None
-        # Mandatory Investigation Gate: PRs modifying Python code MUST run verify_python_ast before submitting review
+        # Collect changed files and patches for grounding, and log warning if Python files changed without pre-audit
         skip_gate = state_dict.get("skip_investigation_gate", False)
         if not skip_gate:
             changed_files: list[str] = []
@@ -327,25 +327,12 @@ def review(
 
             modifies_python = any(f.endswith(".py") for f in changed_files)
             if modifies_python:
-                _sentinel = object()
-                direct_ast = state_dict.get("deterministic_precompiled_ast", _sentinel)
-                deterministic_precompiled = bool(
-                    direct_ast
-                    if direct_ast is not _sentinel
-                    else state_dict.get("user:deterministic_precompiled_ast")
-                )
-                tools_executed = (
-                    state_dict.get("tools_executed") or state_dict.get("user:tools_executed") or []
-                )
-                tools_set = (
-                    set(tools_executed) if isinstance(tools_executed, (list, set, tuple)) else set()
-                )
-                if not deterministic_precompiled and "verify_python_ast" not in tools_set:
-                    return (
-                        "Error: Review submission rejected. This PR modifies Python code, but the mandatory AST "
-                        "integrity and defect verification tool ('verify_python_ast') was not executed. You MUST call "
-                        "'verify_python_ast(file_path=...)' on the modified Python files to audit syntax, AST defects, "
-                        "and structural risks before calling review()."
+                deterministic_precompiled = bool(state_dict.get("deterministic_precompiled_ast"))
+                if not deterministic_precompiled:
+                    logger.warning(
+                        "Python files modified in %s#%s, but no pre-audit ran.",
+                        repo_name,
+                        pr_number,
                     )
 
         # Pre-submission finding validation: force LLM self-correction if payload has boilerplate or missing line numbers

@@ -206,7 +206,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** DLQ publish failure leaves the message unacked; transient error is retried then succeeds (monkeypatch `_RETRY_DELAYS` to zeros); non-transient goes to DLQ; retry is not suppressed as duplicate; overlapping sweep skipped; exit code propagation.
 - **done when:** `worker.py` coverage is at least 75% (`uv run --with coverage coverage run --source=src -m pytest -q tests/unit/test_worker.py && uv run --with coverage coverage report --include='*/worker.py'`).
 
-## T-13: Remove the unsatisfiable `verify_python_ast` gate
+## T-13: Remove the unsatisfiable `verify_python_ast` gate [COMPLETED - PR #331]
 
 - **depends_on:** T-04. **branch:** `fix/dead-investigation-gate` | **commit:** `fix(review): drop unsatisfiable AST investigation gate`
 - **files:** `src/webhook_agent/tools/github_tools.py`, `src/webhook_agent/core/callbacks.py`, `src/webhook_agent/core/execution.py`, `tests/unit/review/test_review_tool_validation.py`, `tests/unit/core/test_callbacks.py`
