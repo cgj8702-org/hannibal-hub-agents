@@ -164,7 +164,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **tests:** with umask `022` the cache file is `0600` and its directory `0700`; atomic replace leaves no partial file; run `bash -n scripts/load_secrets.sh`.
 - **done when:** the permission test passes.
 
-## T-10: Stop scoring unparsable code as docs-only
+## T-10: Stop scoring unparsable code as docs-only [COMPLETED - PR #327]
 
 - **branch:** `fix/ast-partial-fragments` | **commit:** `fix(analysis): treat unparsable hunks as unknown, not docs`
 - **files:** `src/webhook_agent/analysis/ast_analyzer.py`, `src/webhook_agent/tools/ast_tools.py`, `tests/unit/analysis/test_ast_analyzer.py`, `tests/unit/tools/test_ast_tools.py`

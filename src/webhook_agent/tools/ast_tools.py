@@ -7,6 +7,7 @@ Provides compiler-grade syntax and structural validation for Python code diffs.
 from __future__ import annotations
 
 import ast
+import itertools
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,8 +20,9 @@ logger = logging.getLogger(__name__)
 class StructuralDefectVisitor(ast.NodeVisitor):
     """AST visitor that checks for common code smells and syntax defects."""
 
-    def __init__(self) -> None:
+    def __init__(self, skip_unreachable: bool = False) -> None:
         self.defects: list[str] = []
+        self.skip_unreachable = skip_unreachable
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.type is None:
@@ -47,6 +49,8 @@ class StructuralDefectVisitor(ast.NodeVisitor):
                 )
 
     def _check_body_unreachable(self, body: list[Any]) -> None:
+        if self.skip_unreachable:
+            return
         for idx, stmt in enumerate(body[:-1]):
             if isinstance(stmt, (ast.Return, ast.Raise)):
                 unreachable = body[idx + 1]
@@ -94,6 +98,7 @@ def verify_python_ast(
         numbers, impact categories, and structural defects.
     """
     code_text = code_snippet
+    is_partial_diff_view = False
     if not code_text or not code_text.strip():
         cleaned_path = _strip_diff_prefix(file_path)
         if diff_text:
@@ -103,8 +108,13 @@ def verify_python_ast(
                 _, text_map = walk_right_side(diff_text)
                 file_lines = text_map.get(cleaned_path) or text_map.get(file_path)
                 if file_lines:
-                    sorted_lines = [file_lines[k] for k in sorted(file_lines.keys())]
+                    sorted_line_keys = sorted(file_lines.keys())
+                    sorted_lines = [file_lines[k] for k in sorted_line_keys]
                     code_text = "\n".join(sorted_lines)
+                    if len(sorted_line_keys) > 1 and any(
+                        b != a + 1 for a, b in itertools.pairwise(sorted_line_keys)
+                    ):
+                        is_partial_diff_view = True
             except Exception as diff_err:
                 logger.debug(
                     "Could not extract lines from diff_text for %s: %s", file_path, diff_err
@@ -148,6 +158,8 @@ def verify_python_ast(
 
             tree = ast.parse(textwrap.dedent(code_text), filename=file_path)
         except SyntaxError:
+            if is_partial_diff_view:
+                return f"Could not parse partial diff fragment; this is expected for hunks ({file_path})."
             error_line = e.lineno or 0
             error_col = e.offset or 0
             snippet = f"\n  >>> {e.text.strip()}" if e.text else ""
@@ -157,7 +169,7 @@ def verify_python_ast(
             )
 
     # 2. Structural defects inspection
-    visitor = StructuralDefectVisitor()
+    visitor = StructuralDefectVisitor(skip_unreachable=is_partial_diff_view)
     visitor.visit(tree)
 
     # 3. Impact scoring via ast_analyzer
@@ -166,9 +178,10 @@ def verify_python_ast(
         ", ".join(analysis_res.categories_found) if analysis_res.categories_found else "None"
     )
 
+    status_str = "PARSE OK (partial diff view)" if is_partial_diff_view else "SYNTAX VALID"
     lines = [
         f"✅ AST Verification for '{file_path}':",
-        "- Status: SYNTAX VALID",
+        f"- Status: {status_str}",
         f"- Risk Score: {analysis_res.risk_score:.2f}",
         f"- Nodes Analyzed: {analysis_res.nodes_analyzed}",
         f"- Impact Categories: {categories_str}",
