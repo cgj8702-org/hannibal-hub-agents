@@ -57,3 +57,20 @@ def test_analyze_diff_hunks() -> None:
     assert res.impact_counts["BREAKING_SIGNATURE"] == 1
     assert res.risk_score >= 0.6
     assert res.nodes_analyzed > 0
+
+
+def test_indented_hunk_with_eval_not_docs_only() -> None:
+    indented_code = "        if True:\n            eval(untrusted_input)\n"
+    res = analyze_python_code(indented_code)
+    assert res.parse_failed is False
+    assert "DOCS_OR_COMMENTS" not in res.categories_found
+    assert "INTERNAL_LOGIC" in res.categories_found
+    assert res.risk_score >= 0.4
+
+
+def test_unparseable_fragment_returns_parse_failed() -> None:
+    broken_fragment = "    if x > \n"
+    res = analyze_python_code(broken_fragment)
+    assert res.parse_failed is True
+    assert res.categories_found == ["UNPARSEABLE_FRAGMENT"]
+    assert res.risk_score == 0.5

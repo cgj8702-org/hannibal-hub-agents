@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import textwrap
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -31,6 +32,7 @@ class ASTAnalysisResult:
     risk_score: float = 0.0
     nodes_analyzed: int = 0
     categories_found: list[str] = field(default_factory=list)
+    parse_failed: bool = False
 
 
 class ASTImpactVisitor(ast.NodeVisitor):
@@ -87,18 +89,20 @@ def analyze_python_code(code_text: str) -> ASTAnalysisResult:
     if not code_text or not code_text.strip():
         return ASTAnalysisResult()
 
+    dedented = textwrap.dedent(code_text)
     try:
-        tree = ast.parse(code_text)
+        tree = ast.parse(dedented)
     except SyntaxError:
         try:
             tree = ast.parse(
-                "\n".join(line for line in code_text.splitlines() if not line.startswith("-"))
+                "\n".join(line for line in dedented.splitlines() if not line.startswith("-"))
             )
         except SyntaxError:
             return ASTAnalysisResult(
-                risk_score=0.2,
+                risk_score=0.5,
                 nodes_analyzed=0,
-                categories_found=["DOCS_OR_COMMENTS"],
+                categories_found=["UNPARSEABLE_FRAGMENT"],
+                parse_failed=True,
             )
 
     visitor = ASTImpactVisitor()

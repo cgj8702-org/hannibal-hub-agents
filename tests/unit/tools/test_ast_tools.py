@@ -174,3 +174,42 @@ def test_verify_python_ast_diff_text_priority_over_disk(tmp_path):
 
     result = verify_python_ast(str(test_file), diff_text=diff_text)
     assert "SyntaxError" in result
+
+
+def test_verify_python_ast_two_hunk_diff_no_unreachable_warning(tmp_path):
+    """Verify non-contiguous hunks do not report unreachable statements and use partial status."""
+    test_file = "src/example.py"
+    # Hunk 1 has 'return 42'. Hunk 2 has 'print("second hunk")'.
+    # If stitched into one function body, 'print' follows 'return', which normally triggers an unreachable defect.
+    diff_text = (
+        f"diff --git a/{test_file} b/{test_file}\n"
+        f"--- a/{test_file}\n"
+        f"+++ b/{test_file}\n"
+        "@@ -10,2 +10,3 @@\n"
+        " def my_func():\n"
+        "+    return 42\n"
+        "@@ -50,2 +51,3 @@\n"
+        "+    print('second hunk')\n"
+        "     return 100\n"
+    )
+    result = verify_python_ast(test_file, diff_text=diff_text)
+    assert "PARSE OK (partial diff view)" in result
+    assert "SYNTAX VALID" not in result
+    assert "Unreachable statement" not in result
+
+
+def test_verify_python_ast_partial_diff_unparseable_neutral_note():
+    """Verify unparseable non-contiguous diff returns a neutral note, not a SyntaxError alarm."""
+    test_file = "src/partial_broken.py"
+    diff_text = (
+        f"diff --git a/{test_file} b/{test_file}\n"
+        f"--- a/{test_file}\n"
+        f"+++ b/{test_file}\n"
+        "@@ -10,2 +10,3 @@\n"
+        "+    if x >\n"
+        "@@ -80,2 +81,3 @@\n"
+        "+    return 42\n"
+    )
+    result = verify_python_ast(test_file, diff_text=diff_text)
+    assert "Could not parse partial diff fragment; this is expected for hunks" in result
+    assert "❌ SyntaxError" not in result
