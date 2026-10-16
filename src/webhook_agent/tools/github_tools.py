@@ -162,36 +162,6 @@ def get_issue(ctx: Context, number: int, include_diff: bool = False) -> str:
         return f"Error fetching issue/PR: {e}"
 
 
-def create_issue(
-    ctx: Context,
-    title: str,
-    body: str,
-) -> str:
-    """Create a new GitHub issue in the repository.
-
-    Use this tool to autonomously spawn well-defined tasks, bug reports,
-    or refactoring task specifications for human maintainer review. Note that
-    the agent cannot label issues; labels must be attached by human maintainers.
-
-    Args:
-        title: Issue title.
-        body: Markdown issue description and structured task specification.
-
-    Returns:
-        A string describing the result, including issue number and URL.
-    """
-    gh = _get_gh_from_ctx(ctx)
-    repo_name = _get_repo_full_name(ctx)
-    try:
-        repo = gh.get_repo(repo_name)
-        issue = repo.create_issue(title=title, body=body)
-        return (
-            f"Successfully created issue #{issue.number} ({getattr(issue, 'html_url', 'created')})."
-        )
-    except Exception as e:
-        return f"Error creating issue: {e}"
-
-
 # ---------------------------------------------------------------------------
 # Pulls API (PR-specific extensions)
 # ---------------------------------------------------------------------------

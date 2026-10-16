@@ -66,23 +66,14 @@ class ReviewInput(ToolInputBase):
         return data
 
 
-class CreateIssueInput(ToolInputBase):
-    """Input schema for create_issue tool."""
-
-    title: str = Field(..., min_length=1, description="Issue title.")
-    body: str = Field(..., min_length=1, description="Structured markdown task specification.")
-
-
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
     "get_issue": GetIssueInput,
     "review": ReviewInput,
-    "create_issue": CreateIssueInput,
 }
 
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
-    "CreateIssueInput",
     "GetIssueInput",
     "ReadFileInput",
     "ReviewInput",
