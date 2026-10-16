@@ -40,6 +40,7 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 - `src/webhook_agent/github/`: GitHub App authentication, bot identity, and PR context enrichment.
 - `src/webhook_agent/models/`: model chains, factory, rate limiter, depleted-model registry, secrets.
 - `src/webhook_agent/analysis/`: deterministic pre-audit (AST, symbol graph, test impact, diff filter, lockfile and dependency checks).
+- `src/webhook_agent/environment/`: local execution environments and ephemeral PR workspace context.
 - `src/webhook_agent/state/`: idempotency claims, circuit breaker, review checkpoints.
 - `src/webhook_agent/review/`: writeback policy, duplicate detection, verdict enforcement, review metadata, markdown formatting, schemas, and fast-paths.
 - `src/webhook_agent/tools/`: model-callable tools (GitHub, AST, diff).
@@ -116,6 +117,8 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 * **Session Persistence:** use `send_command_input` for long-running or interactive background processes.
 * **Autonomy:** default to non-interactive CLI flags (`-y`, `--quiet`, `--silent`).
 * **Sequential Thinking:** before complex or multi-step operations, use the `sequential-thinking` tool to lay out the execution path and dependencies.
+
+*Note: The `.ocr/` directory is not committed to this repository; skip the managed block below if `.ocr/skills/SKILL.md` is missing.*
 
 <!-- OCR:START -->
 ## Open Code Review Instructions

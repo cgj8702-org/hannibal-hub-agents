@@ -19,7 +19,7 @@ flowchart TD
     Worker -->|"App Authentication"| Creds["GitHub App JWT / Installation Token"]
     Worker -->|"Instant 👀 Reaction (0-Token)"| GH_React["GitHub Comment Reaction"]
     Worker -->|"ADK workflow evaluation"| StateGraph["ADK Workflow Runner"]
-    StateGraph -->|"Proactive Sweeps (30m Ticker)"| Proactive["Proactive PR Evaluator"]
+    StateGraph -->|"Proactive Sweeps (5m Ticker, Opt-In)"| Proactive["Proactive PR Evaluator"]
     Proactive -->|"Stale / Conflict / CI Warnings"| GH_Write
     
     StateGraph -->|"Policy Verification"| Policy{"Mutations Allowed?"}
@@ -37,8 +37,13 @@ flowchart TD
 ├── .agents/skills/          # Localized agent operational skills
 │   ├── gcloud-logging/      # GCP logging inspection protocol & project matrix
 │   └── github-pr-manager/   # End-to-end GitHub PR lifecycle management
-├── .github/workflows/
+├── .github/workflows/       # GitHub Actions CI PR gate & VM deployment workflows
+│   ├── ci.yml               # Automated lint, formatting, typecheck, and test gate
 │   └── deploy.yml           # Automated CI/CD deployment to VM via IAP SSH
+├── assets/                  # Static assets and model registries
+│   └── registries/          # Gemini model specs and capabilities
+├── dev/                     # Developer tools (model sync, rate limits, fixture recording)
+├── docs/                    # Architecture, model chain, plans, and technical documentation
 ├── scripts/
 │   ├── load_secrets.sh      # Load environment variables dynamically from GCP Secret Manager
 │   ├── migrate_pubsub_messages.py # Pub/Sub backlog migration helper
@@ -47,9 +52,10 @@ flowchart TD
 │   ├── publish_test_message.py    # Test webhook payload publisher
 │   └── install-git-hooks.sh       # Pre-commit hook installer for lint & type validation
 ├── src/
-│   ├── webhook_agent/         # Core Webhook Orchestrator Package
+│   ├── webhook_agent/       # Core Webhook Orchestrator Package
 │       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter)
 │       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, callbacks, & plugins
+│       ├── environment/     # Local & ephemeral PR workspace execution contexts
 │       ├── github/          # GitHub App authentication, bot identity, and PR context enrichment
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
 │       ├── review/          # Code review verdict parser, scorecard enforcement, schemas, & formatter
@@ -78,7 +84,7 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Pull-request context and diffs are hydrated before model evaluation.
    - Structured review output is normalized before writeback.
 2. **Proactive PR Evaluator (`ProactiveEvaluator`)**:
-   - Runs a 30-minute background ticker in the worker process.
+   - Runs a 5-minute background ticker in the worker process (disabled by default unless `ENABLE_PROACTIVE_SWEEP=1`).
    - Scans open PRs for:
      - **Stale Review Threads**: Unresolved review feedback idle >24h ➔ Posts soft reminder comment.
      - **Merge Conflicts**: Target branch conflicts (`mergeable_state == "dirty"`) ➔ Posts conflict warning comment.
@@ -96,6 +102,23 @@ The project includes built-in strategies to maximize context efficiency, elimina
 7. **Dual-Engine Architecture (Automated Reviews + Conversational Pair Programming)**:
    - Eliminates rigid slash command requirements: automatically conducts formal clinical reviews on PR lifecycle events (`pull_request.opened`, `pull_request.synchronize`, `pull_request.ready_for_review`).
    - Supports natural-language pair programming, architecture Q&A, and discussion on PR threads, while seamlessly routing to full re-audits whenever review intent is detected (`please review`, `audit this`, `/review`).
+
+---
+
+## ⚙️ Configuration
+
+Key environment variables configuring orchestrator operation:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `TRIGGER_ALLOWED_ASSOCIATIONS` | `OWNER,MEMBER,COLLABORATOR` | Comma-separated list of permitted author associations for triggering actions. |
+| `TRIGGER_EXEMPT_LOGINS` | `cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]` | Comma-separated list of user or bot logins exempt from author association checks. |
+| `ENABLE_PR_WORKSPACE` | `1` | Clone PR head into an ephemeral sandbox workspace for accurate AST, symbol, and diff analysis (`1` = enabled, `0` = disabled). |
+| `LOG_LEVEL` | `INFO` | Application logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
+| `ALLOW_AUTOMATED_MUTATIONS` | `1` | Master policy gate for automated writeback actions (comments, formal reviews). |
+| `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute background sweep ticker for stale PRs, conflicts, and CI failures. |
+| `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
+| `STRICT_REVIEW_GROUNDING` | `0` | When `1`, strictly reject review submissions containing unverified line or symbol citations. |
 
 ---
 
