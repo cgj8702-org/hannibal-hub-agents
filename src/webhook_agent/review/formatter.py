@@ -33,7 +33,8 @@ FINDING_KEYS = (
     "path|line|body|window|verify_steps|description|suggested_fix|executive_summary|"
     "risk|recommendation|summary|resolutions|critical_issues|minor_suggestions|"
     "risks_and_edge_cases|context_gaps|verdict|status|evidence|item_description|title|"
-    "verified_invariants|invariant|unverified_claims|residual_uncertainty"
+    "verified_invariants|invariant|unverified_claims|residual_uncertainty|"
+    "scorecard|dimension|notes"
 )
 
 STRING_FIELD_OPEN = re.compile(rf'"(?:{FINDING_KEYS})"\s*:\s*"')
@@ -216,6 +217,12 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
+    for sc in getattr(review, "scorecard", []):
+        if getattr(sc, "status", "") == "FAIL":
+            logger.info(
+                "Mechanical verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
+            )
+            return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.info("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
@@ -244,6 +251,12 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
+    for sc in getattr(review, "scorecard", []):
+        if getattr(sc, "status", "") == "FAIL":
+            logger.info(
+                "Sync verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
+            )
+            return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.info("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
@@ -463,6 +476,57 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
 
     data["critical_issues"] = critical_issues
     data["minor_suggestions"] = minor_suggestions
+
+    scorecard: list[dict[str, str]] = []
+    sc_match = re.search(
+        r"###\s*(?:\d+\.)?\s*Audit Dimension Scorecard[^\n]*\n+([\s\S]*?)(?=\n---|\n###|\Z)",
+        body,
+        re.IGNORECASE,
+    )
+    if sc_match:
+        from .schemas import clean_field_string
+
+        for row in sc_match.group(1).splitlines():
+            row_s = row.strip()
+            if (
+                row_s.startswith("|")
+                and not row_s.startswith("| :---")
+                and not row_s.lower().startswith("| dimension")
+                and not row_s.lower().startswith("| **dimension")
+            ):
+                cols = [c.strip() for c in row_s.strip("|").split("|")]
+                if len(cols) >= 3:
+                    dim = clean_field_string(cols[0])
+                    st = "PASS"
+                    col1_u = cols[1].upper()
+                    if "FAIL" in col1_u or "CRIT" in col1_u:
+                        st = "FAIL"
+                    elif "WARN" in col1_u:
+                        st = "WARN"
+                    elif "N/A" in col1_u:
+                        st = "N/A"
+                    notes = clean_field_string(cols[2])
+                    if dim:
+                        scorecard.append({"dimension": dim, "status": st, "notes": notes})
+    if scorecard:
+        data["scorecard"] = scorecard
+
+    verified_invariants: list[str] = []
+    inv_match = re.search(
+        r"###\s*(?:\d+\.)?\s*Verified Invariants[^\n]*\n+([\s\S]*?)(?=\n---|\n###|\Z)",
+        body,
+        re.IGNORECASE,
+    )
+    if inv_match:
+        for line in inv_match.group(1).splitlines():
+            line_s = line.strip()
+            if line_s.startswith(("- [x]", "- [ ]", "* ", "- ")):
+                inv_clean = re.sub(r"^(?:-\s*\[[ xX]\]|\*|-)\s*", "", line_s).strip()
+                if inv_clean:
+                    verified_invariants.append(inv_clean)
+    if verified_invariants:
+        data["verified_invariants"] = verified_invariants
+
     return data
 
 

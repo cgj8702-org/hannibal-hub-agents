@@ -471,13 +471,12 @@ def test_prefetch_previous_bot_reviews_extracts_structured_metadata() -> None:
 @pytest.mark.webhook_agent
 @pytest.mark.parametrize("model", [CodeReviewResponse, SyncReviewResponse])
 def test_string_only_invariant_gets_no_fabricated_citation(model: type) -> None:
-    """A bare-string invariant produces no fabricated path/line and is recorded in unverified_claims."""
+    """A bare-string invariant produces no fabricated path/line and is recorded in verified_invariants."""
     key = "executive_summary" if model is CodeReviewResponse else "summary"
     resp = model.model_validate(
         {key: "s", "verdict": "COMMENT", "verified_invariants": ["Retries are capped"]}
     )
-    assert not hasattr(resp, "verified_invariants")
-    assert resp.unverified_claims == ["Retries are capped"]
+    assert resp.verified_invariants == ["Retries are capped"]
 
     md = resp.to_markdown(verdict="COMMENT")
     assert "`codebase`" not in md
