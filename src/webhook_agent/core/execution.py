@@ -358,15 +358,18 @@ def execute_agent_event(
             canonical,
             trace_id[-4:],
         )
-        agent._current_model_name = selected_model
-        new_model_instance = get_adk_model(
-            model_name=selected_model,
-            api_key=get_active_api_key(),
-        )
-        if hasattr(agent, "_code_auditor") and agent._code_auditor is not None:
-            agent._code_auditor.model = new_model_instance
-        if hasattr(agent, "_conversational_agent") and agent._conversational_agent is not None:
-            agent._conversational_agent.model = new_model_instance
+        if hasattr(agent, "_switch_model"):
+            agent._switch_model(selected_model)
+        else:
+            agent._current_model_name = selected_model
+            new_model_instance = get_adk_model(
+                model_name=selected_model,
+                api_key=get_active_api_key(),
+            )
+            if hasattr(agent, "_code_auditor") and agent._code_auditor is not None:
+                agent._code_auditor.model = new_model_instance
+            if hasattr(agent, "_conversational_agent") and agent._conversational_agent is not None:
+                agent._conversational_agent.model = new_model_instance
 
     emitted_texts: list[str] = []
     final_session = None
