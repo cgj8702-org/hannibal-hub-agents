@@ -510,5 +510,34 @@ def _submit_formal_review(
         _COMMENT_RATE_LIMITER.record(target_key)
         if isinstance(state, dict):
             state["review_submitted_in_this_turn"] = True
+
+        # Auto-resolve bot review threads (e.g. CodeRabbit) on approved PR
+        if enforced_event == "APPROVE":
+            try:
+                from webhook_agent.github.thread_resolver import (
+                    auto_resolve_coderabbit_threads,
+                    is_coderabbit_auto_resolve_enabled,
+                )
+
+                if is_coderabbit_auto_resolve_enabled():
+                    resolved_threads = auto_resolve_coderabbit_threads(
+                        repo_name, int(number_text), pr
+                    )
+                    if resolved_threads:
+                        logger.info(
+                            "Auto-resolved %d CodeRabbit review thread(s) on %s#%s: %s",
+                            len(resolved_threads),
+                            repo_name,
+                            number_text,
+                            resolved_threads,
+                        )
+            except Exception as auto_res_err:
+                logger.warning(
+                    "Auto-resolving review threads encountered non-fatal error on %s#%s: %s",
+                    repo_name,
+                    number_text,
+                    auto_res_err,
+                )
+
         detail = getattr(rv, "html_url", str(rv))
         return f"Submitted review ({enforced_event}): {detail}", True
