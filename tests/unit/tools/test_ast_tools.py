@@ -45,7 +45,7 @@ def test_is_gemini_3_plus_model_filter():
 
 @pytest.mark.anyio
 async def test_before_model_callback_disables_cache_for_gemma():
-    """Verify that before_model_callback nullifies cache_config on Gemma models."""
+    """Verify that before_model_callback nullifies cache_config and thinking_config on Gemma models."""
     ctx = MagicMock()
     ctx.state = {"active_tier": "free"}
 
@@ -55,6 +55,8 @@ async def test_before_model_callback_disables_cache_for_gemma():
     req.cache_config = ContextCacheConfig(min_tokens=4096)
     req.cache_metadata = MagicMock()
     req.cacheable_contents_token_count = 5000
+    req.config = MagicMock()
+    req.config.thinking_config = MagicMock()
 
     with patch("webhook_agent.core.callbacks.rpm_waiter.check_and_wait", new_callable=AsyncMock):
         await before_model_callback(ctx, req)
@@ -62,6 +64,7 @@ async def test_before_model_callback_disables_cache_for_gemma():
     assert req.cache_config is None
     assert req.cache_metadata is None
     assert req.cacheable_contents_token_count is None
+    assert req.config.thinking_config is None
 
 
 @pytest.mark.anyio

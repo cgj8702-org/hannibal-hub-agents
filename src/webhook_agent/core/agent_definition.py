@@ -324,6 +324,11 @@ class WebhookAgent:
             self._current_model_name,
             next_model,
         )
+        self._switch_model(next_model)
+        return next_model
+
+    def _switch_model(self, next_model: str) -> None:
+        """Switch active model across code auditor, conversational agent, and runners."""
         self._current_model_name = next_model
         self._attempted_model_names.add(self._normalize_model_name(next_model))
         new_model_instance = get_adk_model(
@@ -365,7 +370,6 @@ class WebhookAgent:
                 session_service=self._session_service,
                 memory_service=self._memory_service,
             )
-        return next_model
 
     def _create_fallback_agent(self, error: Exception | None = None) -> None:
         """Switch to fallback model when primary model is unavailable."""

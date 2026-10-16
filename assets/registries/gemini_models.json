@@ -5,7 +5,39 @@
       "version": "0.1",
       "display_name": "Antigravity Agent Preview",
       "description": "Preview release of Antigravity Agent (05-2026)",
-      "input_token_limit": 131072,
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/antigravity-preview-09-2026",
+      "version": "0.1",
+      "display_name": "Antigravity Agent Preview",
+      "description": "Preview release of Antigravity Agent (09-2026)",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/antigravity-preview-latest",
+      "version": "Antigravity Agent Preview Latest",
+      "display_name": "Antigravity Agent Preview Latest",
+      "description": "Latest preview release of Antigravity Agent",
+      "input_token_limit": 1048576,
       "output_token_limit": 65536,
       "supported_actions": [
         "generateContent",
@@ -299,6 +331,22 @@
       }
     },
     {
+      "name": "models/gemini-3.5-transcribe",
+      "version": "3.5-transcribe-08-2026",
+      "display_name": "Gemini 3.5 Transcribe",
+      "description": "Gemini 3.5 Transcribe",
+      "input_token_limit": 98304,
+      "output_token_limit": 32768,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
       "name": "models/gemini-3.6-flash",
       "version": "3.6-flash-07-2026",
       "display_name": "Gemini 3.6 Flash",
@@ -360,7 +408,7 @@
     },
     {
       "name": "models/gemini-3.8-flash",
-      "version": "3.8-flash-09-2026",
+      "version": "3.0",
       "display_name": "Gemini 3.8 Flash",
       "description": "Gemini 3.8 Flash",
       "input_token_limit": 1048576,
@@ -387,6 +435,23 @@
           "rpd": 20.0
         }
       }
+    },
+    {
+      "name": "models/gemini-4-argon",
+      "version": "3.0",
+      "display_name": "Gemini 4 Argon",
+      "description": "Gemini 4 Argon",
+      "input_token_limit": 1048576,
+      "output_token_limit": 32768,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
     },
     {
       "name": "models/gemini-flash-latest",
@@ -418,6 +483,39 @@
         "countTokens",
         "createCachedContent",
         "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-nano-banana-2.1",
+      "version": "3.0",
+      "display_name": "Nano Banana 2.1",
+      "description": "Gemini Nano Banana 2.1.",
+      "input_token_limit": 65536,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-omni-1.1-flash",
+      "version": "001",
+      "display_name": "Gemini Omni 1.1 Flash",
+      "description": "Gemini Omni 1.1 Flash ",
+      "input_token_limit": 131072,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
       ],
       "accessible_tiers": [
         "free",
@@ -515,5 +613,5 @@
       }
     }
   ],
-  "updated_at": "2026-08-13T22:09:23.871152+00:00"
+  "updated_at": "2026-10-16T19:52:32.836362+00:00"
 }

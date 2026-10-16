@@ -128,6 +128,10 @@ async def before_model_callback(
             llm_request.cache_metadata = None
         if hasattr(llm_request, "cacheable_contents_token_count"):
             llm_request.cacheable_contents_token_count = None
+        clean_target = (target_model or "").replace("models/", "").strip().lower()
+        if "gemma" in clean_target and hasattr(llm_request, "config") and llm_request.config:
+            if getattr(llm_request.config, "thinking_config", None) is not None:
+                llm_request.config.thinking_config = None
     else:
         # For Gemini 3+, ensure context cache config is active with 4096-token floor
         if getattr(llm_request, "cache_config", None) is None:
