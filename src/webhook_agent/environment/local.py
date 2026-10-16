@@ -9,11 +9,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 from pathlib import Path
 
 from webhook_agent.environment.base import BaseEnvironment, ExecutionResult
 
 logger = logging.getLogger(__name__)
+
+_ALLOWED_SUBPROCESS_ENV_VARS: tuple[str, ...] = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "PYTHONIOENCODING",
+)
 
 
 class LocalEnvironment(BaseEnvironment):
@@ -26,7 +36,7 @@ class LocalEnvironment(BaseEnvironment):
         env_vars: dict[str, str] | None = None,
     ) -> ExecutionResult:
         """Execute a command via subprocess inside this environment's working directory."""
-        env = os.environ.copy()
+        env = {k: os.environ[k] for k in _ALLOWED_SUBPROCESS_ENV_VARS if k in os.environ}
         if env_vars:
             env.update(env_vars)
 
@@ -37,6 +47,7 @@ class LocalEnvironment(BaseEnvironment):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                start_new_session=True,
             )
 
             try:
@@ -46,10 +57,13 @@ class LocalEnvironment(BaseEnvironment):
                 )
             except TimeoutError:
                 try:
-                    proc.kill()
+                    if proc.pid is not None:
+                        os.killpg(proc.pid, signal.SIGKILL)
                     await proc.wait()
+                except ProcessLookupError:
+                    pass
                 except Exception as kill_err:
-                    logger.debug("Failed killing timed-out process: %s", kill_err)
+                    logger.debug("Failed killing timed-out process group: %s", kill_err)
                 return ExecutionResult(
                     exit_code=-1,
                     stdout="",

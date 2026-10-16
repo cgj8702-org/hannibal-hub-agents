@@ -94,6 +94,7 @@ def _build_search_script(
         "if not os.path.isdir(_root):\n"
         "    sys.stderr.write('search path not a directory: ' + _root + '\\n')\n"
         "    sys.exit(2)\n"
+        "_real_root = os.path.realpath(_root) + os.sep\n"
         "_matches = []\n"
         "for _dp, _dns, _fns in os.walk(_root):\n"
         "    _dns[:] = [d for d in _dns if not d.startswith('.') and (_no_ignore or d not in _ignored)]\n"
@@ -106,6 +107,8 @@ def _build_search_script(
         "        if _dot != -1 and _fn[_dot:].lower() in _binary:\n"
         "            continue\n"
         "        _full = os.path.join(_dp, _fn)\n"
+        "        if os.path.islink(_full) or not os.path.realpath(_full).startswith(_real_root):\n"
+        "            continue\n"
         "        try:\n"
         "            _st = os.stat(_full)\n"
         "            if _st.st_size > _max_size:\n"
@@ -174,6 +177,15 @@ async def search_files(
     """
     if not pattern:
         return {"error": "Search pattern cannot be empty", "matches": [], "total": 0}
+
+    if len(pattern) > 500:
+        return {
+            "error": "Search pattern exceeds maximum allowed length of 500 characters",
+            "matches": [],
+            "total": 0,
+        }
+
+    limit = max(1, min(limit, 200))
 
     target_env = active_environment()
     root_resolved = target_env.resolve_path(path)

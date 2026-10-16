@@ -1,6 +1,8 @@
 """Unit tests for BaseEnvironment and LocalEnvironment implementations."""
 
 import asyncio
+import os
+import signal
 import tempfile
 from pathlib import Path
 
@@ -111,5 +113,58 @@ def test_ephemeral_environment_lifecycle():
         assert active_environment() == initial_env
         assert created_path is not None
         assert not created_path.exists()
+
+    asyncio.run(_run())
+
+
+def test_local_environment_scrubs_os_environ(monkeypatch: pytest.MonkeyPatch):
+    """Verify that sensitive parent environment variables like WEBHOOK_PAID_KEY are not passed to subprocesses."""
+
+    async def _run():
+        monkeypatch.setenv("WEBHOOK_PAID_KEY", "super_secret_paid_key_123")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            env = LocalEnvironment(root)
+
+            result = await env.execute(
+                'python3 -c \'import os; print(os.environ.get("WEBHOOK_PAID_KEY", ""))\''
+            )
+            assert result.ok is True
+            assert "super_secret_paid_key_123" not in result.stdout
+            assert result.stdout.strip() == ""
+
+    asyncio.run(_run())
+
+
+def test_local_environment_kills_child_process_group_on_timeout():
+    """Verify that timeout kills the entire process group including background child processes."""
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            env = LocalEnvironment(root)
+
+            # Spawn a child process in background, write its PID, and sleep
+            cmd = (
+                'python3 -c "'
+                "import subprocess, time; "
+                "p = subprocess.Popen(['sleep', '60']); "
+                "open('child.pid', 'w').write(str(p.pid)); "
+                'time.sleep(60)"'
+            )
+            result = await env.execute(cmd, timeout=0.5)
+            assert result.ok is False
+            assert "timed out" in result.stderr.lower()
+
+            pid_file = root / "child.pid"
+            assert pid_file.exists()
+            child_pid = int(pid_file.read_text().strip())
+
+            # Give OS a moment to reap
+            await asyncio.sleep(0.1)
+
+            # ProcessLookupError proves the child process was killed
+            with pytest.raises(ProcessLookupError):
+                os.kill(child_pid, 0)
 
     asyncio.run(_run())

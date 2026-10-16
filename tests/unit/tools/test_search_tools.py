@@ -124,3 +124,73 @@ def test_search_files_function_tool_schema_declaration():
     assert decl is not None
     assert decl.name == "search_files"
     assert "Search text files" in (decl.description or "")
+
+
+def test_search_files_blocks_symlink_escape():
+    """Verify that search_files ignores symlinks pointing outside the workspace root."""
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as parent_dir:
+            parent = Path(parent_dir)
+            outside_file = parent / "secret.txt"
+            outside_file.write_text("SUPER_SECRET_TOKEN_OUTSIDE = 'leak'")
+
+            workspace = parent / "workspace"
+            workspace.mkdir()
+            env = LocalEnvironment(workspace)
+
+            # Create a symlink inside workspace pointing outside
+            symlink = workspace / "leaked_symlink.txt"
+            symlink.symlink_to(outside_file)
+
+            # Also create an internal file
+            internal_file = workspace / "normal.txt"
+            internal_file.write_text("NORMAL_TOKEN = 'safe'")
+
+            with use_environment(env):
+                res = await search_files(pattern="SUPER_SECRET_TOKEN_OUTSIDE")
+                assert "error" not in res
+                assert res["total"] == 0
+                assert res["matches"] == []
+
+                res_safe = await search_files(pattern="NORMAL_TOKEN")
+                assert res_safe["total"] == 1
+
+    asyncio.run(_run())
+
+
+def test_search_files_rejects_overlong_pattern():
+    """Verify that patterns longer than 500 characters are rejected with an error dict."""
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = LocalEnvironment(Path(tmp_dir))
+            with use_environment(env):
+                res = await search_files(pattern="a" * 501)
+                assert "error" in res
+                assert res["matches"] == []
+                assert res["total"] == 0
+
+    asyncio.run(_run())
+
+
+def test_search_files_clamps_limit():
+    """Verify that search_files clamps limit within [1, 200]."""
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            env = LocalEnvironment(root)
+            for i in range(5):
+                (root / f"file_{i}.txt").write_text("common_token = True\n")
+
+            with use_environment(env):
+                # Negative or zero limit clamps to 1
+                res_low = await search_files(pattern="common_token", limit=-10)
+                assert res_low["total"] == 1
+
+                # Normal limit works
+                res_normal = await search_files(pattern="common_token", limit=3)
+                assert res_normal["total"] == 3
+
+    asyncio.run(_run())
