@@ -82,6 +82,17 @@ async def fetch_model_registry() -> bool:
     models_by_name: dict[str, dict[str, Any]] = {}
     excluded_keywords = _get_exclusion_keywords()
 
+    existing_limits: dict[str, Any] = {}
+    if os.path.exists(TARGET_REGISTRY):
+        try:
+            with open(TARGET_REGISTRY, encoding="utf-8") as f:
+                existing_data = json.load(f)
+                for m in existing_data.get("models", []):
+                    if isinstance(m, dict) and "name" in m and "rate_limits" in m:
+                        existing_limits[m["name"]] = m["rate_limits"]
+        except Exception as e:
+            LOGGER.warning(f"Failed to read existing rate limits: {e}")
+
     for tier, api_key in keys_to_poll.items():
         LOGGER.info(f"Polling Gemini models using WEBHOOK_{tier.upper()}_KEY...")
         try:
@@ -98,7 +109,7 @@ async def fetch_model_registry() -> bool:
                     if not name:
                         continue
                     if name not in models_by_name:
-                        models_by_name[name] = {
+                        entry = {
                             "name": name,
                             "version": getattr(model, "version", None),
                             "display_name": getattr(model, "display_name", None),
@@ -108,6 +119,9 @@ async def fetch_model_registry() -> bool:
                             "supported_actions": actions,
                             "accessible_tiers": [],
                         }
+                        if name in existing_limits:
+                            entry["rate_limits"] = existing_limits[name]
+                        models_by_name[name] = entry
                     models_by_name[name]["accessible_tiers"].append(tier)
         except Exception as e:
             LOGGER.error(f"Error listing models for tier '{tier}': {e}")
