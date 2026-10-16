@@ -479,14 +479,18 @@ def review(
                 repo_name,
                 pr_number,
             )
-            if strict_grounding_enabled() and effective_event == "APPROVE":
+            if effective_event == "APPROVE":
                 logger.warning(
-                    "Grounding check skipped in strict mode for %s#%s; downgrading verdict from APPROVE to COMMENT",
+                    "Grounding check skipped for %s#%s; downgrading verdict from APPROVE to COMMENT",
                     repo_name,
                     pr_number,
                 )
                 effective_event = "COMMENT"
                 event = "COMMENT"
+                if hasattr(review_obj, "verdict"):
+                    review_obj.verdict = "COMMENT"
+                parsed_data["verdict"] = "COMMENT"
+                body = json.dumps(parsed_data)
         else:
             grounding_issues = verify_citations(
                 _grounding_findings(review_obj),
