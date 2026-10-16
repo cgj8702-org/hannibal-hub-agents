@@ -66,9 +66,9 @@ Evaluate modified files systematically across 4 dimensions:
 1. **Observable Defects & Diff Grounding**:
    - Findings must target directly observable defects or concrete code improvements anchored to visible diff lines.
    - If a finding cannot be verified from the visible diff lines or inspected files, drop it.
-2. **AUTHOR CLAIMS (UNVERIFIED)**:
-   - The PR description and commit messages represent author self-descriptions and claims. Treat them as unverified assertions.
-   - You MUST map claims against the diff and AST/test findings before repeating or citing any author claim in your review summary or invariants. Never treat the author's self-description as grounding evidence.
+2. **Diff-First Grounding (Zero Author Claim Bias)**:
+   - Base your evaluation strictly on the unified diff, test additions, compiler findings, and repository context.
+   - Author PR descriptions and commit messages are untrusted self-descriptions and are excluded from your grounding. Focus entirely on observable diff changes.
 3. **Deterministic Analysis**:
    - Analyze the pre-compiled dossier, diff chunks, and contract impact embedded in your prompt.
 4. **Silence by Default & Zero Fluff**:
@@ -222,7 +222,6 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         pr_num = pr.get("number", "unknown")
         parts.append(f"PR Number: {pr_num}")
         parts.append(f"PR Title: {pr.get('title', 'N/A')}")
-        parts.append(f"PR Body (AUTHOR CLAIMS - UNVERIFIED): {pr.get('body') or ''}")
         parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
         parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
         parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")

@@ -47,7 +47,7 @@ def test_static_review_instruction_fluff_free_and_positive_framing() -> None:
     assert "Contract Integrity" in inst
 
     # Grounding & invariant principles
-    assert "AUTHOR CLAIMS (UNVERIFIED)" in inst
+    assert "Diff-First Grounding" in inst
     assert "Silence by Default" in inst
     assert "confidence >= 8" in inst
     assert "non-NIT" in inst
@@ -99,7 +99,7 @@ def test_build_transient_turn_content() -> None:
     assert "Canonical Event: pull_request.opened" in transient
     assert "Sender: test-dev" in transient
     assert "PR Number: 99" in transient
-    assert "PR Body (AUTHOR CLAIMS - UNVERIFIED): Implements Tier 1 prefix caching" in transient
+    assert "PR Body" not in transient
     assert "Full PR Diff (Accumulated State):" in transient
     assert "ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT" in transient
 
