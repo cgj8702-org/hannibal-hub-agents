@@ -1045,6 +1045,110 @@ def test_scorecard_fail_triggers_request_changes():
     assert verdict == "REQUEST_CHANGES"
 
 
+def test_scorecard_unknown_and_error_statuses() -> None:
+    """Verify ScorecardItem handles UNKNOWN and ERROR without fail-open coercion to PASS."""
+    from webhook_agent.review.schemas import ScorecardItem
+
+    # Empty status defaults to UNKNOWN, not PASS
+    item_empty = ScorecardItem(dimension="Security & Secrets", status="")
+    assert item_empty.status == "UNKNOWN"
+    assert "`❓ UNKNOWN`" in item_empty.to_table_row()
+
+    # Unrecognized status defaults to UNKNOWN, not PASS
+    item_unrec = ScorecardItem(dimension="Test Coverage & Regressions", status="some_random_text")
+    assert item_unrec.status == "UNKNOWN"
+    assert "`❓ UNKNOWN`" in item_unrec.to_table_row()
+
+    # Explicit ERROR status renders ERROR badge
+    item_err = ScorecardItem(
+        dimension="Contract Integrity", status="ERROR", notes="Analyzer crash."
+    )
+    assert item_err.status == "ERROR"
+    assert "`💥 ERROR`" in item_err.to_table_row()
+
+    # Exception keyword sanitizes to ERROR
+    item_crash = ScorecardItem(dimension="Logic & Boundaries", status="crash_in_ast")
+    assert item_crash.status == "ERROR"
+
+
+def test_scorecard_unknown_verdict_behavior() -> None:
+    """Verify UNKNOWN/ERROR in scorecard does not hard block or silently approve."""
+    from webhook_agent.review.schemas import ScorecardItem
+
+    cr = CodeReviewResponse(
+        executive_summary="Clean PR with unverified dimension.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Contract Integrity", status="UNKNOWN", notes="Analyzer timed out."
+            ),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="No secrets."),
+        ],
+    )
+    # UNKNOWN alone does not force REQUEST_CHANGES (only FAIL does)
+    verdict = calculate_strict_verdict(cr)
+    assert verdict == "APPROVE"
+
+
+def test_parse_text_review_scorecard_unknown_and_error() -> None:
+    """Verify Markdown text parser accurately parses UNKNOWN and ERROR without coercing to PASS."""
+    from webhook_agent.review.formatter import parse_text_review_to_dict
+
+    review_text = (
+        "## 🛡️ Code Review: `COMMENT`\n\n"
+        "### 1. Executive Summary\nAnalysis summary.\n\n"
+        "### 2. Audit Dimension Scorecard\n\n"
+        "| Dimension | Status | Notes |\n"
+        "| :--- | :---: | :--- |\n"
+        "| **Logic & Boundaries** | `❓ UNKNOWN` | Could not verify dynamic calls. |\n"
+        "| **Contract Integrity** | `💥 ERROR` | Syntax error in file parser. |\n"
+        "| **Concurrency & State** | `💥 EXCEPTION` | AST parser raised an unhandled exception. |\n"
+        "| **Security & Secrets** | `✅ PASS` | Verified clean. |\n"
+    )
+    parsed = parse_text_review_to_dict(review_text)
+    scorecard = parsed.get("scorecard", [])
+    assert len(scorecard) == 4
+    assert scorecard[0]["status"] == "UNKNOWN"
+    assert scorecard[1]["status"] == "ERROR"
+    assert scorecard[2]["status"] == "ERROR"
+    assert scorecard[3]["status"] == "PASS"
+
+
+def test_response_normalizers_scorecard_missing_status_defaults_to_unknown() -> None:
+    """Verify normalize_code_review_dict and normalize_sync_review_dict default missing status to UNKNOWN."""
+    from webhook_agent.review.formatter import (
+        normalize_code_review_dict,
+        normalize_sync_review_dict,
+    )
+
+    raw_cr = {
+        "executive_summary": "Test summary",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "", "notes": "No status provided."},
+            {"dimension": "Security & Secrets", "notes": "Status key omitted entirely."},
+            "Contract Integrity: Bare string without status.",
+        ],
+    }
+    norm_cr = normalize_code_review_dict(raw_cr)
+    sc_cr = norm_cr.get("scorecard", [])
+    assert len(sc_cr) == 3
+    assert sc_cr[0]["status"] == "UNKNOWN"
+    assert sc_cr[1]["status"] == "UNKNOWN"
+    assert sc_cr[2]["status"] == "UNKNOWN"
+
+    raw_sync = {
+        "summary": "Sync summary",
+        "scorecard": {
+            "Concurrency & State": {"notes": "Dict format with missing status."},
+            "Test Coverage & Regressions": "String note only in dict mapping",
+        },
+    }
+    norm_sync = normalize_sync_review_dict(raw_sync)
+    sc_sync = norm_sync.get("scorecard", [])
+    assert len(sc_sync) == 2
+    assert sc_sync[0]["status"] == "UNKNOWN"
+    assert sc_sync[1]["status"] == "UNKNOWN"
+
+
 def test_string_findings_get_no_placeholder_path() -> None:
     """Bare-string findings keep their text but never receive an invented file path."""
     code = normalize_code_review_dict(

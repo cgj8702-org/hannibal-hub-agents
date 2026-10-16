@@ -218,11 +218,16 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
         )
         return "REQUEST_CHANGES"
     for sc in getattr(review, "scorecard", []):
-        if getattr(sc, "status", "") == "FAIL":
+        sc_status = getattr(sc, "status", "")
+        if sc_status == "FAIL":
             logger.info(
                 "Mechanical verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
             )
             return "REQUEST_CHANGES"
+        elif sc_status in ("UNKNOWN", "ERROR"):
+            logger.warning(
+                "Scorecard dimension has unverified status (%s): %s", sc_status, sc.dimension
+            )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.info("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
@@ -252,11 +257,16 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
         )
         return "REQUEST_CHANGES"
     for sc in getattr(review, "scorecard", []):
-        if getattr(sc, "status", "") == "FAIL":
+        sc_status = getattr(sc, "status", "")
+        if sc_status == "FAIL":
             logger.info(
                 "Sync verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
             )
             return "REQUEST_CHANGES"
+        elif sc_status in ("UNKNOWN", "ERROR"):
+            logger.warning(
+                "Sync scorecard dimension has unverified status (%s): %s", sc_status, sc.dimension
+            )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.info("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
@@ -497,14 +507,20 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                 cols = [c.strip() for c in row_s.strip("|").split("|")]
                 if len(cols) >= 3:
                     dim = clean_field_string(cols[0])
-                    st = "PASS"
+                    st = "UNKNOWN"
                     col1_u = cols[1].upper()
-                    if "FAIL" in col1_u or "CRIT" in col1_u:
+                    if "FAIL" in col1_u or "CRIT" in col1_u or "BLOCK" in col1_u:
                         st = "FAIL"
-                    elif "WARN" in col1_u:
+                    elif "ERR" in col1_u or "CRASH" in col1_u or "EXCEPT" in col1_u:
+                        st = "ERROR"
+                    elif "UNKNOWN" in col1_u or "UNVERIF" in col1_u:
+                        st = "UNKNOWN"
+                    elif "WARN" in col1_u or "CAUTION" in col1_u:
                         st = "WARN"
-                    elif "N/A" in col1_u:
+                    elif "N/A" in col1_u or "NA" in col1_u:
                         st = "N/A"
+                    elif "PASS" in col1_u or "OK" in col1_u:
+                        st = "PASS"
                     notes = clean_field_string(cols[2])
                     if dim:
                         scorecard.append({"dimension": dim, "status": st, "notes": notes})

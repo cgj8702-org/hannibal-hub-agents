@@ -69,7 +69,7 @@ Every audit must be high-signal, professional, and thorough:
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
 2. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
-   - `status`: "PASS", "WARN", "FAIL", or "N/A".
+   - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).
    - `notes`: Specific, diff-grounded verification findings or justification (citing verified AST structures, locks, or test assertions).
 3. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants verified during the audit (e.g., "Single-request TPM fast-fail terminates immediately without sleep delay", "Lock acquisition order preserved across async workers").
 4. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
