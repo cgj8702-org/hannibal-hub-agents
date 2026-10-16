@@ -93,7 +93,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 - **done when:** a `NONE`-association commenter saying "please review" is ignored; an `OWNER` is not.
 - **do not:** touch the Jules adoption or dependency fast-path logic.
 
-## T-04: Never APPROVE without verified patches
+## T-04: Never APPROVE without verified patches [COMPLETED - PR #328]
 
 - **branch:** `fix/approve-requires-grounding` | **commit:** `fix(review): downgrade APPROVE when grounding is skipped`
 - **files:** `src/webhook_agent/tools/github_tools.py`, `src/webhook_agent/review/review_enforcer.py`, `src/webhook_agent/constants.py`, `tests/unit/review/test_review_tool_validation.py`

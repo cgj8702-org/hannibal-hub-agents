@@ -27,8 +27,8 @@ DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/we
 # --- Operational Policy Defaults ---
 # Fail open / allowed by default: automated mutations enabled out of the box.
 DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"
-# Fail closed: citation grounding is measured (logged) first and only enforced once its
-# false-positive rate is known. See review/grounding.py.
+# Grounding is measured-only by default (D2): citation grounding is measured (logged) first
+# and only enforced once STRICT_REVIEW_GROUNDING=1. See review/grounding.py.
 DEFAULT_STRICT_REVIEW_GROUNDING = "0"
 # Hold automatic reviews until the PR head commit has fully green CI (silent skip on failure).
 # Set REVIEW_WAIT_FOR_CI=0 to restore review-immediately behaviour. See review/ci_gate.py.

@@ -882,7 +882,11 @@ class TestReviewDismissalOrdering:
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
-        ctx.state = {"gh_client": mock_gh, "repo_full_name": "owner/repo"}
+        ctx.state = {
+            "gh_client": mock_gh,
+            "repo_full_name": "owner/repo",
+            "skip_investigation_gate": True,
+        }
 
         mock_prior = MagicMock()
         mock_prior.id = 101
@@ -899,6 +903,10 @@ class TestReviewDismissalOrdering:
         mock_pr.merged = False
         mock_pr.create_review.return_value = mock_new
         mock_pr.get_reviews.return_value = [mock_prior, mock_new]
+        mock_file = MagicMock()
+        mock_file.filename = "src/core.py"
+        mock_file.patch = "@@ -1,10 +1,11 @@\n context\n+new line\n"
+        mock_pr.get_files.return_value = [mock_file]
 
         valid_body = (
             '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '

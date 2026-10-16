@@ -17,8 +17,17 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 @pytest.fixture
 def mock_ctx():
     ctx = MagicMock(spec=Context)
+    gh = MagicMock()
+    repo = MagicMock()
+    pr = MagicMock()
+    f = MagicMock()
+    f.filename = "README.md"
+    f.patch = "@@ -1,1 +1,2 @@\n existing\n+new\n"
+    pr.get_files.return_value = [f]
+    repo.get_pull.return_value = pr
+    gh.get_repo.return_value = repo
     ctx.state = {
-        "gh_client": MagicMock(),
+        "gh_client": gh,
         "repo_full_name": "owner/repo",
         "formal_review_eligible": True,
     }
@@ -573,6 +582,80 @@ def test_strict_mode_skipped_grounding_downgrades_approve_to_comment(
     assert mock_submit.called
     _submitted_pr, _submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
     assert submitted_event == "COMMENT"
+    assert "downgrading verdict from APPROVE to COMMENT" in caplog.text
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_non_strict_mode_skipped_grounding_downgrades_approve_to_comment(
+    mock_submit, monkeypatch, caplog
+):
+    """Non-strict mode (default) review with skipped grounding must also downgrade APPROVE to COMMENT."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"assets/logo.png": None})
+    payload = {
+        "executive_summary": "Attempting approval on binary-only PR in non-strict mode",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+    }
+    with caplog.at_level(logging.WARNING):
+        res = review(ctx, 8109, json.dumps(payload), "APPROVE")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, _submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "COMMENT"
+    assert json.loads(_submitted_body).get("verdict") == "COMMENT"
+    assert "downgrading verdict from APPROVE to COMMENT" in caplog.text
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_approve_with_usable_patches_is_unchanged(mock_submit, monkeypatch):
+    """APPROVE with usable patches is retained as APPROVE."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    payload = {
+        "executive_summary": "Clean PR with valid patches",
+        "confidence": 8,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+        "verdict": "APPROVE",
+    }
+    res = review(ctx, 8110, json.dumps(payload), "APPROVE")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, _submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "APPROVE"
+    assert json.loads(_submitted_body).get("verdict") == "APPROVE"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_retrieval_failure_downgrades_approve_to_comment(mock_submit, monkeypatch, caplog):
+    """When patch retrieval fails, APPROVE is downgraded to COMMENT."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({}, files_error=Exception("GitHub API 500 error"))
+    payload = {
+        "executive_summary": "Attempting approval when files API fails",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+        "verdict": "APPROVE",
+    }
+    with caplog.at_level(logging.WARNING):
+        res = review(ctx, 8111, json.dumps(payload), "APPROVE")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, _submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "COMMENT"
+    assert json.loads(_submitted_body).get("verdict") == "COMMENT"
     assert "downgrading verdict from APPROVE to COMMENT" in caplog.text
 
 
