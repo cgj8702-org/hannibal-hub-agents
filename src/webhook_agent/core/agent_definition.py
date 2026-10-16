@@ -299,13 +299,20 @@ class WebhookAgent:
     def _normalize_model_name(model_name: str) -> str:
         return model_name.replace("models/", "").strip().lower()
 
-    def _advance_model_chain(self, error: Exception | None = None) -> str | None:
+    def _advance_model_chain(
+        self,
+        error: Exception | None = None,
+        estimated_tokens: int | None = None,
+    ) -> str | None:
         """Cascade once to the next untried model, or return None when exhausted."""
         failed_model = self._normalize_model_name(self._current_model_name)
         self._attempted_model_names.add(failed_model)
         _DEPLETED_MODEL_REGISTRY.mark_depleted(self._current_model_name, error=error)
 
-        full_chain = get_model_chain()
+        if estimated_tokens is not None:
+            full_chain = get_model_chain(estimated_tokens=estimated_tokens)
+        else:
+            full_chain = get_model_chain()
         available = [
             model
             for model in full_chain

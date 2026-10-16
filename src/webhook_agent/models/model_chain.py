@@ -36,52 +36,79 @@ __all__ = [
 # Chain Resolution & Event Selection
 # ---------------------------------------------------------------------------
 
+FREE_TIER_DEFAULT_CHAIN: list[str] = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+]
 
-def get_model_chain() -> list[str]:
-    """Build ordered list of fallback models sorted by capacity and tier.
+PAID_TIER_DEFAULT_CHAIN: list[str] = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+]
+
+# Gemma Free Tier input tokens ceiling (hard quota: 16k TPM; 14k gives a safety buffer)
+GEMMA_FREE_TIER_MAX_INPUT_TOKENS = 14000
+
+
+def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
+    """Build ordered list of fallback models sorted by capacity, TPM bandwidth, and tier.
 
     Filters out models currently marked as depleted in _DEPLETED_MODEL_REGISTRY.
     See docs/MODEL_CHAIN.md for the canonical reference.
 
-    Free Tier Chain:
+    Args:
+        estimated_tokens: Optional token estimate of the prompt/payload.
+            If provided and > GEMMA_FREE_TIER_MAX_INPUT_TOKENS (14k tokens),
+            Gemma models are excluded to prevent 429 RESOURCE_EXHAUSTED TPM blocks.
+
+    Free Tier Chain (250k TPM High-Bandwidth):
         1. gemini-3.5-flash-lite (500 RPD / 250k TPM)
         2. gemini-3.1-flash-lite (500 RPD / 250k TPM)
-        3. gemini-2.5-flash (20 RPD / 250k TPM)
-        4. gemini-2.5-flash-lite (20 RPD / 250k TPM)
-        5. gemma-4-31b-it (14,400 RPD / 16k TPM)
-        6. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM)
+        3. gemini-3.8-flash (20 RPD / 250k TPM)
+        4. gemini-3.7-flash (20 RPD / 250k TPM)
+        5. gemini-3.6-flash (20 RPD / 250k TPM)
+        6. gemini-3.5-flash (20 RPD / 250k TPM)
+        7. gemini-2.5-flash-lite (20 RPD / 250k TPM)
+        8. gemini-2.5-flash (20 RPD / 250k TPM)
+        9. gemma-4-31b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
+        10. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
 
     Paid Tier Chain:
         1. gemini-3.8-flash (10,000 RPD / 2M TPM)
         2. gemini-3.7-flash (10,000 RPD / 2M TPM)
         3. gemini-3.6-flash (10,000 RPD / 2M TPM)
-        4. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
-        5. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
-        6. gemini-2.5-flash (10,000 RPD / 1M TPM)
-        7. gemini-2.5-flash-lite (1,000,000 RPD / 4M TPM)
+        4. gemini-3.5-flash (10,000 RPD / 2M TPM)
+        5. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
+        6. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
+        7. gemini-2.5-flash (10,000 RPD / 1M TPM)
+        8. gemini-2.5-flash-lite (1,000,000 RPD / 4M TPM)
     """
     active_tier = _resolve_tier()
     if active_tier == "paid":
         default_primary = "gemini-3.8-flash"
-        default_chain = [
-            default_primary,
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-        ]
+        default_chain = list(PAID_TIER_DEFAULT_CHAIN)
     else:
         default_primary = "gemini-3.5-flash-lite"
-        default_chain = [
-            default_primary,
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemma-4-31b-it",
-            "gemma-4-26b-a4b-it",
-        ]
+        default_chain = list(FREE_TIER_DEFAULT_CHAIN)
+        if estimated_tokens is None or estimated_tokens <= GEMMA_FREE_TIER_MAX_INPUT_TOKENS:
+            default_chain.extend(
+                [
+                    os.environ.get("GEMMA_HEAVY_MODEL", "gemma-4-31b-it"),
+                    os.environ.get("GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"),
+                ]
+            )
 
     # Support PRIMARY_MODEL with fallback to legacy GEMMA_MODEL
     raw_primary = os.environ.get(
@@ -95,9 +122,23 @@ def get_model_chain() -> list[str]:
 
     chain = [primary] + [m for m in default_chain if m != primary]
     deduped = list(dict.fromkeys(chain))
+
+    # Strict token-aware filter: if on free tier and payload > 14k tokens, never include Gemma
+    if (
+        active_tier == "free"
+        and estimated_tokens is not None
+        and estimated_tokens > GEMMA_FREE_TIER_MAX_INPUT_TOKENS
+    ):
+        deduped = [m for m in deduped if "gemma" not in m.lower()]
+
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
     final_chain = available if available else deduped
-    logger.debug("Resolved %s model chain: %s", active_tier, final_chain)
+    logger.debug(
+        "Resolved %s model chain (tokens=%s): %s",
+        active_tier,
+        estimated_tokens,
+        final_chain,
+    )
     return final_chain
 
 
@@ -227,7 +268,7 @@ def _is_transient_error(error: Exception) -> bool:
     """Check if an error is transient and should be retried.
 
     Transient errors include server unavailability (503), rate limiting (429),
-    RESOURCE_EXHAUSTED errors, and other temporary issues.
+    RESOURCE_EXHAUSTED errors, TPM/quota limit fast-fails, and other temporary issues.
     """
     if isinstance(error, GenAIServerError):
         error_code = getattr(error, "code", None)
@@ -241,8 +282,12 @@ def _is_transient_error(error: Exception) -> bool:
         or "high demand" in err_str
         or "resource_exhausted" in err_str
         or "resourceexhausted" in err_type
+        or "tpm limit" in err_str
+        or "quota" in err_str
+        or "rate limit" in err_str
         or "clienterror" in err_type
         or "servererror" in err_type
+        or "ratelimitexceedederror" in err_type
     )
 
 

@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("webhook_agent.core.execution")
 
 _MAX_RETRIES = int(
-    os.environ.get("PRIMARY_MODEL_MAX_RETRIES") or os.environ.get("GEMMA_MODEL_MAX_RETRIES") or "5"
+    os.environ.get("PRIMARY_MODEL_MAX_RETRIES") or os.environ.get("GEMMA_MODEL_MAX_RETRIES") or "10"
 )
 
 
@@ -566,15 +566,21 @@ def execute_agent_event(
                 last_error = e
                 if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                     rate_details = extract_rate_limit_details(e)
-                    next_model = agent._advance_model_chain(error=e)
+                    est_prompt_tokens = (len(base_prompt_text) // 4) if base_prompt_text else None
+                    next_model = agent._advance_model_chain(
+                        error=e, estimated_tokens=est_prompt_tokens
+                    )
                     if next_model is None:
                         break
                     err_s = str(e).lower()
-                    is_503_high_demand = (
-                        "503" in err_s or "unavailable" in err_s or "high demand" in err_s
+                    is_instant_failover = (
+                        "503" in err_s
+                        or "unavailable" in err_s
+                        or "high demand" in err_s
+                        or "tpm limit" in err_s
                     )
                     parsed_retry = rate_details.get("retry_after_seconds")
-                    if is_503_high_demand:
+                    if is_instant_failover:
                         retry_delay = 0.5
                     elif parsed_retry is not None and parsed_retry > 0:
                         retry_delay = min(float(parsed_retry) + 0.5, 65.0)

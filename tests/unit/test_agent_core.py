@@ -205,14 +205,14 @@ class TestIsTransientError:
 
 class TestWebhookAgentModelChain:
     def test_get_model_chain_orders_tpm_descending(self):
-        """get_model_chain should order models by capacity without duplicates and omit 3.6 on Free Tier."""
+        """get_model_chain should order models by capacity without duplicates and include high-bandwidth 250k TPM models on Free Tier."""
         from webhook_agent.models.model_chain import get_model_chain
 
         free_chain = get_model_chain()
         assert len(free_chain) == len(set(free_chain))
         assert "gemini-3.5-flash-lite" in free_chain
-        assert "gemini-3.6-flash" not in free_chain
-        assert "gemini-3.8-flash" not in free_chain
+        assert "gemini-3.8-flash" in free_chain
+        assert "gemini-3.6-flash" in free_chain
         assert "gemma-4-31b-it" in free_chain
         assert "gemma-4-26b-a4b-it" in free_chain
 
