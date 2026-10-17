@@ -461,6 +461,41 @@ class TestShouldProcessEvent:
             is True
         )
 
+    def test_pr_metadata_events_suppressed(self):
+        """PR metadata events (labeled, assigned, milestoned, etc.) must be suppressed."""
+        for act in (
+            "labeled",
+            "unlabeled",
+            "assigned",
+            "unassigned",
+            "milestoned",
+            "demilestoned",
+            "review_request_removed",
+            "auto_merge_enabled",
+            "auto_merge_disabled",
+            "locked",
+            "unlocked",
+            "converted_to_draft",
+            "dequeued",
+            "enqueued",
+        ):
+            ev = _make_normalized("pull_request", action=act)
+            assert self.processor.should_process_event(ev) is False, (
+                f"Action {act} should be suppressed"
+            )
+
+        # Also verify when canonical is set explicitly
+        ev_canonical = {"canonical": "pull_request.labeled", "delivery_id": "test-labeled-1"}
+        assert self.processor.should_process_event(ev_canonical) is False
+
+    def test_pr_code_and_review_events_allowed(self):
+        """PR code change and review events must not be suppressed."""
+        for act in ("opened", "reopened", "synchronize", "ready_for_review"):
+            ev = _make_normalized("pull_request", action=act)
+            assert self.processor.should_process_event(ev) is True, (
+                f"Action {act} should be allowed"
+            )
+
     def test_installation_events_ignored(self):
         """Installation lifecycle events should be filtered early."""
         assert (

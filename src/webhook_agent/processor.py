@@ -75,6 +75,25 @@ from .webhook_types import ActionResult
 logger = logging.getLogger("webhook_agent.processor")
 core_logger = logging.getLogger("webhook_agent.core")
 
+SUPPRESSED_PR_METADATA_ACTIONS: frozenset[str] = frozenset(
+    {
+        "assigned",
+        "auto_merge_disabled",
+        "auto_merge_enabled",
+        "converted_to_draft",
+        "demilestoned",
+        "dequeued",
+        "enqueued",
+        "labeled",
+        "locked",
+        "milestoned",
+        "review_request_removed",
+        "unassigned",
+        "unlabeled",
+        "unlocked",
+    }
+)
+
 
 def _env_int(name: str, default: int) -> int:
     """Read an integer env var, treating empty/unset as the default.
@@ -96,6 +115,7 @@ def _env_int(name: str, default: int) -> int:
 # Re-exported module helpers (extracted to pr_context.py, fast_path.py, and review/comment_poster.py)
 # Preserved for backwards compatibility with existing consumers and unit tests.
 __all__ = [
+    "SUPPRESSED_PR_METADATA_ACTIONS",
     "AgentCore",
     "WebhookProcessor",
     "_add_eyes_reaction",
@@ -486,6 +506,25 @@ class WebhookProcessor:
             return False
 
         if canonical.startswith("pull_request_review_thread."):
+            return False
+
+        # Suppress non-code PR metadata noise (labels, assignees, milestones, locks)
+        # to prevent unsolicited conversational comments and review noise.
+        if (
+            action in SUPPRESSED_PR_METADATA_ACTIONS
+            and (
+                event_name in ("pull_request", "pr")
+                or canonical.startswith(("pull_request.", "pr."))
+            )
+        ) or (
+            canonical.startswith(("pull_request.", "pr."))
+            and canonical.split(".", 1)[1] in SUPPRESSED_PR_METADATA_ACTIONS
+        ):
+            logger.debug(
+                "Suppressing PR metadata event '%s' (action=%s) to prevent review noise",
+                canonical,
+                action,
+            )
             return False
 
         # Ignore automated CI infrastructure noise, installation lifecycle events, and review thread state changes
