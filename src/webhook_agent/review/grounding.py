@@ -491,19 +491,23 @@ def _check_one(
             )
         )
     else:
-        code_quote = " ".join(_BACKTICK_RE.findall(finding.evidence or ""))
-        if len(_norm_evidence(code_quote)) > 24 and diff_text:
-            norm_code = _norm_evidence(code_quote)
+        raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
+        code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
+        if diff_text:
             norm_diff = _norm_evidence(diff_text)
-            if norm_code not in norm_diff:
-                issues.append(
-                    _issue(
-                        "hard",
-                        "evidence_not_in_diff",
-                        finding,
-                        f"{finding.kind} on '{path}:{finding.line}' evidence text does not appear in the diff.",
-                    )
-                )
+            for quote in code_quotes:
+                if len(_norm_evidence(quote)) > 24:
+                    norm_code = _norm_evidence(quote)
+                    if norm_code not in norm_diff:
+                        issues.append(
+                            _issue(
+                                "hard",
+                                "evidence_not_in_diff",
+                                finding,
+                                f"{finding.kind} on '{path}:{finding.line}' evidence text "
+                                f"'{quote}' does not appear in the diff.",
+                            )
+                        )
 
     # Behavioral invariant check:
     # A "Verified Invariant" asserting a behavior (not a static fact or line quote/test citation)
@@ -522,9 +526,12 @@ def _check_one(
             "gracefully",
         )
         is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
-        quotes = [q for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
+        raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
+        code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
         norm_diff = _norm_evidence(diff_text)
-        has_diff_quote = bool(quotes) and all(_norm_evidence(q) in norm_diff for q in quotes)
+        has_diff_quote = bool(code_quotes) and all(
+            _norm_evidence(q) in norm_diff for q in code_quotes
+        )
         has_test = re.search(r"\btest_\w+", ev) is not None
         has_concrete_quote_or_test = has_diff_quote or has_test
         is_static_fact = (
@@ -607,6 +614,31 @@ _PATH_RE = re.compile(
     r"|[A-Za-z0-9_.-]+\.([A-Za-z0-9]{1,5})"
     r"(?![A-Za-z0-9_.-])"
 )
+_INVARIANT_CITATION_RE = re.compile(
+    r"(?:^|[\s(])`?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9_\-]+):(\d+)(?:[-,]\d+)*`?"
+)
+
+
+def _is_path_citation(candidate: str, finding_path: str = "") -> bool:
+    """Return True if a backticked candidate string represents a file/line citation rather than code."""
+    c = candidate.strip()
+    if not c or c.startswith(("self.", "cls.")):
+        return False
+    if _INVARIANT_CITATION_RE.search(c):
+        return True
+    if " " in c or "(" in c or ")" in c or "=" in c or "\n" in c:
+        return False
+    if finding_path and (
+        c == finding_path or finding_path.endswith("/" + c) or c.endswith("/" + finding_path)
+    ):
+        return True
+    if "/" in c:
+        parts = c.split("/")
+        last_ext = (parts[-1].rsplit(".", 1)[-1] if "." in parts[-1] else "").lower()
+        if last_ext in _KNOWN_EXTENSIONS:
+            return True
+    parts = c.rsplit(".", 1)
+    return len(parts) == 2 and parts[1].lower() in _KNOWN_EXTENSIONS
 
 
 def extract_identifiers(text: str) -> set[str]:
@@ -774,11 +806,6 @@ def ngram_containment(text_a: str, text_b: str, n: int = 5) -> float:
         return 0.0
     intersection = ngrams_a & ngrams_b
     return round(len(intersection) / len(ngrams_b), 4)
-
-
-_INVARIANT_CITATION_RE = re.compile(
-    r"(?:^|[\s(])`?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9_\-]+):(\d+)(?:[-,]\d+)*`?"
-)
 
 
 def _citation_finding(kind: Kind, item: Any) -> Finding:
