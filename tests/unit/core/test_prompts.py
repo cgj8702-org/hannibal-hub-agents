@@ -96,6 +96,15 @@ def test_system_instruction_clause_group_2_pruned() -> None:
     assert "NEVER echo existing code lines unchanged into `suggested_fix`" not in SYSTEM_INSTRUCTION
 
 
+def test_system_instruction_contains_adaptive_investigation_directive() -> None:
+    """SYSTEM_INSTRUCTION must explicitly direct auditor on adaptive investigation and tool usage."""
+    assert "Investigation & Tools (Adaptive Exploration)" in SYSTEM_INSTRUCTION
+    assert "Fast-Path Single-Turn" in SYSTEM_INSTRUCTION
+    assert "Proactive Multi-Turn Investigation" in SYSTEM_INSTRUCTION
+    assert "search_files" in SYSTEM_INSTRUCTION
+    assert "read_file" in SYSTEM_INSTRUCTION
+
+
 def test_build_user_message_pull_request_opened() -> None:
     """Test build_user_message for PR opened event."""
     event_data: dict[str, Any] = {
@@ -124,7 +133,7 @@ def test_build_user_message_pull_request_opened() -> None:
     assert "Canonical Event: pull_request.opened" in text
     assert "Sender: developer" in text
     assert "Full PR Diff (Accumulated State):" in text
-    assert "ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT" in text
+    assert "ACTION DIRECTIVE: ADAPTIVE FORMAL AUDIT" in text
 
 
 def test_build_user_message_conversational_comment() -> None:

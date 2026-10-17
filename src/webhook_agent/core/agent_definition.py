@@ -239,8 +239,8 @@ class WebhookAgent:
             ],
         )
 
-        self._iteration_budget_plugin = IterationBudgetPlugin(max_turns=6, max_tool_calls=15)
-        self._guardrails_plugin = GuardrailsPlugin(failure_threshold=3, no_progress_window=3)
+        self._iteration_budget_plugin = IterationBudgetPlugin(max_turns=10, max_tool_calls=25)
+        self._guardrails_plugin = GuardrailsPlugin(failure_threshold=3, no_progress_window=4)
         self._history_pruning_plugin = WebhookHistoryPruningPlugin(max_events=12)
         self._tool_pruning_plugin = ToolOutputPruningPlugin()
 
