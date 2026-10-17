@@ -13,7 +13,7 @@
 - **Part 2** is the diagnosis in one page.
 - **Part 3** is the evidence — every number here was measured, not estimated.
 - **Part 4** is the work, sequenced. Every item has a stable ID (`B1`, `C2`, …) so you can refer to them in commits and PRs.
-- **Part 5** is the set of decisions only you can make. Nothing in Part 4 that depends on Part 5 should start before its decision is recorded.
+- **Part 5** is the set of decisions only you can make, each ID'd (`P1`…`P7`). Nothing in Part 4 that depends on a `P`-decision should start before that decision is recorded.
 - **Parts 6–7** are loose ends and the guardrails that stop this recurring.
 
 ---
@@ -249,15 +249,15 @@ If you keep the memory service for future cross-PR learning, its key must includ
 def _key(self, app_name: str, session_id: str) -> str:
     return f"{app_name}:{session_id}"
 ```
-If `B5` was done, this is moot. **Do not keep it "just in case"** — see Part 5.
+If `B5` was done, this is moot. **Do not keep it "just in case"** — the keep-or-delete call is decision **P5** (Part 5); record it there rather than deferring.
 
 ---
 
 ## Phase 3 — Decide the dead features (maintainer's call)
 
-Each of these is a **policy decision**, not a cleanup task. Nothing here gets deleted until the decision is recorded in Part 5.
+Each of these is a **policy decision**, not a cleanup task. Nothing here gets deleted until the matching `P`-decision is recorded in Part 5.
 
-### D1. Circuit breaker: delete or wire up?
+### D1. Circuit breaker: delete or wire up? → decision **P4**
 - **File:** `src/webhook_agent/state/circuit_breaker.py` — **270 lines**
 - **Finding:** `CircuitBreaker` is **never instantiated anywhere in the repo**. Its only references are an import and an `__all__` entry in `state/__init__.py`. `call_async()` (53 lines) has zero callers. Nothing imports `webhook_agent.state` as a package; the three live consumers import `state.review_checkpoint` / `state.review_idempotency` directly.
 - **Two honest options:**
@@ -265,7 +265,7 @@ Each of these is a **policy decision**, not a cleanup task. Nothing here gets de
   - **Wire it up.** If you actually want circuit breaking around GitHub API calls, instantiate it and route calls through `call_async`. That's real work and it's a *feature*, not cleanup.
 - **Do not leave it as-is.** It's a docstring promising resilience you don't have — the exact thing that makes the repo untrustworthy to read.
 
-### D2. Thread-resolution tools: delete or gate?
+### D2. Thread-resolution tools: delete or gate? → decision **P2**
 - **Files:** `tools/github_tools.py:482` `resolve_review_thread` (~29 lines), `:513` `resolve_bot_review_threads` (39 lines)
 - **Finding:** exported in `tools/__init__.py` (`__all__` + lazy-import set), registered on **no agent**, called by nothing but `tests/unit/github/test_thread_resolver.py`.
 - **Options:**
@@ -277,7 +277,7 @@ Each of these is a **policy decision**, not a cleanup task. Nothing here gets de
 - `build_repo_profile_context(..., memory_bank_heuristics=None)` — never supplied; the only call site (`prompts.py:554`) passes just the repo name. Either delete the parameter or actually populate it.
 - `add_events_to_memory(..., session_id=None)` — accepted, written into metadata, never used for scoping. Moot if `B5` is done.
 
-### D4. ⚠️ Investigate: two of three scorecard dimensions appear unwired
+### D4. ⚠️ Investigate: two of three scorecard dimensions appear unwired → decision **P6**
 - **File:** `src/webhook_agent/review/review_enforcer.py`
 - **Finding:** three dimension predicates — `is_contract_dimension` (`:34`), `is_security_dimension` (`:39`), `is_test_coverage_dimension` (`:45`). Only **`is_contract_dimension` is exported and used**. The other two have zero references in `src/` and are exercised only by their own tests. All three have near-identical tests (0.98 structural similarity).
 - **This may be a real bug, not dead code:** the scorecard floor may only be enforcing one of the three dimensions it was designed for. **Investigate before deleting.**
@@ -576,7 +576,7 @@ Eight small PRs, in order. Each independently reviewable and revertible.
 | 3 | `B4` delete orphaned `audit_canary` module + its test | none | −40 src, −test |
 | 4 | `B5` delete abandoned memory subsystem | none | −189 src, −83 test |
 | 5 | `C1`–`C3` session scoping fix (test first) | low | +test, 2 lines |
-| 6 | `D1`–`D3`, `D5` decisions applied | low–medium | depends on Part 5 |
+| 6 | `D1`–`D3`, `D5` decisions applied | low–medium | depends on **P1**–**P5** |
 | 7 | `E1`–`E6` the policy layer | medium | ~+120, net negative |
 | 8 | `F1`–`F2`, `H1`–`H2` rename + docs | none | — |
 
