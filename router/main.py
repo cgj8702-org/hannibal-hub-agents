@@ -1,25 +1,85 @@
+"""GitHub webhook ingress: verify, filter, normalize, and publish to Pub/Sub.
+
+Deployed as a Cloud Function (source upload + ``requirements.txt``), entry point
+``github_webhook_router``. This is the trust boundary: the HMAC signature is verified over
+the raw body before anything else touches it.
+"""
+
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json
 import logging
 import os
+from typing import Any
 
 import functions_framework
 from google.cloud import pubsub_v1
 
 logger = logging.getLogger(__name__)
 
-# Initialize the Pub/Sub client globally to reuse it across requests
-project_id = os.environ.get("PUBSUB_PROJECT")
-topic_id = os.environ.get("PUBSUB_TOPIC")
-publisher = pubsub_v1.PublisherClient()
-topic_path = publisher.topic_path(project_id, topic_id)
+# Events GitHub delivers to every App regardless of subscription settings. They cannot be
+# unsubscribed, so dropping them here is the only way to avoid a Pub/Sub round trip the
+# worker would discard anyway. Kept as a named constant so tests can assert it stays a
+# strict subset of the worker's suppression list (see src/webhook_agent/processor.py).
+AUTO_DELIVERED_INSTALLATION_EVENTS: frozenset[str] = frozenset(
+    {
+        "installation",
+        "installation_repositories",
+        "installation_target",
+    }
+)
 
-# The secret token you configured in your GitHub App settings
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
+# Top-level keys that appear only on repo-scoped deliveries. Every installation lifecycle
+# payload carries "installation" *and* none of these; every repo event carries "repository".
+# This is what lets us classify from the signed body instead of the unsigned header.
+_REPO_SCOPED_KEYS: frozenset[str] = frozenset(
+    {
+        "repository",
+        "issue",
+        "pull_request",
+        "comment",
+        "review",
+    }
+)
+
+
+def _get_required_env(name: str) -> str:
+    """Return a required environment variable, or fail the cold start loudly.
+
+    Validating at import makes a misconfigured revision fail its startup probe rather than
+    silently rejecting every webhook with 401 forever.
+    """
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+PUBSUB_PROJECT = _get_required_env("PUBSUB_PROJECT")
+PUBSUB_TOPIC = _get_required_env("PUBSUB_TOPIC")
+WEBHOOK_SECRET = _get_required_env("WEBHOOK_SECRET")
+
+_publisher: pubsub_v1.PublisherClient | None = None
+
+
+def _get_publisher() -> pubsub_v1.PublisherClient:
+    """Return the shared Pub/Sub client, constructing it on first use.
+
+    Constructing at import resolves credentials at import, which makes the module
+    unimportable without GCP credentials (so it cannot be unit tested) and turns a
+    credential problem into an import-time crash. One client is still reused across warm
+    invocations.
+    """
+    global _publisher
+    if _publisher is None:
+        _publisher = pubsub_v1.PublisherClient()
+    return _publisher
 
 
 def verify_signature(payload_body: bytes, signature_header: str) -> bool:
+    """Verify GitHub's HMAC-SHA256 signature over the raw request body."""
     if not signature_header:
         return False
     if not WEBHOOK_SECRET:
@@ -35,54 +95,131 @@ def verify_signature(payload_body: bytes, signature_header: str) -> bool:
     return hmac.compare_digest(mac.hexdigest(), signature)
 
 
-def normalize_payload(event_name: str, raw_payload: dict, delivery_id: str) -> dict:
-    """Normalize incoming webhook payload into the project's consistent event envelope."""
+def _body_event_class(body: dict[str, Any]) -> str:
+    """Classify a delivery from its *signed* body.
+
+    Returns ``"ping"``, ``"installation"``, or ``"unknown"``. The body cannot yield the full
+    event name -- GitHub puts that in the unsigned ``X-GitHub-Event`` header, and several
+    payloads share top-level keys -- but it can decide the two cases this router acts on.
+    """
+    # ping is the only payload carrying `zen`, and the only one with no `action`.
+    if "zen" in body and "action" not in body:
+        return "ping"
+    # Installation lifecycle deliveries are the only ones carrying `installation` without a
+    # repo-scoped object. `installation` alone is not a discriminator: every App delivery
+    # includes it.
+    if "installation" in body and _REPO_SCOPED_KEYS.isdisjoint(body):
+        return "installation"
+    return "unknown"
+
+
+def normalize_payload(
+    event_name: str,
+    raw_payload: dict[str, Any],
+    delivery_id: str,
+) -> dict[str, Any]:
+    """Normalize a delivery into the envelope the worker consumes.
+
+    ``installation_id`` is flattened to a top-level int because the worker reads
+    ``event_data["installation_id"]``; sending only the nested ``installation`` object left
+    that key permanently ``None``.
+    """
+    installation = raw_payload.get("installation")
     return {
         "delivery_id": delivery_id,
         "event_name": event_name,
         "action": raw_payload.get("action"),
         "sender": raw_payload.get("sender"),
-        "installation": raw_payload.get("installation"),
+        "installation": installation,
+        "installation_id": installation.get("id") if isinstance(installation, dict) else None,
         "repository": raw_payload.get("repository"),
         "raw_payload": raw_payload,
     }
 
 
+def _attribute(value: Any) -> str:
+    """Render a Pub/Sub attribute.
+
+    Attribute values must be non-empty strings, and ``None`` must not become the literal
+    ``"None"``.
+    """
+    return "" if value is None else str(value)
+
+
+def _publish(normalized: dict[str, Any], delivery_id: str, event_type: str) -> None:
+    """Publish the normalized envelope, with a bounded wait."""
+    publisher = _get_publisher()
+    if PUBSUB_TOPIC.startswith("projects/"):
+        topic = PUBSUB_TOPIC
+    else:
+        topic = publisher.topic_path(PUBSUB_PROJECT, PUBSUB_TOPIC)
+
+    repository = normalized.get("repository")
+    repository_full_name = repository.get("full_name", "") if isinstance(repository, dict) else ""
+
+    future = publisher.publish(
+        topic,
+        data=json.dumps(normalized).encode("utf-8"),
+        delivery_id=delivery_id,
+        event_name=event_type,
+        action=_attribute(normalized.get("action")),
+        repository=_attribute(repository_full_name),
+        installation_id=_attribute(normalized.get("installation_id")),
+    )
+    # A client-side timeout does not cancel an in-flight publish. If it lands anyway, the
+    # worker's delivery_id dedup cache absorbs GitHub's retry.
+    future.result(timeout=5.0)
+
+
 @functions_framework.http
-def github_webhook_router(request):
-    # Reject anything that isn't a POST request from GitHub
+def github_webhook_router(request: Any) -> tuple[str | dict[str, Any], int]:
+    """Cloud Function entry point."""
+    if request.method == "GET":
+        return {"status": "healthy"}, 200
     if request.method != "POST":
         return "Method Not Allowed", 405
 
-    signature_header = request.headers.get("X-Hub-Signature-256")
+    payload_body = request.get_data()
+    signature_header = request.headers.get("X-Hub-Signature-256") or ""
     event_type = request.headers.get("X-GitHub-Event", "unknown")
     delivery_id = request.headers.get("X-GitHub-Delivery", "unknown")
-    payload_body = request.get_data()
 
-    # 1. Verify that the webhook actually came from GitHub
+    # 1. Verify the signature over the raw bytes before anything else touches them.
     if not verify_signature(payload_body, signature_header):
         return "Unauthorized: Signature mismatch", 401
 
+    # 2. Strict decode + parse. A malformed body is the caller's fault, so it is a 400:
+    #    a 5xx would ask GitHub to redeliver a request that can never succeed.
     try:
-        # 2. Parse and Normalize
-        raw_payload = json.loads(payload_body.decode("utf-8", errors="replace"))
-        normalized = normalize_payload(event_type, raw_payload, delivery_id)
+        body = json.loads(payload_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "Bad Request: malformed JSON body", 400
+    if not isinstance(body, dict):
+        return "Bad Request: payload root must be an object", 400
 
-        # Convert normalized dict to bytes for Pub/Sub
-        data_bytes = json.dumps(normalized).encode("utf-8")
+    # 3. The body is signed; the header is not. Decide from the body, and reject a header
+    #    that positively disagrees rather than trusting it.
+    body_class = _body_event_class(body)
 
-        # 3. Publish to Pub/Sub with full metadata for filtering/logging
-        future = publisher.publish(
-            topic_path,
-            data=data_bytes,
-            delivery_id=delivery_id,
-            event_name=str(event_type),
-            action=str(normalized["action"] or ""),
-        )
-        future.result()
-    except Exception as e:
-        logger.exception("Error processing or publishing to Pub/Sub: %s", e)
+    if body_class == "ping":
+        return {"msg": "pong"}, 200
+
+    if body_class == "installation":
+        if event_type not in AUTO_DELIVERED_INSTALLATION_EVENTS and event_type != "unknown":
+            return "Bad Request: event type does not match payload", 400
+        return "Event acknowledged and dropped by perimeter filter", 202
+
+    if event_type in AUTO_DELIVERED_INSTALLATION_EVENTS:
+        # The header claims an installation event, but the body is repo-scoped.
+        return "Bad Request: event type does not match payload", 400
+
+    # 4. Publish.
+    normalized = normalize_payload(event_type, body, delivery_id)
+    try:
+        _publish(normalized, delivery_id, event_type)
+    except Exception:
+        logger.exception("Publish failed (delivery=%s event=%s)", delivery_id, event_type)
         return "Internal Server Error", 500
 
-    # Respond to GitHub immediately
     return "Event normalized and queued successfully", 202
+
