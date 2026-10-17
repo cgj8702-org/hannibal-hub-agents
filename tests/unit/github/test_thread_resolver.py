@@ -20,7 +20,6 @@ from webhook_agent.github.thread_resolver import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_extract_token_from_gh() -> None:
     """Verify token extraction across token strings, Github objects, and PullRequests."""
     # 1. Plain string token
@@ -43,7 +42,6 @@ def test_extract_token_from_gh() -> None:
     assert extract_token_from_gh(12345) is None
 
 
-@pytest.mark.unit
 def test_fetch_pr_review_threads_success() -> None:
     """Verify fetching and parsing GraphQL review threads."""
     sample_response = {
@@ -116,7 +114,6 @@ def test_fetch_pr_review_threads_success() -> None:
     assert call_args.kwargs["headers"]["Authorization"] == "Bearer token123"
 
 
-@pytest.mark.unit
 def test_fetch_pr_review_threads_graphql_errors() -> None:
     """Verify GraphQL error responses are handled gracefully."""
     mock_resp = MagicMock()
@@ -129,7 +126,6 @@ def test_fetch_pr_review_threads_graphql_errors() -> None:
     assert threads == []
 
 
-@pytest.mark.unit
 def test_fetch_pr_review_threads_http_error() -> None:
     """Verify HTTP client exceptions return empty list without crashing."""
     with patch("httpx.Client.post", side_effect=httpx.ConnectTimeout("Network timed out")):
@@ -138,7 +134,6 @@ def test_fetch_pr_review_threads_http_error() -> None:
     assert threads == []
 
 
-@pytest.mark.unit
 def test_resolve_review_thread_success() -> None:
     """Verify resolving review thread via GraphQL mutation."""
     sample_response = {
@@ -162,7 +157,6 @@ def test_resolve_review_thread_success() -> None:
     assert success is True
 
 
-@pytest.mark.unit
 def test_resolve_review_thread_failure() -> None:
     """Verify resolve_review_thread returns False on GraphQL error."""
     mock_resp = MagicMock()
@@ -175,7 +169,6 @@ def test_resolve_review_thread_failure() -> None:
     assert success is False
 
 
-@pytest.mark.unit
 def test_auto_resolve_coderabbit_threads() -> None:
     """Verify auto_resolve_coderabbit_threads targets only open bot threads."""
     th_coderabbit_open = ReviewThread(
@@ -242,7 +235,6 @@ def test_auto_resolve_coderabbit_threads() -> None:
     )
 
 
-@pytest.mark.unit
 def test_is_coderabbit_auto_resolve_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify environment variable toggle for auto-resolve."""
     monkeypatch.setenv("ENABLE_CODERABBIT_AUTO_RESOLVE", "true")
@@ -252,7 +244,6 @@ def test_is_coderabbit_auto_resolve_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     assert is_coderabbit_auto_resolve_enabled() is False
 
 
-@pytest.mark.unit
 def test_github_tools_resolve_tools() -> None:
     """Verify ADK model-callable tools in github_tools.py."""
     from webhook_agent.tools.github_tools import resolve_bot_review_threads, resolve_review_thread

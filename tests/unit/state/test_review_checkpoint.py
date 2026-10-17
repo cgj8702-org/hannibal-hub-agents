@@ -12,7 +12,7 @@ from webhook_agent.state.review_checkpoint import (
     _safe_doc_id,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.firestore]
 
 
 def test_safe_doc_id():

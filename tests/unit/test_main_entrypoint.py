@@ -10,16 +10,14 @@ import pytest
 
 import main
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_src_in_sys_path() -> None:
     expected_src = str(Path(main.__file__).resolve().parent / "src")
     assert expected_src in sys.path
 
 
-@pytest.mark.unit
 def test_run_worker_imports_and_calls_worker_main() -> None:
     mock_webhook_agent = MagicMock()
     mock_worker = MagicMock()
@@ -36,7 +34,6 @@ def test_run_worker_imports_and_calls_worker_main() -> None:
         mock_worker.main.assert_called_once()
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("worker_exitcode,expected_exit", [(0, 0), (3, 3), (None, 0)])
 def test_main_propagates_worker_exitcode(worker_exitcode: int | None, expected_exit: int) -> None:
     mock_proc = MagicMock()

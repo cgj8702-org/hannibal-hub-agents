@@ -11,10 +11,9 @@ import pytest
 from webhook_agent.state import review_idempotency
 from webhook_agent.state.review_idempotency import ReviewClaimRegistry
 
-pytestmark = [pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.firestore]
 
 
-@pytest.mark.unit
 def test_local_claim_suppresses_duplicate_and_records_submission() -> None:
     registry = ReviewClaimRegistry()
     registry._initialized = True
@@ -28,7 +27,6 @@ def test_local_claim_suppresses_duplicate_and_records_submission() -> None:
     assert registry.claim("owner/repo", 42, "head-a", github_review_exists=False) is None
 
 
-@pytest.mark.unit
 def test_failed_claim_can_be_released_and_retried() -> None:
     registry = ReviewClaimRegistry()
     registry._initialized = True
@@ -43,7 +41,6 @@ def test_failed_claim_can_be_released_and_retried() -> None:
     assert retry.token != claim.token
 
 
-@pytest.mark.unit
 def test_existing_github_review_reconciles_claim() -> None:
     registry = ReviewClaimRegistry()
     registry._initialized = True
@@ -52,7 +49,6 @@ def test_existing_github_review_reconciles_claim() -> None:
     assert registry.claim("owner/repo", 42, "head-c", github_review_exists=False) is None
 
 
-@pytest.mark.unit
 def test_firestore_uses_explicit_project_before_webhook_fallback(monkeypatch) -> None:
     monkeypatch.setenv("ENABLE_REVIEW_IDEMPOTENCY", "1")
     monkeypatch.setenv("FIRESTORE_PROJECT_ID", "explicit-firestore-project")
@@ -67,7 +63,6 @@ def test_firestore_uses_explicit_project_before_webhook_fallback(monkeypatch) ->
     assert registry._get_db() is client
 
 
-@pytest.mark.unit
 def test_firestore_uses_centralized_default_when_env_is_absent(monkeypatch) -> None:
     monkeypatch.setenv("ENABLE_REVIEW_IDEMPOTENCY", "1")
     monkeypatch.delenv("FIRESTORE_PROJECT_ID", raising=False)
@@ -80,7 +75,6 @@ def test_firestore_uses_centralized_default_when_env_is_absent(monkeypatch) -> N
     assert registry._get_db() is client
 
 
-@pytest.mark.unit
 def test_firestore_init_failure_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _get_db returns None and logs warning when Client fails."""
     from unittest.mock import MagicMock
@@ -94,7 +88,6 @@ def test_firestore_init_failure_logs_warning(monkeypatch: pytest.MonkeyPatch) ->
     assert registry._get_db() is None
 
 
-@pytest.mark.unit
 def test_firestore_claim_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify claim succeeds when Firestore document does not exist yet."""
     from unittest.mock import MagicMock
@@ -118,7 +111,6 @@ def test_firestore_claim_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mock_tx.set.called
 
 
-@pytest.mark.unit
 def test_firestore_claim_already_submitted(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify claim returns None when Firestore record is already submitted."""
     from unittest.mock import MagicMock
@@ -142,7 +134,6 @@ def test_firestore_claim_already_submitted(monkeypatch: pytest.MonkeyPatch) -> N
     assert claim is None
 
 
-@pytest.mark.unit
 def test_firestore_claim_active_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify claim returns None when another worker holds an active lease."""
     import datetime
@@ -168,7 +159,6 @@ def test_firestore_claim_active_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     assert claim is None
 
 
-@pytest.mark.unit
 def test_firestore_claim_transaction_error_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify claim falls back to local claim when Firestore transaction fails."""
     monkeypatch.setattr(review_idempotency.firestore, "transactional", lambda f: f)
@@ -190,7 +180,6 @@ def test_firestore_claim_transaction_error_fallback(monkeypatch: pytest.MonkeyPa
     assert registry._db is None
 
 
-@pytest.mark.unit
 def test_firestore_mark_submitted(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify mark_submitted updates Firestore document in transaction."""
     from unittest.mock import MagicMock
@@ -215,7 +204,6 @@ def test_firestore_mark_submitted(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mock_tx.set.called
 
 
-@pytest.mark.unit
 def test_firestore_release(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify release deletes Firestore document in transaction."""
     from unittest.mock import MagicMock

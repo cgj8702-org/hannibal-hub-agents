@@ -17,7 +17,7 @@ from webhook_agent.review.comment_poster import (
 )
 from webhook_agent.review.schemas import IssueItem
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.guardrails]
 
 
 def test_strip_code_fences() -> None:

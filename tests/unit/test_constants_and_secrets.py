@@ -14,10 +14,9 @@ from webhook_agent.constants import (
 )
 from webhook_agent.models.secret_manager import resolve_secret
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_constants_defaults() -> None:
     assert DEFAULT_GITHUB_APP_ID == "4133145"
     assert DEFAULT_GITHUB_INSTALLATION_ID == "150411146"
@@ -29,14 +28,12 @@ def test_constants_defaults() -> None:
     assert DEFAULT_ENABLE_JULES_PR_PROXY == "0"
 
 
-@pytest.mark.unit
 def test_resolve_secret_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WEBHOOK_FREE_KEY", "resolved_from_environment")
     key = resolve_secret("WEBHOOK_FREE_KEY")
     assert key == "resolved_from_environment"
 
 
-@pytest.mark.unit
 def test_resolve_secret_unset_or_dummy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WEBHOOK_FREE_KEY", raising=False)
     assert resolve_secret("WEBHOOK_FREE_KEY", default="fallback_val") == "fallback_val"

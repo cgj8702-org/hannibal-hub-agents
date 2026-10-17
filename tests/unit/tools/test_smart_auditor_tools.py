@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from webhook_agent.review.formatter import (
     render_code_review_markdown,
 )
 from webhook_agent.review.schemas import CodeReviewResponse, IssueItem
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
 def test_format_suggested_fix_markdown_single_line():
