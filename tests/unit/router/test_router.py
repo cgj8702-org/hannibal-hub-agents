@@ -196,15 +196,24 @@ class TestPing:
         assert not publisher.publish.called
 
 
-class TestInstallationFilter:
+class TestPerimeterFilter:
     @pytest.mark.parametrize(
         "event",
-        ["installation", "installation_repositories", "installation_target"],
+        [
+            "check_run",
+            "status",
+            "installation",
+            "installation_repositories",
+            "installation_target",
+            "pull_request_review_thread",
+            "workflow_run",
+            "workflow_job",
+        ],
     )
-    def test_auto_delivered_events_are_dropped(
+    def test_perimeter_filtered_events_are_dropped(
         self, monkeypatch: pytest.MonkeyPatch, event: str
     ) -> None:
-        """These cannot be unsubscribed, so they are dropped before costing a publish."""
+        """Cannot be unsubscribed (installation*) or dropped as defense-in-depth."""
         module = _load_router(monkeypatch)
         publisher = _stub_publisher(module, monkeypatch)
         response = _post(module, _installation_payload(), event)
@@ -212,13 +221,20 @@ class TestInstallationFilter:
         assert "perimeter filter" in response[0]
         assert not publisher.publish.called
 
-    def test_auto_delivered_set_is_exactly_the_three(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_perimeter_filter_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = _load_router(monkeypatch)
-        assert frozenset(
-            {"installation", "installation_repositories", "installation_target"}
-        ) == module.AUTO_DELIVERED_INSTALLATION_EVENTS
+        assert module.PERIMETER_FILTER_EVENTS == frozenset(
+            {
+                "check_run",
+                "status",
+                "installation",
+                "installation_repositories",
+                "installation_target",
+                "pull_request_review_thread",
+                "workflow_run",
+                "workflow_job",
+            }
+        )
 
 
 class TestBodyHeaderConsistency:
@@ -324,9 +340,9 @@ class TestCrossSystemParity:
     ) -> None:
         """The router may only drop events the worker would also suppress."""
         module = _load_router(monkeypatch)
-        from webhook_agent.processor import SUPPRESSED_EVENT_NAMES 
+        from webhook_agent.processor import SUPPRESSED_EVENT_NAMES
 
-        router_set = module.AUTO_DELIVERED_INSTALLATION_EVENTS
+        router_set = module.PERIMETER_FILTER_EVENTS
         assert router_set.issubset(SUPPRESSED_EVENT_NAMES)
         assert router_set != SUPPRESSED_EVENT_NAMES  # strict subset
 

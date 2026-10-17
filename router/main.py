@@ -19,15 +19,23 @@ from google.cloud import pubsub_v1
 
 logger = logging.getLogger(__name__)
 
-# Events GitHub delivers to every App regardless of subscription settings. They cannot be
-# unsubscribed, so dropping them here is the only way to avoid a Pub/Sub round trip the
-# worker would discard anyway. Kept as a named constant so tests can assert it stays a
-# strict subset of the worker's suppression list (see src/webhook_agent/processor.py).
-AUTO_DELIVERED_INSTALLATION_EVENTS: frozenset[str] = frozenset(
+# Events dropped at the perimeter before they ever cost a Pub/Sub round trip.
+#
+# The first three cannot be unsubscribed (GitHub delivers them to every App);
+# the rest we *could* unsubscribe, but drop here as defense-in-depth so a
+# re-subscription can't silently reintroduce them. Kept as a named constant so
+# tests can assert it stays a strict subset of the worker's suppression list
+# (see src/webhook_agent/processor.py).
+PERIMETER_FILTER_EVENTS: frozenset[str] = frozenset(
     {
+        "check_run",
+        "status",
         "installation",
         "installation_repositories",
         "installation_target",
+        "pull_request_review_thread",
+        "workflow_run",
+        "workflow_job",
     }
 )
 
@@ -205,13 +213,19 @@ def github_webhook_router(request: Any) -> tuple[str | dict[str, Any], int]:
         return {"msg": "pong"}, 200
 
     if body_class == "installation":
-        if event_type not in AUTO_DELIVERED_INSTALLATION_EVENTS and event_type != "unknown":
+        # Body says installation; header must name an installation event type.
+        installation_events = {
+            "installation",
+            "installation_repositories",
+            "installation_target",
+        }
+        if event_type not in installation_events and event_type != "unknown":
             return "Bad Request: event type does not match payload", 400
         return "Event acknowledged and dropped by perimeter filter", 202
 
-    if event_type in AUTO_DELIVERED_INSTALLATION_EVENTS:
-        # The header claims an installation event, but the body is repo-scoped.
-        return "Bad Request: event type does not match payload", 400
+    if event_type in PERIMETER_FILTER_EVENTS:
+        # Header says drop this event; body doesn't claim installation.
+        return "Event acknowledged and dropped by perimeter filter", 202
 
     # 4. Publish.
     normalized = normalize_payload(event_type, body, delivery_id)
