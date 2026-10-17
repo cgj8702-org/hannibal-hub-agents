@@ -166,7 +166,12 @@ def record(pr_number: int, repo: str, patches: str) -> Path:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("pr_number", type=int, help="Pull request number to record.")
+    parser.add_argument(
+        "pr_numbers",
+        type=int,
+        nargs="+",
+        help="One or more pull request numbers to record.",
+    )
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to record from.")
     parser.add_argument(
         "--patches",
@@ -176,9 +181,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    path = record(args.pr_number, args.repo, args.patches)
-    size_kb = path.stat().st_size / 1024
-    sys.stdout.write(f"wrote {path} ({size_kb:.1f} KiB)\n")
+    for pr_num in args.pr_numbers:
+        path = record(pr_num, args.repo, args.patches)
+        size_kb = path.stat().st_size / 1024
+        sys.stdout.write(f"wrote {path} ({size_kb:.1f} KiB)\n")
     return 0
 
 
