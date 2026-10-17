@@ -7,21 +7,21 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 from github import Github
 from google.adk.agents.context import Context
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.constants import (
-    DEFAULT_STRICT_REVIEW_GROUNDING,
+from webhook_agent.review.grounding import (
+    extract_grounding_findings,
+    strict_grounding_enabled,
 )
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
 
 if TYPE_CHECKING:
-    from webhook_agent.review.grounding import Finding, Kind
+    pass
 
 logger = logging.getLogger("webhook_agent.tools.github_tools")
 
@@ -184,38 +184,8 @@ def _collect_pr_patches(pr: Any) -> dict[str, str | None]:
         return {}
 
 
-def _citation_finding(kind: Kind, item: Any) -> Finding:
-    """Adapt one parsed review finding into a grounding citation finding."""
-    # Imported locally: a module-level import would pull webhook_agent.tools.diff_tools
-    # in while webhook_agent.tools.__init__ is still executing.
-    from webhook_agent.review.grounding import Finding
-
-    evidence = getattr(item, "evidence", None) or getattr(item, "description", None) or ""
-    return Finding(
-        kind=kind,
-        path=getattr(item, "path", None) or "",
-        line=getattr(item, "line", None),
-        evidence=str(evidence),
-    )
-
-
-def _grounding_findings(review_obj: Any) -> list[Finding]:
-    """Adapt every cited finding in a parsed review response into citation findings."""
-    findings: list[Finding] = []
-    for item in getattr(review_obj, "critical_issues", None) or []:
-        findings.append(_citation_finding(kind="critical", item=item))
-    for item in getattr(review_obj, "minor_suggestions", None) or []:
-        findings.append(_citation_finding(kind="suggestion", item=item))
-    return findings
-
-
-def strict_grounding_enabled() -> bool:
-    """Return True when ungrounded citations should reject a review, not merely log."""
-    return os.environ.get("STRICT_REVIEW_GROUNDING", DEFAULT_STRICT_REVIEW_GROUNDING) in (
-        "1",
-        "true",
-        "True",
-    )
+# Backward-compatibility alias for internal callers
+_grounding_findings = extract_grounding_findings
 
 
 def review(

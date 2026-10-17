@@ -241,3 +241,116 @@ def test_enforce_verdict_clean_pass_stays_approve() -> None:
     rendered_body, enforced_verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
     assert enforced_verdict == "APPROVE"
     assert "`✅ PASS`" in rendered_body
+
+
+def test_enforce_verdict_citation_grounding_shadow_mode_logs_telemetry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    diff_text = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1,3 +1,4 @@\n+def run():\n+    pass\n"
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation verified.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "src/nonexistent.py",
+                "line": 42,
+                "description": "Hallucinated file citation",
+                "suggested_fix": "fix()",
+            }
+        ],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/app.py"],
+    }
+
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        _, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+
+    # In Shadow Mode (default): verdict is preserved as APPROVE
+    assert verdict == "APPROVE"
+    # But telemetry log MUST be emitted
+    assert "🔎 [Grounding Telemetry]" in caplog.text
+    assert "hard:path_not_changed" in caplog.text
+
+
+def test_enforce_verdict_citation_grounding_strict_mode_downgrades_to_comment(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+
+    diff_text = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1,3 +1,4 @@\n+def run():\n+    pass\n"
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation clean.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "src/ghost_file.py",
+                "line": 10,
+                "description": "Fabricated path",
+                "suggested_fix": "fix()",
+            }
+        ],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/app.py"],
+    }
+
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        _, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+
+    # In Strict Mode: Hard citation failure forces downgrade to COMMENT
+    assert verdict == "COMMENT"
+    assert "Strict Grounding Gate: Hard citation failures" in caplog.text
+    assert "Downgrading APPROVE to COMMENT" in caplog.text
+
+
+def test_enforce_verdict_citation_grounding_clean_citations(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    diff_text = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1,3 +1,4 @@\n+def run():\n+    pass\n"
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation clean.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "src/app.py",
+                "line": 1,
+                "description": "Grounded comment",
+                "suggested_fix": "def run():",
+            }
+        ],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/app.py"],
+    }
+
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        _, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+
+    assert verdict == "APPROVE"
+    assert "🔎 [Grounding Telemetry]" not in caplog.text
