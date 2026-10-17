@@ -186,14 +186,17 @@ class TestShouldProcessEvent:
         ev = _make_normalized("pull_request", action="opened", sender_login="hannibal-hub-agents")
         assert self.processor.should_process_event(ev) is False
 
-    def test_suppress_bot_actor_by_type(self):
-        """Bot events detected via sender.type == 'Bot' should be suppressed."""
+    def test_external_bot_not_suppressed_by_type_alone(self):
+        """Events from external bots (sender.type == 'Bot') are not suppressed by type alone;
+
+        only our own bot identity is filtered.
+        """
         ev = _make_normalized(
             "issue_comment",
             action="created",
             sender_login="some-other-bot",
         )
-        # A different bot should NOT be suppressed
+        # An external bot is NOT suppressed solely by type == 'Bot'
         ev["sender"] = {
             "login": "some-other-bot",
             "type": "Bot",
