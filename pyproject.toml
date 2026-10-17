@@ -17,6 +17,7 @@ dependencies = [
     "nest-asyncio>=1.6.0",
     "detect-secrets>=1.5.0",
     "bandit>=1.8.0",
+    "diff-cover>=10.6.0",
 ]
 
 [dependency-groups]
@@ -149,6 +150,7 @@ module = [
     "nest_asyncio.*",
     "detect_secrets.*",
     "bandit.*",
+    "diff_cover.*",
 ]
 ignore_missing_imports = true
 

@@ -8,7 +8,9 @@ generates clinical test stubs for uncovered functions.
 from __future__ import annotations
 
 import ast
+import contextlib
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -17,6 +19,7 @@ from webhook_agent.analysis.symbol_graph import (
     SignatureSpec,
     SymbolDefinitionVisitor,
 )
+from webhook_agent.review.schemas import ScorecardItem
 
 logger = logging.getLogger("webhook_agent.analysis.test_impact")
 
@@ -441,3 +444,158 @@ class TestImpactAnalyzer:
             )
 
         return "\n".join(lines)
+
+
+def run_diff_coverage(
+    diff_text: str,
+    coverage_file: str | Path | None = None,
+    repo_root: str | Path | None = None,
+) -> tuple[float | None, int]:
+    """Calculate diff coverage percentage using diff-cover when coverage reports exist.
+
+    Returns (coverage_pct, total_num_lines) if a coverage report is present and parsed,
+    or (None, 0) if no coverage report exists on disk or calculation is skipped.
+    """
+    if not diff_text or not diff_text.strip():
+        return None, 0
+
+    root = Path(repo_root).resolve() if repo_root else Path.cwd().resolve()
+
+    cov_path: Path | None = None
+    if coverage_file:
+        p = Path(coverage_file)
+        cov_path = p if p.is_absolute() else (root / p)
+    else:
+        candidates = [
+            root / "coverage.xml",
+            root / ".coverage.xml",
+            root / "reports" / "coverage.xml",
+            root / "tests" / "coverage.xml",
+        ]
+        for c in candidates:
+            if c.is_file():
+                cov_path = c
+                break
+
+    if not cov_path or not cov_path.is_file():
+        return None, 0
+
+    temp_patch_path: str | None = None
+    try:
+        from diff_cover.diff_cover_tool import (
+            GitDiffFileTool,
+            GitPathTool,
+            generate_coverage_report,
+        )
+
+        GitPathTool.set_cwd(str(root))
+        GitPathTool._root = str(root)
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".patch", delete=False, encoding="utf-8"
+        ) as tf:
+            tf.write(diff_text)
+            temp_patch_path = tf.name
+
+        diff_tool = GitDiffFileTool(temp_patch_path)
+        pct, num_lines = generate_coverage_report(
+            coverage_files=[str(cov_path)],
+            compare_branch="",
+            diff_tool=diff_tool,
+            report_formats={},
+            quiet=True,
+        )
+        return float(pct), int(num_lines)
+    except Exception as exc:
+        logger.debug("diff-cover execution encountered non-fatal error: %s", exc)
+        return None, 0
+    finally:
+        if temp_patch_path is not None:
+            with contextlib.suppress(Exception):
+                Path(temp_patch_path).unlink(missing_ok=True)
+
+
+def evaluate_test_coverage_integrity(
+    report: TestImpactReport,
+    diff_coverage_pct: float | None = None,
+    is_pure_dep_pr: bool = False,
+    is_docs_or_config_only: bool = False,
+    scan_errors: list[str] | None = None,
+) -> ScorecardItem:
+    """Evaluate Dimension 5 (Test Coverage & Regressions) deterministically.
+
+    Principles (Grounded Review Architecture):
+    - Real coverage verification via diff-cover when coverage reports exist.
+    - Soft WARN when coverage data is absent or when modified symbols lack tests;
+      NEVER a mechanical FAIL on missing test diffs.
+    - PASS when coverage >= 80%, test files are modified, or no executable python source changed.
+    - UNKNOWN on analyzer errors.
+    """
+    errors = list(scan_errors or [])
+    if errors:
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="UNKNOWN",
+            notes=f"Test coverage analyzer encountered non-fatal error: {'; '.join(errors)}",
+        )
+
+    # 1. Non-code changes (lockfile updates, documentation, configuration only)
+    if is_pure_dep_pr or is_docs_or_config_only or not report.modified_source_files:
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="PASS",
+            notes="No executable production code modified; test suite additions not required.",
+        )
+
+    # 2. Diff coverage percentage available from coverage report (diff-cover)
+    if diff_coverage_pct is not None:
+        if diff_coverage_pct >= 80.0:
+            return ScorecardItem(
+                dimension="Test Coverage & Regressions",
+                status="PASS",
+                notes=f"Diff test coverage verified at {diff_coverage_pct:.1f}% via coverage report.",
+            )
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="WARN",
+            notes=f"Diff test coverage is {diff_coverage_pct:.1f}% (< 80%). Consider adding test cases for uncovered diff lines.",
+        )
+
+    # 3. Static AST Symbol Coverage Analysis (fallback when no coverage XML exists)
+    if report.modified_test_files:
+        cov_summary = (
+            f"{report.covered_count} covered symbol(s)"
+            if report.covered_count
+            else "test suite modified"
+        )
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="PASS",
+            notes=f"Test suite updated with {len(report.modified_test_files)} test file(s); {cov_summary} verified.",
+        )
+
+    if report.has_uncovered_symbols:
+        uncovered_names = [
+            f"`{c.qualname}`" for c in report.coverages if c.status == TestCoverageStatus.UNCOVERED
+        ][:3]
+        if report.uncovered_count > 3:
+            uncovered_names.append(f"...+{report.uncovered_count - 3} more")
+        names_str = ", ".join(uncovered_names)
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="WARN",
+            notes=f"Modified code contains {report.uncovered_count} symbol(s) ({names_str}) lacking direct test references. Recommended test stubs generated.",
+        )
+
+    if not report.coverages:
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="PASS",
+            notes="Modified Python files contain no new or altered callable symbols requiring test coverage.",
+        )
+
+    return ScorecardItem(
+        dimension="Test Coverage & Regressions",
+        status="PASS",
+        notes=f"All {report.covered_count} modified symbol(s) verified as covered in repository test suite.",
+    )

@@ -10,8 +10,10 @@ import pytest
 from webhook_agent.review.review_enforcer import (
     _enforce_verdict,
     apply_scorecard_floor,
+    has_grounding_bypass_label,
     is_contract_dimension,
     is_security_dimension,
+    is_test_coverage_dimension,
 )
 from webhook_agent.review.schemas import ScorecardItem
 
@@ -246,7 +248,9 @@ def test_enforce_verdict_clean_pass_stays_approve() -> None:
 
 def test_enforce_verdict_citation_grounding_shadow_mode_logs_telemetry(
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
     diff_text = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1,3 +1,4 @@\n+def run():\n+    pass\n"
     review_dict: dict[str, Any] = {
         "verdict": "APPROVE",
@@ -543,3 +547,159 @@ def test_enforce_verdict_sync_review_security_floor() -> None:
     )
     assert enforced_verdict == "REQUEST_CHANGES"
     assert "PROVEN: AWS Secret Key detected in new diff" in rendered_body
+
+
+def test_is_test_coverage_dimension() -> None:
+    assert is_test_coverage_dimension("Test Coverage & Regressions") is True
+    assert is_test_coverage_dimension("test coverage") is True
+    assert is_test_coverage_dimension("Tests & Regressions") is True
+    assert is_test_coverage_dimension("Test Suite Coverage") is True
+    assert is_test_coverage_dimension("Logic & Boundaries") is False
+    assert is_test_coverage_dimension("Security & Secrets") is False
+    assert is_test_coverage_dimension("Contract Integrity") is False
+
+
+def test_apply_scorecard_floor_test_coverage_warn() -> None:
+    scorecard = [
+        ScorecardItem(
+            dimension="Test Coverage & Regressions", status="PASS", notes="Model says clean"
+        ),
+    ]
+    det_item = ScorecardItem(
+        dimension="Test Coverage & Regressions",
+        status="WARN",
+        notes="Modified code contains 2 symbol(s) lacking direct test references",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert floored[0].status == "WARN"
+    assert "lacking direct test references" in floored[0].notes
+
+
+def test_apply_scorecard_floor_test_coverage_golden_asymmetry() -> None:
+    scorecard = [
+        ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="FAIL",
+            notes="Model caught critical regression in test logic",
+        ),
+    ]
+    det_item = ScorecardItem(
+        dimension="Test Coverage & Regressions",
+        status="PASS",
+        notes="Diff coverage 95%",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert floored[0].status == "FAIL"
+    assert "Model caught critical regression in test logic" in floored[0].notes
+
+
+def test_has_grounding_bypass_label() -> None:
+    class MockLabel:
+        def __init__(self, name: str):
+            self.name = name
+
+    class MockPR:
+        def __init__(self, labels: list[Any]):
+            self.labels = labels
+
+    assert has_grounding_bypass_label(None) is False
+    assert has_grounding_bypass_label(MockPR([])) is False
+    assert has_grounding_bypass_label(MockPR([MockLabel("enhancement")])) is False
+    assert has_grounding_bypass_label(MockPR([MockLabel("skip-grounding-gate")])) is True
+    assert has_grounding_bypass_label(MockPR([MockLabel("skip-grounding")])) is True
+    assert has_grounding_bypass_label(MockPR([MockLabel("bypass-grounding")])) is True
+    assert has_grounding_bypass_label(MockPR(["skip-grounding-gate"])) is True
+
+
+def test_enforce_verdict_test_coverage_warn_does_not_block_approval() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "All checks passed cleanly.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "OK"},
+            {
+                "dimension": "Test Coverage & Regressions",
+                "status": "PASS",
+                "notes": "Model says ok",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_test_scorecard_item": {
+            "dimension": "Test Coverage & Regressions",
+            "status": "WARN",
+            "notes": "Diff coverage is 65.0% (< 80%).",
+        }
+    }
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    # Dimension 5 produces soft WARN, never mechanical FAIL: APPROVE is preserved!
+    assert enforced_verdict == "APPROVE"
+    assert "65.0%" in rendered_body
+    assert "⚠️ WARN" in rendered_body
+
+
+def test_enforce_verdict_grounding_emergency_bypass_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
+
+    class MockLabel:
+        def __init__(self, name: str):
+            self.name = name
+
+    class MockPR:
+        def __init__(self, labels: list[Any]):
+            self.labels = labels
+            self.head = None
+
+        def get_reviews(self):
+            return []
+
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Approved changes.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "OK"},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "src/nonexistent_file.py",
+                "line": 99,
+                "description": "Hallucinated file finding",
+                "suggested_fix": "fix()",
+            }
+        ],
+    }
+    json_body = json.dumps(review_dict)
+    diff_text = "diff --git a/src/main.py b/src/main.py\n--- a/src/main.py\n+++ b/src/main.py\n@@ -1,1 +1,1 @@\n-old\n+new\n"
+
+    # 1. Without emergency bypass label: strict grounding downgrades APPROVE to COMMENT
+    pr_without_bypass = MockPR([])
+    state_no_bypass = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/main.py"],
+    }
+    _, verdict_no_bypass, _ = _enforce_verdict(
+        json_body,
+        "APPROVE",
+        pr=pr_without_bypass,
+        state=state_no_bypass,
+    )
+    assert verdict_no_bypass == "COMMENT"
+
+    # 2. With emergency bypass label: APPROVE is preserved despite ungrounded citations!
+    pr_with_bypass = MockPR([MockLabel("skip-grounding-gate")])
+    state_with_bypass = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/main.py"],
+    }
+    _, verdict_with_bypass, _ = _enforce_verdict(
+        json_body,
+        "APPROVE",
+        pr=pr_with_bypass,
+        state=state_with_bypass,
+    )
+    assert verdict_with_bypass == "APPROVE"

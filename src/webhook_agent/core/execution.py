@@ -385,6 +385,7 @@ def execute_agent_event(
         "deterministic_security_scorecard_item": event_data.get(
             "deterministic_security_scorecard_item"
         ),
+        "deterministic_test_scorecard_item": event_data.get("deterministic_test_scorecard_item"),
     }
 
     user_message: genai_types.Content | None = None
@@ -668,6 +669,10 @@ def execute_agent_event(
                             deterministic_state["deterministic_security_scorecard_item"] = (
                                 event_data["deterministic_security_scorecard_item"]
                             )
+                        if "deterministic_test_scorecard_item" in event_data:
+                            deterministic_state["deterministic_test_scorecard_item"] = event_data[
+                                "deterministic_test_scorecard_item"
+                            ]
                         if user_message and user_message.parts:
                             logger.debug(
                                 "📝 Built user message for agent (length: %d chars)",
@@ -687,6 +692,10 @@ def execute_agent_event(
                     if "deterministic_security_scorecard_item" in event_data:
                         deterministic_state["deterministic_security_scorecard_item"] = event_data[
                             "deterministic_security_scorecard_item"
+                        ]
+                    if "deterministic_test_scorecard_item" in event_data:
+                        deterministic_state["deterministic_test_scorecard_item"] = event_data[
+                            "deterministic_test_scorecard_item"
                         ]
                     if user_message and user_message.parts:
                         logger.debug(

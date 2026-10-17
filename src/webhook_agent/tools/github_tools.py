@@ -407,17 +407,26 @@ def review(
                 pr_number,
             )
             if effective_event == "APPROVE":
-                logger.warning(
-                    "Grounding check skipped for %s#%s; downgrading verdict from APPROVE to COMMENT",
-                    repo_name,
-                    pr_number,
-                )
-                effective_event = "COMMENT"
-                event = "COMMENT"
-                if hasattr(review_obj, "verdict"):
-                    review_obj.verdict = "COMMENT"
-                parsed_data["verdict"] = "COMMENT"
-                body = json.dumps(parsed_data)
+                from webhook_agent.review.review_enforcer import has_grounding_bypass_label
+
+                if has_grounding_bypass_label(pr):
+                    logger.warning(
+                        "Strict Grounding Gate: Bypassed downgrade via emergency label on %s#%s (no patches)",
+                        repo_name,
+                        pr_number,
+                    )
+                else:
+                    logger.warning(
+                        "Grounding check skipped for %s#%s; downgrading verdict from APPROVE to COMMENT",
+                        repo_name,
+                        pr_number,
+                    )
+                    effective_event = "COMMENT"
+                    event = "COMMENT"
+                    if hasattr(review_obj, "verdict"):
+                        review_obj.verdict = "COMMENT"
+                    parsed_data["verdict"] = "COMMENT"
+                    body = json.dumps(parsed_data)
         else:
             grounding_issues = verify_citations(
                 _grounding_findings(review_obj),
@@ -433,7 +442,16 @@ def review(
                     [f"{issue.severity}:{issue.code}" for issue in grounding_issues],
                 )
             if strict_grounding_enabled():
-                invalid_findings.extend(hard_reasons(grounding_issues))
+                from webhook_agent.review.review_enforcer import has_grounding_bypass_label
+
+                if has_grounding_bypass_label(pr):
+                    logger.warning(
+                        "Strict Grounding Gate: Bypassed via emergency label on %s#%s",
+                        repo_name,
+                        pr_number,
+                    )
+                else:
+                    invalid_findings.extend(hard_reasons(grounding_issues))
 
         if invalid_findings:
             error_details = "; ".join(invalid_findings)
