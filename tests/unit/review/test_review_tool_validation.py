@@ -195,6 +195,11 @@ def test_review_rejects_sync_request_changes_without_actionable_items():
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_accepts_valid_payload(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
+    f = MagicMock()
+    f.filename = "src/model_chain.py"
+    f.patch = "@@ -40,5 +40,5 @@\n existing\n+mod\n"
+    mock_ctx.state["gh_client"].get_repo().get_pull().get_files.return_value = [f]
+    mock_ctx.state["deterministic_precompiled_ast"] = True
     payload = {
         "executive_summary": "Valid initial review",
         "confidence": 5,
@@ -325,6 +330,10 @@ def test_review_ignores_legacy_invariants_on_approve(mock_submit, mock_ctx):
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_accepts_approve_with_valid_verified_invariants(mock_submit, mock_ctx):
     mock_submit.return_value = ("Review submitted", True)
+    f = MagicMock()
+    f.filename = "src/webhook_agent/core/agent_definition.py"
+    f.patch = "@@ -100,10 +100,10 @@\n existing\n+mod\n"
+    mock_ctx.state["gh_client"].get_repo().get_pull().get_files.return_value = [f]
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
     mock_ctx.state["tools_executed"] = ["verify_python_ast"]
     payload = {
@@ -352,6 +361,11 @@ def test_review_accepts_approve_with_valid_verified_invariants(mock_submit, mock
 def test_review_handles_adk_state_object_properly(mock_submit, mock_ctx):
     """Verify review tool correctly reads non-dict ADK State objects with to_dict()."""
     mock_submit.return_value = ("Review submitted", True)
+
+    f = MagicMock()
+    f.filename = "src/webhook_agent/core/agent_definition.py"
+    f.patch = "@@ -100,10 +100,10 @@\n existing\n+mod\n"
+    mock_ctx.state["gh_client"].get_repo().get_pull().get_files.return_value = [f]
 
     class MockADKState:
         def __init__(self, data):
@@ -446,8 +460,8 @@ def _critical_payload(path, line):
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_grounding_does_not_reject_when_not_strict(mock_submit, monkeypatch):
-    """A hard grounding failure is logged but not enforced by default."""
-    monkeypatch.delenv("STRICT_REVIEW_GROUNDING", raising=False)
+    """A hard grounding failure is logged but not enforced when strict grounding is disabled."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
     mock_submit.return_value = ("Review submitted", True)
     ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
     res = review(ctx, 8101, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")

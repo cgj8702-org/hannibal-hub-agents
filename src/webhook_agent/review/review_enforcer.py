@@ -42,6 +42,12 @@ def is_security_dimension(dim: str) -> bool:
     return "security" in d or "secret" in d
 
 
+def is_test_coverage_dimension(dim: str) -> bool:
+    """Check if a scorecard dimension corresponds to Dimension 5 (Test Coverage & Regressions)."""
+    d = dim.strip().lower()
+    return "test" in d or "coverage" in d or "regression" in d
+
+
 def matches_dimension(scorecard_dim: str, target_dim: str) -> bool:
     """Check if a scorecard dimension matches the target dimension."""
     s_dim = scorecard_dim.strip().lower()
@@ -50,9 +56,61 @@ def matches_dimension(scorecard_dim: str, target_dim: str) -> bool:
         return True
     if "contract" in t_dim and "contract" in s_dim:
         return True
+    if ("security" in t_dim or "secret" in t_dim) and ("security" in s_dim or "secret" in s_dim):
+        return True
     return bool(
-        ("security" in t_dim or "secret" in t_dim) and ("security" in s_dim or "secret" in s_dim)
+        ("test" in t_dim or "coverage" in t_dim) and ("test" in s_dim or "coverage" in s_dim)
     )
+
+
+def has_grounding_bypass_label(pr: Any) -> bool:
+    """Check if the PR has the emergency owner bypass label (skip-grounding-gate)."""
+    if pr is None:
+        return False
+    with contextlib.suppress(Exception):
+        labels = getattr(pr, "labels", None)
+        if labels is None and hasattr(pr, "get_labels"):
+            labels = list(pr.get_labels())
+        if labels:
+            label_names = {(getattr(lbl, "name", "") or str(lbl)).strip().lower() for lbl in labels}
+            return any(
+                b in label_names
+                for b in ("skip-grounding-gate", "skip-grounding", "bypass-grounding")
+            )
+    return False
+
+
+def _handle_strict_grounding_gate(
+    has_hard: bool,
+    grounding_issues: list[Any],
+    pr: Any,
+    pr_label: str,
+    enforced_verdict: str,
+) -> str:
+    """Apply strict grounding gate downgrade if hard issues exist and emergency bypass is not set."""
+    from webhook_agent.review.grounding import hard_reasons, strict_grounding_enabled
+
+    if not strict_grounding_enabled() or not has_hard:
+        return enforced_verdict
+
+    if has_grounding_bypass_label(pr):
+        logger.info(
+            "Strict Grounding Gate: Bypassed via emergency label 'skip-grounding-gate' on %s",
+            pr_label,
+        )
+        return enforced_verdict
+
+    logger.warning(
+        "Strict Grounding Gate: Hard citation failures on %s: %s",
+        pr_label,
+        hard_reasons(grounding_issues),
+    )
+    if enforced_verdict == "APPROVE":
+        logger.warning(
+            "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
+        )
+        return "COMMENT"
+    return enforced_verdict
 
 
 def apply_scorecard_floor(
@@ -192,6 +250,7 @@ def _enforce_verdict(
     state: Any = None,
     deterministic_contract_item: ScorecardItem | None = None,
     deterministic_security_item: ScorecardItem | None = None,
+    deterministic_test_item: ScorecardItem | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """Programmatically enforce verdict rules based on structured JSON or Markdown text.
 
@@ -207,6 +266,7 @@ def _enforce_verdict(
 
     det_contract_item: ScorecardItem | None = deterministic_contract_item
     det_security_item: ScorecardItem | None = deterministic_security_item
+    det_test_item: ScorecardItem | None = deterministic_test_item
 
     if state is not None:
         state_dict_val = (
@@ -229,6 +289,14 @@ def _enforce_verdict(
                     det_security_item = ScorecardItem.model_validate(raw_sec_sc)
             elif isinstance(raw_sec_sc, ScorecardItem):
                 det_security_item = raw_sec_sc
+
+        if det_test_item is None:
+            raw_test_sc = state_dict_val.get("deterministic_test_scorecard_item")
+            if isinstance(raw_test_sc, dict):
+                with contextlib.suppress(Exception):
+                    det_test_item = ScorecardItem.model_validate(raw_test_sc)
+            elif isinstance(raw_test_sc, ScorecardItem):
+                det_test_item = raw_test_sc
 
     cleaned_body = body.strip()
     req_event = (event or "").strip().upper()
@@ -437,6 +505,10 @@ def _enforce_verdict(
                         sync_obj.scorecard = apply_scorecard_floor(
                             sync_obj.scorecard, det_security_item
                         )
+                    if det_test_item is not None:
+                        sync_obj.scorecard = apply_scorecard_floor(
+                            sync_obj.scorecard, det_test_item
+                        )
                     sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
                     sync_obj.minor_suggestions = critic_engine.filter_issues(
                         sync_obj.minor_suggestions
@@ -486,28 +558,19 @@ def _enforce_verdict(
 
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     if diff_for_grounding:
-                        from webhook_agent.review.grounding import (
-                            hard_reasons,
-                            strict_grounding_enabled,
-                        )
-
                         grounding_issues, has_hard = _apply_citation_grounding(
                             sync_obj,
                             diff_for_grounding,
                             changed_paths=changed_paths,
                             pr_label=pr_label,
                         )
-                        if strict_grounding_enabled() and has_hard:
-                            logger.warning(
-                                "Strict Grounding Gate: Hard citation failures on %s: %s",
-                                pr_label,
-                                hard_reasons(grounding_issues),
-                            )
-                            if enforced_verdict == "APPROVE":
-                                logger.warning(
-                                    "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
-                                )
-                                enforced_verdict = "COMMENT"
+                        enforced_verdict = _handle_strict_grounding_gate(
+                            has_hard=has_hard,
+                            grounding_issues=grounding_issues,
+                            pr=pr,
+                            pr_label=pr_label,
+                            enforced_verdict=enforced_verdict,
+                        )
 
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
@@ -553,16 +616,14 @@ def _enforce_verdict(
                         cr_obj.scorecard = apply_scorecard_floor(
                             cr_obj.scorecard, det_security_item
                         )
+                    if det_test_item is not None:
+                        cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_test_item)
                     cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
                     cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
                     enforced_verdict = calculate_strict_verdict(cr_obj)
                     diff_for_grounding = raw_diff or diff_text
                     if diff_for_grounding:
-                        from webhook_agent.review.grounding import (
-                            hard_reasons,
-                            partition_invariants,
-                            strict_grounding_enabled,
-                        )
+                        from webhook_agent.review.grounding import partition_invariants
 
                         if cr_obj.verified_invariants:
                             v_invs, s_invs = partition_invariants(
@@ -581,17 +642,13 @@ def _enforce_verdict(
                             changed_paths=changed_paths,
                             pr_label=pr_label,
                         )
-                        if strict_grounding_enabled() and has_hard:
-                            logger.warning(
-                                "Strict Grounding Gate: Hard citation failures on %s: %s",
-                                pr_label,
-                                hard_reasons(grounding_issues),
-                            )
-                            if enforced_verdict == "APPROVE":
-                                logger.warning(
-                                    "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
-                                )
-                                enforced_verdict = "COMMENT"
+                        enforced_verdict = _handle_strict_grounding_gate(
+                            has_hard=has_hard,
+                            grounding_issues=grounding_issues,
+                            pr=pr,
+                            pr_label=pr_label,
+                            enforced_verdict=enforced_verdict,
+                        )
 
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
@@ -641,6 +698,8 @@ def _enforce_verdict(
                 sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_contract_item)
             if det_security_item is not None:
                 sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_security_item)
+            if det_test_item is not None:
+                sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_test_item)
             sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
             sync_obj.minor_suggestions = critic_engine.filter_issues(sync_obj.minor_suggestions)
             if diff_text:
@@ -652,11 +711,7 @@ def _enforce_verdict(
             enforced_verdict = calculate_sync_verdict(sync_obj)
             diff_for_grounding = raw_diff or diff_text
             if diff_for_grounding:
-                from webhook_agent.review.grounding import (
-                    hard_reasons,
-                    partition_invariants,
-                    strict_grounding_enabled,
-                )
+                from webhook_agent.review.grounding import partition_invariants
 
                 if sync_obj.verified_invariants:
                     v_invs, s_invs = partition_invariants(
@@ -675,17 +730,13 @@ def _enforce_verdict(
                     changed_paths=changed_paths,
                     pr_label=pr_label,
                 )
-                if strict_grounding_enabled() and has_hard:
-                    logger.warning(
-                        "Strict Grounding Gate: Hard citation failures on %s: %s",
-                        pr_label,
-                        hard_reasons(grounding_issues),
-                    )
-                    if enforced_verdict == "APPROVE":
-                        logger.warning(
-                            "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
-                        )
-                        enforced_verdict = "COMMENT"
+                enforced_verdict = _handle_strict_grounding_gate(
+                    has_hard=has_hard,
+                    grounding_issues=grounding_issues,
+                    pr=pr,
+                    pr_label=pr_label,
+                    enforced_verdict=enforced_verdict,
+                )
 
             rendered_body = render_sync_review_markdown(
                 sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
@@ -698,16 +749,14 @@ def _enforce_verdict(
             cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_contract_item)
         if det_security_item is not None:
             cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_security_item)
+        if det_test_item is not None:
+            cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_test_item)
         cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
         cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
         enforced_verdict = calculate_strict_verdict(cr_obj)
         diff_for_grounding = raw_diff or diff_text
         if diff_for_grounding:
-            from webhook_agent.review.grounding import (
-                hard_reasons,
-                partition_invariants,
-                strict_grounding_enabled,
-            )
+            from webhook_agent.review.grounding import partition_invariants
 
             if cr_obj.verified_invariants:
                 v_invs, s_invs = partition_invariants(
@@ -726,17 +775,13 @@ def _enforce_verdict(
                 changed_paths=changed_paths,
                 pr_label=pr_label,
             )
-            if strict_grounding_enabled() and has_hard:
-                logger.warning(
-                    "Strict Grounding Gate: Hard citation failures on %s: %s",
-                    pr_label,
-                    hard_reasons(grounding_issues),
-                )
-                if enforced_verdict == "APPROVE":
-                    logger.warning(
-                        "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
-                    )
-                    enforced_verdict = "COMMENT"
+            enforced_verdict = _handle_strict_grounding_gate(
+                has_hard=has_hard,
+                grounding_issues=grounding_issues,
+                pr=pr,
+                pr_label=pr_label,
+                enforced_verdict=enforced_verdict,
+            )
 
         if is_intended_request_changes and enforced_verdict == "APPROVE":
             logger.warning(

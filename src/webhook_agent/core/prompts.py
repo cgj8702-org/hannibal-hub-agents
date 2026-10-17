@@ -405,13 +405,36 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                         )
 
                     # Test Impact & Coverage Verification
-                    from webhook_agent.analysis.test_impact import TestImpactAnalyzer
+                    from webhook_agent.analysis.test_impact import (
+                        TestImpactAnalyzer,
+                        evaluate_test_coverage_integrity,
+                        run_diff_coverage,
+                    )
 
                     test_analyzer = TestImpactAnalyzer(repo_root=active_env.root)
                     test_report = test_analyzer.analyze(changed_files)
-                    if test_report.coverages:
+                    diff_pct, _ = run_diff_coverage(
+                        diff_text=str(raw.get("pr_diff") or ""),
+                        repo_root=active_env.root,
+                    )
+                    test_item = evaluate_test_coverage_integrity(
+                        test_report,
+                        diff_coverage_pct=diff_pct,
+                    )
+                    event_data["deterministic_test_scorecard_item"] = test_item.model_dump()
+
+                    if test_report.coverages or diff_pct is not None or test_item.status != "PASS":
                         test_md = test_report.to_markdown()
-                        parts.append(f"\n{test_md}")
+                        cov_note = (
+                            f"\n**Diff Test Coverage**: `{diff_pct:.1f}%`\n"
+                            if diff_pct is not None
+                            else ""
+                        )
+                        parts.append(
+                            f"\n{test_md}{cov_note}\n"
+                            f"**Dimension 5 (Test Coverage & Regressions) Evaluated Status**: `{test_item.status}`\n"
+                            f"**Notes**: {test_item.notes}\n"
+                        )
             except Exception as ast_err:
                 logger.debug(
                     "Could not build deterministic pre-audit compiler dossier: %s", ast_err

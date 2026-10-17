@@ -38,7 +38,12 @@ from .symbol_graph import (
     SymbolImpactReport,
     evaluate_contract_integrity,
 )
-from .test_impact import TestImpactAnalyzer, TestImpactReport
+from .test_impact import (
+    TestImpactAnalyzer,
+    TestImpactReport,
+    evaluate_test_coverage_integrity,
+    run_diff_coverage,
+)
 
 __all__ = [
     "ASTAnalysisResult",
@@ -64,6 +69,7 @@ __all__ = [
     "build_dependency_grounding_context",
     "evaluate_contract_integrity",
     "evaluate_security_integrity",
+    "evaluate_test_coverage_integrity",
     "filter_review_diff",
     "get_transitive_closure",
     "is_exempt_file_path",
@@ -72,6 +78,7 @@ __all__ = [
     "parse_bumped_packages_from_diff",
     "parse_lockfile_dependency_graph",
     "render_deterministic_approval_markdown",
+    "run_diff_coverage",
     "skip_reason",
     "validate_lockfile_diff",
 ]
