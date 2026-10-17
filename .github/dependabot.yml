@@ -9,8 +9,20 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          # Pinned exactly (==) as a verified baseline. Keep it in its own PR so it
+          # can be tested and reverted on its own.
+          - "google-adk"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
