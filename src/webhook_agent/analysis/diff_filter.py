@@ -107,6 +107,11 @@ def skip_reason(path: str, churn: int = 0) -> str | None:
     return None
 
 
+def is_reviewable_path(path: str, churn: int = 0) -> bool:
+    """Return True if a file path is eligible for review comments."""
+    return skip_reason(path, churn=churn) is None
+
+
 def budget_for(churn: int) -> int:
     """Comments expected for this much churn."""
     for ceiling, budget in BUDGET_TABLE:
