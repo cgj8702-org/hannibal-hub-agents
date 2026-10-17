@@ -98,6 +98,13 @@ SUPPRESSED_PR_METADATA_ACTIONS: frozenset[str] = frozenset(
 # should_process_event) so the router's perimeter filter can be asserted as a strict subset
 # of it -- see tests/unit/router/test_router.py. A router that drops more than this list
 # would lose events silently, so the subset relation is the invariant that matters.
+#
+# CI infrastructure events: We subscribe to check_suite only -- its `completed` action
+# drives the CI gate (see review/ci_gate.py). check_run / status / workflow_run / workflow_job
+# are NOT subscribed, and are listed here as guards so they can never reach the agent if a
+# subscription is ever re-added. No code path reads their payloads, and
+# build_transient_turn_content has no branch for them -- so reaching the agent means an empty
+# prompt and a hallucinated reply (see docs/plans/repo_reclamation.md §8.1).
 SUPPRESSED_EVENT_NAMES: frozenset[str] = frozenset(
     {
         "check_suite",

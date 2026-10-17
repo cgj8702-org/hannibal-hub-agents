@@ -659,7 +659,7 @@ Flow: suite #1 completes → re-evaluate → suite #2 still pending → `PENDING
 | ID | Action | Status |
 |:--|:--|:--|
 | **EV-A** | Unsubscribe `workflow_run` in GitHub App settings | ✅ **done** |
-| **EV-B** | Add code-level guards so unsubscribed CI events can never reach the agent | ⬜ to do — see 8.5 |
+| **EV-B** | Add code-level guards so unsubscribed CI events can never reach the agent | ✅ **done** — see 8.5 |
 | **EV-C** | Never key a session on a delivery GUID (`_derive_session_id` fallback) | ⬜ to do — see 8.7 |
 | **EV-D** | Move the no-op decision *before* the agent (deterministic `Mode.IGNORE`) | ⬜ to do — this is `E1`–`E4` in Phase 4 |
 | **EV-E** | Collapse the logging to one line per lifecycle stage, owned by one place | ⬜ to do — see 8.8 |
