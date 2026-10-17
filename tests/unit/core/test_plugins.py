@@ -16,8 +16,6 @@ from webhook_agent.core.plugins import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_webhook_history_pruning_under_limit() -> None:
     plugin = WebhookHistoryPruningPlugin(max_events=5)
@@ -30,8 +28,6 @@ async def test_webhook_history_pruning_under_limit() -> None:
     assert req.contents == ["event0", "event1", "event2"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_webhook_history_pruning_exceeds_limit() -> None:
     plugin = WebhookHistoryPruningPlugin(max_events=4)
@@ -57,8 +53,6 @@ async def test_webhook_history_pruning_exceeds_limit() -> None:
     assert len(req.contents) == 4
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_webhook_history_pruning_no_contents() -> None:
     plugin = WebhookHistoryPruningPlugin(max_events=4)
@@ -69,8 +63,6 @@ async def test_webhook_history_pruning_no_contents() -> None:
     assert res is None
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_tool_output_pruning_no_session_events() -> None:
     plugin = ToolOutputPruningPlugin()
@@ -103,8 +95,6 @@ def _make_tool_event(tool_name: str, response: Any) -> MagicMock:
     return event
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_tool_output_pruning_protects_recent_turns() -> None:
     plugin = ToolOutputPruningPlugin(
@@ -127,8 +117,6 @@ async def test_tool_output_pruning_protects_recent_turns() -> None:
     assert part.function_response.response == "Z" * 400
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_tool_output_pruning_zeroes_stale_tool_outputs() -> None:
     plugin = ToolOutputPruningPlugin(
@@ -155,8 +143,6 @@ async def test_tool_output_pruning_zeroes_stale_tool_outputs() -> None:
     assert recent_part.function_response.response == "OK"
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_tool_output_pruning_skips_already_pruned() -> None:
     plugin = ToolOutputPruningPlugin(
@@ -179,8 +165,6 @@ async def test_tool_output_pruning_skips_already_pruned() -> None:
     assert part.function_response.response == {"pruned": PRUNE_MARKER}
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_prompt_sanitizer_plugin_string_and_content_parts() -> None:
     """Verify PromptSanitizerPlugin redacts secrets and returns None for callback chaining."""
@@ -209,8 +193,6 @@ async def test_prompt_sanitizer_plugin_string_and_content_parts() -> None:
     assert "ghp_" not in part.text
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sanitize_markdown_text_widened_secret_formats() -> None:
     """Verify that widened secret formats (ghs, ghu, ghr, github_pat, AKIA, PEM) are redacted."""
     from webhook_agent.core.sanitizer_plugin import sanitize_markdown_text
@@ -271,8 +253,6 @@ def test_sanitize_markdown_text_widened_secret_formats() -> None:
     assert "[REDACTED_SECRET]" in res_pem_no_end
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sanitize_markdown_text_negative_cases() -> None:
     """Verify that ordinary prose and short token look-alikes are preserved without false redacting."""
     from webhook_agent.core.sanitizer_plugin import sanitize_markdown_text

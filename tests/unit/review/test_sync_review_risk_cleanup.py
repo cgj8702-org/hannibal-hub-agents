@@ -14,8 +14,6 @@ from webhook_agent.review.schemas import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.regression]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_has_genuine_summary_risk_disabled() -> None:
     """Verify has_genuine_summary_risk returns False and does not trip on resolution or risk phrases."""
     summary = (
@@ -28,8 +26,6 @@ def test_has_genuine_summary_risk_disabled() -> None:
     assert has_genuine_summary_risk(None) is False
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_response_positive_summary_no_synthetic_critical() -> None:
     """Ensure a sync review with a positive summary and all RESOLVED items produces 0 critical issues and APPROVE."""
     data = {
@@ -60,8 +56,6 @@ def test_sync_review_response_positive_summary_no_synthetic_critical() -> None:
     assert verdict == "APPROVE"
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_response_unresolved_critical_retains_request_changes() -> None:
     """Ensure an unresolved critical issue still yields REQUEST_CHANGES."""
     data = {
@@ -83,8 +77,6 @@ def test_sync_review_response_unresolved_critical_retains_request_changes() -> N
     assert verdict == "REQUEST_CHANGES"
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_drops_placeholder_resolutions_without_grounding() -> None:
     """Placeholder resolutions (empty desc/evidence) must be dropped, not defaulted."""
     data = {
@@ -114,8 +106,6 @@ def test_sync_review_drops_placeholder_resolutions_without_grounding() -> None:
     assert "No prior review items tracked." in md
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_drops_string_only_resolutions() -> None:
     """String-only resolutions without evidence must not invent tracker rows."""
     data = {
@@ -129,8 +119,6 @@ def test_sync_review_drops_string_only_resolutions() -> None:
     assert sync_obj.resolutions == []
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_code_review_response_no_synthetic_critical_from_summary() -> None:
     """Ensure CodeReviewResponse does not synthesize a critical issue from an executive summary mentioning breaking changes."""
     data = {
@@ -144,8 +132,6 @@ def test_code_review_response_no_synthetic_critical_from_summary() -> None:
     assert len(cr_obj.critical_issues) == 0
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_sync_review_preserves_resolutions_from_approved_review_with_suggestions() -> None:
     """Ensure resolutions addressing suggestions from an APPROVED prior review are preserved."""
     from unittest.mock import MagicMock

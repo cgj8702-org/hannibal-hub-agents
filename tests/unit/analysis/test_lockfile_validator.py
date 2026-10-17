@@ -1,11 +1,16 @@
 """Unit tests for deterministic lockfile validator and fast-path approval."""
 
+import pytest
+
 from webhook_agent.analysis.lockfile_validator import (
     is_pure_dependency_pr,
     parse_bumped_packages_from_diff,
     render_deterministic_approval_markdown,
     validate_lockfile_diff,
 )
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 
 SAMPLE_UV_LOCK_DIFF = """diff --git a/uv.lock b/uv.lock
 index 1234..5678 100644

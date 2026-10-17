@@ -17,7 +17,6 @@ from webhook_agent.models.genai_provider import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_normalize_text() -> None:
     """Verify _normalize_text coerces various inputs correctly."""
     assert _normalize_text(None) == ""
@@ -31,7 +30,6 @@ def test_normalize_text() -> None:
     assert _normalize_text(MockObj()) == ""
 
 
-@pytest.mark.unit
 def test_extract_citations_empty() -> None:
     """Verify citations extraction returns empty list on empty response."""
     empty_resp = MagicMock()
@@ -40,7 +38,6 @@ def test_extract_citations_empty() -> None:
     assert _extract_citations(empty_resp) == []
 
 
-@pytest.mark.unit
 def test_extract_citations_from_grounding_chunks() -> None:
     """Verify citations extraction from candidate grounding metadata."""
     resp = MagicMock()
@@ -74,7 +71,6 @@ def test_extract_citations_from_grounding_chunks() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_extract_citations_from_steps() -> None:
     """Verify citations extraction from step results (dict and object formats)."""
     resp = MagicMock()
@@ -112,7 +108,6 @@ def test_extract_citations_from_steps() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_text_generation_result_dataclass() -> None:
     """Verify TextGenerationResult default fields."""
     res = TextGenerationResult(text="output text")
@@ -121,7 +116,6 @@ def test_text_generation_result_dataclass() -> None:
     assert res.citations == []
 
 
-@pytest.mark.unit
 def test_generate_content_provider_success() -> None:
     """Verify GenerateContentProvider invokes client models generate_content."""
     mock_client = MagicMock()
@@ -145,7 +139,6 @@ def test_generate_content_provider_success() -> None:
     assert res.citations == []
 
 
-@pytest.mark.unit
 def test_generate_content_provider_token_fallback_and_invalid() -> None:
     """Verify token fallback to total_tokens and handling of invalid token types."""
     mock_client = MagicMock()
@@ -172,7 +165,6 @@ def test_generate_content_provider_token_fallback_and_invalid() -> None:
     assert res3.total_tokens == 0
 
 
-@pytest.mark.unit
 def test_get_text_generation_provider_factory() -> None:
     """Verify get_text_generation_provider factory creates GenerateContentProvider."""
     mock_client = MagicMock()

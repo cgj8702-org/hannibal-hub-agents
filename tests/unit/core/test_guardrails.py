@@ -23,7 +23,7 @@ from webhook_agent.core.guardrails import (
     reset_guardrail_state,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.guardrails]
 
 
 @pytest.mark.anyio

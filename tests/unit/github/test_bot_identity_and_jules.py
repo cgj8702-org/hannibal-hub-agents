@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from webhook_agent.core.agent_definition import CONVERSATIONAL_INSTRUCTION
 from webhook_agent.github.bot_identity import (
     OWNER_LOGIN,
@@ -11,6 +13,8 @@ from webhook_agent.github.bot_identity import (
     is_owner_sender,
 )
 from webhook_agent.processor import WebhookProcessor
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
 def test_is_owner_sender():

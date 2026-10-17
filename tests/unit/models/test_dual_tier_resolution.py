@@ -7,10 +7,9 @@ from webhook_agent.models.rate_limiter import (
     resolve_webhook_api_key,
 )
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
 def test_resolve_webhook_api_key_fast_fail_missing_free_key(monkeypatch) -> None:
     monkeypatch.setenv("WEBHOOK_TIER", "free")
     monkeypatch.delenv("WEBHOOK_FREE_KEY", raising=False)
@@ -20,7 +19,6 @@ def test_resolve_webhook_api_key_fast_fail_missing_free_key(monkeypatch) -> None
         resolve_webhook_api_key()
 
 
-@pytest.mark.unit
 def test_resolve_webhook_api_key_fast_fail_missing_paid_key(monkeypatch) -> None:
     monkeypatch.setenv("WEBHOOK_TIER", "paid")
     monkeypatch.delenv("WEBHOOK_PAID_KEY", raising=False)
@@ -30,7 +28,6 @@ def test_resolve_webhook_api_key_fast_fail_missing_paid_key(monkeypatch) -> None
         resolve_webhook_api_key()
 
 
-@pytest.mark.unit
 def test_get_allowed_models_filters_zero_quota(monkeypatch) -> None:
     monkeypatch.setenv("WEBHOOK_TIER", "free")
     models = get_allowed_models("free")

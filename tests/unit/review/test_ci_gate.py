@@ -9,6 +9,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from webhook_agent.processor import WebhookProcessor
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 from webhook_agent.review.ci_gate import (
     CIState,
     build_review_event,

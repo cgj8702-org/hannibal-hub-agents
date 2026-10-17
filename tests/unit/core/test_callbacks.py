@@ -20,8 +20,6 @@ from webhook_agent.core.callbacks import (
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_agent_callback() -> None:
     ctx = MagicMock()
@@ -31,8 +29,6 @@ async def test_before_agent_callback() -> None:
     assert ctx.state["active_tier"] in ("free", "paid")
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
@@ -62,8 +58,6 @@ async def test_before_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert getattr(req, "_rate_limit_checked", False) is True
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_model_callback_uses_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
@@ -103,8 +97,6 @@ async def test_before_model_callback_uses_shared_client(monkeypatch: pytest.Monk
     )
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
@@ -129,8 +121,6 @@ async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_sanitization() -> None:
     tool = MagicMock()
@@ -142,8 +132,6 @@ async def test_before_tool_callback_sanitization() -> None:
     assert args["pr_number"] == 42
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_on_tool_error_callback() -> None:
     tool = MagicMock()
@@ -159,8 +147,6 @@ async def test_on_tool_error_callback() -> None:
     assert "temporary limit or error" in res["detail"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_allow_multiple_tools() -> None:
     tool = MagicMock()
@@ -179,8 +165,6 @@ async def test_before_tool_callback_allow_multiple_tools() -> None:
     assert res2 is None
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_on_tool_error_callback_rate_limit() -> None:
     tool = MagicMock()
@@ -195,8 +179,6 @@ async def test_on_tool_error_callback_rate_limit() -> None:
     assert "temporary limit or error" in res["detail"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_after_tool_callback_string_under_limit() -> None:
     tool = MagicMock()
@@ -210,8 +192,6 @@ async def test_after_tool_callback_string_under_limit() -> None:
     assert res == short_response
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_after_tool_callback_string_truncation() -> None:
     tool = MagicMock()
@@ -226,8 +206,6 @@ async def test_after_tool_callback_string_truncation() -> None:
     assert res == long_response
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_after_tool_callback_dict_truncation() -> None:
     tool = MagicMock()
@@ -245,8 +223,6 @@ async def test_after_tool_callback_dict_truncation() -> None:
     assert res == dict_response
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_resilient_token_extraction_variants() -> None:
     """Verify _extract_total_tokens and _extract_cached_tokens handle all SDK and dict formats."""
     resp1 = MagicMock()
@@ -285,8 +261,6 @@ def test_resilient_token_extraction_variants() -> None:
     assert _extract_cached_tokens(resp5) == 0
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_after_model_callback_falls_back_to_cache_metadata() -> None:
     """Verify that after_model_callback confirms cache reuse via cache_metadata if tokens omitted."""
@@ -308,8 +282,6 @@ async def test_after_model_callback_falls_back_to_cache_metadata() -> None:
     )
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_pydantic_validation_success() -> None:
     """Valid arguments are sanitized and coerced by Pydantic gate."""
@@ -326,8 +298,6 @@ async def test_before_tool_callback_pydantic_validation_success() -> None:
     assert "get_issue" in ctx.state["tools_executed"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_pydantic_validation_failure() -> None:
     """Invalid arguments return an error dict to short-circuit execution safely."""
@@ -343,8 +313,6 @@ async def test_before_tool_callback_pydantic_validation_failure() -> None:
     assert "Tool 'read_file' argument validation failed" in res["error"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 def test_format_tool_args_for_logging() -> None:
     """_format_tool_args_for_logging retains values, redacts sensitive keys, and truncates long strings."""
     from webhook_agent.core.callbacks import _format_tool_args_for_logging
@@ -365,8 +333,6 @@ def test_format_tool_args_for_logging() -> None:
     assert "[truncated" in formatted["huge_content"]
 
 
-@pytest.mark.unit
-@pytest.mark.webhook_agent
 @pytest.mark.anyio
 async def test_before_tool_callback_logs_real_arguments(caplog: pytest.LogCaptureFixture) -> None:
     """before_tool_callback logs the actual tool arguments rather than just keys."""
