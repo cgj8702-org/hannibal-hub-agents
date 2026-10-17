@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -110,6 +111,11 @@ def skip_reason(path: str, churn: int = 0) -> str | None:
 def is_reviewable_path(path: str, churn: int = 0) -> bool:
     """Return True if a file path is eligible for review comments."""
     return skip_reason(path, churn=churn) is None
+
+
+def reviewable_file_paths(paths: Iterable[str]) -> list[str]:
+    """Filter an iterable of paths to only those eligible for review comments."""
+    return [p for p in paths if is_reviewable_path(p)]
 
 
 def budget_for(churn: int) -> int:
