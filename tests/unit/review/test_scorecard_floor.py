@@ -11,6 +11,7 @@ from webhook_agent.review.review_enforcer import (
     _enforce_verdict,
     apply_scorecard_floor,
     is_contract_dimension,
+    is_security_dimension,
 )
 from webhook_agent.review.schemas import ScorecardItem
 
@@ -394,3 +395,151 @@ def test_enforce_verdict_partitions_unverified_invariants() -> None:
     assert meta["semantic_invariants"] == [
         "Gracefully handles transient network disconnections without crash."
     ]
+
+
+def test_is_security_dimension() -> None:
+    assert is_security_dimension("Security & Secrets") is True
+    assert is_security_dimension("security") is True
+    assert is_security_dimension("Secrets") is True
+    assert is_security_dimension("Secret Keyword") is True
+    assert is_security_dimension("Logic & Boundaries") is False
+    assert is_security_dimension("Contract Integrity") is False
+
+
+def test_apply_scorecard_floor_security_overrides_pass_to_fail() -> None:
+    scorecard = [
+        ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Clean"),
+        ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Model claimed clean"),
+    ]
+    det_item = ScorecardItem(
+        dimension="Security & Secrets",
+        status="FAIL",
+        notes="PROVEN: Hardcoded AWS secret key in src/auth.py:12",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert len(floored) == 2
+    sec = next(i for i in floored if i.dimension == "Security & Secrets")
+    assert sec.status == "FAIL"
+    assert "PROVEN: Hardcoded AWS secret key in src/auth.py:12" in sec.notes
+
+
+def test_apply_scorecard_floor_security_overrides_pass_to_warn() -> None:
+    scorecard = [
+        ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Model clean"),
+    ]
+    det_item = ScorecardItem(
+        dimension="Security & Secrets",
+        status="WARN",
+        notes="SUSPECTED: Low confidence pattern match",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert floored[0].status == "WARN"
+    assert "SUSPECTED: Low confidence pattern match" in floored[0].notes
+
+
+def test_apply_scorecard_floor_security_preserves_model_fail_when_deterministic_is_pass() -> None:
+    # Golden Asymmetry: PROVEN PASS does not override model's FAIL
+    scorecard = [
+        ScorecardItem(
+            dimension="Security & Secrets",
+            status="FAIL",
+            notes="Model caught SSRF vulnerability via user parameter",
+        ),
+    ]
+    det_item = ScorecardItem(
+        dimension="Security & Secrets",
+        status="PASS",
+        notes="PASS: 0 hardcoded secrets or static security defects",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert floored[0].status == "FAIL"
+    assert "SSRF vulnerability" in floored[0].notes
+
+
+def test_enforce_verdict_locks_approve_to_request_changes_via_state_security_fail() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation is clean and verified.",
+        "confidence": 5,
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+            {"dimension": "Concurrency & State", "status": "PASS", "notes": "Thread-safe."},
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "No issues."},
+            {"dimension": "Contract Integrity", "status": "PASS", "notes": "Compatible."},
+            {"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "Covered."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+
+    state = {
+        "deterministic_security_scorecard_item": {
+            "dimension": "Security & Secrets",
+            "status": "FAIL",
+            "notes": "PROVEN: Hardcoded secret detected at src/secrets.py:42",
+        }
+    }
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "Security & Secrets" in rendered_body
+    assert "PROVEN: Hardcoded secret detected at src/secrets.py:42" in rendered_body
+
+
+def test_enforce_verdict_direct_deterministic_security_item_param() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Clean pass.",
+        "scorecard": [
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "Clean"},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+    det_sec_item = ScorecardItem(
+        dimension="Security & Secrets",
+        status="FAIL",
+        notes="PROVEN: Insecure temp file usage (bandit B108)",
+    )
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(
+        json_body, "APPROVE", deterministic_security_item=det_sec_item
+    )
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "PROVEN: Insecure temp file usage (bandit B108)" in rendered_body
+
+
+def test_enforce_verdict_sync_review_security_floor() -> None:
+    sync_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "summary": "Synchronize update clean.",
+        "resolutions": [
+            {
+                "item_description": "Fix memory leak",
+                "status": "RESOLVED",
+                "evidence": "Fixed in src/leak.py",
+                "category": "CRITICAL",
+            }
+        ],
+        "scorecard": [
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "Model says clean"},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(sync_dict)
+    state = {
+        "deterministic_security_scorecard_item": {
+            "dimension": "Security & Secrets",
+            "status": "FAIL",
+            "notes": "PROVEN: AWS Secret Key detected in new diff",
+        }
+    }
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(
+        json_body, "APPROVE", review_mode="sync", state=state
+    )
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "PROVEN: AWS Secret Key detected in new diff" in rendered_body

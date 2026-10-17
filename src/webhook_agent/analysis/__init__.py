@@ -17,6 +17,14 @@ from .lockfile_validator import (
     render_deterministic_approval_markdown,
     validate_lockfile_diff,
 )
+from .security_scanner import (
+    SecurityAnalysisReport,
+    SecurityFinding,
+    SecurityScanner,
+    evaluate_security_integrity,
+    is_exempt_file_path,
+    is_exempt_secret_value,
+)
 from .symbol_graph import (
     BrokenCallSite,
     CallSiteSpec,
@@ -41,6 +49,9 @@ __all__ = [
     "LockfilePackage",
     "LockfileValidationResult",
     "ParameterSpec",
+    "SecurityAnalysisReport",
+    "SecurityFinding",
+    "SecurityScanner",
     "SignatureDiff",
     "SignatureSpec",
     "SymbolDefinitionVisitor",
@@ -52,8 +63,11 @@ __all__ = [
     "analyze_python_code",
     "build_dependency_grounding_context",
     "evaluate_contract_integrity",
+    "evaluate_security_integrity",
     "filter_review_diff",
     "get_transitive_closure",
+    "is_exempt_file_path",
+    "is_exempt_secret_value",
     "is_pure_dependency_pr",
     "parse_bumped_packages_from_diff",
     "parse_lockfile_dependency_graph",

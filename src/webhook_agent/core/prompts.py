@@ -417,6 +417,37 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                     "Could not build deterministic pre-audit compiler dossier: %s", ast_err
                 )
 
+        # Option 4: Deterministic Security Tooling (detect-secrets & bandit)
+        try:
+            from webhook_agent.analysis.security_scanner import (
+                SecurityScanner,
+                evaluate_security_integrity,
+            )
+            from webhook_agent.environment.context import get_active_environment
+
+            sec_env = get_active_environment()
+            sec_root = sec_env.root if sec_env else None
+            sec_scanner = SecurityScanner(repo_root=sec_root)
+            sec_report = sec_scanner.scan(
+                diff_text=str(raw.get("pr_diff") or ""),
+                changed_files=changed_files,
+                repo_root=sec_root,
+            )
+            sec_item = evaluate_security_integrity(sec_report)
+            event_data["deterministic_security_scorecard_item"] = sec_item.model_dump()
+
+            if sec_report.active_findings() or sec_item.status in ("FAIL", "WARN"):
+                parts.append(
+                    f"\n### 🛡️ Deterministic Security Pre-Audit Findings\n"
+                    f"{sec_report.to_markdown()}\n\n"
+                    f"**Dimension 3 (Security & Secrets) Evaluated Status**: `{sec_item.status}`\n"
+                    f"**Notes**: {sec_item.notes}\n\n"
+                    f"Enforce Dimension 3 (Security & Secrets) in the review scorecard. "
+                    f"Proven defects mechanically prevent approval."
+                )
+        except Exception as sec_err:
+            logger.debug("Could not run deterministic security scanner: %s", sec_err)
+
     # Include pre-fetched inline comment code context if available
     if "inline_code_context" in raw:
         parts.append(f"\nPre-Fetched Inline Code Context:\n{raw['inline_code_context']}")
