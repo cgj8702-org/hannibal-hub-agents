@@ -53,7 +53,7 @@ def test_analyze_diff_hunks() -> None:
         "+    x = 1\n"
         "+    return x\n"
     )
-    res = analyze_diff_hunks(diff)
+    res = analyze_diff_hunks("src/foo.py", diff)
     assert res.impact_counts["BREAKING_SIGNATURE"] == 1
     assert res.risk_score >= 0.6
     assert res.nodes_analyzed > 0

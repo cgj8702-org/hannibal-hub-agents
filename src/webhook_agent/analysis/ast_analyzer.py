@@ -129,8 +129,13 @@ def analyze_python_code(code_text: str) -> ASTAnalysisResult:
     )
 
 
-def analyze_diff_hunks(diff_text: str) -> ASTAnalysisResult:
-    """Extract added/modified lines from Python diff text and analyze via AST."""
+def analyze_diff_hunks(file_path: str, diff_text: str = "") -> ASTAnalysisResult:
+    """Extract added/modified lines from Python diff text and analyze via AST.
+
+    Args:
+        file_path: Relative path to the target source file being analyzed.
+        diff_text: Unified diff hunk content.
+    """
     if not diff_text or not diff_text.strip():
         return ASTAnalysisResult()
 
