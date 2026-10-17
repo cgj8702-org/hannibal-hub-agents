@@ -216,9 +216,9 @@ class TestInstallationFilter:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_router(monkeypatch)
-        assert module.AUTO_DELIVERED_INSTALLATION_EVENTS == frozenset(
+        assert frozenset(
             {"installation", "installation_repositories", "installation_target"}
-        )
+        ) == module.AUTO_DELIVERED_INSTALLATION_EVENTS
 
 
 class TestBodyHeaderConsistency:
@@ -324,7 +324,7 @@ class TestCrossSystemParity:
     ) -> None:
         """The router may only drop events the worker would also suppress."""
         module = _load_router(monkeypatch)
-        from webhook_agent.processor import SUPPRESSED_EVENT_NAMES  # noqa: PLC0415
+        from webhook_agent.processor import SUPPRESSED_EVENT_NAMES 
 
         router_set = module.AUTO_DELIVERED_INSTALLATION_EVENTS
         assert router_set.issubset(SUPPRESSED_EVENT_NAMES)
