@@ -9,7 +9,7 @@ from .dependency_tree import (
     get_transitive_closure,
     parse_lockfile_dependency_graph,
 )
-from .diff_filter import filter_review_diff, skip_reason
+from .diff_filter import filter_review_diff, is_reviewable_path, skip_reason
 from .lockfile_validator import (
     LockfileValidationResult,
     is_pure_dependency_pr,
@@ -75,6 +75,7 @@ __all__ = [
     "is_exempt_file_path",
     "is_exempt_secret_value",
     "is_pure_dependency_pr",
+    "is_reviewable_path",
     "parse_bumped_packages_from_diff",
     "parse_lockfile_dependency_graph",
     "render_deterministic_approval_markdown",
