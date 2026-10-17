@@ -528,6 +528,13 @@ class TestShouldProcessEvent:
             is False
         )
 
+    def test_workflow_events_ignored(self):
+        """workflow_run and workflow_job events must be suppressed as unhandled CI noise."""
+        for event_name in ("workflow_run", "workflow_job"):
+            for action in ("requested", "in_progress", "completed"):
+                ev = _make_normalized(event_name, action=action)
+                assert self.processor.should_process_event(ev) is False
+
     def test_process_event_null_repository_does_not_crash(self, caplog):
         """Payloads with 'repository': null must not crash with AttributeError."""
         import logging
