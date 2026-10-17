@@ -297,10 +297,10 @@ Referenced only by their own tests, never by a code path. Delete or wire:
 
 Note: `_count_tokens_exact` overlaps `count_tokens_exact` in `core/agent_definition.py:116` (which *is* exported). Check whether one supersedes the other.
 
-### D6. Fix the lying test
-- **File:** `tests/unit/test_worker.py` — `test_suppress_bot_actor_by_type`
-- **Problem:** docstring says *"Bot events detected via `sender.type == 'Bot'` should be suppressed"* but the assertion is `is True` (allowed), and the inline comment says the opposite of the docstring.
-- **Why it matters:** in a suite this size, a handful of tests that misdescribe themselves cost more during triage than 200 redundant tests ever would. This is the only genuine *test debt* found.
+### D6. Fix the lying test ✅
+- **File:** `tests/unit/test_worker.py` — `test_external_bot_not_suppressed_by_type_alone` (formerly `test_suppress_bot_actor_by_type`)
+- **Fix:** renamed and updated docstring to accurately state that external bots (`sender.type == 'Bot'`) are not suppressed by type alone; only our own bot identity slug is filtered.
+- **Status:** completed in PR 1.
 
 ### D7. Tier 6: 32 dead re-exports — handle carefully
 Package `__init__.py` files re-export 32 names that **no module imports** (`ASTAnalysisResult`, `CallSiteVisitor`, `RateLimitExceededError`, `PRClosedRegistry`, `set_active_environment`, `_MAX_RETRIES`, …).
@@ -528,6 +528,12 @@ gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python" AND ti
 Two gotchas from `.agents/skills/gcloud-logging`: relative offsets like `"-15m"` are **rejected inside the filter expression** (use `--freshness` instead), and most interesting lines are `logger.debug(...)` — silently dropped by GCP unless logging is set to `DEBUG`.
 
 6. **A second walkthrough of the two foggiest stations.** Still unidentified: `analysis/` (what the model actually receives) or `review/grounding.py` (989 lines, the real remaining complexity).
+7. **Gating & Proving Semantic Invariants (Research / Brainstorm):**
+The review schema partitions audit guarantees into `verified_invariants` (grounded in concrete line/file diff citations and AST verification) vs. `semantic_invariants` (high-level behavioral guarantees asserted by the model without deterministic proof).
+*Goal:* Brainstorm and research mechanisms to gate, test, or formally verify semantic invariants before allowing them into published review writebacks:
+- **Executable/Static Proofs:** Can semantic invariant assertions be tested against deterministic AST predicates, test suites, or symbol cross-references before rendering?
+- **Critic Verification Gate:** Can a secondary critic agent challenge and attempt to disprove each proposed semantic invariant against the diff, rejecting unprovable assertions?
+- **Formal Verification Contracts:** Require every semantic invariant to declare a verification predicate, evidence path, or test expectation, downgrading unverifiable claims to general comments.
 
 ---
 
