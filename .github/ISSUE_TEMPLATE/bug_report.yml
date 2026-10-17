@@ -1,0 +1,97 @@
+name: "🐞 Bug report"
+description: Something in Hannibal misbehaved (wrong review, missed event, bot loop, crash).
+title: "bug(<scope>): "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this! 💛 The more concrete the evidence, the faster we can turn it into a regression test.
+
+        🔒 **Security issue?** Please don't file it here. Follow our [security policy](https://github.com/cgj8702-org/hannibal-hub-agents/security/policy) instead.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 🧭 Area
+      description: Closest match is fine.
+      options:
+        - Review quality (wrong verdict, bad citation, hallucinated finding)
+        - Deterministic analysis (AST, symbol graph, test impact, diff filter)
+        - Webhook router / Pub/Sub
+        - Worker, sweeps, or proactive evaluator
+        - Model chain / rate limits
+        - GitHub App auth / bot identity
+        - Writeback policy / duplicate comments
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: 💥 Impact
+      options:
+        - Bot posted something wrong or misleading on a PR
+        - Bot stayed silent when it should have acted
+        - Bot looped, duplicated, or spammed comments
+        - Event dropped, stuck, or dead-lettered
+        - Cosmetic / minor
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the bot (or service) actually do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: For review bugs, include the verdict you expected (APPROVE / COMMENT / REQUEST_CHANGES) and why.
+    validations:
+      required: true
+
+  - type: input
+    id: link
+    attributes:
+      label: 🔗 Link to the PR, review, or comment
+      description: A permalink is the best evidence. Recorded reviews can be turned into replay fixtures.
+      placeholder: https://github.com/cgj8702-org/hannibal-hub-agents/pull/123#pullrequestreview-...
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Event type, PR state, trigger (`/review`, push, sweep), anything that makes it happen again.
+      placeholder: |
+        1. Open a PR that changes the signature of ...
+        2. Wait for CI to go green
+        3. See review ...
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 📜 Relevant logs
+      description: Trim to the relevant lines. **Redact tokens, keys, and installation IDs first.**
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Deployed commit (if known)
+      placeholder: "abc1234"
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: ✅ Before submitting
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I removed secrets, tokens, and credentials from everything above.
+          required: true

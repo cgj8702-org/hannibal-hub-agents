@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/cgj8702-org/hannibal-hub-agents/security/policy
+    about: Please don't open a public issue for vulnerabilities. Follow the reporting steps in our security policy.
