@@ -65,3 +65,19 @@ def test_filter_review_diff_empty():
 def test_reviewable_file_paths():
     paths = ["src/main.py", "package-lock.json", "uv.lock", "tests/test_foo.py"]
     assert reviewable_file_paths(paths) == ["src/main.py", "tests/test_foo.py"]
+
+
+def test_filter_review_diff_computes_ast_risk():
+    sample_diff = (
+        "diff --git a/src/logic.py b/src/logic.py\n"
+        "--- a/src/logic.py\n"
+        "+++ b/src/logic.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        "+def compute_total(a: int, b: int) -> int:\n"
+        "+    return a + b\n"
+    )
+    res = filter_review_diff(sample_diff)
+    assert res.is_reviewable is True
+    assert "src/logic.py" in res.kept_files
+    assert res.ast_risk_score > 0.0
+    assert "BREAKING_SIGNATURE" in res.ast_impact_counts
