@@ -21,12 +21,14 @@ from .symbol_graph import (
     BrokenCallSite,
     CallSiteSpec,
     CallSiteVisitor,
+    ConfidenceLevel,
     ParameterSpec,
     SignatureDiff,
     SignatureSpec,
     SymbolDefinitionVisitor,
     SymbolImpactAnalyzer,
     SymbolImpactReport,
+    evaluate_contract_integrity,
 )
 from .test_impact import TestImpactAnalyzer, TestImpactReport
 
@@ -35,6 +37,7 @@ __all__ = [
     "BrokenCallSite",
     "CallSiteSpec",
     "CallSiteVisitor",
+    "ConfidenceLevel",
     "LockfilePackage",
     "LockfileValidationResult",
     "ParameterSpec",
@@ -48,6 +51,7 @@ __all__ = [
     "analyze_diff_hunks",
     "analyze_python_code",
     "build_dependency_grounding_context",
+    "evaluate_contract_integrity",
     "filter_review_diff",
     "get_transitive_closure",
     "is_pure_dependency_pr",

@@ -326,4 +326,9 @@ def test_build_user_message_runs_symbol_and_test_impact_when_workspace_active(
     text = content.parts[0].text or ""
     assert "Cross-File Contract & Symbol Impact Analysis" in text
     assert "MISSING_REQUIRED_ARG" in text
+    assert "Dimension 4 (Contract Integrity) Evaluated Status" in text
     mock_repo.get_contents.assert_called_once_with("src/service.py", ref="base123")
+    contract_item = event_data.get("deterministic_contract_scorecard_item")
+    assert contract_item is not None
+    assert contract_item["dimension"] == "Contract Integrity"
+    assert contract_item["status"] == "FAIL"

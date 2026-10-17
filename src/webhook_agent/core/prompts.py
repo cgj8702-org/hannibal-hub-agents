@@ -367,23 +367,38 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                         baseline_loader = _gh_baseline_loader
 
                     # Cross-File Symbol Dependency & Breaking Signature Graph
-                    from webhook_agent.analysis.symbol_graph import SymbolImpactAnalyzer
+                    from webhook_agent.analysis.symbol_graph import (
+                        SymbolImpactAnalyzer,
+                        evaluate_contract_integrity,
+                    )
 
                     sym_analyzer = SymbolImpactAnalyzer(repo_root=active_env.root)
                     impact_reports = sym_analyzer.analyze_modified_files(
                         changed_files,
                         baseline_loader=baseline_loader,
                     )
+                    contract_item = evaluate_contract_integrity(
+                        impact_reports,
+                        parse_errors=sym_analyzer.parse_errors,
+                    )
+                    event_data["deterministic_contract_scorecard_item"] = contract_item.model_dump()
+
                     impact_blocks = [
                         r.to_markdown()
                         for r in impact_reports
                         if r.broken_call_sites or (r.sig_diff and r.sig_diff.is_breaking)
                     ]
-                    if impact_blocks:
-                        impact_text = "\n\n".join(impact_blocks)
+                    if impact_blocks or contract_item.status in ("FAIL", "WARN", "ERROR"):
+                        impact_text = (
+                            "\n\n".join(impact_blocks)
+                            if impact_blocks
+                            else "No broken call sites detected."
+                        )
                         parts.append(
                             f"\n### 🕸️ Cross-File Contract & Symbol Impact Analysis\n"
                             f"The static symbol dependency engine detected contract alterations and cross-file callers:\n\n"
+                            f"**Dimension 4 (Contract Integrity) Evaluated Status**: `{contract_item.status}`\n"
+                            f"**Notes**: {contract_item.notes}\n\n"
                             f"{impact_text}\n\n"
                             f"Verify whether external callers are broken and enforce Dimension 4 (Contract Integrity)."
                         )

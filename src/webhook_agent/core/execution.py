@@ -379,6 +379,9 @@ def execute_agent_event(
         "deterministic_changed_files": changed_files_list,
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
         "formal_review_eligible": _is_formal_review_eligible(canonical, comment_body),
+        "deterministic_contract_scorecard_item": event_data.get(
+            "deterministic_contract_scorecard_item"
+        ),
     }
 
     user_message: genai_types.Content | None = None
@@ -654,6 +657,10 @@ def execute_agent_event(
                         deterministic_state["deterministic_precompiled_ast"] = bool(
                             event_data.get("deterministic_precompiled_ast")
                         )
+                        if "deterministic_contract_scorecard_item" in event_data:
+                            deterministic_state["deterministic_contract_scorecard_item"] = (
+                                event_data["deterministic_contract_scorecard_item"]
+                            )
                         if user_message and user_message.parts:
                             logger.debug(
                                 "📝 Built user message for agent (length: %d chars)",
@@ -666,6 +673,10 @@ def execute_agent_event(
                     deterministic_state["deterministic_precompiled_ast"] = bool(
                         event_data.get("deterministic_precompiled_ast")
                     )
+                    if "deterministic_contract_scorecard_item" in event_data:
+                        deterministic_state["deterministic_contract_scorecard_item"] = event_data[
+                            "deterministic_contract_scorecard_item"
+                        ]
                     if user_message and user_message.parts:
                         logger.debug(
                             "📝 Built user message for agent (length: %d chars)",

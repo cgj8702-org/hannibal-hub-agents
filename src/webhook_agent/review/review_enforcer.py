@@ -24,11 +24,85 @@ from webhook_agent.review.formatter import (
     render_sync_review_markdown,
 )
 from webhook_agent.review.hunter import HunterEngine
-from webhook_agent.review.schemas import CodeReviewResponse, SyncReviewResponse
+from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem, SyncReviewResponse
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
 from webhook_agent.state.review_idempotency import review_claim_registry
 
 logger = logging.getLogger("webhook_agent.review_enforcer")
+
+
+def is_contract_dimension(dim: str) -> bool:
+    """Check if a scorecard dimension corresponds to Dimension 4 (Contract Integrity)."""
+    return "contract" in dim.strip().lower()
+
+
+def apply_scorecard_floor(
+    scorecard: list[ScorecardItem],
+    deterministic_item: ScorecardItem,
+) -> list[ScorecardItem]:
+    """Enforce deterministic floor on scorecard dimensions (Golden Asymmetry).
+
+    The LLM has zero authority to overturn a deterministic FAIL or WARN.
+    - If deterministic status is FAIL, the dimension status is strictly locked to FAIL.
+    - If deterministic status is WARN, the dimension status cannot be upgraded to PASS or N/A.
+    - If deterministic status is ERROR, the dimension status cannot be upgraded to PASS or N/A.
+    - If the dimension was omitted by the LLM, the deterministic item is appended.
+    """
+    updated: list[ScorecardItem] = []
+    found = False
+
+    for item in scorecard:
+        if is_contract_dimension(item.dimension):
+            found = True
+            new_status = item.status
+            new_notes = item.notes
+
+            if deterministic_item.status == "FAIL":
+                if item.status != "FAIL":
+                    logger.warning(
+                        "Deterministic Floor: Overriding LLM %s status on '%s' to FAIL: %s",
+                        item.status,
+                        item.dimension,
+                        deterministic_item.notes,
+                    )
+                    new_status = "FAIL"
+                    new_notes = deterministic_item.notes
+            elif deterministic_item.status == "WARN":
+                if item.status in ("PASS", "N/A"):
+                    logger.warning(
+                        "Deterministic Floor: Overriding LLM %s status on '%s' to WARN: %s",
+                        item.status,
+                        item.dimension,
+                        deterministic_item.notes,
+                    )
+                    new_status = "WARN"
+                    new_notes = deterministic_item.notes
+            elif deterministic_item.status in ("ERROR", "UNKNOWN"):
+                if item.status in ("PASS", "N/A"):
+                    logger.warning(
+                        "Deterministic Floor: Overriding LLM %s status on '%s' to %s: %s",
+                        item.status,
+                        item.dimension,
+                        deterministic_item.status,
+                        deterministic_item.notes,
+                    )
+                    new_status = deterministic_item.status
+                    new_notes = deterministic_item.notes
+
+            updated.append(
+                ScorecardItem(
+                    dimension=item.dimension,
+                    status=new_status,
+                    notes=new_notes,
+                )
+            )
+        else:
+            updated.append(item)
+
+    if not found:
+        updated.append(deterministic_item)
+
+    return updated
 
 
 def _parse_scorecard_scores(body: str) -> list[int]:
@@ -54,7 +128,12 @@ def _parse_scorecard_scores(body: str) -> list[int]:
 
 
 def _enforce_verdict(
-    body: str, event: str, pr: Any = None, review_mode: str | None = None
+    body: str,
+    event: str,
+    pr: Any = None,
+    review_mode: str | None = None,
+    state: Any = None,
+    deterministic_contract_item: ScorecardItem | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """Programmatically enforce verdict rules based on structured JSON or Markdown text.
 
@@ -67,6 +146,20 @@ def _enforce_verdict(
     or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
     """
     from .comment_poster import build_github_review_comments
+
+    det_contract_item: ScorecardItem | None = deterministic_contract_item
+    if det_contract_item is None and state is not None:
+        state_dict_val = (
+            state.to_dict()
+            if hasattr(state, "to_dict")
+            else (state if isinstance(state, dict) else {})
+        )
+        raw_det_sc = state_dict_val.get("deterministic_contract_scorecard_item")
+        if isinstance(raw_det_sc, dict):
+            with contextlib.suppress(Exception):
+                det_contract_item = ScorecardItem.model_validate(raw_det_sc)
+        elif isinstance(raw_det_sc, ScorecardItem):
+            det_contract_item = raw_det_sc
 
     cleaned_body = body.strip()
     req_event = (event or "").strip().upper()
@@ -249,6 +342,10 @@ def _enforce_verdict(
                 if use_sync_schema:
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+                    if det_contract_item is not None:
+                        sync_obj.scorecard = apply_scorecard_floor(
+                            sync_obj.scorecard, det_contract_item
+                        )
                     sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
                     sync_obj.minor_suggestions = critic_engine.filter_issues(
                         sync_obj.minor_suggestions
@@ -320,6 +417,10 @@ def _enforce_verdict(
                 ):
                     normalized_data = normalize_code_review_dict(data)
                     cr_obj = CodeReviewResponse.model_validate(normalized_data)
+                    if det_contract_item is not None:
+                        cr_obj.scorecard = apply_scorecard_floor(
+                            cr_obj.scorecard, det_contract_item
+                        )
                     cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
                     cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
                     enforced_verdict = calculate_strict_verdict(cr_obj)
@@ -367,6 +468,8 @@ def _enforce_verdict(
         if review_mode == "sync":
             normalized_sync = normalize_sync_review_dict(parsed_dict)
             sync_obj = SyncReviewResponse.model_validate(normalized_sync)
+            if det_contract_item is not None:
+                sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_contract_item)
             sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
             sync_obj.minor_suggestions = critic_engine.filter_issues(sync_obj.minor_suggestions)
             if diff_text:
@@ -383,6 +486,8 @@ def _enforce_verdict(
 
         normalized_dict = normalize_code_review_dict(parsed_dict)
         cr_obj = CodeReviewResponse.model_validate(normalized_dict)
+        if det_contract_item is not None:
+            cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_contract_item)
         cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
         cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
         enforced_verdict = calculate_strict_verdict(cr_obj)
@@ -412,7 +517,7 @@ def _enforce_verdict(
         logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)
 
     fallback_event = req_event if req_event else "COMMENT"
-    if is_intended_request_changes:
+    if is_intended_request_changes or (det_contract_item and det_contract_item.status == "FAIL"):
         fallback_event = "REQUEST_CHANGES"
     return body, fallback_event, []
 
@@ -463,7 +568,7 @@ def _submit_formal_review(
         if review_mode not in ("initial", "sync"):
             review_mode = "sync" if bot_reviews else "initial"
         rendered_body, enforced_event, inline_comments = _enforce_verdict(
-            body, event, pr, review_mode=review_mode
+            body, event, pr, review_mode=review_mode, state=state
         )
 
         try:
