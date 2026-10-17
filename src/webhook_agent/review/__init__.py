@@ -53,6 +53,8 @@ from .review_enforcer import (
     _enforce_verdict,
     _parse_scorecard_scores,
     _submit_formal_review,
+    apply_scorecard_floor,
+    is_contract_dimension,
 )
 from .schemas import (
     CandidateFinding,
@@ -95,6 +97,7 @@ __all__ = [
     "_review_lock",
     "_submit_formal_review",
     "already_raised",
+    "apply_scorecard_floor",
     "build_exclusions",
     "build_github_review_comments",
     "build_reconciliation_cache_key",
@@ -115,6 +118,7 @@ __all__ = [
     "has_actionable_findings",
     "is_automatic_pr_review_enabled",
     "is_base_branch_merge_sync",
+    "is_contract_dimension",
     "is_echo_description",
     "is_echo_suggestion",
     "is_reconciliation_claimed",

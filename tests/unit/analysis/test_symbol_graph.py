@@ -7,9 +7,13 @@ from pathlib import Path
 import pytest
 
 from webhook_agent.analysis.symbol_graph import (
+    BrokenCallSite,
     CallSiteSpec,
+    SignatureDiff,
     SymbolImpactAnalyzer,
+    SymbolImpactReport,
     compare_signatures,
+    evaluate_contract_integrity,
     extract_signatures_from_code,
     verify_call_site_compatibility,
 )
@@ -260,3 +264,184 @@ def test_symbol_impact_analyzer_without_baseline_loader(tmp_path: Path):
     assert reports[0].symbol_name == "run"
     assert reports[0].sig_diff is None
     assert len(reports[0].broken_call_sites) == 1
+    assert reports[0].broken_call_sites[0].confidence == "PROVEN"
+
+
+def test_verify_call_site_confidence_proven_vs_suspected():
+    code = "def compute(x, y): pass"
+    sig = extract_signatures_from_code(code)["compute"]
+
+    # Direct call -> PROVEN
+    direct_cs = CallSiteSpec(
+        "test.py", 10, 0, "compute", 1, frozenset(), False, False, is_attribute_call=False
+    )
+    direct_broken = verify_call_site_compatibility(direct_cs, sig)
+    assert direct_broken is not None
+    assert direct_broken.confidence == "PROVEN"
+
+    # Attribute call -> SUSPECTED
+    attr_cs = CallSiteSpec(
+        "test.py", 12, 0, "compute", 1, frozenset(), False, False, is_attribute_call=True
+    )
+    attr_broken = verify_call_site_compatibility(attr_cs, sig)
+    assert attr_broken is not None
+    assert attr_broken.confidence == "SUSPECTED"
+
+
+def test_verify_call_site_unexpected_keyword_with_starred_args():
+    code = "def compute(x, y=10): pass"
+    sig = extract_signatures_from_code(code)["compute"]
+
+    # Starred args passed, but explicit unexpected keyword passed without **kwargs
+    cs = CallSiteSpec(
+        "test.py", 15, 0, "compute", 1, frozenset({"bogus"}), True, False, is_attribute_call=False
+    )
+    broken = verify_call_site_compatibility(cs, sig)
+    assert broken is not None
+    assert broken.error_type == "UNEXPECTED_KEYWORD"
+    assert broken.confidence == "PROVEN"
+
+    # Starred args with valid keywords -> skips mismatch (None)
+    cs_valid = CallSiteSpec(
+        "test.py", 16, 0, "compute", 1, frozenset({"y"}), True, False, is_attribute_call=False
+    )
+    assert verify_call_site_compatibility(cs_valid, sig) is None
+
+
+def test_symbol_impact_report_to_markdown_confidence():
+    cs = CallSiteSpec("test.py", 10, 0, "func", 0, frozenset(), is_attribute_call=False)
+    broken = BrokenCallSite(
+        cs, "func", "MISSING_REQUIRED_ARG", "Missing 1 arg", confidence="PROVEN"
+    )
+    report = SymbolImpactReport(
+        symbol_name="func",
+        file_path="src/lib.py",
+        sig_diff=None,
+        total_call_sites_found=1,
+        broken_call_sites=[broken],
+        compatible_call_sites=[],
+    )
+    md = report.to_markdown()
+    assert "[PROVEN]" in md
+    assert "[MISSING_REQUIRED_ARG]" in md
+
+
+def test_extract_signatures_error_collector():
+    invalid_code = "def broken(\n"
+    errors: list[str] = []
+    sigs = extract_signatures_from_code(invalid_code, file_path="bad.py", error_collector=errors)
+    assert sigs == {}
+    assert len(errors) == 1
+    assert "bad.py" in errors[0]
+    assert "SyntaxError" in errors[0]
+
+
+def test_symbol_impact_analyzer_parse_errors(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    bad_file = src_dir / "broken.py"
+    bad_file.write_text("def syntax_error(\n")
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/broken.py"])
+    assert reports == []
+    assert len(analyzer.parse_errors) == 1
+    assert "src/broken.py" in analyzer.parse_errors[0]
+    assert "SyntaxError" in analyzer.parse_errors[0]
+
+
+def test_evaluate_contract_integrity_parse_errors():
+    item = evaluate_contract_integrity(
+        [], parse_errors=["src/bad.py:1: SyntaxError: unexpected EOF"]
+    )
+    assert item.dimension == "Contract Integrity"
+    assert item.status == "ERROR"
+    assert "ERROR: AST parse failure on: src/bad.py:1: SyntaxError: unexpected EOF" in item.notes
+
+    unknown_item = evaluate_contract_integrity([], parse_errors=["UNKNOWN: Timeout during parsing"])
+    assert unknown_item.status == "UNKNOWN"
+    assert "UNKNOWN: Analysis incomplete" in unknown_item.notes
+
+
+def test_evaluate_contract_integrity_proven_fail():
+    cs = CallSiteSpec("src/caller.py", 20, 0, "run", 0, frozenset(), is_attribute_call=False)
+    broken = BrokenCallSite(
+        cs, "run", "MISSING_REQUIRED_ARG", "Missing required arg 'x'", confidence="PROVEN"
+    )
+    report = SymbolImpactReport(
+        symbol_name="run",
+        file_path="src/service.py",
+        sig_diff=None,
+        total_call_sites_found=1,
+        broken_call_sites=[broken],
+        compatible_call_sites=[],
+    )
+    item = evaluate_contract_integrity([report])
+    assert item.dimension == "Contract Integrity"
+    assert item.status == "FAIL"
+    assert "PROVEN: Broken call site(s) detected for 'run' at src/caller.py:20" in item.notes
+
+
+def test_evaluate_contract_integrity_suspected_warn():
+    cs = CallSiteSpec("src/caller.py", 25, 0, "execute", 0, frozenset(), is_attribute_call=True)
+    broken = BrokenCallSite(
+        cs, "execute", "MISSING_REQUIRED_ARG", "Missing required arg", confidence="SUSPECTED"
+    )
+    report = SymbolImpactReport(
+        symbol_name="execute",
+        file_path="src/service.py",
+        sig_diff=None,
+        total_call_sites_found=1,
+        broken_call_sites=[broken],
+        compatible_call_sites=[],
+    )
+    item = evaluate_contract_integrity([report])
+    assert item.dimension == "Contract Integrity"
+    assert item.status == "WARN"
+    assert (
+        "SUSPECTED: Dynamic call site(s) may be affected: 'execute' at src/caller.py:25"
+        in item.notes
+    )
+
+
+def test_evaluate_contract_integrity_breaking_signature_without_callers():
+    diff = SignatureDiff(
+        symbol_name="api_v2",
+        file_path="src/api.py",
+        old_sig=None,
+        new_sig=None,
+        is_breaking=True,
+        reasons=["Required parameter 'token' was added without default."],
+    )
+    report = SymbolImpactReport(
+        symbol_name="api_v2",
+        file_path="src/api.py",
+        sig_diff=diff,
+        total_call_sites_found=0,
+        broken_call_sites=[],
+        compatible_call_sites=[],
+    )
+    item = evaluate_contract_integrity([report])
+    assert item.dimension == "Contract Integrity"
+    assert item.status == "WARN"
+    assert "SUSPECTED: Breaking signature change detected on 'api_v2'" in item.notes
+
+
+def test_evaluate_contract_integrity_pass():
+    report = SymbolImpactReport(
+        symbol_name="safe_func",
+        file_path="src/safe.py",
+        sig_diff=None,
+        total_call_sites_found=2,
+        broken_call_sites=[],
+        compatible_call_sites=[],
+    )
+    item = evaluate_contract_integrity([report])
+    assert item.dimension == "Contract Integrity"
+    assert item.status == "PASS"
+    assert "PASS: All cross-file signatures and call sites compatible." in item.notes
+
+    empty_item = evaluate_contract_integrity([])
+    assert empty_item.dimension == "Contract Integrity"
+    assert empty_item.status == "PASS"
+    assert "PASS: No breaking contract changes detected." in empty_item.notes

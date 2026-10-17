@@ -12,8 +12,13 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+from webhook_agent.review.schemas import ScorecardItem
 
 logger = logging.getLogger("webhook_agent.analysis.symbol_graph")
+
+ConfidenceLevel = Literal["PROVEN", "SUSPECTED", "UNKNOWN"]
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,8 @@ class CallSiteSpec:
     has_starred_arg: bool = False  # *args
     has_starred_kwarg: bool = False  # **kwargs
     raw_code: str = ""
+    is_attribute_call: bool = False  # True if obj.method(), False if direct func()
+    receiver_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +89,7 @@ class BrokenCallSite:
         str  # "MISSING_REQUIRED_ARG", "TOO_MANY_ARGS", "MISSING_KEYWORD_ARG", "UNEXPECTED_KEYWORD"
     )
     description: str
+    confidence: Literal["PROVEN", "SUSPECTED"] = "PROVEN"
 
 
 @dataclass(frozen=True)
@@ -115,7 +123,7 @@ class SymbolImpactReport:
             for b in self.broken_call_sites:
                 cs = b.call_site
                 loc = f"`{cs.file_path}:{cs.line_number}`"
-                lines.append(f"  * {loc}: [{b.error_type}] {b.description}")
+                lines.append(f"  * {loc}: [{b.confidence}] [{b.error_type}] {b.description}")
         else:
             lines.append("- **✅ All External Call Sites Compatible**.")
 
@@ -261,15 +269,21 @@ class CallSiteVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         is_match = False
         callee_name = ""
+        is_attribute_call = False
+        receiver_name: str | None = None
 
         # Direct function call: func(...)
         if isinstance(node.func, ast.Name) and node.func.id == self.target_symbol:
             is_match = True
             callee_name = node.func.id
+            is_attribute_call = False
         # Attribute call: obj.method(...)
         elif isinstance(node.func, ast.Attribute) and node.func.attr == self.target_symbol:
             is_match = True
             callee_name = node.func.attr
+            is_attribute_call = True
+            if isinstance(node.func.value, ast.Name):
+                receiver_name = node.func.value.id
 
         if is_match:
             has_star = any(isinstance(a, ast.Starred) for a in node.args)
@@ -286,17 +300,31 @@ class CallSiteVisitor(ast.NodeVisitor):
                 has_starred_arg=has_star,
                 has_starred_kwarg=has_star_kw,
                 raw_code=ast.unparse(node),
+                is_attribute_call=is_attribute_call,
+                receiver_name=receiver_name,
             )
             self.call_sites.append(call_spec)
 
         self.generic_visit(node)
 
 
-def extract_signatures_from_code(code: str, file_path: str = "") -> dict[str, SignatureSpec]:
+def extract_signatures_from_code(
+    code: str,
+    file_path: str = "",
+    error_collector: list[str] | None = None,
+) -> dict[str, SignatureSpec]:
     """Parse Python code and extract all callable signatures."""
     try:
         tree = ast.parse(code, filename=file_path)
-    except SyntaxError:
+    except SyntaxError as err:
+        if error_collector is not None:
+            lineno = getattr(err, "lineno", "?")
+            msg = getattr(err, "msg", str(err))
+            error_collector.append(f"{file_path}:{lineno}: SyntaxError: {msg}")
+        return {}
+    except Exception as exc:
+        if error_collector is not None:
+            error_collector.append(f"{file_path}: Exception: {exc}")
         return {}
     visitor = SymbolDefinitionVisitor(file_path=file_path)
     visitor.visit(tree)
@@ -399,8 +427,31 @@ def verify_call_site_compatibility(
     sig: SignatureSpec,
 ) -> BrokenCallSite | None:
     """Verify whether a call site satisfies the callable's signature constraints."""
+    confidence: Literal["PROVEN", "SUSPECTED"] = (
+        "SUSPECTED" if call_site.is_attribute_call else "PROVEN"
+    )
+
     # If dynamic forwarding is used (*args or **kwargs), skip static argument count mismatch
+    # but still catch explicit unexpected keywords if **kwargs is not accepted
     if call_site.has_starred_arg or call_site.has_starred_kwarg:
+        if not sig.has_var_keyword:
+            valid_kw_names = {
+                p.name
+                for p in sig.parameters
+                if p.kind in ("POSITIONAL_OR_KEYWORD", "KEYWORD_ONLY")
+            }
+            unexpected_kw = call_site.keyword_names - valid_kw_names
+            if unexpected_kw:
+                return BrokenCallSite(
+                    call_site=call_site,
+                    target_symbol=sig.symbol_name,
+                    error_type="UNEXPECTED_KEYWORD",
+                    description=(
+                        f"Unexpected keyword argument(s): {sorted(unexpected_kw)}. "
+                        f"Valid keyword arguments are: {sorted(valid_kw_names)}."
+                    ),
+                    confidence=confidence,
+                )
         return None
 
     pos_count = call_site.positional_arg_count
@@ -437,6 +488,7 @@ def verify_call_site_compatibility(
                 f"Signature requires at least {effective_min_pos}, but call supplies {pos_count} "
                 f"(keywords supplied: {sorted(kw_names)})."
             ),
+            confidence=confidence,
         )
 
     # Check for too many positional arguments
@@ -449,6 +501,7 @@ def verify_call_site_compatibility(
                 f"Too many positional arguments. Function accepts at most {effective_max_pos}, "
                 f"but call supplies {pos_count}."
             ),
+            confidence=confidence,
         )
 
     # Check for missing required keyword-only arguments
@@ -459,6 +512,7 @@ def verify_call_site_compatibility(
             target_symbol=sig.symbol_name,
             error_type="MISSING_KEYWORD_ARG",
             description=(f"Missing required keyword-only argument(s): {sorted(missing_req_kw)}."),
+            confidence=confidence,
         )
 
     # Check for unexpected keyword arguments
@@ -476,6 +530,7 @@ def verify_call_site_compatibility(
                     f"Unexpected keyword argument(s): {sorted(unexpected_kw)}. "
                     f"Valid keyword arguments are: {sorted(valid_kw_names)}."
                 ),
+                confidence=confidence,
             )
 
     return None
@@ -486,6 +541,7 @@ class SymbolImpactAnalyzer:
 
     def __init__(self, repo_root: Path | None = None) -> None:
         self.repo_root = repo_root or Path.cwd()
+        self.parse_errors: list[str] = []
 
     def find_call_sites_in_repo(
         self,
@@ -612,6 +668,7 @@ class SymbolImpactAnalyzer:
                 new_code = abs_file.read_text(encoding="utf-8", errors="replace")
             except OSError as read_err:
                 logger.debug("Failed reading %s: %s", abs_file, read_err)
+                self.parse_errors.append(f"{rel_path}: OSError: {read_err}")
                 continue
 
             # Fetch baseline code via baseline_loader if provided
@@ -622,7 +679,9 @@ class SymbolImpactAnalyzer:
                 except Exception as load_err:
                     logger.debug("Could not fetch baseline for %s: %s", rel_path, load_err)
 
-            new_sigs = extract_signatures_from_code(new_code, file_path=rel_path)
+            new_sigs = extract_signatures_from_code(
+                new_code, file_path=rel_path, error_collector=self.parse_errors
+            )
             old_sigs = (
                 extract_signatures_from_code(old_code or "", file_path=rel_path) if old_code else {}
             )
@@ -654,3 +713,96 @@ class SymbolImpactAnalyzer:
                     reports.append(rep)
 
         return reports
+
+
+def evaluate_contract_integrity(
+    reports: list[SymbolImpactReport],
+    parse_errors: list[str] | None = None,
+) -> ScorecardItem:
+    """Evaluate Dimension 4 (Contract Integrity) from cross-file symbol impact and AST parse status.
+
+    Confidence tiering:
+    - ERROR: AST parse errors or syntax failures in analyzed files.
+    - FAIL (PROVEN): Incompatible call sites directly invoking modified symbols.
+    - WARN (SUSPECTED): Incompatible dynamic/attribute call sites, or breaking signature changes
+      without identified internal call sites.
+    - PASS: All cross-file signatures and call sites compatible, or no contract changes.
+    """
+    if parse_errors:
+        err_msg = "; ".join(parse_errors[:3])
+        if len(parse_errors) > 3:
+            err_msg += f" (+{len(parse_errors) - 3} more)"
+        is_unknown = any("UNKNOWN" in e.upper() for e in parse_errors)
+        status: Literal["UNKNOWN", "ERROR"] = "UNKNOWN" if is_unknown else "ERROR"
+        prefix = "UNKNOWN: Analysis incomplete" if is_unknown else "ERROR: AST parse failure on"
+        return ScorecardItem(
+            dimension="Contract Integrity",
+            status=status,
+            notes=f"{prefix}: {err_msg}",
+        )
+
+    proven_broken: list[BrokenCallSite] = []
+    suspected_broken: list[BrokenCallSite] = []
+    for rep in reports:
+        for b in rep.broken_call_sites:
+            if b.confidence == "PROVEN":
+                proven_broken.append(b)
+            else:
+                suspected_broken.append(b)
+
+    if proven_broken:
+        citations: list[str] = []
+        for b in proven_broken[:3]:
+            cs = b.call_site
+            citations.append(
+                f"'{b.target_symbol}' at {cs.file_path}:{cs.line_number} ({b.error_type})"
+            )
+        citation_str = "; ".join(citations)
+        if len(proven_broken) > 3:
+            citation_str += f" (+{len(proven_broken) - 3} more)"
+        return ScorecardItem(
+            dimension="Contract Integrity",
+            status="FAIL",
+            notes=f"PROVEN: Broken call site(s) detected for {citation_str}.",
+        )
+
+    if suspected_broken:
+        citations = []
+        for b in suspected_broken[:3]:
+            cs = b.call_site
+            citations.append(
+                f"'{b.target_symbol}' at {cs.file_path}:{cs.line_number} ({b.error_type})"
+            )
+        citation_str = "; ".join(citations)
+        if len(suspected_broken) > 3:
+            citation_str += f" (+{len(suspected_broken) - 3} more)"
+        return ScorecardItem(
+            dimension="Contract Integrity",
+            status="WARN",
+            notes=f"SUSPECTED: Dynamic call site(s) may be affected: {citation_str}.",
+        )
+
+    breaking_diffs = [rep for rep in reports if rep.sig_diff and rep.sig_diff.is_breaking]
+    if breaking_diffs:
+        sym_names = [f"'{r.symbol_name}'" for r in breaking_diffs[:3]]
+        sym_str = ", ".join(sym_names)
+        if len(breaking_diffs) > 3:
+            sym_str += f" (+{len(breaking_diffs) - 3} more)"
+        return ScorecardItem(
+            dimension="Contract Integrity",
+            status="WARN",
+            notes=f"SUSPECTED: Breaking signature change detected on {sym_str}, but no internal callers were broken.",
+        )
+
+    if reports:
+        return ScorecardItem(
+            dimension="Contract Integrity",
+            status="PASS",
+            notes="PASS: All cross-file signatures and call sites compatible.",
+        )
+
+    return ScorecardItem(
+        dimension="Contract Integrity",
+        status="PASS",
+        notes="PASS: No breaking contract changes detected.",
+    )
