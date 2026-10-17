@@ -9,12 +9,39 @@ This directory contains static fixtures and canonical sample webhook payloads us
 | `reply_to_bot_review_comment.json` | Webhook Payload (`issue_comment` / PR review reply) | Real GitHub webhook event payload simulating a user replying directly to an automated bot review comment on PR #160. |
 | `webhook_agent_creates_comment.json` | Webhook Payload (`issue_comment` creation) | Real GitHub webhook event payload simulating the webhook agent bot creating an issue comment. |
 
-## Usage
+## Status of the two legacy webhook fixtures
 
-These fixtures are loaded in unit tests (under `tests/unit/`) to verify:
-1. `processor.py` event routing and bot loop prevention logic.
-2. `schemas.py` and `bot_identity.py` user login extraction and bot identification.
-3. Payload normalization and deterministic idempotency hashing.
+> ⚠️ **Currently unreferenced.** Neither `reply_to_bot_review_comment.json` nor
+> `webhook_agent_creates_comment.json` is loaded by any test — nothing globs this directory
+> either. They are retained as reference payloads only. Either wire them into a test or
+> remove them; the newer convention below is name-addressed, which makes the same drift
+> visible rather than silent.
+
+## Webhook Payload Fixtures (`tests/fixtures/webhooks/`)
+
+Raw webhook payload bodies, recorded from real GitHub deliveries, named
+`<event>.<action>.json`.
+
+**The filename is the only metadata a test needs.** The event and action are derivable from
+it, and the worker's input envelope carries `event_name` and `delivery_id` as flat strings —
+so request headers are deliberately *not* recorded.
+
+Recorded from the App deliveries API, which requires **App-level** JWT auth (it rejects
+installation tokens, GitHub App user tokens, and fine-grained PATs).
+
+Regenerate (network required; never from a test):
+
+```bash
+uv run python dev/record_webhook_fixtures.py --list
+uv run python dev/record_webhook_fixtures.py pull_request.opened issue_comment.created
+```
+
+The deliveries API returns the payload as *parsed JSON*, so the original signed bytes are not
+recoverable. These fixtures are for routing, normalization, and suppression tests — **not**
+for signature verification. Construct synthetic bodies and a test secret for that.
+
+Re-recording is byte-identical while the deliveries are unchanged; if a fixture changes, a
+test that depends on it should be reviewed rather than silently updated.
 
 ## Review Replay Fixtures (`tests/fixtures/reviews/`)
 
