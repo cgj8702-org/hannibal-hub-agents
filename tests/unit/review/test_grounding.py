@@ -422,3 +422,67 @@ def test_behavioral_invariant_with_diff_quote_or_test_passes() -> None:
     issues = verify_citations([inv_prose_equals], SAMPLE_DIFF, ["src/main.py"])
     assert len(issues) == 1
     assert issues[0].code == "unsubstantiated_behavioral_invariant"
+
+
+def test_backticked_path_citation_not_treated_as_code_quote() -> None:
+    """A backticked file path or line citation in evidence must not trigger evidence_not_in_diff."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    finding = Finding(
+        kind="invariant",
+        path="src/main.py",
+        line=10,
+        evidence="Shadow mode telemetry logging verified (`src/main.py:10`)",
+    )
+    issues = verify_citations([finding], SAMPLE_DIFF, ["src/main.py"])
+    assert issues == []
+
+
+def test_multi_symbol_prose_does_not_concatenate_into_diff_failure() -> None:
+    """Multiple backticked symbols in prose must not be concatenated into a continuous diff query."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    finding = Finding(
+        kind="suggestion",
+        path="src/main.py",
+        line=10,
+        evidence="Consider refactoring `new_line_1` and `new_line_2` into a single helper.",
+    )
+    issues = verify_citations([finding], SAMPLE_DIFF, ["src/main.py"])
+    assert issues == []
+
+
+def test_long_untrue_code_quote_still_rejected() -> None:
+    """A long code quote (> 24 chars) that does not exist in the diff must be rejected."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    finding = Finding(
+        kind="critical",
+        path="src/main.py",
+        line=10,
+        evidence="Fabricated code quote: `this_function_does_not_exist_anywhere_in_the_diff()`",
+    )
+    issues = verify_citations([finding], SAMPLE_DIFF, ["src/main.py"])
+    assert len(issues) == 1
+    assert issues[0].code == "evidence_not_in_diff"
+    assert issues[0].is_hard
+
+
+def test_is_path_citation_helper() -> None:
+    """Verify _is_path_citation accurately distinguishes file paths from code symbols."""
+    from webhook_agent.review.grounding import _is_path_citation
+
+    # File paths and line citations
+    assert _is_path_citation("src/main.py:10", "src/main.py") is True
+    assert _is_path_citation(".github/dependabot.yml:11-19") is True
+    assert _is_path_citation("src/webhook_agent/processor.py") is True
+    assert _is_path_citation("main.py", "src/main.py") is True
+    assert _is_path_citation("main.py") is True
+
+    # Code symbols and expressions
+    assert _is_path_citation("ToolInputBase") is False
+    assert _is_path_citation("calculate_strict_verdict") is False
+    assert _is_path_citation("logger.info('hello')") is False
+    assert _is_path_citation("x = 1") is False
+    assert _is_path_citation("self.diff") is False
+    assert _is_path_citation("cls.handler") is False
