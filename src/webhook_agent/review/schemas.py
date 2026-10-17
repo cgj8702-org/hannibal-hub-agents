@@ -365,6 +365,10 @@ class CodeReviewResponse(BaseModel):
         default_factory=list,
         description="Concrete, diff-grounded behavioral guarantees or invariants verified during audit",
     )
+    semantic_invariants: list[str] = Field(
+        default_factory=list,
+        description="High-level architectural, domain, or behavioral guarantees asserted by the model without mechanical line proof",
+    )
     unverified_claims: list[str] = Field(
         default_factory=list,
         description="Claims, residual uncertainty, or hypotheses that could not be fully verified against the diff.",
@@ -673,6 +677,27 @@ class CodeReviewResponse(BaseModel):
                         clean_inv.append(inv_text)
         normalized["verified_invariants"] = clean_inv
 
+        raw_semantic = normalized.get("semantic_invariants") or normalized.get(
+            "model_asserted_invariants"
+        )
+        clean_semantic: list[str] = []
+        if isinstance(raw_semantic, list):
+            for item in raw_semantic:
+                if isinstance(item, BaseModel):
+                    item = item.model_dump()
+                if isinstance(item, str) and item.strip():
+                    clean_semantic.append(clean_field_string(item.strip()))
+                elif isinstance(item, dict):
+                    inv_text = str(
+                        item.get("invariant")
+                        or item.get("description")
+                        or item.get("evidence")
+                        or ""
+                    ).strip()
+                    if inv_text:
+                        clean_semantic.append(clean_field_string(inv_text))
+        normalized["semantic_invariants"] = clean_semantic
+
         raw_unverified = (
             normalized.get("unverified_claims")
             or normalized.get("residual_uncertainty")
@@ -780,6 +805,20 @@ class CodeReviewResponse(BaseModel):
             )
             section_counter += 1
 
+        if self.semantic_invariants:
+            sem_lines = [f"* {inv}" for inv in self.semantic_invariants]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Semantic Invariants (Model-Asserted)",
+                    "",
+                    "\n".join(sem_lines),
+                ]
+            )
+            section_counter += 1
+
         if self.unverified_claims:
             u_lines = [f"* {claim}" for claim in self.unverified_claims]
             markdown_parts.extend(
@@ -850,6 +889,8 @@ class CodeReviewResponse(BaseModel):
             ]
         if self.verified_invariants:
             meta["verified_invariants"] = list(self.verified_invariants)
+        if self.semantic_invariants:
+            meta["semantic_invariants"] = list(self.semantic_invariants)
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
 
@@ -883,6 +924,10 @@ class SyncReviewResponse(BaseModel):
     verified_invariants: list[str] = Field(
         default_factory=list,
         description="Concrete, diff-grounded behavioral guarantees or invariants verified during audit",
+    )
+    semantic_invariants: list[str] = Field(
+        default_factory=list,
+        description="High-level architectural, domain, or behavioral guarantees asserted by the model without mechanical line proof",
     )
     unverified_claims: list[str] = Field(
         default_factory=list,
@@ -1175,9 +1220,28 @@ class SyncReviewResponse(BaseModel):
                     line_val = item.get("line")
                     if path_val and line_val:
                         clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
-                    elif inv_text:
-                        clean_inv.append(inv_text)
         normalized["verified_invariants"] = clean_inv
+
+        raw_semantic = normalized.get("semantic_invariants") or normalized.get(
+            "model_asserted_invariants"
+        )
+        clean_semantic: list[str] = []
+        if isinstance(raw_semantic, list):
+            for item in raw_semantic:
+                if isinstance(item, BaseModel):
+                    item = item.model_dump()
+                if isinstance(item, str) and item.strip():
+                    clean_semantic.append(clean_field_string(item.strip()))
+                elif isinstance(item, dict):
+                    inv_text = str(
+                        item.get("invariant")
+                        or item.get("description")
+                        or item.get("evidence")
+                        or ""
+                    ).strip()
+                    if inv_text:
+                        clean_semantic.append(clean_field_string(inv_text))
+        normalized["semantic_invariants"] = clean_semantic
 
         return normalized
 
@@ -1198,6 +1262,7 @@ class SyncReviewResponse(BaseModel):
                 "minor_suggestions": [item.model_dump() for item in self.minor_suggestions],
                 "risks_and_edge_cases": [],
                 "verified_invariants": list(self.verified_invariants),
+                "semantic_invariants": list(self.semantic_invariants),
                 "unverified_claims": list(self.unverified_claims),
             }
             cr_obj = CodeReviewResponse.model_validate(cr_data)
@@ -1329,6 +1394,20 @@ class SyncReviewResponse(BaseModel):
             )
             section_counter += 1
 
+        if self.semantic_invariants:
+            sem_lines = [f"* {inv}" for inv in self.semantic_invariants]
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Semantic Invariants (Model-Asserted)",
+                    "",
+                    "\n".join(sem_lines),
+                ]
+            )
+            section_counter += 1
+
         if self.unverified_claims:
             u_lines = [f"* {claim}" for claim in self.unverified_claims]
             markdown_parts.extend(
@@ -1388,6 +1467,8 @@ class SyncReviewResponse(BaseModel):
             ]
         if self.verified_invariants:
             meta["verified_invariants"] = list(self.verified_invariants)
+        if self.semantic_invariants:
+            meta["semantic_invariants"] = list(self.semantic_invariants)
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
 

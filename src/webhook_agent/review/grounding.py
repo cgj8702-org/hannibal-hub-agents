@@ -514,17 +514,6 @@ def _check_one(
     # must be backed by a test or diff quote.
     if finding.kind == "invariant":
         ev = (finding.evidence or "").lower()
-        BEHAVIORAL_KEYWORDS = (
-            "skips",
-            "skip",
-            "handles",
-            "fails",
-            "retries",
-            "bypasses",
-            "fallback",
-            "runs",
-            "gracefully",
-        )
         is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
@@ -619,6 +608,19 @@ _INVARIANT_CITATION_RE = re.compile(
 )
 
 
+BEHAVIORAL_KEYWORDS: tuple[str, ...] = (
+    "skips",
+    "skip",
+    "handles",
+    "fails",
+    "retries",
+    "bypasses",
+    "fallback",
+    "runs",
+    "gracefully",
+)
+
+
 def _is_path_citation(candidate: str, finding_path: str = "") -> bool:
     """Return True if a backticked candidate string represents a file/line citation rather than code."""
     c = candidate.strip()
@@ -639,6 +641,88 @@ def _is_path_citation(candidate: str, finding_path: str = "") -> bool:
             return True
     parts = c.rsplit(".", 1)
     return len(parts) == 2 and parts[1].lower() in _KNOWN_EXTENSIONS
+
+
+def is_machine_verified_invariant(
+    invariant: str,
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+) -> bool:
+    """Return True if an invariant has concrete mechanical proof in the diff, False if semantic.
+
+    An invariant is classified as Machine-Verified [Machine-Checked] if:
+    1. It points to a cited file and line in the diff (via path:line citation), where:
+       - The cited file is among the changed paths / diff files.
+       - Any non-path code quotes appear in the diff.
+       - If asserting behavioral logic, it contains a concrete code quote from the diff or
+         cites a test function (test_\\w+).
+    2. OR it contains a concrete code quote (>= 16 chars) or test symbol directly found in the diff.
+    Otherwise, it is classified as Semantic [Model-Asserted].
+    """
+    raw_inv = (invariant or "").strip()
+    if not raw_inv or not diff_text:
+        return False
+
+    norm_diff = _norm_evidence(diff_text)
+    match = _INVARIANT_CITATION_RE.search(raw_inv)
+
+    if match:
+        path = bare_path(match.group(1))
+        if changed_paths is not None:
+            changed = {bare_path(p) for p in changed_paths if p}
+            if path not in changed:
+                return False
+        else:
+            anchors, line_text = walk_right_side(diff_text)
+            if path not in line_text and path not in anchors:
+                return False
+
+        raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(raw_inv) if q.strip()]
+        code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
+        for q in code_quotes:
+            if len(_norm_evidence(q)) > 24 and _norm_evidence(q) not in norm_diff:
+                return False
+
+        ev = raw_inv.lower()
+        is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
+        has_diff_quote = bool(code_quotes) and all(
+            _norm_evidence(q) in norm_diff for q in code_quotes
+        )
+        has_test = re.search(r"\btest_\w+", ev) is not None
+        has_concrete_quote_or_test = has_diff_quote or has_test
+        is_static_fact = re.search(r"^[A-Z0-9_]+\s*=\s*", raw_inv) is not None
+
+        return not (is_behavioral and not is_static_fact and not has_concrete_quote_or_test)
+
+    # No path:line citation: check if it directly quotes diff code or cites a test function in the diff
+    raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(raw_inv) if q.strip()]
+    code_quotes = [q for q in raw_quotes if not _is_path_citation(q)]
+    has_matching_quote = any(
+        len(_norm_evidence(q)) >= 16 and _norm_evidence(q) in norm_diff for q in code_quotes
+    )
+    has_test = bool(re.search(r"\btest_\w+", raw_inv)) and any(
+        t in norm_diff for t in re.findall(r"\btest_\w+", raw_inv.lower())
+    )
+    return has_matching_quote or has_test
+
+
+def partition_invariants(
+    invariants: Sequence[str],
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Partition invariant strings into (machine_verified, semantic_asserted)."""
+    verified: list[str] = []
+    semantic: list[str] = []
+    for inv in invariants:
+        clean = (inv or "").strip()
+        if not clean:
+            continue
+        if is_machine_verified_invariant(clean, diff_text, changed_paths):
+            verified.append(clean)
+        else:
+            semantic.append(clean)
+    return verified, semantic
 
 
 def extract_identifiers(text: str) -> set[str]:
@@ -875,6 +959,7 @@ def strict_grounding_enabled() -> bool:
 
 
 __all__ = [
+    "BEHAVIORAL_KEYWORDS",
     "PLACEHOLDER_PATHS",
     "CitationOverlap",
     "Finding",
@@ -893,8 +978,10 @@ __all__ = [
     "extract_grounding_findings",
     "extract_identifiers",
     "hard_reasons",
+    "is_machine_verified_invariant",
     "ngram_containment",
     "parse_removal_hunks",
+    "partition_invariants",
     "strict_grounding_enabled",
     "touched_lines_by_file",
     "verify_citations",

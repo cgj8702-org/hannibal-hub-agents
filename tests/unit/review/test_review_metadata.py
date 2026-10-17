@@ -142,6 +142,22 @@ def test_metadata_roundtrip_includes_unverified_claims() -> None:
     assert meta["unverified_claims"] == ["Distributed lock behavior under split-brain"]
 
 
+def test_metadata_roundtrip_includes_semantic_invariants() -> None:
+    """Ensure semantic_invariants round-trips through serialize and extract metadata."""
+    cr = CodeReviewResponse(
+        executive_summary="Review with semantic domain guarantees.",
+        verdict="APPROVE",
+        semantic_invariants=["Backward compatibility preserved for async workers"],
+    )
+    md = cr.to_markdown(verdict="APPROVE")
+    assert "Semantic Invariants (Model-Asserted)" in md
+    assert "* Backward compatibility preserved for async workers" in md
+
+    meta = extract_review_metadata(md)
+    assert meta is not None
+    assert meta["semantic_invariants"] == ["Backward compatibility preserved for async workers"]
+
+
 def test_sync_review_metadata_omits_verified_invariants() -> None:
     """Sync reviews must omit verified invariants from metadata."""
     sync = SyncReviewResponse(
