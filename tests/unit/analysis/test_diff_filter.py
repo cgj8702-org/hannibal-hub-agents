@@ -8,6 +8,7 @@ from webhook_agent.analysis.diff_filter import (
     budget_for,
     filter_review_diff,
     is_reviewable_path,
+    reviewable_file_paths,
     skip_reason,
 )
 
@@ -59,3 +60,8 @@ def test_filter_review_diff_empty():
     assert res.is_reviewable is False
     assert res.reviewable_lines == 0
     assert res.budget == 0
+
+
+def test_reviewable_file_paths():
+    paths = ["src/main.py", "package-lock.json", "uv.lock", "tests/test_foo.py"]
+    assert reviewable_file_paths(paths) == ["src/main.py", "tests/test_foo.py"]
