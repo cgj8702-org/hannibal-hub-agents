@@ -111,7 +111,7 @@ Key environment variables configuring orchestrator operation:
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `TRIGGER_ALLOWED_ASSOCIATIONS` | `OWNER,MEMBER,COLLABORATOR` | Comma-separated list of permitted author associations for triggering actions. |
+| `TRIGGER_ALLOWED_ASSOCIATIONS` | `OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR` | Comma-separated list of permitted author associations for triggering actions. |
 | `TRIGGER_EXEMPT_LOGINS` | `cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]` | Comma-separated list of user or bot logins exempt from author association checks. |
 | `ENABLE_PR_WORKSPACE` | `1` | Clone PR head into an ephemeral sandbox workspace for accurate AST, symbol, and diff analysis (`1` = enabled, `0` = disabled). |
 | `LOG_LEVEL` | `INFO` | Application logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
