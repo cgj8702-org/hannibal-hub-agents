@@ -15,6 +15,7 @@
 - **Part 4** is the work, sequenced. Every item has a stable ID (`B1`, `C2`, …) so you can refer to them in commits and PRs.
 - **Part 5** is the set of decisions only you can make, each ID'd (`P1`…`P7`). Nothing in Part 4 that depends on a `P`-decision should start before that decision is recorded.
 - **Parts 6–7** are loose ends and the guardrails that stop this recurring.
+- **Part 8** is the event-surface and observability findings from live gcloud logs, plus plans `EV-A`…`EV-F`.
 
 ---
 
@@ -496,6 +497,7 @@ Nothing in Phase 3 or Phase 4 should start before the relevant decision is recor
 | **P5** | Keep the memory service for future cross-PR learning? | delete (recommended — it's unread) / keep + fix key | `B5`, `C6` | *(open)* |
 | **P6** | Is the unwired security/test-coverage scorecard dimension a bug? | investigate first | `D4` | *(open)* |
 | **P7** | Merge the two agents into one? | not now; revisit after `E1`–`E4` | `F3` | *(open)* |
+| **P8** | Remove the `check_run` subscription? | remove (recommended — already suppressed in code, so it is pure cost) | §8.3 | *(open)* |
 
 **Already decided in-session (recorded for the record):**
 - **Session scope = PR, not sender.** The PR is the scope; the sender is an attribute. `session_id = "owner/repo#N"` is correct and stays.
@@ -546,6 +548,280 @@ These are the rules that, had they existed, would have prevented this. Cheap to 
 
 ---
 
+# Part 8 — Event surface & observability
+
+> **Label note:** you referred to these as plans "A–F". They're prefixed `EV-` here because Phase 0 already uses `A1`–`A4`, and this document has already caused one confusing collision (`B5` vs `Part 5`).
+
+Discovered by reading live gcloud logs on 2026-10-17. The worked example is the `workflow_run` bug.
+
+## 8.1 The worked example: one cause, four faces
+
+`workflow_run` was referenced **nowhere** in `src/`:
+
+```
+$ grep -rn 'workflow_run' src/ --include=*.py
+(nothing)
+```
+
+Those three actions (`requested`, `in_progress`, `completed`) arrived, passed every filter, spawned a full agent run, and no code path read them. In a 52-minute log window that produced **6 complete agent runs for pure noise**:
+
+| `workflow_run` | Gemini call | Orphan session |
+|:--|:--|:--|
+| 15:37:10.303 `requested` | trace `8900` → "Hello! 👋 Hannibal Hub…" | `9bbfc4f0-ca40-…` |
+| 15:37:13.407 `in_progress` | trace `8d79` → "Hello! Hannibal Hub's…" | `9d6fe5f0-ca40-…` |
+| 15:37:44.378 `completed` | trace `ab05` → "Hello! 👋 I'm Hannibal…" | `b1353d10-ca40-…` |
+| 16:28:19.857 `requested` | trace `1b45` → "Hello! Hannibal Hub's…" | `c0fab2a0-ca47-…` |
+| 16:28:22.717 `in_progress` | trace `5553` → "Hello! I am Hannibal…" | `c2ced660-ca47-…` |
+| 16:29:43.170 `completed` | trace `bf28` → "Hello! I'm Hannibal Hub's…" | `e9e9d2e0-ca47-…` |
+
+Six self-introductions, six orphaned sessions, perfectly 1:1.
+
+### The causal chain
+
+1. `build_transient_turn_content` (`prompts.py:195-278`) has branches for `issue_comment.`, `issues.`, `pull_request.`, `pull_request_review_comment.`, `pull_request_review.` — and **nothing** for `workflow_run.*`. So the entire prompt the model receives is three lines of metadata with **no ask**.
+2. The conversational agent's instruction says *"Engage conversationally… respond with warmth."*
+3. A model told to be warm, handed an empty prompt, fills the silence with a greeting.
+4. `_post_conversational_reply` discards it, because `pr_number` is `None` (`execution.py:219`).
+5. `_derive_session_id` (`agent_definition.py:403-406`) found no `issue.number` and no `pull_request.number`, so it fell back to `f"{repo_name}/{delivery_id}"` — a **GitHub delivery GUID**, guaranteed unique, therefore guaranteed to create a new session every time.
+
+### Why this is the answer to "let the agent decide if action is needed"
+
+The original design intent was that the agent would read the payload and determine whether any action was necessary. The logs are the empirical refutation: **given an empty prompt, the agent does not decide "no action needed" — it invents a social response.** Not because the model is weak, but because "is anything needed here?" is not a question you can ask a language model with a prompt containing nothing, while also instructing it to be responsive.
+
+**The no-op decision must be deterministic, and must happen before the model is called.** That is precisely what `Mode.IGNORE` in the policy layer exists for.
+
+## 8.2 The cost hierarchy — the generalisable lesson
+
+Suppression inside `should_process_event` is **late**. By the time it fires, the event has already travelled:
+
+```
+GitHub → Cloud Run invocation → Pub/Sub publish → worker pull → decode → filter
+```
+
+You paid for all of that. The cheapest filter is not subscribing.
+
+| Level | Where | Cost per event |
+|:--|:--|:--|
+| **1** | Don't subscribe (GitHub App settings) | **zero** |
+| **2** | Router drops it (not in this repo) | 1 Cloud Run invocation |
+| **3** | `should_process_event` | full Pub/Sub + worker + logs |
+| **4** | `_dispatch_event`, before the agent | + no Gemini call |
+| **5** | Let the agent decide | Gemini call, every time |
+
+`workflow_run` was sitting at **level 5** for events that should never have been at level 1. `check_run` sits at **level 3** — cheaper, but still not level 1.
+
+**Rule:** for every subscribed event type, ask which level it *should* be at, then move it there. Every event that reaches level 5 without a reason is a bug.
+
+## 8.3 Subscription audit (CI events)
+
+| Event | Subscribed? | Used by code? | Verdict |
+|:--|:--|:--|:--|
+| `check_suite` | **yes — keep** | `processor.py:638` → `_handle_ci_completed`; the only CI event acted on | **Required.** It is the CI-gate trigger. |
+| `check_run` | remove | no — only appears in the suppression tuple and a docstring | **Remove the subscription.** Already dropped in code, so it is pure webhook + Pub/Sub + worker cost for nothing. |
+| `status` | **not subscribed** (correct) | the *event* is unused; the *data* is still read via REST (see 8.6) | Leave unsubscribed. |
+| `workflow_run` | removed ✅ | never referenced anywhere | Done. |
+
+### The semantic fact that matters — and why it means you need only `check_suite`
+
+GitHub's own docs claim: *"A GitHub App only receives one `check_suite` event per commit SHA."* **That is false.** Filed as `github/docs#21435`, with evidence:
+
+```
+$ curl '.../commits/<sha>/check-suites' | jq '.check_suites[].app.id'
+15368
+15368
+15368
+15368      ← four check suites, all from GitHub Actions
+```
+
+**GitHub Actions creates one check suite per workflow run.** So a commit with 3 workflows gets 3 check suites → **`check_suite.completed` fires 3 times per commit**, and the first firing is usually premature.
+
+### Your design already handles this correctly — do not "simplify" it
+
+```python
+# processor.py:542 — _handle_ci_completed docstring
+"""A failed suite is ignored (silent skip). A passing one re-checks the whole
+commit, since other suites may still be running or may have failed."""
+```
+
+And `evaluate_ci` does not trust the suite payload — it recomputes globally:
+
+```python
+# ci_gate.py:75-90
+for run in commit.get_check_runs():          # ALL runs, ALL suites on the commit
+    ...
+combined = commit.get_combined_status()      # plus legacy statuses
+```
+
+Flow: suite #1 completes → re-evaluate → suite #2 still pending → `PENDING` → no review. Suite #3 completes → re-evaluate → all green → review. **The event is only a trigger; the verdict is recomputed from the API.** That is why `check_run` adds nothing — it would fire per *job* instead of per *workflow*, recomputing the identical verdict more often.
+
+## 8.4 Plan EV-A … EV-F
+
+| ID | Action | Status |
+|:--|:--|:--|
+| **EV-A** | Unsubscribe `workflow_run` in GitHub App settings | ✅ **done** |
+| **EV-B** | Add code-level guards so unsubscribed CI events can never reach the agent | ⬜ to do — see 8.5 |
+| **EV-C** | Never key a session on a delivery GUID (`_derive_session_id` fallback) | ⬜ to do — see 8.7 |
+| **EV-D** | Move the no-op decision *before* the agent (deterministic `Mode.IGNORE`) | ⬜ to do — this is `E1`–`E4` in Phase 4 |
+| **EV-E** | Collapse the logging to one line per lifecycle stage, owned by one place | ⬜ to do — see 8.8 |
+| **EV-F** | Fix the logger bindings so `python_logger` matches the file it is in | ⬜ to do — see 8.8 |
+
+**Relationship to Phase 2 (`C1`–`C3`).** `EV-C` and Phase 2 both touch session identity but are different fixes:
+
+- **Phase 2 `C1`–`C3`** fixes `user_id` so sessions are **PR-scoped and shared by every sender** on that PR.
+- **`EV-C`** fixes `session_id` so events with no PR number stop minting a **new session per delivery**.
+
+Fix only one and you still have half the bug: `C2` alone will not help a `workflow_run` event (it has no PR number to key on), and `EV-C` alone will not let two different humans share one PR's history.
+
+**Ordering:** land **`EV-D` first**. If the agent never runs for a no-op event, no session is created at all, which removes most of `EV-C`'s blast radius. `EV-C` then remains as a guard against a *future* event type silently minting per-delivery sessions.
+
+## 8.5 `EV-B` — the code fix (tuple + comment)
+
+**Current** (`processor.py:530-537`):
+
+```python
+        # Ignore automated CI infrastructure noise, installation lifecycle events, and review thread state changes
+        return event_name not in (
+            "check_suite",
+            "check_run",
+            "status",
+            "installation",
+            "pull_request_review_thread",
+        )
+```
+
+**Replace with:**
+
+```python
+        # CI infrastructure events. We subscribe to check_suite only — its `completed`
+        # action drives the CI gate (see review/ci_gate.py). check_run / status /
+        # workflow_run / workflow_job are NOT subscribed, and are listed here as
+        # guards so they can never reach the agent if a subscription is ever re-added.
+        # No code path reads their payloads, and build_transient_turn_content has no
+        # branch for them — so reaching the agent means an empty prompt and a
+        # hallucinated reply (see docs/plans/repo_reclamation.md §8.1).
+        return event_name not in (
+            "check_suite",
+            "check_run",
+            "status",
+            "workflow_run",
+            "workflow_job",
+            "installation",
+            "pull_request_review_thread",
+        )
+```
+
+**Why add to the tuple rather than trim it.** The current tuple lists three event types you do not subscribe to (`check_run`, `status`, and until recently `workflow_run`) — which looks like dead code. It is not. It is a **tripwire**, and `workflow_run` proves it: your fix for that bug lives *entirely* in GitHub App settings, with **no code-level guard**:
+
+```
+$ grep -rn 'workflow_run\|workflow_job' src/ --include=*.py
+(nothing)
+```
+
+So if that subscription ever returns — a reinstall, an org-level App config change, someone debugging CI — the events flow straight through again: `should_process_event` returns `True`, `build_transient_turn_content` has no branch, and you get self-introductions and orphaned sessions again.
+
+**The distinction from the circuit breaker / memory service deletions.** Those were unreachable *features* whose docstrings promised capability that did not exist — which corrupts a reader's model. These are unreachable *guards*: they claim nothing, and they prevent a known failure. Unreachable features are harmful; unexercised guards are just unexercised. The comment is what makes their status explicit — not deletion.
+
+**Cost of keeping them:** a tuple membership test on events that never arrive. **Benefit:** the guard is version-controlled and reviewable, instead of living in a settings page nobody diffs.
+
+## 8.6 Do NOT do these (three traps)
+
+### Trap 1 — do not remove `get_combined_status()` from `ci_gate.py`
+
+There are **two unrelated things called `status`**:
+
+| | Where | What it is | Remove? |
+|:--|:--|:--|:--|
+| The `status` **webhook event** | `processor.py:534` (tuple) | An event you do not subscribe to | Keep as a guard (8.5) |
+| The commit-status **data** | `ci_gate.py:83` `commit.get_combined_status()` | A REST read, independent of any subscription | **NO** |
+
+```python
+# ci_gate.py:83-90
+combined = commit.get_combined_status()
+if getattr(combined, "total_count", 0):
+    state = (getattr(combined, "state", "") or "").lower()
+    if state in FAILING_STATUS_STATES:      # {"failure", "error"}
+        return CIState.FAIL                 # ← blocks the review
+```
+
+That is an **API read**, not event handling. Not being subscribed to the `status` *event* does not mean there are no legacy statuses on the commit — any third party can post one via the Status API, and this reads them regardless.
+
+**It fails closed and deleting it fails open.** It returns `CIState.FAIL`, which *blocks* a review. Remove it and a commit carrying a failing legacy status could be `APPROVE`d. Today it is a no-op (`total_count == 0`, so the `if` skips) and costs one API call per evaluation — cheap insurance.
+
+### Trap 2 — do not move the `check_suite.completed` early-return below the bot filter
+
+```python
+# processor.py:379-382
+if ev.get("event_name") == "check_suite" and ev.get("action") == "completed":
+    # Finished CI drives deferred reviews (see review/ci_gate.py). Its sender is
+    # usually github-actions[bot], which the bot-sender filter below would drop.
+    return is_ci_gate_enabled()
+if _is_bot_event(ev):
+    return False
+```
+
+GitHub sends the **`ghost` user** as `sender` for check events with no authenticated actor (its docs call this out explicitly for `check_run` and `check_suite`). So the sender is unreliable for these events, and the early-return placement — *before* `_is_bot_event` — is deliberate. A naive reorder would silently break the CI gate.
+
+### Trap 3 — do not remove `"status"` / `"check_run"` from the tuple
+
+See 8.5. They are guards, not dead code. Removing them makes a future re-subscription fail loudly in production instead of being caught here.
+
+## 8.7 `EV-C` — never key a session on a delivery GUID
+
+```python
+# agent_definition.py:403-406
+number = issue.get("number") or pr.get("number")
+if number:
+    return f"{repo_name}/{number}"
+return f"{repo_name}/{event_data.get('delivery_id', 'unknown')}"   # ← GUID
+```
+
+A GitHub delivery ID is a GUID — **guaranteed unique, therefore guaranteed to miss the cache and create a new session every time.** Confirmed in the logs: `…/b1353d10-ca40-11f1-…` is a delivery GUID, not a PR number.
+
+The proof it is this mechanism and nothing else: the `pull_request.synchronize` review at 15:37:50 used `repo/375`, found the existing session, and logged **no** "Created new ADK session" line. Stable key → reuse. GUID key → create.
+
+**Consequence:** `InMemorySessionService` has **no eviction** — unlike `_processed_deliveries`, which does have a FIFO bound (`processor.py:613-616`). Sessions accumulate forever, each holding full event history.
+
+**Fix:** return a stable per-repo key for non-PR events, or skip session creation entirely for events that will do nothing. Do not invent a new key from a per-delivery value.
+
+### Pre-existing risk worth recording: the `status` stall
+
+Because you are not subscribed to `status`: if a legacy status is the **last** thing to go green on a commit, no event fires, and the deferred review **stalls until the next push**. This risk exists today, independently of everything else here. It is fine while CI is pure Actions — but record the assumption so a future CI change does not silently break the gate. (This is also why `get_combined_status()` still earns its keep: it correctly sees a failing status during the *next* evaluation triggered by a `check_suite`.)
+
+## 8.8 `EV-E` / `EV-F` — logging
+
+**`EV-E`: one no-op event currently emits eight INFO lines.**
+
+| # | Line | Logger label | Message |
+|--:|:--|:--|:--|
+| 1 | `processor.py:618` | `.processor` | `Event processed: workflow_run.requested` |
+| 2 | `processor.py:654` | `.processor` | `Agent starting execution for repo X` |
+| 3 | `processor.py:179` | **`.core`** | `🧠 Processing event via ADK agent (trace…)` |
+| 4 | `callbacks.py:67` | `.core.callbacks` | `🤖 [SubAgent: conversational_agent] Starting…` |
+| 5 | `execution.py:455` | `.core.execution` | `Created new ADK session …` |
+| 6 | `execution.py:119` | `.core.execution` | `🧠 Agent response: Hello!…` |
+| 7 | `execution.py:749` | `.core.execution` | `🏁 Agent completed with no actions` |
+| 8 | `processor.py:911` | `.processor` | `Agent completed execution with no actions taken` |
+
+**Three** "we started" signals (#2, #3, #4). **Two** "nothing happened" signals (#7, #8). Plus hidden DEBUG twins: `processor.py:173` is a near-verbatim duplicate of `:179`, and `execution.py:114` duplicates `:119`.
+
+**The real defect is unjoinability, not verbosity.** No single line carries the event, the trace, and the outcome together:
+
+- `:618` has the event — no trace, no repo
+- `:654` has the repo — no event, no trace
+- `:911` has the repo — no event, **no trace** ← the line that says "nothing happened" cannot tell you *what* did nothing
+- the trace appears only in `:179`, `execution.py:119`, `:749`
+
+So answering "which event did nothing, and why?" requires timestamp archaeology.
+
+**`EV-F`: the logger-label trap.** `processor.py:173/179` log via `core_logger`, so GCP labels them `python_logger="webhook_agent.core"` even though the code physically lives in `processor.py`. A gcloud filter of `labels.python_logger="processor"` **silently drops those two lines** — which is exactly the mistake made earlier in this session when writing log-query guidance. Check the logger binding, not the file path.
+
+**Fix:** one line per lifecycle stage, owned by one place, with every line carrying `event=`, `trace=`, `repo=`, `outcome=` as structured fields (via `extra={...}`) rather than string interpolation — so GCP can filter on `jsonPayload` fields instead of regex. Delete the DEBUG twins or demote the INFO versions to DEBUG.
+
+
+
+
+
+
 # Appendix A — The map
 
 Five stations on one conveyor belt. Every package belongs to exactly one.
@@ -571,16 +847,18 @@ Eight small PRs, in order. Each independently reviewable and revertible.
 
 | PR | Contents | Risk | Size |
 |:--|:--|:--|:--|
+| **0** | `EV-B` guard `workflow_run` / `workflow_job` in the suppression tuple + comment (the code half of `EV-A`, which is already done) | none | +6 lines |
 | 1 | `D6` fix the lying test | none | 1 line |
 | 2 | `B1`–`B3` dead functions (`normalize_event_type`, `_create_fallback_agent`, `defang_content`) | none | −39 |
 | 3 | `B4` delete orphaned `audit_canary` module + its test | none | −40 src, −test |
 | 4 | `B5` delete abandoned memory subsystem | none | −189 src, −83 test |
-| 5 | `C1`–`C3` session scoping fix (test first) | low | +test, 2 lines |
+| 5 | `C1`–`C3` session scoping fix + `EV-C` session-key guard (test first) | low | +test, few lines |
 | 6 | `D1`–`D3`, `D5` decisions applied | low–medium | depends on **P1**–**P5** |
 | 7 | `E1`–`E6` the policy layer | medium | ~+120, net negative |
 | 8 | `F1`–`F2`, `H1`–`H2` rename + docs | none | — |
+| 9 | `EV-E` / `EV-F` collapse the logging + fix logger bindings | none | — |
 
-**Why this order:** PRs 1–4 are pure deletions and build confidence. PR 5 fixes the one real bug. PR 6 clears the ground. PR 7 is the structural fix, landing on clean ground. PR 8 makes the result readable.
+**Why this order:** PR 0 is the code half of a fix already started in GitHub settings — cheapest possible first PR. PRs 1–4 are pure deletions and build confidence. PR 5 fixes the one real bug. PR 6 clears the ground. PR 7 is the structural fix, landing on clean ground. PR 8 makes the result readable.
 
 **Do not start PR 7 before PRs 2–4.** The policy layer's whole job is to make the codebase honest; layering it on top of dead features defeats the purpose.
 
