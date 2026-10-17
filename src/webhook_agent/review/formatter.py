@@ -34,6 +34,7 @@ FINDING_KEYS = (
     "risk|recommendation|summary|resolutions|critical_issues|minor_suggestions|"
     "risks_and_edge_cases|context_gaps|verdict|status|evidence|item_description|title|"
     "verified_invariants|invariant|unverified_claims|residual_uncertainty|"
+    "semantic_invariants|model_asserted_invariants|"
     "scorecard|dimension|notes"
 )
 

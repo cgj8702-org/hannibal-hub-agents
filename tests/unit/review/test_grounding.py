@@ -486,3 +486,60 @@ def test_is_path_citation_helper() -> None:
     assert _is_path_citation("x = 1") is False
     assert _is_path_citation("self.diff") is False
     assert _is_path_citation("cls.handler") is False
+
+
+def test_is_machine_verified_invariant() -> None:
+    """Verify is_machine_verified_invariant distinguishes machine-checked from semantic claims."""
+    from webhook_agent.review.grounding import is_machine_verified_invariant
+
+    # 1. Path:line citation with non-behavioral prose -> Machine-Verified
+    inv_fact = "Telemetry logging configured (`src/main.py:10`)"
+    assert is_machine_verified_invariant(inv_fact, SAMPLE_DIFF, ["src/main.py"]) is True
+
+    # 2. Path:line citation with behavioral keyword AND diff quote -> Machine-Verified
+    inv_diff_quote = "skips processing when `new_line_1` encountered (`src/main.py:10`)"
+    assert is_machine_verified_invariant(inv_diff_quote, SAMPLE_DIFF, ["src/main.py"]) is True
+
+    # 3. Path:line citation with behavioral keyword AND test citation -> Machine-Verified
+    inv_test = "gracefully handles retries verified in test_retry_fallback (`src/main.py:10`)"
+    assert is_machine_verified_invariant(inv_test, SAMPLE_DIFF, ["src/main.py"]) is True
+
+    # 4. Path:line citation with behavioral keyword WITHOUT diff quote or test -> Semantic
+    inv_unsubstantiated = "handles retries when retry_count = None (`src/main.py:10`)"
+    assert is_machine_verified_invariant(inv_unsubstantiated, SAMPLE_DIFF, ["src/main.py"]) is False
+
+    # 5. Path not in diff -> Not machine verified (Semantic or ungrounded)
+    inv_wrong_path = "Logging configured (`src/other.py:10`)"
+    assert is_machine_verified_invariant(inv_wrong_path, SAMPLE_DIFF, ["src/main.py"]) is False
+
+    # 6. No path citation, broad natural language assertion -> Semantic
+    inv_prose = "Backward compatibility preserved across async workers."
+    assert is_machine_verified_invariant(inv_prose, SAMPLE_DIFF, ["src/main.py"]) is False
+
+    # 7. No path citation, but cites test present in diff -> Machine-Verified
+    diff_with_test = SAMPLE_DIFF + "\n+def test_worker_pool(): pass\n"
+    inv_test_diff = "Worker pool concurrency verified in test_worker_pool."
+    assert is_machine_verified_invariant(inv_test_diff, diff_with_test, ["src/main.py"]) is True
+
+
+def test_partition_invariants() -> None:
+    """Verify partition_invariants cleanly splits mixed invariant lists."""
+    from webhook_agent.review.grounding import partition_invariants
+
+    invariants = [
+        "Telemetry logging configured (`src/main.py:10`)",
+        "handles retries when retry_count = None (`src/main.py:10`)",
+        "Backward compatibility preserved across async workers.",
+        "skips processing when `new_line_1` encountered (`src/main.py:10`)",
+    ]
+
+    verified, semantic = partition_invariants(invariants, SAMPLE_DIFF, ["src/main.py"])
+
+    assert verified == [
+        "Telemetry logging configured (`src/main.py:10`)",
+        "skips processing when `new_line_1` encountered (`src/main.py:10`)",
+    ]
+    assert semantic == [
+        "handles retries when retry_count = None (`src/main.py:10`)",
+        "Backward compatibility preserved across async workers.",
+    ]

@@ -71,10 +71,11 @@ Every audit must be high-signal, professional, and thorough:
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
    - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).
    - `notes`: Specific, diff-grounded verification findings or justification (citing verified AST structures, locks, or test assertions).
-3. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants verified during the audit (e.g., "Single-request TPM fast-fail terminates immediately without sleep delay", "Lock acquisition order preserved across async workers").
-4. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
-5. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
-6. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
+3. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants citing specific file paths and lines (`path:line`) or test symbols proven by the diff.
+4. **semantic_invariants**: 1-3 high-level architectural, domain, or behavioral guarantees asserted by model reasoning without mechanical line citations.
+5. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
+6. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
+7. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
 
 ### 3. Grounding & Verification Directives
 1. **Observable Defects & Diff Grounding**:
@@ -469,7 +470,8 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             "Perform a clinical, high-signal audit:\n"
             "- Provide a concise executive summary explaining the verified behavior.\n"
             "- Populate 'scorecard' evaluating all 5 audit dimensions ('Logic & Boundaries', 'Concurrency & State', 'Security & Secrets', 'Contract Integrity', 'Test Coverage & Regressions') with diff-grounded evidence.\n"
-            "- Populate 2-4 'verified_invariants' citing concrete behavioral guarantees proven by the diff.\n"
+            "- Populate 2-4 'verified_invariants' citing concrete behavioral guarantees proven by the diff (with file/line citations where applicable).\n"
+            "- Optionally populate 'semantic_invariants' for high-level domain guarantees asserted without mechanical proof.\n"
             "- If the change is sound, approve cleanly with empty critical_issues and minor_suggestions.\n"
             "Output your formal review JSON immediately."
         )

@@ -429,6 +429,7 @@ def _enforce_verdict(
                     diff_for_grounding = raw_diff or diff_text
                     if diff_for_grounding:
                         from webhook_agent.review.grounding import (
+                            partition_invariants,
                             verify_resolutions,
                         )
                         from webhook_agent.review.schemas import SyncResolutionItem
@@ -437,6 +438,16 @@ def _enforce_verdict(
                         sync_obj.resolutions = [
                             SyncResolutionItem.model_validate(r) for r in grounded_res
                         ]
+                        if sync_obj.verified_invariants:
+                            v_invs, s_invs = partition_invariants(
+                                sync_obj.verified_invariants,
+                                diff_for_grounding,
+                                changed_paths=changed_paths,
+                            )
+                            sync_obj.verified_invariants = v_invs
+                            for s in s_invs:
+                                if s not in sync_obj.semantic_invariants:
+                                    sync_obj.semantic_invariants.append(s)
 
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     if diff_for_grounding:
@@ -510,8 +521,20 @@ def _enforce_verdict(
                     if diff_for_grounding:
                         from webhook_agent.review.grounding import (
                             hard_reasons,
+                            partition_invariants,
                             strict_grounding_enabled,
                         )
+
+                        if cr_obj.verified_invariants:
+                            v_invs, s_invs = partition_invariants(
+                                cr_obj.verified_invariants,
+                                diff_for_grounding,
+                                changed_paths=changed_paths,
+                            )
+                            cr_obj.verified_invariants = v_invs
+                            for s in s_invs:
+                                if s not in cr_obj.semantic_invariants:
+                                    cr_obj.semantic_invariants.append(s)
 
                         grounding_issues, has_hard = _apply_citation_grounding(
                             cr_obj,
@@ -590,8 +613,20 @@ def _enforce_verdict(
             if diff_for_grounding:
                 from webhook_agent.review.grounding import (
                     hard_reasons,
+                    partition_invariants,
                     strict_grounding_enabled,
                 )
+
+                if sync_obj.verified_invariants:
+                    v_invs, s_invs = partition_invariants(
+                        sync_obj.verified_invariants,
+                        diff_for_grounding,
+                        changed_paths=changed_paths,
+                    )
+                    sync_obj.verified_invariants = v_invs
+                    for s in s_invs:
+                        if s not in sync_obj.semantic_invariants:
+                            sync_obj.semantic_invariants.append(s)
 
                 grounding_issues, has_hard = _apply_citation_grounding(
                     sync_obj,
@@ -627,8 +662,20 @@ def _enforce_verdict(
         if diff_for_grounding:
             from webhook_agent.review.grounding import (
                 hard_reasons,
+                partition_invariants,
                 strict_grounding_enabled,
             )
+
+            if cr_obj.verified_invariants:
+                v_invs, s_invs = partition_invariants(
+                    cr_obj.verified_invariants,
+                    diff_for_grounding,
+                    changed_paths=changed_paths,
+                )
+                cr_obj.verified_invariants = v_invs
+                for s in s_invs:
+                    if s not in cr_obj.semantic_invariants:
+                        cr_obj.semantic_invariants.append(s)
 
             grounding_issues, has_hard = _apply_citation_grounding(
                 cr_obj,
