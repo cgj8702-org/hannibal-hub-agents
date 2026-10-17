@@ -13,12 +13,8 @@ from collections.abc import Generator
 from typing import Any
 
 from .schemas import (
-    BREAKING_RISK_KEYWORDS,
     CodeReviewResponse,
     SyncReviewResponse,
-)
-from .schemas import (
-    has_genuine_summary_risk as has_genuine_summary_risk,
 )
 from .schemas import (
     is_implausible_body as is_implausible_body,
@@ -235,11 +231,6 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.info("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
-    for r in review.risks_and_edge_cases:
-        desc = (r.risk + " " + r.recommendation).lower()
-        if any(kw in desc for kw in BREAKING_RISK_KEYWORDS):
-            logger.info("Mechanical verdict: REQUEST_CHANGES (breaking risk flagged: %s)", r.risk)
-            return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
     logger.info("Mechanical verdict: APPROVE (0 critical issues)")
@@ -273,9 +264,6 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
             )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.info("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
-        return "REQUEST_CHANGES"
-    if has_genuine_summary_risk(review.summary):
-        logger.info("Sync verdict: REQUEST_CHANGES (blocking issue noted in sync summary)")
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"

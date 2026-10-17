@@ -17,6 +17,7 @@ from webhook_agent.review.schemas import (
     RiskItem,
     SyncResolutionItem,
     SyncReviewResponse,
+    is_unmitigated_breaking_risk,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -466,8 +467,8 @@ def test_normalize_code_review_promotes_breaking_risks():
     assert normalized["critical_issues"][0]["suggested_fix"] == "Restore marker in uv.lock"
 
 
-def test_calculate_strict_verdict_respects_explicit_verdict_and_breaking_risks():
-    """Verify calculate_strict_verdict flags explicit REQUEST_CHANGES and breaking risks."""
+def test_calculate_strict_verdict_respects_explicit_verdict_and_advisory_risks():
+    """Verify calculate_strict_verdict flags explicit REQUEST_CHANGES and treats risks as advisory."""
     review_explicit = CodeReviewResponse(
         verdict="REQUEST_CHANGES",
         executive_summary="Reviewer requested changes.",
@@ -478,6 +479,7 @@ def test_calculate_strict_verdict_respects_explicit_verdict_and_breaking_risks()
     )
     assert calculate_strict_verdict(review_explicit) == "REQUEST_CHANGES"
 
+    # Advisory risks alone must NOT mechanically flip verdict to REQUEST_CHANGES
     review_risk = CodeReviewResponse(
         executive_summary="Dependency bump.",
         confidence=5,
@@ -490,7 +492,94 @@ def test_calculate_strict_verdict_respects_explicit_verdict_and_breaking_risks()
             )
         ],
     )
-    assert calculate_strict_verdict(review_risk) == "REQUEST_CHANGES"
+    assert calculate_strict_verdict(review_risk) == "APPROVE"
+
+
+def test_is_unmitigated_breaking_risk_deprecated():
+    """Verify is_unmitigated_breaking_risk is deprecated and consistently returns False."""
+    assert (
+        is_unmitigated_breaking_risk(
+            "Minor risk of upstream breaking changes between Google ADK v2.9.2 and v2.12.0; mitigated by test suite execution and CI validation."
+        )
+        is False
+    )
+    assert (
+        is_unmitigated_breaking_risk("Introduces breaking change to public API interface") is False
+    )
+    assert is_unmitigated_breaking_risk("Lockfile corruption detected in uv.lock") is False
+    assert (
+        is_unmitigated_breaking_risk("Unintended modification dropping required dependencies")
+        is False
+    )
+    assert (
+        is_unmitigated_breaking_risk("Unauthorized modification of security configuration") is False
+    )
+
+
+def test_calculate_strict_verdict_advisory_risks_never_flip_verdict():
+    """Verify calculate_strict_verdict does not mechanically flip APPROVE to REQUEST_CHANGES on advisory risks."""
+    review_mitigated = CodeReviewResponse(
+        executive_summary="Routine dependency bump.",
+        confidence=5,
+        critical_issues=[],
+        minor_suggestions=[],
+        risks_and_edge_cases=[
+            RiskItem(
+                risk="Minor risk of upstream breaking changes between Google ADK v2.9.2 and v2.12.0; mitigated by test suite execution and CI validation.",
+                recommendation="",
+            )
+        ],
+    )
+    assert calculate_strict_verdict(review_mitigated) == "APPROVE"
+
+    review_negated = CodeReviewResponse(
+        executive_summary="Safe refactor.",
+        confidence=5,
+        critical_issues=[],
+        minor_suggestions=[],
+        risks_and_edge_cases=[
+            RiskItem(
+                risk="Verified no breaking changes across public symbols.",
+                recommendation="None needed",
+            )
+        ],
+    )
+    assert calculate_strict_verdict(review_negated) == "APPROVE"
+
+    # Even unmitigated prose risks remain advisory; blockers belong in critical_issues or scorecard
+    review_unmitigated = CodeReviewResponse(
+        executive_summary="API alteration.",
+        confidence=5,
+        critical_issues=[],
+        minor_suggestions=[],
+        risks_and_edge_cases=[
+            RiskItem(
+                risk="Breaking change in webhook payload schema without fallback handler.",
+                recommendation="Restore fallback handler",
+            )
+        ],
+    )
+    assert calculate_strict_verdict(review_unmitigated) == "APPROVE"
+
+
+def test_normalize_code_review_dict_does_not_promote_mitigated_breaking_risk():
+    """Verify normalize_code_review_dict does not promote mitigated risks to critical_issues."""
+    raw = {
+        "executive_summary": "Clean dependency bump.",
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "risks_and_edge_cases": [
+            {
+                "path": "pyproject.toml",
+                "line": 16,
+                "risk": "Minor risk of upstream breaking changes; mitigated by automated tests.",
+                "recommendation": "Monitor production runs",
+            }
+        ],
+    }
+    normalized = normalize_code_review_dict(raw)
+    assert len(normalized["critical_issues"]) == 0
+    assert len(normalized["risks_and_edge_cases"]) == 1
 
 
 def test_calculate_sync_verdict_respects_explicit_verdict_and_unaddressed_summary():

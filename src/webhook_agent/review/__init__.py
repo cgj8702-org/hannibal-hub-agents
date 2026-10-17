@@ -77,6 +77,7 @@ from .schemas import (
     SyncReviewResponse,
     VerificationVerdict,
     VerifiedInvariant,
+    is_unmitigated_breaking_risk,
 )
 from .verdict_parser import calculate_verdict
 from .writeback_policy import (
@@ -143,6 +144,7 @@ __all__ = [
     "is_echo_description",
     "is_echo_suggestion",
     "is_reconciliation_claimed",
+    "is_unmitigated_breaking_risk",
     "load_fixture_file",
     "normalize_code_review_dict",
     "normalize_sync_review_dict",
