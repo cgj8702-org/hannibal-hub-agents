@@ -287,20 +287,16 @@ class VerifiedInvariant(BaseModel):
         return f"{head}\n  *Evidence*: {evidence}"
 
 
-BREAKING_RISK_KEYWORDS = (
-    "unauthorized modification",
-    "unintended modification",
-    "lockfile corruption",
-    "breaking change",
-)
+def is_unmitigated_breaking_risk(risk: str, recommendation: str = "") -> bool:
+    """Check if a risk text describes an active, unmitigated breaking risk.
 
-SUMMARY_RISK_KEYWORDS = (
-    "unaddressed",
-    "unresolved",
-    "must fix",
-    "blocking",
-    *BREAKING_RISK_KEYWORDS,
-)
+    Deprecated: Natural language prose scraping in risks_and_edge_cases was deprecated to
+    prevent brittle regex parsing and false-positive mechanical blocks. Reviewers and
+    deterministic analyzers must explicitly place blocking issues in critical_issues or
+    mark scorecard dimensions as FAIL. Always returns False.
+    """
+    return False
+
 
 NOT_CHEAP_MARKERS = re.compile(
     r"\btrace\b|\bassum\w*\b|consider the case|if an attacker|"
@@ -572,32 +568,6 @@ class CodeReviewResponse(BaseModel):
                                 "suggested_fix": fix,
                             }
                         )
-
-        for r_item in clean_risks:
-            r_lower = r_item["risk"].lower()
-            rec_lower = r_item["recommendation"].lower()
-            if any(kw in r_lower or kw in rec_lower for kw in BREAKING_RISK_KEYWORDS):
-                if not any(r_item["risk"] in c.get("description", "") for c in clean_crit):
-                    # Only promote when a concrete recommendation and valid citation exist.
-                    if not r_item["recommendation"]:
-                        continue
-                    r_path = str(r_item.get("path") or "").strip()
-                    raw_r_line = r_item.get("line")
-                    r_line: int | None = (
-                        int(raw_r_line)
-                        if isinstance(raw_r_line, str) and raw_r_line.isdigit()
-                        else (raw_r_line if isinstance(raw_r_line, int) else None)
-                    )
-                    if not r_path or r_line is None or r_line <= 0:
-                        continue
-                    clean_crit.append(
-                        {
-                            "path": r_path,
-                            "line": r_line,
-                            "description": r_item["risk"],
-                            "suggested_fix": r_item["recommendation"],
-                        }
-                    )
         normalized["critical_issues"] = clean_crit
 
         raw_minor = normalized.get("minor_suggestions")
