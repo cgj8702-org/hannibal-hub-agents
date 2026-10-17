@@ -149,9 +149,7 @@ class TestHealthAndMethod:
 
 class TestColdStartValidation:
     @pytest.mark.parametrize("missing", ["PUBSUB_PROJECT", "PUBSUB_TOPIC", "WEBHOOK_SECRET"])
-    def test_missing_env_fails_import(
-        self, monkeypatch: pytest.MonkeyPatch, missing: str
-    ) -> None:
+    def test_missing_env_fails_import(self, monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
         """A misconfigured revision must die at cold start, not 401 forever."""
         with pytest.raises(RuntimeError, match=missing):
             _load_router(monkeypatch, **{missing: None})
@@ -223,17 +221,20 @@ class TestPerimeterFilter:
 
     def test_perimeter_filter_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = _load_router(monkeypatch)
-        assert module.PERIMETER_FILTER_EVENTS == frozenset(
-            {
-                "check_run",
-                "status",
-                "installation",
-                "installation_repositories",
-                "installation_target",
-                "pull_request_review_thread",
-                "workflow_run",
-                "workflow_job",
-            }
+        assert (
+            frozenset(
+                {
+                    "check_run",
+                    "status",
+                    "installation",
+                    "installation_repositories",
+                    "installation_target",
+                    "pull_request_review_thread",
+                    "workflow_run",
+                    "workflow_job",
+                }
+            )
+            == module.PERIMETER_FILTER_EVENTS
         )
 
 
@@ -345,5 +346,3 @@ class TestCrossSystemParity:
         router_set = module.PERIMETER_FILTER_EVENTS
         assert router_set.issubset(SUPPRESSED_EVENT_NAMES)
         assert router_set != SUPPRESSED_EVENT_NAMES  # strict subset
-
-

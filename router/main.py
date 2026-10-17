@@ -167,7 +167,7 @@ def _publish(normalized: dict[str, Any], delivery_id: str, event_type: str) -> N
 
     future = publisher.publish(
         topic,
-        data=json.dumps(normalized).encode("utf-8"),
+        json.dumps(normalized).encode("utf-8"),
         delivery_id=delivery_id,
         event_name=event_type,
         action=_attribute(normalized.get("action")),
@@ -212,19 +212,25 @@ def github_webhook_router(request: Any) -> tuple[str | dict[str, Any], int]:
     if body_class == "ping":
         return {"msg": "pong"}, 200
 
-    if body_class == "installation":
-        # Body says installation; header must name an installation event type.
-        installation_events = {
-            "installation",
-            "installation_repositories",
-            "installation_target",
-        }
-        if event_type not in installation_events and event_type != "unknown":
-            return "Bad Request: event type does not match payload", 400
-        return "Event acknowledged and dropped by perimeter filter", 202
+    installation_events = {
+        "installation",
+        "installation_repositories",
+        "installation_target",
+    }
 
-    if event_type in PERIMETER_FILTER_EVENTS:
-        # Header says drop this event; body doesn't claim installation.
+    if event_type in installation_events and not _REPO_SCOPED_KEYS.isdisjoint(body):
+        # Header claims an installation event, but the body carries repo-scoped keys.
+        return "Bad Request: event type does not match payload", 400
+
+    if (
+        body_class == "installation"
+        and event_type not in PERIMETER_FILTER_EVENTS
+        and event_type != "unknown"
+    ):
+        # Body is an installation payload, but header claims an unrelated non-perimeter event.
+        return "Bad Request: event type does not match payload", 400
+
+    if event_type in PERIMETER_FILTER_EVENTS or body_class == "installation":
         return "Event acknowledged and dropped by perimeter filter", 202
 
     # 4. Publish.
@@ -236,4 +242,3 @@ def github_webhook_router(request: Any) -> tuple[str | dict[str, Any], int]:
         return "Internal Server Error", 500
 
     return "Event normalized and queued successfully", 202
-
