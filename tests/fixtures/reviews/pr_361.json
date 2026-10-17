@@ -1,0 +1,66 @@
+{
+  "_note": "Recorded fixture for the offline replay harness. Regenerate with `python3 dev/record_review_fixtures.py 361 --patches full`. Do not hand-edit review bodies: they are evidence.",
+  "_patch_mode": "full",
+  "additions": 12,
+  "body": "## Summary\nGroups Dependabot version updates by ecosystem to reduce notification and pull request volume:\n- **`python-dependencies`**: Groups all Python dependency updates into a single PR, while excluding `google-adk` (which remains pinned exactly and will receive its own isolated PR for testing and verification).\n- **`github-actions`**: Groups all GitHub Action workflow updates into a single PR.\n\n## Verification\n- Validated yaml structure against Dependabot v2 schema.\n- Ran pre-commit lint and type gates (`./scripts/ruff-all.sh`).",
+  "changed_files": [
+    ".github/dependabot.yml"
+  ],
+  "deletions": 0,
+  "number": 361,
+  "patches": {
+    ".github/dependabot.yml": "@@ -9,8 +9,20 @@ updates:\n     directory: \"/\"\n     schedule:\n       interval: \"monthly\"\n+    groups:\n+      python-dependencies:\n+        patterns:\n+          - \"*\"\n+        exclude-patterns:\n+          # Pinned exactly (==) as a verified baseline. Keep it in its own PR so it\n+          # can be tested and reverted on its own.\n+          - \"google-adk\"\n \n   - package-ecosystem: \"github-actions\"\n     directory: \"/\"\n     schedule:\n       interval: \"monthly\"\n+    groups:\n+      github-actions:\n+        patterns:\n+          - \"*\""
+  },
+  "repo": "cgj8702-org/hannibal-hub-agents",
+  "reviews": [
+    {
+      "body": "## \ud83d\udee1\ufe0f Code Review: `APPROVE`\n\n### 1. Executive Summary\n\nThis PR updates .github/dependabot.yml to group Python dependencies and GitHub Actions updates into consolidated monthly pull requests while correctly excluding google-adk to preserve strict baseline testing. The configuration conforms to Dependabot specifications without regression risks.\n\n---\n\n### 2. Audit Dimension Scorecard\n\n| Dimension | Status | Notes |\n| :--- | :---: | :--- |\n| **Logic & Boundaries** | `\u2705 PASS` | Dependabot grouping pattern '*' correctly captures all ecosystem updates with explicit exclusion of google-adk on line 19. |\n| **Concurrency & State** | `\u26aa N/A` | Declarative CI configuration change; no concurrent execution state or locking primitives involved. |\n| **Security & Secrets** | `\u2705 PASS` | No hardcoded credentials, tokens, or security boundary violations introduced in configuration. |\n| **Contract Integrity** | `\u2705 PASS` | YAML syntax is valid and conforms to Dependabot configuration schema contracts. |\n| **Test Coverage & Regressions** | `\u2705 PASS` | Configuration change targeting CI/CD dependency management without application code regression risks. |\n\n---\n\n### 3. Verified Invariants\n\n- [x] Python dependency updates are grouped under python-dependencies except for google-adk (.github/dependabot.yml:11-19)\n- [x] GitHub Actions updates are grouped under github-actions (.github/dependabot.yml:21-27)\n- [x] Monthly schedule interval is maintained for both dependency ecosystems (.github/dependabot.yml:8,25)\n\n<!-- hannibal-review-metadata: {\"version\":1,\"type\":\"initial\",\"verdict\":\"APPROVE\",\"critical_issues\":[],\"minor_suggestions\":[],\"risks\":[],\"unverified_claims\":[],\"scorecard\":[{\"dimension\":\"Logic & Boundaries\",\"status\":\"PASS\",\"notes\":\"Dependabot grouping pattern '*' correctly captures all ecosystem updates with explicit exclusion of google-adk on line 19.\"},{\"dimension\":\"Concurrency & State\",\"status\":\"N/A\",\"notes\":\"Declarative CI configuration change; no concurrent execution state or locking primitives involved.\"},{\"dimension\":\"Security & Secrets\",\"status\":\"PASS\",\"notes\":\"No hardcoded credentials, tokens, or security boundary violations introduced in configuration.\"},{\"dimension\":\"Contract Integrity\",\"status\":\"PASS\",\"notes\":\"YAML syntax is valid and conforms to Dependabot configuration schema contracts.\"},{\"dimension\":\"Test Coverage & Regressions\",\"status\":\"PASS\",\"notes\":\"Configuration change targeting CI/CD dependency management without application code regression risks.\"}],\"verified_invariants\":[\"Python dependency updates are grouped under python-dependencies except for google-adk (.github/dependabot.yml:11-19)\",\"GitHub Actions updates are grouped under github-actions (.github/dependabot.yml:21-27)\",\"Monthly schedule interval is maintained for both dependency ecosystems (.github/dependabot.yml:8,25)\"]} -->\n",
+      "commit_id": "0319cbf0f2fe68e2323bf545ab9e9998a5c7384b",
+      "id": 5555134046,
+      "incremental_diff_bytes": 681,
+      "incremental_files": [
+        ".github/dependabot.yml"
+      ],
+      "incremental_tokens": [
+        "actions",
+        "adk",
+        "and",
+        "baseline",
+        "can",
+        "de58a97",
+        "dependabot",
+        "dependencies",
+        "diff",
+        "directory",
+        "ecosystem",
+        "exactly",
+        "exclude",
+        "fcf60",
+        "git",
+        "github",
+        "google",
+        "groups",
+        "index",
+        "interval",
+        "its",
+        "keep",
+        "monthly",
+        "own",
+        "package",
+        "patterns",
+        "pinned",
+        "python",
+        "reverted",
+        "schedule",
+        "tested",
+        "updates",
+        "verified",
+        "yml"
+      ],
+      "login": "hannibal-hub-agents[bot]",
+      "state": "APPROVED",
+      "submitted_at": "2026-10-17T00:43:26Z"
+    }
+  ],
+  "title": "chore(deps): group Dependabot version updates by ecosystem"
+}
