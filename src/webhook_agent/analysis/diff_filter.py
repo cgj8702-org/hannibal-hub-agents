@@ -274,7 +274,11 @@ def filter_review_diff(
 
     from .ast_analyzer import analyze_diff_hunks
 
-    ast_res = analyze_diff_hunks(filtered_text)
+    primary_path = next(
+        (f for f in kept_files if f.endswith(".py")),
+        kept_files[0] if kept_files else "diff.py",
+    )
+    ast_res = analyze_diff_hunks(primary_path, diff_text=filtered_text)
 
     return DiffFilterResult(
         filtered_diff=filtered_text,
