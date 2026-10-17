@@ -105,6 +105,44 @@ def apply_scorecard_floor(
     return updated
 
 
+def _apply_citation_grounding(
+    review_obj: Any,
+    diff_text: str,
+    changed_paths: list[str] | None = None,
+    pr_label: str = "",
+) -> tuple[list[Any], bool]:
+    """Verify citations against PR diff in shadow mode, logging telemetry.
+
+    Returns (grounding_issues, has_hard_issues).
+    """
+    if not diff_text:
+        return [], False
+
+    from webhook_agent.review.grounding import (
+        extract_grounding_findings,
+        verify_citations,
+    )
+
+    findings = extract_grounding_findings(review_obj)
+    if not findings:
+        return [], False
+
+    issues = verify_citations(findings, diff_text, changed_paths=changed_paths)
+    if issues:
+        issue_summary = [
+            f"{getattr(i, 'severity', 'hard')}:{getattr(i, 'code', 'unknown')}" for i in issues
+        ]
+        logger.info(
+            "🔎 [Grounding Telemetry] PR %s: %d ungrounded citation(s): %s",
+            pr_label or "?",
+            len(issues),
+            issue_summary,
+        )
+
+    has_hard = any(getattr(i, "is_hard", False) for i in issues)
+    return issues, has_hard
+
+
 def _parse_scorecard_scores(body: str) -> list[int]:
     """Extract individual category scores from a review body's scorecard.
 
@@ -209,6 +247,8 @@ def _enforce_verdict(
     has_prior_reviews = True
     diff_text = ""
     raw_diff = ""
+    changed_paths: list[str] = []
+    pr_label = f"#{getattr(pr, 'number', '?')}" if pr is not None else ""
     bot_reviews: list[Any] = []
     if pr is not None:
         from webhook_agent.github.bot_identity import is_hannibal_bot_login
@@ -232,7 +272,10 @@ def _enforce_verdict(
             files = pr.get_files()
             patches: dict[str, str] = {}
             for f in files:
-                patches[f.filename] = getattr(f, "patch", "") or ""
+                fname = getattr(f, "filename", "")
+                if fname:
+                    patches[fname] = getattr(f, "patch", "") or ""
+            changed_paths = list(patches.keys())
             from webhook_agent.review.grounding import diff_text_from_patches
 
             raw_diff = diff_text_from_patches(patches)
@@ -277,6 +320,19 @@ def _enforce_verdict(
     else:
         review_budget = None
         existing_comments_data = []
+
+    if state is not None:
+        state_dict_val = (
+            state.to_dict()
+            if hasattr(state, "to_dict")
+            else (state if isinstance(state, dict) else {})
+        )
+        if not changed_paths and "deterministic_changed_files" in state_dict_val:
+            changed_paths = list(state_dict_val["deterministic_changed_files"] or [])
+        if not diff_text and "deterministic_diff_text" in state_dict_val:
+            diff_text = str(state_dict_val["deterministic_diff_text"] or "")
+        if not raw_diff and diff_text:
+            raw_diff = diff_text
 
     critic_engine = CriticEngine()
     hunter_engine = HunterEngine()
@@ -372,7 +428,9 @@ def _enforce_verdict(
 
                     diff_for_grounding = raw_diff or diff_text
                     if diff_for_grounding:
-                        from webhook_agent.review.grounding import verify_resolutions
+                        from webhook_agent.review.grounding import (
+                            verify_resolutions,
+                        )
                         from webhook_agent.review.schemas import SyncResolutionItem
 
                         grounded_res = verify_resolutions(sync_obj.resolutions, diff_for_grounding)
@@ -381,6 +439,30 @@ def _enforce_verdict(
                         ]
 
                     enforced_verdict = calculate_sync_verdict(sync_obj)
+                    if diff_for_grounding:
+                        from webhook_agent.review.grounding import (
+                            hard_reasons,
+                            strict_grounding_enabled,
+                        )
+
+                        grounding_issues, has_hard = _apply_citation_grounding(
+                            sync_obj,
+                            diff_for_grounding,
+                            changed_paths=changed_paths,
+                            pr_label=pr_label,
+                        )
+                        if strict_grounding_enabled() and has_hard:
+                            logger.warning(
+                                "Strict Grounding Gate: Hard citation failures on %s: %s",
+                                pr_label,
+                                hard_reasons(grounding_issues),
+                            )
+                            if enforced_verdict == "APPROVE":
+                                logger.warning(
+                                    "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
+                                )
+                                enforced_verdict = "COMMENT"
+
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
                             "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
@@ -424,6 +506,31 @@ def _enforce_verdict(
                     cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
                     cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
                     enforced_verdict = calculate_strict_verdict(cr_obj)
+                    diff_for_grounding = raw_diff or diff_text
+                    if diff_for_grounding:
+                        from webhook_agent.review.grounding import (
+                            hard_reasons,
+                            strict_grounding_enabled,
+                        )
+
+                        grounding_issues, has_hard = _apply_citation_grounding(
+                            cr_obj,
+                            diff_for_grounding,
+                            changed_paths=changed_paths,
+                            pr_label=pr_label,
+                        )
+                        if strict_grounding_enabled() and has_hard:
+                            logger.warning(
+                                "Strict Grounding Gate: Hard citation failures on %s: %s",
+                                pr_label,
+                                hard_reasons(grounding_issues),
+                            )
+                            if enforced_verdict == "APPROVE":
+                                logger.warning(
+                                    "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
+                                )
+                                enforced_verdict = "COMMENT"
+
                     if is_intended_request_changes and enforced_verdict == "APPROVE":
                         logger.warning(
                             "Safety Guardrail: Prevented mechanical upgrade of REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
@@ -479,6 +586,31 @@ def _enforce_verdict(
                     sync_obj.minor_suggestions, diff_text
                 )
             enforced_verdict = calculate_sync_verdict(sync_obj)
+            diff_for_grounding = raw_diff or diff_text
+            if diff_for_grounding:
+                from webhook_agent.review.grounding import (
+                    hard_reasons,
+                    strict_grounding_enabled,
+                )
+
+                grounding_issues, has_hard = _apply_citation_grounding(
+                    sync_obj,
+                    diff_for_grounding,
+                    changed_paths=changed_paths,
+                    pr_label=pr_label,
+                )
+                if strict_grounding_enabled() and has_hard:
+                    logger.warning(
+                        "Strict Grounding Gate: Hard citation failures on %s: %s",
+                        pr_label,
+                        hard_reasons(grounding_issues),
+                    )
+                    if enforced_verdict == "APPROVE":
+                        logger.warning(
+                            "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
+                        )
+                        enforced_verdict = "COMMENT"
+
             rendered_body = render_sync_review_markdown(
                 sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
             )
@@ -491,6 +623,31 @@ def _enforce_verdict(
         cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
         cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
         enforced_verdict = calculate_strict_verdict(cr_obj)
+        diff_for_grounding = raw_diff or diff_text
+        if diff_for_grounding:
+            from webhook_agent.review.grounding import (
+                hard_reasons,
+                strict_grounding_enabled,
+            )
+
+            grounding_issues, has_hard = _apply_citation_grounding(
+                cr_obj,
+                diff_for_grounding,
+                changed_paths=changed_paths,
+                pr_label=pr_label,
+            )
+            if strict_grounding_enabled() and has_hard:
+                logger.warning(
+                    "Strict Grounding Gate: Hard citation failures on %s: %s",
+                    pr_label,
+                    hard_reasons(grounding_issues),
+                )
+                if enforced_verdict == "APPROVE":
+                    logger.warning(
+                        "Strict Grounding Gate: Downgrading APPROVE to COMMENT due to ungrounded citations."
+                    )
+                    enforced_verdict = "COMMENT"
+
         if is_intended_request_changes and enforced_verdict == "APPROVE":
             logger.warning(
                 "Safety Guardrail: Prevented mechanical upgrade of text REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."

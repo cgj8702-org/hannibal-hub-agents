@@ -31,11 +31,13 @@ defect class.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from webhook_agent.constants import DEFAULT_STRICT_REVIEW_GROUNDING
 from webhook_agent.tools.diff_tools import walk_right_side
 
 Severity = Literal["hard", "soft"]
@@ -774,6 +776,77 @@ def ngram_containment(text_a: str, text_b: str, n: int = 5) -> float:
     return round(len(intersection) / len(ngrams_b), 4)
 
 
+_INVARIANT_CITATION_RE = re.compile(
+    r"(?:^|[\s(])`?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9_\-]+):(\d+)(?:[-,]\d+)*`?"
+)
+
+
+def _citation_finding(kind: Kind, item: Any) -> Finding:
+    """Adapt one parsed review finding item into a grounding citation Finding."""
+    evidence = getattr(item, "evidence", None) or getattr(item, "description", None) or ""
+    if isinstance(item, dict):
+        evidence = item.get("evidence") or item.get("description") or item.get("invariant") or ""
+        path = item.get("path") or ""
+        line = item.get("line")
+    else:
+        path = getattr(item, "path", None) or ""
+        line = getattr(item, "line", None)
+    return Finding(
+        kind=kind,
+        path=path,
+        line=line,
+        evidence=str(evidence),
+    )
+
+
+def extract_grounding_findings(review_obj: Any) -> list[Finding]:
+    """Adapt cited findings from CodeReviewResponse or SyncReviewResponse into Findings."""
+    findings: list[Finding] = []
+    if review_obj is None:
+        return findings
+
+    critical_items = getattr(review_obj, "critical_issues", None)
+    if critical_items is None and isinstance(review_obj, dict):
+        critical_items = review_obj.get("critical_issues")
+    for item in critical_items or []:
+        findings.append(_citation_finding("critical", item))
+
+    suggestion_items = getattr(review_obj, "minor_suggestions", None)
+    if suggestion_items is None and isinstance(review_obj, dict):
+        suggestion_items = review_obj.get("minor_suggestions")
+    for item in suggestion_items or []:
+        findings.append(_citation_finding("suggestion", item))
+
+    invariant_items = getattr(review_obj, "verified_invariants", None)
+    if invariant_items is None and isinstance(review_obj, dict):
+        invariant_items = review_obj.get("verified_invariants")
+    for item in invariant_items or []:
+        if isinstance(item, str):
+            match = _INVARIANT_CITATION_RE.search(item)
+            if match:
+                findings.append(
+                    Finding(
+                        kind="invariant",
+                        path=match.group(1),
+                        line=int(match.group(2)),
+                        evidence=item,
+                    )
+                )
+        elif hasattr(item, "path") or isinstance(item, dict):
+            findings.append(_citation_finding("invariant", item))
+
+    return findings
+
+
+def strict_grounding_enabled() -> bool:
+    """Return True when ungrounded citations should reject or downgrade a review, not merely log."""
+    return os.environ.get("STRICT_REVIEW_GROUNDING", DEFAULT_STRICT_REVIEW_GROUNDING) in (
+        "1",
+        "true",
+        "True",
+    )
+
+
 __all__ = [
     "PLACEHOLDER_PATHS",
     "CitationOverlap",
@@ -790,10 +863,12 @@ __all__ = [
     "extract_bare_symbols",
     "extract_cited_paths",
     "extract_cited_symbols",
+    "extract_grounding_findings",
     "extract_identifiers",
     "hard_reasons",
     "ngram_containment",
     "parse_removal_hunks",
+    "strict_grounding_enabled",
     "touched_lines_by_file",
     "verify_citations",
     "verify_resolutions",
