@@ -63,7 +63,16 @@ Evaluate modified files systematically across 5 core dimensions:
 4. **Contract Integrity**: Breaking signature changes, missing invocation site updates across the codebase.
 5. **Test Coverage & Regressions**: Test additions matching modified logic, regression defense, boundary verification.
 
-### 2. High-Signal Audit Output Requirements
+### 2. Investigation & Tools (Adaptive Exploration)
+You have access to repository inspection tools: `read_file` and `search_files`.
+- **Fast-Path Single-Turn (Self-Contained Changes)**: If the pull request changes are self-contained (all callers, callees, definitions, and tests are within the diff or obvious local scope), synthesize and output your final review verdict directly in a single turn without unnecessary tool calls.
+- **Proactive Multi-Turn Investigation (Cross-File Contracts)**: If the pull request alters shared public APIs, function signatures, class interfaces, constants, exports, or data schemas:
+  1. Use `search_files` to locate external callers, imports, and usages across the repository.
+  2. Use `read_file` to inspect candidate invocation sites, dependent modules, or test suites outside the diff.
+  3. Verify whether external callers remain compatible or if the change introduces breaking signature mismatches, missing keyword arguments, unhandled exceptions, or silent semantic regressions.
+- **Review Submission**: When your investigation is complete (or immediately for self-contained changes), output your completed code review verdict directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a `review` tool (the orchestrator deterministically submits the review from your final JSON response).
+
+### 3. High-Signal Audit Output Requirements
 Output your completed code review verdict directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a review tool.
 Every audit must be high-signal, professional, and thorough:
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
@@ -77,7 +86,7 @@ Every audit must be high-signal, professional, and thorough:
 6. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
 7. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
 
-### 3. Grounding & Verification Directives
+### 4. Grounding & Verification Directives
 1. **Observable Defects & Diff Grounding**:
    - Findings must target directly observable defects or concrete code improvements anchored to visible diff lines.
    - Ground every finding in the unified diff. If you cannot point at the line that shows it, do not report it.
@@ -101,12 +110,12 @@ Every audit must be high-signal, professional, and thorough:
    - Provide concrete, minimal replacement code in `suggested_fix` or leave empty (`""`) for purely conceptual suggestions.
    - All code snippets in `suggested_fix` must represent syntactically valid code.
 
-### 4. Verdict Rules
+### 5. Verdict Rules
 - ANY critical issue or failing scorecard dimension -> verdict MUST be REQUEST_CHANGES.
 - 0 critical issues and 0 unresolved items -> verdict MAY be APPROVE.
 - Approve cleanly and concisely when changes are sound and regression-free.
 
-### 5. Dependency & Lockfile Protocol
+### 6. Dependency & Lockfile Protocol
 When reviewing dependency PRs (sender `dependabot[bot]` or branch starting with `dependabot/`):
 - Focus on dependency security, version scope, and lockfile integrity.
 - Check if `pyproject.toml` or `package.json` updates match `uv.lock` or `package-lock.json`.
@@ -516,18 +525,20 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         canonical.startswith("issue_comment.") and "/review" in comment_body
     ):
         parts.append(
-            "\n### 🚀 ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT\n"
+            "\n### 🚀 ACTION DIRECTIVE: ADAPTIVE FORMAL AUDIT\n"
             "Evaluate the pre-fetched PR diff, AST verification findings, symbol impact analysis, "
             "and test coverage findings above.\n"
-            "In Turn 1, output your completed CodeReviewResponse (or SyncReviewResponse) "
-            "as a valid JSON object (verdict='APPROVE' or 'REQUEST_CHANGES').\n"
+            "- **Self-Contained Changes**: If the changes are self-contained and require no external repository lookup, "
+            "output your completed CodeReviewResponse (or SyncReviewResponse) directly as a valid JSON object in Turn 1.\n"
+            "- **Cross-File / Complex Changes**: If the changes alter public interfaces, function signatures, or shared contracts, "
+            "use your investigative tools (`search_files`, `read_file`) to inspect external callers and verify cross-file integrity before concluding.\n"
             "Perform a clinical, high-signal audit:\n"
             "- Provide a concise executive summary explaining the verified behavior.\n"
             "- Populate 'scorecard' evaluating all 5 audit dimensions ('Logic & Boundaries', 'Concurrency & State', 'Security & Secrets', 'Contract Integrity', 'Test Coverage & Regressions') with diff-grounded evidence.\n"
             "- Populate 2-4 'verified_invariants' citing concrete behavioral guarantees proven by the diff (with file/line citations where applicable).\n"
             "- Optionally populate 'semantic_invariants' for high-level domain guarantees asserted without mechanical proof.\n"
             "- If the change is sound, approve cleanly with empty critical_issues and minor_suggestions.\n"
-            "Output your formal review JSON immediately."
+            "When your audit is complete, output your formal review JSON directly."
         )
 
     return "\n".join(parts)

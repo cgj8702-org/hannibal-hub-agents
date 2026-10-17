@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from webhook_agent.core.execution import (
+    _execute_adk_runner,
     _post_conversational_reply,
     _submit_deterministic_review,
     execute_agent_event,
@@ -594,3 +595,62 @@ def test_search_files_during_agent_event_resolves_inside_pr_workspace(tmp_path: 
     matches = search_results[0].get("matches", [])
     assert len(matches) == 1
     assert matches[0]["path"] == "pr_unique_marker.py"
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_max_llm_calls_default_and_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify _execute_adk_runner configures max_llm_calls default to 10 and respects env overrides."""
+    from google.genai import types as genai_types
+
+    captured_run_configs = []
+
+    class FakeRunner:
+        async def run_async(self, *args: Any, **kwargs: Any) -> Any:
+            captured_run_configs.append(kwargs.get("run_config"))
+            if False:
+                yield None
+
+    runner = FakeRunner()
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit")])
+
+    monkeypatch.delenv("MAX_AUDITOR_LLM_CALLS", raising=False)
+    monkeypatch.delenv("ADK_MAX_LLM_CALLS", raising=False)
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr1",
+        results=[],
+        emitted_texts=[],
+    )
+    assert len(captured_run_configs) == 1
+    assert captured_run_configs[0].max_llm_calls == 10
+
+    # Test override
+    monkeypatch.setenv("MAX_AUDITOR_LLM_CALLS", "15")
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr1",
+        results=[],
+        emitted_texts=[],
+    )
+    assert len(captured_run_configs) == 2
+    assert captured_run_configs[1].max_llm_calls == 15
+
+
+def test_agent_plugins_iteration_and_guardrail_budget() -> None:
+    """Verify WebhookAgent initializes iteration budget to 10 turns and guardrail window to 4."""
+    from webhook_agent.core.agent_definition import WebhookAgent
+
+    agent = WebhookAgent(dry_run=True)
+    assert agent._iteration_budget_plugin.max_turns == 10
+    assert agent._iteration_budget_plugin.max_tool_calls == 25
+    assert agent._guardrails_plugin.no_progress_window == 4

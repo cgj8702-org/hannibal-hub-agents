@@ -59,7 +59,7 @@ async def _execute_adk_runner(
 ) -> None:
     """Execute the ADK runner asynchronously and collect tool results and emitted text."""
     max_llm_calls = int(
-        os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "6"
+        os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "10"
     )
     run_config = RunConfig(max_llm_calls=max_llm_calls)
     try:

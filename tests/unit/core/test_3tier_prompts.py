@@ -101,7 +101,7 @@ def test_build_transient_turn_content() -> None:
     assert "PR Number: 99" in transient
     assert "PR Body" not in transient
     assert "Full PR Diff (Accumulated State):" in transient
-    assert "ACTION DIRECTIVE: FAST-PASS FORMAL AUDIT" in transient
+    assert "ACTION DIRECTIVE: ADAPTIVE FORMAL AUDIT" in transient
 
 
 def test_build_user_message_tier_assembly() -> None:
