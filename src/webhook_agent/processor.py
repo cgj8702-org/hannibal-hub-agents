@@ -94,6 +94,24 @@ SUPPRESSED_PR_METADATA_ACTIONS: frozenset[str] = frozenset(
     }
 )
 
+# Event names dropped before dispatch. Named (rather than inlined at the end of
+# should_process_event) so the router's perimeter filter can be asserted as a strict subset
+# of it -- see tests/unit/router/test_router.py. A router that drops more than this list
+# would lose events silently, so the subset relation is the invariant that matters.
+SUPPRESSED_EVENT_NAMES: frozenset[str] = frozenset(
+    {
+        "check_suite",
+        "check_run",
+        "status",
+        "installation",
+        "installation_repositories",
+        "installation_target",
+        "pull_request_review_thread",
+        "workflow_run",
+        "workflow_job",
+    }
+)
+
 
 def _env_int(name: str, default: int) -> int:
     """Read an integer env var, treating empty/unset as the default.
@@ -115,6 +133,7 @@ def _env_int(name: str, default: int) -> int:
 # Re-exported module helpers (extracted to pr_context.py, fast_path.py, and review/comment_poster.py)
 # Preserved for backwards compatibility with existing consumers and unit tests.
 __all__ = [
+    "SUPPRESSED_EVENT_NAMES",
     "SUPPRESSED_PR_METADATA_ACTIONS",
     "AgentCore",
     "WebhookProcessor",
@@ -527,14 +546,9 @@ class WebhookProcessor:
             )
             return False
 
-        # Ignore automated CI infrastructure noise, installation lifecycle events, and review thread state changes
-        return event_name not in (
-            "check_suite",
-            "check_run",
-            "status",
-            "installation",
-            "pull_request_review_thread",
-        )
+        # Ignore automated CI infrastructure noise, installation lifecycle events, and review
+        # thread state changes. See SUPPRESSED_EVENT_NAMES.
+        return event_name not in SUPPRESSED_EVENT_NAMES
 
     def _handle_ci_completed(self, payload: dict[str, Any]) -> None:
         """Start reviews that were held back while CI was running.

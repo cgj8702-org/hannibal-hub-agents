@@ -113,9 +113,9 @@ class TestTriggerAuthorization:
         )
         assert self.processor.should_process_event(ev) is True
 
-    def test_member_and_collaborator_allowed(self) -> None:
-        """MEMBER and COLLABORATOR commenters must be allowed by default."""
-        for role in ("MEMBER", "COLLABORATOR"):
+    def test_member_collaborator_and_contributor_allowed(self) -> None:
+        """MEMBER, COLLABORATOR, and CONTRIBUTOR commenters must be allowed by default."""
+        for role in ("MEMBER", "COLLABORATOR", "CONTRIBUTOR"):
             ev = _make_comment_event(
                 body="/review",
                 author_association=role,
@@ -124,9 +124,9 @@ class TestTriggerAuthorization:
             )
             assert self.processor.should_process_event(ev) is True
 
-    def test_contributor_and_first_timer_ignored_by_default(self) -> None:
-        """CONTRIBUTOR and FIRST_TIME_CONTRIBUTOR must be ignored by default."""
-        for role in ("CONTRIBUTOR", "FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"):
+    def test_first_timer_ignored_by_default(self) -> None:
+        """FIRST_TIMER and FIRST_TIME_CONTRIBUTOR must be ignored by default."""
+        for role in ("FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"):
             ev = _make_comment_event(
                 body="please review my PR",
                 author_association=role,
@@ -154,7 +154,15 @@ class TestTriggerAuthorization:
             sender_login="contributor",
             delivery_id="del-pr-contrib",
         )
-        assert self.processor.should_process_event(ev_contributor) is False
+        assert self.processor.should_process_event(ev_contributor) is True
+
+        ev_first_timer = _make_pr_event(
+            action="opened",
+            author_association="FIRST_TIME_CONTRIBUTOR",
+            sender_login="stranger",
+            delivery_id="del-pr-first-timer",
+        )
+        assert self.processor.should_process_event(ev_first_timer) is False
 
     def test_exempt_logins_case_insensitive(self) -> None:
         """Exempt logins (cgj8702, cgj8702-agents, dependabot[bot], google-labs-jules[bot]) bypass association check."""
