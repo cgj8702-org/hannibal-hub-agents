@@ -718,3 +718,128 @@ def test_symbol_exists_in_codebase_token_level_match(tmp_path: Path) -> None:
     assert _symbol_exists_in_codebase(
         "is_phantom_worker_active", diff_text, changed_paths=["src/main.py"], repo_root=tmp_path
     )
+
+
+def test_extract_grounding_findings_includes_scorecard() -> None:
+    """extract_grounding_findings must extract path:line citations from scorecard notes."""
+    from webhook_agent.review.grounding import extract_grounding_findings
+    from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem
+
+    cr = CodeReviewResponse(
+        executive_summary="Clean implementation.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Logic & Boundaries",
+                status="PASS",
+                notes="Verified boundary check at src/app.py:10.",
+            ),
+            ScorecardItem(
+                dimension="Security & Secrets",
+                status="PASS",
+                notes="No credentials leaked, verified in src/auth.py:42.",
+            ),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+    )
+
+    findings = extract_grounding_findings(cr)
+    scorecard_findings = [f for f in findings if f.kind == "scorecard"]
+    assert len(scorecard_findings) == 2
+    assert scorecard_findings[0].path == "src/app.py"
+    assert scorecard_findings[0].line == 10
+    assert scorecard_findings[1].path == "src/auth.py"
+    assert scorecard_findings[1].line == 42
+
+
+def test_scorecard_citation_grounding() -> None:
+    """verify_citations must check scorecard citations against the diff."""
+    from webhook_agent.review.grounding import Finding, verify_citations
+
+    diff = """--- a/src/app.py
++++ b/src/app.py
+@@ -10,2 +10,2 @@
+-def old():
++def new():
+"""
+    # 1. Valid line in diff
+    finding_valid = Finding(
+        kind="scorecard",
+        path="src/app.py",
+        line=10,
+        evidence="Boundary check at src/app.py:10",
+    )
+    issues_valid = verify_citations([finding_valid], diff, changed_paths=["src/app.py"])
+    assert not issues_valid
+
+    # 2. Line outside diff
+    finding_outside = Finding(
+        kind="scorecard",
+        path="src/app.py",
+        line=999,
+        evidence="Non-existent line at src/app.py:999",
+    )
+    issues_outside = verify_citations([finding_outside], diff, changed_paths=["src/app.py"])
+    assert any(i.code == "line_outside_diff" for i in issues_outside)
+
+    # 3. Path not changed by PR
+    finding_unchanged = Finding(
+        kind="scorecard",
+        path="src/other.py",
+        line=5,
+        evidence="Existing file src/other.py:5",
+    )
+    issues_unchanged = verify_citations([finding_unchanged], diff, changed_paths=["src/app.py"])
+    assert any(i.code == "scorecard_path_not_changed" for i in issues_unchanged)
+
+    # 4. Out-of-diff backtick code quote does not cause hard evidence_not_in_diff
+    finding_with_external_quote = Finding(
+        kind="scorecard",
+        path="src/app.py",
+        line=10,
+        evidence="Calls `external_function_that_is_in_another_file_entirely()` at src/app.py:10",
+    )
+    issues_external = verify_citations(
+        [finding_with_external_quote], diff, changed_paths=["src/app.py"]
+    )
+    assert not any(i.code == "evidence_not_in_diff" for i in issues_external)
+
+
+def test_extract_scorecard_invariants() -> None:
+    """extract_scorecard_invariants must recover diff-grounded citations as verified invariants."""
+    from webhook_agent.review.grounding import extract_scorecard_invariants
+    from webhook_agent.review.schemas import ScorecardItem
+
+    diff = """--- a/src/core.py
++++ b/src/core.py
+@@ -14,3 +14,3 @@
+ context_line()
+-old_code()
++new_code()
+"""
+    scorecard = [
+        ScorecardItem(
+            dimension="Logic & Boundaries",
+            status="PASS",
+            notes="Implemented cleanly in (src/core.py:15).",
+        ),
+        ScorecardItem(
+            dimension="Security & Secrets",
+            status="PASS",
+            notes="Checked pre-existing line src/core.py:999.",
+        ),
+        ScorecardItem(
+            dimension="Concurrency & State",
+            status="FAIL",
+            notes="Defective race condition at src/core.py:15.",
+        ),
+        ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="PASS",
+            notes="Observed unchanged context line src/core.py:14.",
+        ),
+    ]
+
+    recovered = extract_scorecard_invariants(scorecard, diff, changed_paths=["src/core.py"])
+    assert len(recovered) == 1
+    assert "src/core.py:15: Logic & Boundaries check verified in PR diff." in recovered[0]
