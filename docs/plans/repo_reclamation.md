@@ -179,13 +179,10 @@ All verified by hand with zero reachable callers. One PR, or two if you prefer s
 - **Files:** `src/webhook_agent/analysis/audit_canary.py` (40 lines) + `tests/unit/analysis/test_audit_canary.py` — deleted via `git rm`
 - **Status:** completed in PR 3.
 
-### B5. Delete the abandoned memory subsystem 🧊
-- **Delete:** `src/webhook_agent/core/memory_service.py` (189 lines), `tests/unit/core/test_memory_service.py` (83 lines)
-- **Edit:**
-  - `core/agent_definition.py` — import at `:35`, init at `:153`, and the `memory_service=` argument at `:289`, `:295`, `:372`, `:378`, `:389`
-  - `core/__init__.py` — import at `:46`, `__all__` entry at `:63`
-  - `tests/unit/test_worker.py:443-449` — the logger-hierarchy assertion
-  - `tests/unit/test_agent_core.py:273` — `agent._memory_service = MagicMock()`
+### B5. Delete the abandoned memory subsystem 🧊 ✅
+- **Delete:** `src/webhook_agent/core/memory_service.py` (189 lines), `tests/unit/core/test_memory_service.py` (83 lines) via `git rm`
+- **Edit:** cleaned imports, initializations, and test assertions in `agent_definition.py`, `core/__init__.py`, `test_worker.py`, and `test_agent_core.py`.
+- **Status:** completed in PR 4.
 - **Why:** `search_memory` and `add_session_to_memory` have **zero callers in `src/`**, no memory tool is registered, and `Runner(memory_service=...)` is optional. Nothing reads it.
 - **Why it's safe:** zero readers means zero behavior change.
 - **Caveat:** ADK's `Runner` may call `add_session_to_memory` internally on session end. Even so, nothing reads memory back without a memory tool, so the deletion is behavior-neutral.
@@ -492,7 +489,7 @@ Nothing in Phase 3 or Phase 4 should start before the relevant decision is recor
 | **P2** | May the bot resolve review threads? | no (delete both tools) / gated off by default | `D2` | *(open)* |
 | **P3** | May the bot add labels / merge / commit? | almost certainly no | `A3` | *(open)* |
 | **P4** | Circuit breaker: delete or wire up? | delete (270 lines) / wire it (a feature, not cleanup) | `D1` | *(open)* |
-| **P5** | Keep the memory service for future cross-PR learning? | delete (recommended — it's unread) / keep + fix key | `B5`, `C6` | *(open)* |
+| **P5** | Keep the memory service for future cross-PR learning? | delete (recommended — it's unread) / keep + fix key | `B5`, `C6` | **delete** (completed in PR 4) |
 | **P6** | Is the unwired security/test-coverage scorecard dimension a bug? | investigate first | `D4` | *(open)* |
 | **P7** | Merge the two agents into one? | not now; revisit after `E1`–`E4` | `F3` | *(open)* |
 | **P8** | Remove the `check_run` subscription? | remove (recommended — already suppressed in code, so it is pure cost) | §8.3 | *(open)* |

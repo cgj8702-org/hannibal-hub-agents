@@ -43,7 +43,6 @@ from webhook_agent.core.loop_helpers import (
     get_shared_text_generation_provider,
     run_in_bg_loop,
 )
-from webhook_agent.core.memory_service import InMemoryMemoryService
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools.github_tools import (
     get_issue,
@@ -60,7 +59,6 @@ __all__ = [
     "SYSTEM_INSTRUCTION",
     "AbortAgentExecution",
     "GuardrailsPlugin",
-    "InMemoryMemoryService",
     "IterationBudgetPlugin",
     "PRClosedRegistry",
     "PromptSanitizerPlugin",

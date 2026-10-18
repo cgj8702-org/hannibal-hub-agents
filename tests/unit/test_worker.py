@@ -443,13 +443,12 @@ class TestShouldProcessEvent:
             processor,
             worker,
         )
-        from webhook_agent.core import agent_definition, memory_service
+        from webhook_agent.core import agent_definition
 
         assert processor.logger.name == "webhook_agent.processor"
         assert processor.core_logger.name == "webhook_agent.core"
         assert worker.logger.name == "webhook_agent.worker"
         assert agent_definition.logger.name == "webhook_agent.core.agent_definition"
-        assert memory_service.logger.name == "webhook_agent.core.memory_service"
 
     def test_pr_lifecycle_events_allowed_for_llm_evaluation(self):
         """PR lifecycle events pass should_process_event for autonomous LLM evaluation."""

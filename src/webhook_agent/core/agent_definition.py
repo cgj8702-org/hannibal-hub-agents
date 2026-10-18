@@ -32,7 +32,6 @@ from webhook_agent.core.guardrails import GuardrailsPlugin, IterationBudgetPlugi
 from webhook_agent.core.loop_helpers import (
     get_shared_genai_client,
 )
-from webhook_agent.core.memory_service import InMemoryMemoryService
 from webhook_agent.core.plugins import (
     ToolOutputPruningPlugin,
     WebhookHistoryPruningPlugin,
@@ -148,9 +147,6 @@ class WebhookAgent:
 
         # Session service — keeps per-PR conversation history
         self._session_service = InMemorySessionService()
-
-        # Memory service — in-memory conversation memory
-        self._memory_service = InMemoryMemoryService()
 
         # Track current model chain (TPM Descending)
         self._model_chain = get_model_chain()
@@ -286,13 +282,11 @@ class WebhookAgent:
         self._runner = Runner(
             app=self._app,
             session_service=self._session_service,
-            memory_service=self._memory_service,
         )
 
         self._conversational_runner = Runner(
             app=self._conversational_app,
             session_service=self._session_service,
-            memory_service=self._memory_service,
         )
 
     @staticmethod
@@ -369,13 +363,11 @@ class WebhookAgent:
         self._runner = runner_cls(
             app=self._app,
             session_service=self._session_service,
-            memory_service=self._memory_service,
         )
         if hasattr(self, "_conversational_app") and self._conversational_app is not None:
             self._conversational_runner = runner_cls(
                 app=self._conversational_app,
                 session_service=self._session_service,
-                memory_service=self._memory_service,
             )
 
     def _derive_session_id(self, event_data: dict[str, Any]) -> str:
