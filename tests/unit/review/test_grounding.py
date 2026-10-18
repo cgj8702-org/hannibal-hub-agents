@@ -617,3 +617,28 @@ def test_filter_and_ground_semantic_invariants_triages_and_purges() -> None:
     assert demoted == [
         "Residual uncertainty regarding global cluster memory scaling",
     ]
+
+
+def test_extract_json_payload_recovers_from_trailing_commas() -> None:
+    """extract_json_payload must cleanly recover full review object when trailing commas are present."""
+    from webhook_agent.review.formatter import extract_json_payload
+
+    raw = """```json
+    {
+      "executive_summary": "Comprehensive architectural overhaul.",
+      "scorecard": [
+        {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Solid."},
+      ],
+      "verified_invariants": [
+        "Invariant A",
+        "Invariant B",
+      ],
+      "verdict": "APPROVE",
+    }
+    ```"""
+    parsed = extract_json_payload(raw)
+    assert parsed is not None
+    assert parsed["executive_summary"] == "Comprehensive architectural overhaul."
+    assert len(parsed["scorecard"]) == 1
+    assert len(parsed["verified_invariants"]) == 2
+    assert parsed["verdict"] == "APPROVE"

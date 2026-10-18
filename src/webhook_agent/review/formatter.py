@@ -160,12 +160,37 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
                 return {"critical_issues": parsed}
         except (ValueError, json.JSONDecodeError):
             pass
+
+        # Trailing comma repair: strip trailing commas before closing brackets or braces
+        clean_block = re.sub(r",\s*([\]\}])", r"\1", block)
+        if clean_block != block:
+            try:
+                parsed = json.loads(clean_block)
+                if isinstance(parsed, dict):
+                    return parsed
+                if isinstance(parsed, list):
+                    return {"critical_issues": parsed}
+            except (ValueError, json.JSONDecodeError):
+                pass
+
         repaired = _repaired_findings(block)
         if repaired is not None:
             if isinstance(repaired, dict):
-                logger.info("Successfully repaired malformed JSON review object")
-                return repaired
-            if isinstance(repaired, list):
+                if any(
+                    k in repaired
+                    for k in (
+                        "executive_summary",
+                        "summary",
+                        "scorecard",
+                        "critical_issues",
+                        "minor_suggestions",
+                        "resolutions",
+                        "verdict",
+                    )
+                ):
+                    logger.info("Successfully repaired malformed JSON review object")
+                    return repaired
+            elif isinstance(repaired, list):
                 logger.info("Successfully repaired malformed JSON review list")
                 return {"critical_issues": repaired}
         salvaged = _salvage_objects(block)
