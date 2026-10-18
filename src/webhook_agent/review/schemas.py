@@ -324,13 +324,6 @@ def is_not_cheap_finding(verify_steps: str) -> bool:
     return bool(NOT_CHEAP_MARKERS.search(verify_steps))
 
 
-def has_genuine_summary_risk(summary: str | None) -> bool:
-    """Check if summary mentions blocking or unaddressed risks without negation or resolution."""
-    # Summary scraping was deprecated to prevent false-positive critical issue synthesis.
-    # Reviews must explicitly place blocking issues in critical_issues or mark resolutions as UNRESOLVED.
-    return False
-
-
 class CodeReviewResponse(BaseModel):
     """Structured Pydantic model for full initial PR code reviews."""
 
