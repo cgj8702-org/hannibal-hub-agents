@@ -48,6 +48,20 @@ def is_test_coverage_dimension(dim: str) -> bool:
     return "test" in d or "coverage" in d or "regression" in d
 
 
+TOP_LEVEL_REVIEW_KEYS: frozenset[str] = frozenset(
+    {
+        "executive_summary",
+        "summary",
+        "scorecard",
+        "critical_issues",
+        "minor_suggestions",
+        "resolutions",
+        "candidate_findings",
+        "verified_invariants",
+    }
+)
+
+
 def matches_dimension(scorecard_dim: str, target_dim: str) -> bool:
     """Check if a scorecard dimension matches the target dimension."""
     s_dim = scorecard_dim.strip().lower()
@@ -262,6 +276,9 @@ def _enforce_verdict(
     Safety Invariant: A safety guardrail must ONLY downgrade verdicts (APPROVE -> REQUEST_CHANGES
     or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
     """
+    if not body or not body.strip():
+        raise ValueError("Unparseable review payload: empty review body")
+
     from .comment_poster import build_github_review_comments
 
     det_contract_item: ScorecardItem | None = deterministic_contract_item
@@ -439,6 +456,8 @@ def _enforce_verdict(
     for data in data_candidates:
         try:
             if isinstance(data, dict):
+                if not any(k in data for k in TOP_LEVEL_REVIEW_KEYS):
+                    continue
                 if is_intended_request_changes and not data.get("verdict"):
                     data["verdict"] = "REQUEST_CHANGES"
 
@@ -477,15 +496,15 @@ def _enforce_verdict(
                 # initial schema for a synchronize event (or vice versa).
                 if review_mode == "sync" and "summary" not in data:
                     data = dict(data)
-                    data["summary"] = data.get(
-                        "executive_summary", "Pull request synchronization review update."
-                    )
+                    data["summary"] = data.get("executive_summary")
+                    if not data["summary"]:
+                        continue
                     data.setdefault("resolutions", [])
                 elif review_mode == "initial" and "executive_summary" not in data:
                     data = dict(data)
-                    data["executive_summary"] = data.get(
-                        "summary", "Autonomous PR code review report."
-                    )
+                    data["executive_summary"] = data.get("summary")
+                    if not data["executive_summary"]:
+                        continue
 
                 use_sync_schema = review_mode == "sync" or (
                     review_mode not in ("initial", "sync")
@@ -680,17 +699,23 @@ def _enforce_verdict(
     # Step 2: Fallback text parsing if no valid JSON object was parsed
     try:
         parsed_dict = parse_text_review_to_dict(body)
+        if not parsed_dict or not any(parsed_dict.get(k) for k in TOP_LEVEL_REVIEW_KEYS):
+            raise ValueError(
+                "Unparseable review payload: missing structured review content (no JSON review object or markdown review sections found)"
+            )
         if is_intended_request_changes and not parsed_dict.get("verdict"):
             parsed_dict["verdict"] = "REQUEST_CHANGES"
         if review_mode == "sync" and "summary" not in parsed_dict:
-            parsed_dict["summary"] = parsed_dict.get(
-                "executive_summary", "Pull request synchronization review update."
-            )
+            parsed_dict["summary"] = parsed_dict.get("executive_summary")
+            if not parsed_dict["summary"]:
+                raise ValueError("Unparseable review payload: sync review text missing summary")
             parsed_dict.setdefault("resolutions", [])
         elif review_mode == "initial" and "executive_summary" not in parsed_dict:
-            parsed_dict["executive_summary"] = parsed_dict.get(
-                "summary", "Autonomous PR code review report."
-            )
+            parsed_dict["executive_summary"] = parsed_dict.get("summary")
+            if not parsed_dict["executive_summary"]:
+                raise ValueError(
+                    "Unparseable review payload: initial review text missing executive_summary"
+                )
         if review_mode == "sync":
             normalized_sync = normalize_sync_review_dict(parsed_dict)
             sync_obj = SyncReviewResponse.model_validate(normalized_sync)
@@ -807,15 +832,7 @@ def _enforce_verdict(
         return rendered_body, enforced_verdict, inline_comments
     except Exception as parse_err:
         logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)
-
-    fallback_event = req_event if req_event else "COMMENT"
-    if (
-        is_intended_request_changes
-        or (det_contract_item and det_contract_item.status == "FAIL")
-        or (det_security_item and det_security_item.status == "FAIL")
-    ):
-        fallback_event = "REQUEST_CHANGES"
-    return body, fallback_event, []
+        raise ValueError(f"Unparseable review payload: {parse_err}") from parse_err
 
 
 def _submit_formal_review(
@@ -863,9 +880,19 @@ def _submit_formal_review(
         review_mode = state_dict.get("review_mode")
         if review_mode not in ("initial", "sync"):
             review_mode = "sync" if bot_reviews else "initial"
-        rendered_body, enforced_event, inline_comments = _enforce_verdict(
-            body, event, pr, review_mode=review_mode, state=state
-        )
+        try:
+            rendered_body, enforced_event, inline_comments = _enforce_verdict(
+                body, event, pr, review_mode=review_mode, state=state
+            )
+        except ValueError as parse_err:
+            if claim is not None:
+                review_claim_registry.release(claim)
+            logger.error(
+                "Cannot submit formal review for %s: %s (fast-failing review submission)",
+                target_key,
+                parse_err,
+            )
+            return f"Failed: {parse_err}", False
 
         try:
             if inline_comments:

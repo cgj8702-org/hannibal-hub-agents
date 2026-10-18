@@ -290,7 +290,8 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
             raw_text,
             flags=re.IGNORECASE,
         ).strip()
-        data["executive_summary"] = cleaned_text or "Autonomous PR code review report."
+        if cleaned_text:
+            data["executive_summary"] = cleaned_text
     else:
         summary_match = re.search(
             r"(?:Summary & Justification|Goal of the PR):\*\*?\s*([^\n]+)", body, re.IGNORECASE
@@ -298,17 +299,20 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
         if summary_match:
             data["executive_summary"] = summary_match.group(1).strip("* -•` ")
         else:
-            lines = [
-                re.sub(
-                    r"^(?:\*?\s*\*\*?Summary & Justification:\*\*?|\*?\s*\*\*?Executive Summary:\*\*?)\s*",
-                    "",
-                    line.strip("* -•` "),
-                    flags=re.IGNORECASE,
-                )
-                for line in body.splitlines()
-                if line.strip() and not line.startswith("#")
-            ]
-            data["executive_summary"] = lines[0] if lines else "Autonomous PR code review report."
+            for line in body.splitlines():
+                sline = line.strip("* -•` ")
+                if re.match(
+                    r"^(?:\*\*)?(?:Summary & Justification|Executive Summary|Update Summary|Goal of the PR):\*\*?\s*",
+                    sline,
+                    re.IGNORECASE,
+                ):
+                    data["executive_summary"] = re.sub(
+                        r"^(?:\*\*)?(?:Summary & Justification|Executive Summary|Update Summary|Goal of the PR):\*\*?\s*",
+                        "",
+                        sline,
+                        flags=re.IGNORECASE,
+                    ).strip()
+                    break
 
     risks: list[dict[str, str]] = []
     risk_matches = re.findall(
@@ -534,6 +538,29 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
                     verified_invariants.append(inv_clean)
     if verified_invariants:
         data["verified_invariants"] = verified_invariants
+
+    has_structured_content = any(
+        data.get(k)
+        for k in (
+            "executive_summary",
+            "critical_issues",
+            "minor_suggestions",
+            "risks_and_edge_cases",
+            "scorecard",
+            "verified_invariants",
+        )
+    )
+    if not has_structured_content:
+        return {}
+
+    if "executive_summary" not in data:
+        lines = [
+            line.strip("* -•` ")
+            for line in body.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        if lines:
+            data["executive_summary"] = lines[0]
 
     return data
 
