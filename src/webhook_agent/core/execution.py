@@ -307,6 +307,14 @@ def execute_agent_event(
     policy = resolve_event_policy(event_data, dry_run=agent.dry_run)
     user_id = policy.session_key
 
+    if policy.mode == Mode.IGNORE:
+        logger.info(
+            "🛑 Event ignored by policy: %s (trace: %s)",
+            policy.reason,
+            trace_id[-4:],
+        )
+        return []
+
     logger.debug(
         "👤 Session context: session_id=%s, user_id=%s",
         session_id,
