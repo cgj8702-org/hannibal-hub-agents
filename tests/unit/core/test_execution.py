@@ -631,10 +631,10 @@ async def test_execute_adk_runner_max_llm_calls_default_and_env(
         emitted_texts=[],
     )
     assert len(captured_run_configs) == 1
-    assert captured_run_configs[0].max_llm_calls == 10
+    assert captured_run_configs[0].max_llm_calls == 15
 
     # Test override
-    monkeypatch.setenv("MAX_AUDITOR_LLM_CALLS", "15")
+    monkeypatch.setenv("MAX_AUDITOR_LLM_CALLS", "25")
     await _execute_adk_runner(
         active_runner=runner,
         user_id="user1",
@@ -646,7 +646,7 @@ async def test_execute_adk_runner_max_llm_calls_default_and_env(
         emitted_texts=[],
     )
     assert len(captured_run_configs) == 2
-    assert captured_run_configs[1].max_llm_calls == 15
+    assert captured_run_configs[1].max_llm_calls == 25
 
 
 def test_agent_plugins_iteration_and_guardrail_budget() -> None:
@@ -1122,6 +1122,32 @@ class TestToolGating:
         assert result is None  # Allowed
 
     @pytest.mark.anyio
+    async def test_review_tool_rejected_when_code_audit_without_investigation(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
+
+        tool = MagicMock()
+        tool.name = "review"
+        ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
+        ctx.state["is_code_audit"] = True
+        ctx.state["tools_executed"] = []
+        result = await before_tool_callback(tool, {"pr_number": 42, "body": "{}"}, ctx)
+        assert result is not None
+        assert "error" in result
+        assert "Mandatory Investigation Gate" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_review_tool_allowed_when_code_audit_with_investigation(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
+
+        tool = MagicMock()
+        tool.name = "review"
+        ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
+        ctx.state["is_code_audit"] = True
+        ctx.state["tools_executed"] = ["search_files"]
+        result = await before_tool_callback(tool, {"pr_number": 42, "body": "{}"}, ctx)
+        assert result is None  # Allowed
+
+    @pytest.mark.anyio
     async def test_review_tool_rejected_in_thread_collab(self) -> None:
         from webhook_agent.core.callbacks import before_tool_callback
 
@@ -1328,3 +1354,64 @@ async def test_execute_adk_runner_single_turn_sufficient_if_tool_executed() -> N
     assert calls == 1
     assert any(r.tool == "read_file" for r in results)
     assert emitted_texts == ["Researched review"]
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_multi_turn_when_model_attempts_premature_review_call() -> None:
+    """Verify _execute_adk_runner rejects premature review on code PR and forces exploration turn."""
+    from google.genai import types as genai_types
+
+    calls = 0
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                # Turn 1: Model calls review prematurely without investigating
+                fn_resp = MagicMock()
+                fn_resp.name = "review"
+                fn_resp.response = "premature review output"
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp],
+                    content=None,
+                )
+            elif calls == 2:
+                # Turn 2: Enforced investigation, calls read_file
+                fn_resp = MagicMock()
+                fn_resp.name = "read_file"
+                fn_resp.response = "file content"
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp],
+                    content=None,
+                )
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=list,
+                    content=MagicMock(
+                        parts=[MagicMock(text="Final researched review", thought=False)]
+                    ),
+                )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test-premature",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=True,
+    )
+
+    assert calls == 2
+    assert any(r.tool == "read_file" for r in results)
+    assert emitted_texts == ["Final researched review"]

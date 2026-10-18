@@ -317,6 +317,23 @@ async def before_tool_callback(
             f"Only permitted in mode '{Mode.THREAD_COLLAB}'."
         }
 
+    # Mandatory Investigation Gate: block review tool if code audit has not used investigative tools yet
+    if tool.name == "review" and tool_context.state.get("is_code_audit"):
+        investigative_tools = {"read_file", "search_files"}
+        tools_executed = tool_context.state.get("tools_executed") or []
+        has_investigated = any(t in investigative_tools for t in tools_executed)
+        if not has_investigated:
+            logger.info(
+                "🛑 [Investigation Gate] Blocked premature review() tool call on code PR without prior investigation."
+            )
+            return {
+                "error": (
+                    "Mandatory Investigation Gate: You cannot submit a code review before actively exploring the repository. "
+                    "Use `search_files` or `read_file` to inspect callers, contract boundaries, and related test suites "
+                    "across the repository before submitting your review."
+                )
+            }
+
     # Universal Pydantic input validation gate
     from pydantic import ValidationError
 

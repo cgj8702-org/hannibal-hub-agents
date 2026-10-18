@@ -70,7 +70,7 @@ You have access to repository inspection and review tools: `read_file`, `search_
   2. Use `read_file` to inspect candidate invocation sites, dependent modules, and related test coverage outside the diff.
   3. Verify that the proposed changes integrate safely, introduce no breaking signature mismatches or silent regressions, and that candidate invariants correspond to actual repository code.
 - **Fast-Path Single-Turn (Strictly Limited to Pure Docs/Typos)**: Do NOT use Fast-Path Single-Turn for logic, refactoring, or feature PRs. Premature one-shotting without tool calls produces shallow reviews. Fast-Path Single-Turn is strictly reserved for pure documentation or single-word typo fixes where no code behavior is touched. For all code changes, multi-turn tool investigation is mandatory.
-- **Review Submission**: Only after completing your investigation and verifying surrounding context with tools, submit your completed code review verdict by calling the `review` tool with your structured JSON payload matching `CodeReviewResponse` or `SyncReviewResponse`, or output the valid JSON object directly in your final response.
+- **Review Submission**: Only after completing your investigation and verifying surrounding context with tools, submit your completed code review verdict by calling the `review` tool with your structured JSON payload matching `CodeReviewResponse` or `SyncReviewResponse`. Submitting `review` before calling investigative tools will be rejected by the tool gate on code PRs.
 
 ### 3. High-Signal Audit Output Requirements
 Submit your completed code review verdict via the `review` tool or directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`.
@@ -538,8 +538,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             "- Populate 'scorecard' evaluating all 5 audit dimensions ('Logic & Boundaries', 'Concurrency & State', 'Security & Secrets', 'Contract Integrity', 'Test Coverage & Regressions') with diff-grounded evidence. All citations in notes MUST reference files and line numbers present in the PR diff.\n"
             "- Populate 2-4 'verified_invariants' with explicit path:line citations from the PR diff (e.g. 'src/auth.py:42: Validates token expiration'). Citations in verified_invariants are machine-checked against the diff; invariants without path:line citations will be demoted to semantic invariants.\n"
             "- Optionally populate 'semantic_invariants' for high-level domain guarantees grounded in real repository entities.\n"
-            "- If the change is sound, approve cleanly with empty critical_issues and minor_suggestions.\n"
-            "When your investigation is complete, submit your formal review via the `review` tool or output your formal review JSON directly."
+            "When your investigation with tools is complete, submit your formal review via the `review` tool."
         )
 
     return "\n".join(parts)
