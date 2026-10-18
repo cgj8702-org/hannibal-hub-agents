@@ -52,7 +52,7 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
 
 
 def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
-    """Programmatically pre-fetch PR diff and inject into raw_payload for 1-turn review execution."""
+    """Programmatically pre-fetch PR diff and inject into raw_payload for review execution."""
     try:
         canonical = payload.get("canonical", "")
         raw = payload.get("raw_payload")
@@ -112,7 +112,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             filtered = filter_review_diff(raw_diff)
             raw["pr_diff"] = filtered.filtered_diff or raw_diff
             logger.info(
-                "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d) for 1-turn review",
+                "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d) for review execution",
                 pr_num_int,
                 len(diff_lines),
                 len(filtered.kept_files),

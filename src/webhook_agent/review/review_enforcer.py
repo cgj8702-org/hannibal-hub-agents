@@ -267,6 +267,7 @@ def _enforce_verdict(
     det_contract_item: ScorecardItem | None = deterministic_contract_item
     det_security_item: ScorecardItem | None = deterministic_security_item
     det_test_item: ScorecardItem | None = deterministic_test_item
+    head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
 
     if state is not None:
         state_dict_val = (
@@ -556,6 +557,22 @@ def _enforce_verdict(
                                 if s not in sync_obj.semantic_invariants:
                                     sync_obj.semantic_invariants.append(s)
 
+                        if sync_obj.semantic_invariants:
+                            from webhook_agent.review.grounding import (
+                                filter_and_ground_semantic_invariants,
+                            )
+
+                            grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
+                                sync_obj.semantic_invariants,
+                                diff_for_grounding,
+                                changed_paths=changed_paths,
+                                head_sha=head_sha,
+                            )
+                            sync_obj.semantic_invariants = grounded_sem
+                            for dc in demoted_claims:
+                                if dc not in sync_obj.unverified_claims:
+                                    sync_obj.unverified_claims.append(dc)
+
                     enforced_verdict = calculate_sync_verdict(sync_obj)
                     if diff_for_grounding:
                         grounding_issues, has_hard = _apply_citation_grounding(
@@ -635,6 +652,22 @@ def _enforce_verdict(
                             for s in s_invs:
                                 if s not in cr_obj.semantic_invariants:
                                     cr_obj.semantic_invariants.append(s)
+
+                        if cr_obj.semantic_invariants:
+                            from webhook_agent.review.grounding import (
+                                filter_and_ground_semantic_invariants,
+                            )
+
+                            grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
+                                cr_obj.semantic_invariants,
+                                diff_for_grounding,
+                                changed_paths=changed_paths,
+                                head_sha=head_sha,
+                            )
+                            cr_obj.semantic_invariants = grounded_sem
+                            for dc in demoted_claims:
+                                if dc not in cr_obj.unverified_claims:
+                                    cr_obj.unverified_claims.append(dc)
 
                         grounding_issues, has_hard = _apply_citation_grounding(
                             cr_obj,
@@ -724,6 +757,22 @@ def _enforce_verdict(
                         if s not in sync_obj.semantic_invariants:
                             sync_obj.semantic_invariants.append(s)
 
+                if sync_obj.semantic_invariants:
+                    from webhook_agent.review.grounding import (
+                        filter_and_ground_semantic_invariants,
+                    )
+
+                    grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
+                        sync_obj.semantic_invariants,
+                        diff_for_grounding,
+                        changed_paths=changed_paths,
+                        head_sha=head_sha,
+                    )
+                    sync_obj.semantic_invariants = grounded_sem
+                    for dc in demoted_claims:
+                        if dc not in sync_obj.unverified_claims:
+                            sync_obj.unverified_claims.append(dc)
+
                 grounding_issues, has_hard = _apply_citation_grounding(
                     sync_obj,
                     diff_for_grounding,
@@ -768,6 +817,22 @@ def _enforce_verdict(
                 for s in s_invs:
                     if s not in cr_obj.semantic_invariants:
                         cr_obj.semantic_invariants.append(s)
+
+            if cr_obj.semantic_invariants:
+                from webhook_agent.review.grounding import (
+                    filter_and_ground_semantic_invariants,
+                )
+
+                grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
+                    cr_obj.semantic_invariants,
+                    diff_for_grounding,
+                    changed_paths=changed_paths,
+                    head_sha=head_sha,
+                )
+                cr_obj.semantic_invariants = grounded_sem
+                for dc in demoted_claims:
+                    if dc not in cr_obj.unverified_claims:
+                        cr_obj.unverified_claims.append(dc)
 
             grounding_issues, has_hard = _apply_citation_grounding(
                 cr_obj,

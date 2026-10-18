@@ -56,17 +56,28 @@ async def _execute_adk_runner(
     trace_id: str,
     results: list[ActionResult],
     emitted_texts: list[str],
+    *,
+    is_code_audit: bool = False,
+    max_investigation_turns: int = 2,
 ) -> None:
-    """Execute the ADK runner asynchronously and collect tool results and emitted text."""
+    """Execute the ADK runner asynchronously and collect tool results and emitted text.
+
+    For code PR audits (is_code_audit=True), enforces multi-turn repository investigation:
+    if the model terminates Turn 1 without executing investigative tools (read_file, search_files)
+    or submitting via review(), it prompts for mandatory codebase exploration before accepting
+    the final review.
+    """
     max_llm_calls = int(
         os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "10"
     )
     run_config = RunConfig(max_llm_calls=max_llm_calls)
-    try:
+    investigative_tools = {"read_file", "search_files"}
+
+    async def _run_single_turn(msg: genai_types.Content) -> None:
         async for event in active_runner.run_async(
             user_id=user_id,
             session_id=session_id,
-            new_message=user_message,
+            new_message=msg,
             run_config=run_config,
         ):
             # Handle token recording if usage metadata is available
@@ -121,6 +132,39 @@ async def _execute_adk_runner(
                             part.text,
                             trace_id[-4:],
                         )
+
+    try:
+        await _run_single_turn(user_message)
+
+        if is_code_audit:
+            has_investigated = any(r.tool in investigative_tools for r in results)
+            has_reviewed = any(r.tool == "review" and r.success for r in results)
+            turn = 1
+            while not has_investigated and not has_reviewed and turn < max_investigation_turns:
+                turn += 1
+                logger.info(
+                    "🔍 [Investigation Gate] Model attempted single-turn review on code changes without "
+                    "using investigative tools (trace: %s). Enforcing multi-turn exploration turn %d/%d...",
+                    trace_id[-4:],
+                    turn,
+                    max_investigation_turns,
+                )
+                emitted_texts.clear()
+                followup_directive = genai_types.Content(
+                    role="user",
+                    parts=[
+                        genai_types.Part.from_text(
+                            text=(
+                                "Mandatory Investigation Gate: You cannot finalize a code review in a single turn without "
+                                "active repository exploration. Use `search_files` or `read_file` to inspect callers, "
+                                "contract boundaries, and related test suites across the repository before providing your final review."
+                            )
+                        )
+                    ],
+                )
+                await _run_single_turn(followup_directive)
+                has_investigated = any(r.tool in investigative_tools for r in results)
+                has_reviewed = any(r.tool == "review" and r.success for r in results)
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
             logger.warning(
@@ -552,6 +596,21 @@ def execute_agent_event(
                         installation_id=installation_id,
                     )
 
+                doc_extensions = (
+                    ".md",
+                    ".markdown",
+                    ".txt",
+                    ".rst",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".svg",
+                )
+                is_code_audit = policy.mode == Mode.FORMAL_AUDIT and any(
+                    not f.lower().endswith(doc_extensions) for f in changed_files_list
+                )
+
                 # Execute runner
                 await _execute_adk_runner(
                     active_runner=active_runner,
@@ -562,6 +621,7 @@ def execute_agent_event(
                     trace_id=trace_id,
                     results=results,
                     emitted_texts=emitted_texts,
+                    is_code_audit=is_code_audit,
                 )
 
                 # Fetch final session
@@ -671,6 +731,47 @@ def execute_agent_event(
                 )
             )
 
+    def _finalize_results() -> None:
+        has_review_action = any(r.tool == "review" and r.success for r in results)
+
+        is_comment_reconciliation = False
+        if policy.mode != Mode.FORMAL_AUDIT and not has_review_action and emitted_texts:
+            full_text = "\n\n".join(emitted_texts)
+            has_resolutions = '"resolutions"' in full_text
+            has_verdict = '"verdict"' in full_text
+            is_pr_comment = canonical.startswith(
+                ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
+            )
+            if is_pr_comment and has_resolutions and has_verdict:
+                is_comment_reconciliation = True
+                logger.info(
+                    "Comment reconciliation detected (trace: %s): promoting to deterministic review submission",
+                    trace_id[-4:],
+                )
+
+        if (
+            policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation
+        ) and not has_review_action:
+            _submit_deterministic_review(
+                gh_client=gh_client,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                canonical=canonical,
+                final_session=final_session,
+                emitted_texts=emitted_texts,
+                results=results,
+            )
+        elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
+            _post_conversational_reply(
+                gh_client=gh_client,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                emitted_texts=emitted_texts,
+                trace_id=trace_id,
+                results=results,
+            )
+
     async def _execute_with_workspace() -> None:
         nonlocal user_message
         async with pr_workspace(gh_client, repo_full_name, head_sha) as ws_env:
@@ -699,6 +800,7 @@ def execute_agent_event(
                                 len(getattr(user_message.parts[0], "text", "") or ""),
                             )
                     await _run()
+                    _finalize_results()
             else:
                 if user_message is None:
                     user_message = agent._build_user_message(event_data)
@@ -723,47 +825,9 @@ def execute_agent_event(
                             len(getattr(user_message.parts[0], "text", "") or ""),
                         )
                 await _run()
+                _finalize_results()
 
     run_in_bg_loop(_execute_with_workspace())
-
-    # Deterministic review submission
-    has_review_action = any(r.tool == "review" and r.success for r in results)
-
-    is_comment_reconciliation = False
-    if policy.mode != Mode.FORMAL_AUDIT and not has_review_action and emitted_texts:
-        full_text = "\n\n".join(emitted_texts)
-        has_resolutions = '"resolutions"' in full_text
-        has_verdict = '"verdict"' in full_text
-        is_pr_comment = canonical.startswith(
-            ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
-        )
-        if is_pr_comment and has_resolutions and has_verdict:
-            is_comment_reconciliation = True
-            logger.info(
-                "Comment reconciliation detected (trace: %s): promoting to deterministic review submission",
-                trace_id[-4:],
-            )
-
-    if (policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation) and not has_review_action:
-        _submit_deterministic_review(
-            gh_client=gh_client,
-            repo_full_name=repo_full_name,
-            pr_number=pr_number,
-            head_sha=head_sha,
-            canonical=canonical,
-            final_session=final_session,
-            emitted_texts=emitted_texts,
-            results=results,
-        )
-    elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
-        _post_conversational_reply(
-            gh_client=gh_client,
-            repo_full_name=repo_full_name,
-            pr_number=pr_number,
-            emitted_texts=emitted_texts,
-            trace_id=trace_id,
-            results=results,
-        )
 
     if not results:
         logger.info(

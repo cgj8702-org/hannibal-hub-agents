@@ -878,6 +878,7 @@ class TestResolveEventPolicy:
         assert policy.may_submit_review is True
         assert policy.may_post_comment is True
         assert policy.prefetch_diff is True
+        assert policy.thinking_budget == 4096
         assert policy.session_key == "owner/repo#42"
 
     def test_pull_request_synchronize_is_formal_audit(self) -> None:
@@ -1036,6 +1037,54 @@ class TestResolveEventPolicy:
             resolve_event_policy(event_data)
 
 
+class TestAuditorThinkingBudget:
+    """Tests for get_auditor_thinking_budget parsing and fallbacks."""
+
+    def test_default_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from webhook_agent.core.policy import (
+            DEFAULT_AUDITOR_THINKING_BUDGET,
+            get_auditor_thinking_budget,
+        )
+
+        monkeypatch.delenv("AUDITOR_THINKING_BUDGET", raising=False)
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+    def test_valid_integer_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from webhook_agent.core.policy import get_auditor_thinking_budget
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "8192")
+        assert get_auditor_thinking_budget() == 8192
+
+    def test_whitespace_and_invalid_overrides_fall_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from webhook_agent.core.policy import (
+            DEFAULT_AUDITOR_THINKING_BUDGET,
+            get_auditor_thinking_budget,
+        )
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "   ")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "4k")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "auto")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+    def test_zero_and_negative_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from webhook_agent.core.policy import get_auditor_thinking_budget
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "0")
+        assert get_auditor_thinking_budget() == 0
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "-1")
+        assert get_auditor_thinking_budget() == -1
+
+
 class TestToolGating:
     """Tests for mode-based tool gating in before_tool_callback."""
 
@@ -1117,3 +1166,148 @@ class TestToolGating:
             ctx = self._make_tool_context(mode)
             result = await before_tool_callback(tool, {"file_path": "main.py"}, ctx)
             assert result is None, f"read_file should be allowed in mode {mode}"
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_enforces_multi_turn_investigation_on_code_pr() -> None:
+    """Verify _execute_adk_runner rejects single-turn review on code PR and enforces exploration."""
+    from google.genai import types as genai_types
+
+    calls = 0
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                # Turn 1: Model prematurely emits text without running tools
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=list,
+                    content=MagicMock(
+                        parts=[MagicMock(text="Premature JSON review", thought=False)]
+                    ),
+                )
+            elif calls == 2:
+                # Turn 2: Enforced investigation, calls search_files and then emits final review
+                fn_resp = MagicMock()
+                fn_resp.name = "search_files"
+                fn_resp.response = "matched 3 lines"
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp],
+                    content=None,
+                )
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=list,
+                    content=MagicMock(
+                        parts=[MagicMock(text="Final researched review", thought=False)]
+                    ),
+                )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=True,
+    )
+
+    assert calls == 2
+    assert any(r.tool == "search_files" for r in results)
+    assert emitted_texts == ["Final researched review"]
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_allows_single_turn_when_not_code_audit() -> None:
+    """Verify _execute_adk_runner allows single-turn output when is_code_audit is False."""
+    from google.genai import types as genai_types
+
+    calls = 0
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            yield MagicMock(
+                usage_metadata=None,
+                get_function_responses=list,
+                content=MagicMock(parts=[MagicMock(text="Docs review", thought=False)]),
+            )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit Docs PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test-docs",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=False,
+    )
+
+    assert calls == 1
+    assert emitted_texts == ["Docs review"]
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_single_turn_sufficient_if_tool_executed() -> None:
+    """Verify _execute_adk_runner does not trigger follow-up turn if investigative tool was called in turn 1."""
+    from google.genai import types as genai_types
+
+    calls = 0
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            fn_resp = MagicMock()
+            fn_resp.name = "read_file"
+            fn_resp.response = "file content"
+            yield MagicMock(
+                usage_metadata=None,
+                get_function_responses=lambda: [fn_resp],
+                content=None,
+            )
+            yield MagicMock(
+                usage_metadata=None,
+                get_function_responses=list,
+                content=MagicMock(parts=[MagicMock(text="Researched review", thought=False)]),
+            )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test-tool",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=True,
+    )
+
+    assert calls == 1
+    assert any(r.tool == "read_file" for r in results)
+    assert emitted_texts == ["Researched review"]

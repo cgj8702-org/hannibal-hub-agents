@@ -80,6 +80,9 @@ def test_system_instruction_clause_group_1_pruned() -> None:
         "Do NOT call a review tool — the host pipeline deterministically parses"
         not in SYSTEM_INSTRUCTION
     )
+    assert "Do NOT call a review tool" not in SYSTEM_INSTRUCTION
+    assert "Do NOT call a `review` tool" not in SYSTEM_INSTRUCTION
+    assert "`review`" in SYSTEM_INSTRUCTION
 
 
 def test_system_instruction_clause_group_2_pruned() -> None:

@@ -401,6 +401,60 @@ def test_enforce_verdict_partitions_unverified_invariants() -> None:
     ]
 
 
+def test_enforce_verdict_purges_hallucinated_semantic_invariants() -> None:
+    """Verify that _enforce_verdict deterministically purges hallucinated semantic invariants and demotes unverified claims."""
+    from webhook_agent.review.metadata import extract_review_metadata
+
+    diff_text = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1,3 +1,4 @@\n+def run():\n+    pass\n"
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Clean PR with domain guarantees.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [
+            "Worker execution logic verified (`src/app.py:1`)",
+        ],
+        "semantic_invariants": [
+            "Gracefully handles transient network disconnections without crash.",
+            "Ensures valid transactions in `src/nonexistent/phantom_db.py:42`",
+            "Residual uncertainty regarding global cluster memory scaling",
+            "Thread safety guaranteed by test_phantom_concurrency_race_condition",
+            "Maintains that `PhantomDistributedMutex` prevents lock contention",
+        ],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/app.py"],
+    }
+
+    rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+
+    assert verdict == "APPROVE"
+    assert "### 3. Verified Invariants" in rendered_body
+    assert "- [x] Worker execution logic verified (`src/app.py:1`)" in rendered_body
+    assert "### 4. Semantic Invariants (Model-Asserted)" in rendered_body
+    assert "* Gracefully handles transient network disconnections without crash." in rendered_body
+    assert "phantom_db.py" not in rendered_body
+    assert "test_phantom_concurrency_race_condition" not in rendered_body
+    assert "PhantomDistributedMutex" not in rendered_body
+    assert "### ❓ Unverified Claims & Residual Uncertainty" in rendered_body
+    assert "* Residual uncertainty regarding global cluster memory scaling" in rendered_body
+
+    meta = extract_review_metadata(rendered_body)
+    assert meta is not None
+    assert meta["verified_invariants"] == ["Worker execution logic verified (`src/app.py:1`)"]
+    assert meta["semantic_invariants"] == [
+        "Gracefully handles transient network disconnections without crash."
+    ]
+    assert meta["unverified_claims"] == [
+        "Residual uncertainty regarding global cluster memory scaling"
+    ]
+
+
 def test_is_security_dimension() -> None:
     assert is_security_dimension("Security & Secrets") is True
     assert is_security_dimension("security") is True
