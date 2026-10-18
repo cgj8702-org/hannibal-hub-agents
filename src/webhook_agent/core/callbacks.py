@@ -19,6 +19,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import BaseTool, ToolContext
 
+from webhook_agent.core.policy import Mode
 from webhook_agent.models.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.core.callbacks")
@@ -324,8 +325,22 @@ async def before_tool_callback(
                 "error": f"Tool '{tool.name}' argument validation failed. Please fix the argument types/names and try again."
             }
 
-    # Track executed tools in session state for downstream audit gates
-    tools_executed = tool_context.state.setdefault("tools_executed", [])
+    # Mode-based tool gating
+    mode = tool_context.state.get("agent_mode", Mode.IGNORE)
+    if tool.name == "review" and mode != Mode.FORMAL_AUDIT:
+        return {
+            "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
+            f"Only permitted in mode '{Mode.FORMAL_AUDIT}'."
+        }
+    if tool.name == "resolve_review_thread" and mode not in (
+        Mode.FORMAL_AUDIT,
+        Mode.THREAD_COLLAB,
+    ):
+        return {
+            "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
+            f"Only permitted in modes '{Mode.FORMAL_AUDIT}', '{Mode.THREAD_COLLAB}'."
+        }
+
     if isinstance(tools_executed, list):
         if tool.name not in tools_executed:
             tools_executed.append(tool.name)

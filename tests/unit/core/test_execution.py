@@ -14,6 +14,7 @@ from webhook_agent.core.execution import (
     _submit_deterministic_review,
     execute_agent_event,
 )
+from webhook_agent.core.policy import Mode, resolve_event_policy
 from webhook_agent.webhook_types import ActionResult
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -654,3 +655,185 @@ def test_agent_plugins_iteration_and_guardrail_budget() -> None:
     assert agent._iteration_budget_plugin.max_turns == 10
     assert agent._iteration_budget_plugin.max_tool_calls == 25
     assert agent._guardrails_plugin.no_progress_window == 4
+
+class TestResolveEventPolicy:
+    """Tests for resolve_event_policy() - the single source of truth for event policy."""
+
+    def test_pull_request_opened_is_formal_audit(self) -> None:
+        event_data = {
+            "canonical": "pull_request.opened",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702-agents"},
+            "raw_payload": {"pull_request": {"number": 42}},
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.FORMAL_AUDIT
+        assert policy.may_submit_review is True
+        assert policy.may_post_comment is True
+        assert policy.prefetch_diff is True
+        assert policy.session_key == "owner/repo#42"
+
+    def test_pull_request_synchronize_is_formal_audit(self) -> None:
+        event_data = {
+            "canonical": "pull_request.synchronize",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702-agents"},
+            "raw_payload": {"pull_request": {"number": 42}},
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.FORMAL_AUDIT
+        assert policy.may_submit_review is True
+
+    def test_pull_request_review_comment_is_thread_collab(self) -> None:
+        event_data = {
+            "canonical": "pull_request_review_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "comment": {"body": "Thanks for the review!", "thread_id": "thread-123"},
+                "pull_request": {"number": 42},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.THREAD_COLLAB
+        assert policy.may_post_comment is True
+        assert policy.may_resolve_threads is True
+
+    def test_issue_opened_is_issue_triage(self) -> None:
+        event_data = {
+            "canonical": "issues.opened",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {"issue": {"number": 42}},
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.ISSUE_TRIAGE
+        assert policy.may_post_comment is True
+        assert policy.may_create_issue is True
+
+    def test_issue_comment_is_general_pair_programming(self) -> None:
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": None},
+                "comment": {"body": "How does this work?"},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.GENERAL_PAIR_PROGRAMMING
+        assert policy.may_post_comment is True
+        assert policy.may_submit_review is False
+
+    def test_bot_event_is_ignore(self) -> None:
+        event_data = {
+            "canonical": "pull_request.opened",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "coderabbitai[bot]"},
+            "raw_payload": {"pull_request": {"number": 42}},
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.IGNORE
+        assert policy.may_submit_review is False
+        assert policy.may_post_comment is False
+
+    def test_unknown_event_is_ignore(self) -> None:
+        event_data = {
+            "canonical": "unknown.event",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {},
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.IGNORE
+
+    def test_dry_run_does_not_affect_mode(self) -> None:
+        event_data = {
+            "canonical": "pull_request.opened",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702-agents"},
+            "raw_payload": {"pull_request": {"number": 42}},
+        }
+        policy_dry = resolve_event_policy(event_data, dry_run=True)
+        policy_live = resolve_event_policy(event_data, dry_run=False)
+        assert policy_dry.mode == policy_live.mode == Mode.FORMAL_AUDIT
+
+
+
+class TestToolGating:
+    """Tests for mode-based tool gating in before_tool_callback."""
+
+    def _make_tool_context(self, mode: Mode) -> Any:
+        """Create a mock ToolContext with the given mode in session state."""
+        from google.adk.tools import ToolContext
+
+        ctx = MagicMock()
+        ctx.state = {"agent_mode": mode}
+        return ctx
+
+    def test_review_tool_allowed_in_formal_audit(self) -> None:
+        from webhook_agent.tools.github_tools import review
+
+        tool = MagicMock()
+        tool.name = "review"
+        ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
+        result = before_tool_callback(tool, {}, ctx)
+        assert result is None  # Allowed
+
+    def test_review_tool_rejected_in_thread_collab(self) -> None:
+        from webhook_agent.tools.github_tools import review
+
+        tool = MagicMock()
+        tool.name = "review"
+        ctx = self._make_tool_context(Mode.THREAD_COLLAB)
+        result = before_tool_callback(tool, {}, ctx)
+        assert result is not None
+        assert "Error" in result
+        assert "not permitted" in result
+
+    def test_review_tool_rejected_in_issue_triage(self) -> None:
+        from webhook_agent.tools.github_tools import review
+
+        tool = MagicMock()
+        tool.name = "review"
+        ctx = self._make_tool_context(Mode.ISSUE_TRIAGE)
+        result = before_tool_callback(tool, {}, ctx)
+        assert result is not None
+        assert "Error" in result
+        assert "not permitted" in result
+
+    def test_resolve_review_thread_allowed_in_thread_collab(self) -> None:
+        from webhook_agent.tools.github_tools import resolve_review_thread
+
+        tool = MagicMock()
+        tool.name = "resolve_review_thread"
+        ctx = self._make_tool_context(Mode.THREAD_COLLAB)
+        result = before_tool_callback(tool, {}, ctx)
+        assert result is None  # Allowed
+
+    def test_resolve_review_thread_rejected_in_formal_audit(self) -> None:
+        from webhook_agent.tools.github_tools import resolve_review_thread
+
+        tool = MagicMock()
+        tool.name = "resolve_review_thread"
+        ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
+        result = before_tool_callback(tool, {}, ctx)
+        assert result is not None
+        assert "Error" in result
+
+    def test_read_file_allowed_in_all_modes(self) -> None:
+        from webhook_agent.tools.github_tools import read_file
+
+        tool = MagicMock()
+        tool.name = "read_file"
+        for mode in [
+            Mode.FORMAL_AUDIT,
+            Mode.THREAD_COLLAB,
+            Mode.ISSUE_TRIAGE,
+            Mode.GENERAL_PAIR_PROGRAMMING,
+            Mode.IGNORE,
+        ]:
+            ctx = self._make_tool_context(mode)
+            result = before_tool_callback(tool, {}, ctx)
+            assert result is None, f"read_file should be allowed in mode {mode}"
