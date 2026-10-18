@@ -427,7 +427,79 @@ def test_retry_loop_resets_user_message_prompt(monkeypatch: pytest.MonkeyPatch):
     assert captured_texts[0] == captured_texts[1]
 
 
-def test_deterministic_session_state_contains_ast_flag() -> None:
+def test_session_scope_is_pr_scoped_not_sender_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two different senders on the same PR must share the same session/user_id.
+
+    Currently BROKEN: user_id is derived from sender_login, so different
+    senders on the same PR get different sessions and lose review context.
+    """
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+    mock_agent._build_user_message.return_value = MagicMock(parts=[MagicMock(text="Audit request")])
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name.return_value = "gemini-3.5-flash-lite"
+
+    mock_session_service = MagicMock()
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_session_service.get_session = AsyncMock(return_value=None)
+    mock_session_service.create_session = AsyncMock()
+    mock_session_service.append_event = AsyncMock()
+    mock_session_service.user_state = {}
+    mock_agent._session_service = mock_session_service
+
+    # Capture the user_id passed to create_session
+    captured_user_ids = []
+
+    def fake_create_session(app_name, user_id, session_id, state):
+        captured_user_ids.append(user_id)
+        return None
+
+    mock_session_service.create_session.side_effect = fake_create_session
+
+    # Event 1: PR opened by sender "cgj8702-agents" on PR #42
+    event_data_1: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "cgj8702-agents"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+    }
+
+    # Event 2: Issue comment by sender "cgj8702" on the same PR #42
+    event_data_2: dict[str, Any] = {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "cgj8702"},
+        "raw_payload": {
+            "issue": {"number": 42, "pull_request": {"number": 42}},
+            "comment": {"body": "Thanks for the review!"},
+        },
+    }
+
+    mock_gh = MagicMock()
+
+    with patch(
+        "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+        return_value=None,
+    ), patch(
+        "webhook_agent.core.execution._execute_adk_runner",
+    ):
+        # Process both events
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data_1, gh_client=mock_gh, trace_id="trace-1"
+        )
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data_2, gh_client=mock_gh, trace_id="trace-2"
+        )
+
+    # Both events on the same PR should use the same user_id (PR-scoped, not sender-scoped)
+    assert captured_user_ids[0] == captured_user_ids[1], (
+        f"Expected same user_id for same PR, but got {captured_user_ids[0]!r} "
+        f"and {captured_user_ids[1]!r}"
+    )
     """Verify deterministic precompiled AST flag and review eligibility are passed to session state."""
     mock_agent = MagicMock()
     mock_agent._normalize_model_name.side_effect = lambda x: x
