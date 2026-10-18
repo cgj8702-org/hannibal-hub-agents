@@ -792,6 +792,18 @@ def test_scorecard_citation_grounding() -> None:
     issues_unchanged = verify_citations([finding_unchanged], diff, changed_paths=["src/app.py"])
     assert any(i.code == "scorecard_path_not_changed" for i in issues_unchanged)
 
+    # 4. Out-of-diff backtick code quote does not cause hard evidence_not_in_diff
+    finding_with_external_quote = Finding(
+        kind="scorecard",
+        path="src/app.py",
+        line=10,
+        evidence="Calls `external_function_that_is_in_another_file_entirely()` at src/app.py:10",
+    )
+    issues_external = verify_citations(
+        [finding_with_external_quote], diff, changed_paths=["src/app.py"]
+    )
+    assert not any(i.code == "evidence_not_in_diff" for i in issues_external)
+
 
 def test_extract_scorecard_invariants() -> None:
     """extract_scorecard_invariants must recover diff-grounded citations as verified invariants."""
@@ -800,7 +812,8 @@ def test_extract_scorecard_invariants() -> None:
 
     diff = """--- a/src/core.py
 +++ b/src/core.py
-@@ -15,3 +15,3 @@
+@@ -14,3 +14,3 @@
+ context_line()
 -old_code()
 +new_code()
 """
@@ -814,6 +827,16 @@ def test_extract_scorecard_invariants() -> None:
             dimension="Security & Secrets",
             status="PASS",
             notes="Checked pre-existing line src/core.py:999.",
+        ),
+        ScorecardItem(
+            dimension="Concurrency & State",
+            status="FAIL",
+            notes="Defective race condition at src/core.py:15.",
+        ),
+        ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="PASS",
+            notes="Observed unchanged context line src/core.py:14.",
         ),
     ]
 

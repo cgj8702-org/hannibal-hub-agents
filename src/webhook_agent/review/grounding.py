@@ -509,7 +509,7 @@ def _check_one(
     else:
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
-        if diff_text:
+        if diff_text and finding.kind != "scorecard":
             norm_diff = _norm_evidence(diff_text)
             for quote in code_quotes:
                 if len(_norm_evidence(quote)) > 24:
@@ -1391,11 +1391,18 @@ def extract_scorecard_invariants(
     if not scorecard or not diff_text:
         return []
 
-    _anchors, line_text = walk_right_side(diff_text)
+    anchors, _line_text = walk_right_side(diff_text)
+    changed = {bare_path(p) for p in changed_paths if p} if changed_paths is not None else None
     recovered: list[str] = []
     seen: set[str] = set()
 
     for item in scorecard:
+        status = getattr(item, "status", None) or (
+            item.get("status") if isinstance(item, dict) else ""
+        )
+        if str(status).upper() != "PASS":
+            continue
+
         dimension = (
             getattr(item, "dimension", None)
             or (item.get("dimension") if isinstance(item, dict) else "")
@@ -1413,13 +1420,11 @@ def extract_scorecard_invariants(
             except (ValueError, TypeError):
                 continue
 
-            if changed_paths is not None:
-                changed = {bare_path(p) for p in changed_paths if p}
-                if path not in changed:
-                    continue
+            if changed is not None and path not in changed:
+                continue
 
-            known_lines = line_text.get(path, {})
-            if line_num not in known_lines:
+            anchor_lines = anchors.get(path, set())
+            if line_num not in anchor_lines:
                 continue
 
             key = f"{path}:{line_num}"
