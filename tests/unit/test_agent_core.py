@@ -964,11 +964,13 @@ class TestReviewIdempotency:
         pr.create_review.side_effect = create_review
         results = []
 
+        review_body = '{"executive_summary":"Race test review.","critical_issues":[]}'
+
         def submit():
             results.append(
                 _submit_formal_review(
                     pr,
-                    "race",
+                    review_body,
                     "COMMENT",
                     "owner/repo#102",
                     {"review_mode": "initial"},

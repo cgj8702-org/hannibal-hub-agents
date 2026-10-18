@@ -244,11 +244,29 @@ def _submit_deterministic_review(
             logger.info("Deterministic review result for PR #%d: %s", pr_number, detail)
             if submitted and head_sha:
                 review_checkpoint_manager.mark_completed(repo_full_name, pr_number, head_sha)
+            elif not submitted:
+                logger.warning(
+                    "Deterministic review was not submitted for PR #%d: %s",
+                    pr_number,
+                    detail,
+                )
         except Exception as fallback_err:
             logger.warning(
                 "Deterministic review submission failed: %s",
                 fallback_err,
             )
+    elif not review_payload and pr_number:
+        logger.warning(
+            "Deterministic review skipped for PR #%d: no structured review payload found",
+            pr_number,
+        )
+        results.append(
+            ActionResult(
+                tool="review",
+                success=False,
+                detail="Skipped: no structured review payload found in session state or emitted texts.",
+            )
+        )
 
 
 def _post_conversational_reply(

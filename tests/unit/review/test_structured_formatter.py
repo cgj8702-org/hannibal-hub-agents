@@ -1285,3 +1285,37 @@ def test_issue_without_path_does_not_render_empty_or_fake_location() -> None:
     assert "``" not in md
     assert "codebase" not in md
     assert "no file cited" in md
+
+
+def test_enforce_verdict_fast_fails_on_unparseable_payload() -> None:
+    """_enforce_verdict must raise ValueError on empty, unstructured prose, or non-review payloads."""
+    with pytest.raises(ValueError, match="Unparseable review payload"):
+        _enforce_verdict("", "APPROVE")
+
+    with pytest.raises(ValueError, match="Unparseable review payload"):
+        _enforce_verdict("   \n\t  ", "APPROVE")
+
+    with pytest.raises(ValueError, match="Unparseable review payload"):
+        _enforce_verdict("Looks great to me, ship it!", "APPROVE")
+
+    with pytest.raises(ValueError, match="Unparseable review payload"):
+        _enforce_verdict('{"status": "ok", "message": "done"}', "APPROVE")
+
+
+def test_submit_formal_review_fast_fails_without_creating_review() -> None:
+    """_submit_formal_review must catch ValueError, log, and fail without creating a PR review."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.review.review_enforcer import _submit_formal_review
+
+    pr = MagicMock()
+    result, submitted = _submit_formal_review(
+        pr,
+        "unstructured garbage text",
+        "COMMENT",
+        "owner/repo#42",
+        {"review_mode": "initial"},
+    )
+    assert submitted is False
+    assert "Failed: Unparseable review payload" in result
+    pr.create_review.assert_not_called()
