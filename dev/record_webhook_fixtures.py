@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -76,16 +77,35 @@ def _client() -> httpx.Client:
     )
 
 
+def _next_cursor(link_header: str | None) -> str | None:
+    """Extract the ``cursor`` value from a GitHub ``Link`` header's ``rel="next"``."""
+    if not link_header:
+        return None
+
+    for part in link_header.split(","):
+        if 'rel="next"' in part:
+            match = re.search(r"[?&]cursor=([^&>]+)", part)
+            return match.group(1) if match else None
+    return None
+
+
 def list_deliveries(client: httpx.Client, pages: int) -> list[dict[str, Any]]:
-    """Page through the App's webhook deliveries. Each list item carries event + action."""
+    """Page through the App's webhook deliveries using cursor-based pagination."""
     deliveries: list[dict[str, Any]] = []
-    for page in range(1, pages + 1):
-        response = client.get("/app/hook/deliveries", params={"per_page": 100, "page": page})
+    cursor: str | None = None
+    for _ in range(pages):
+        params: dict[str, Any] = {"per_page": 100}
+        if cursor:
+            params["cursor"] = cursor
+        response = client.get("/app/hook/deliveries", params=params)
         response.raise_for_status()
         batch = response.json()
         if not batch:
             break
         deliveries.extend(batch)
+        cursor = _next_cursor(response.headers.get("link"))
+        if not cursor:
+            break
     return deliveries
 
 
