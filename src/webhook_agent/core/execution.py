@@ -267,10 +267,32 @@ def execute_agent_event(
     repo_full_name = (
         event_data.get("repository", {}).get("full_name")
         if event_data.get("repository")
-        else "unknown"
+        else event_data.get("repo_name")
     )
+    if not repo_full_name or repo_full_name == "unknown":
+        raise ValueError("Cannot execute agent event: missing repository full_name")
+
     canonical = event_data.get("canonical", "")
     raw = event_data.get("raw_payload", {})
+    if not isinstance(raw, dict):
+        raise ValueError("Cannot execute agent event: raw_payload must be a dictionary")
+
+    pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
+        "number"
+    )
+    if not pr_number:
+        raise ValueError(
+            f"Cannot execute agent event: missing PR or issue number for repository '{repo_full_name}'"
+        )
+
+    head_sha = str(
+        (raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or ""
+    )
+
+    sender = event_data.get("sender") or {}
+    sender_login = sender.get("login", "") if isinstance(sender, dict) else str(sender or "")
+    if not sender_login:
+        raise ValueError("Cannot execute agent event: missing sender login")
 
     if gh_client is not None and "gh_client" not in event_data:
         event_data["gh_client"] = gh_client
@@ -282,9 +304,7 @@ def execute_agent_event(
 
     # Derive session and user IDs
     session_id = agent._derive_session_id(event_data)
-    sender = event_data.get("sender") or {}
-    sender_login = sender.get("login", "") if isinstance(sender, dict) else str(sender or "")
-    user_id = sender_login or "anonymous"
+    user_id = f"{repo_full_name}#{pr_number}"
 
     logger.debug(
         "👤 Session context: session_id=%s, user_id=%s",
@@ -294,17 +314,6 @@ def execute_agent_event(
 
     comment_body = (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
     is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
-
-    pr_number = None
-    if isinstance(raw, dict):
-        pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
-            "number"
-        )
-    head_sha = (
-        str((raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or "")
-        if isinstance(raw, dict)
-        else ""
-    )
 
     results: list[ActionResult] = []
 
@@ -506,7 +515,7 @@ def execute_agent_event(
                 ).setdefault(user_id, {})
                 user_state_map["gh_client"] = gh_client
                 user_state_map["repo_full_name"] = repo_full_name
-                user_state_map["sender"] = user_id
+                user_state_map["sender"] = sender_login
                 user_state_map["review_mode"] = (
                     "sync" if canonical == "pull_request.synchronize" else "initial"
                 )
@@ -527,7 +536,7 @@ def execute_agent_event(
                         changed_files=changed_files_list,
                         status="pending",
                         delivery_id=delivery_id,
-                        sender=user_id,
+                        sender=sender_login,
                         comment_body=comment_body,
                         installation_id=installation_id,
                     )

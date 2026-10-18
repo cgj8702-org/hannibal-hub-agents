@@ -374,17 +374,26 @@ class WebhookAgent:
         """Derive a session ID from the event data for conversation continuity.
 
         Uses repo_full_name + issue/PR number so that follow-up comments
-        on the same thread share a session.
+        on the same thread share a session. Fast-fails without fallback.
         """
         repo = event_data.get("repository", {})
-        repo_name = repo.get("full_name", "unknown")
+        repo_name = repo.get("full_name") if isinstance(repo, dict) else None
+        if not repo_name or repo_name == "unknown":
+            repo_name = event_data.get("repo_name")
+        if not repo_name or repo_name == "unknown":
+            raise ValueError("Cannot derive session ID: event is missing repository full_name")
+
         raw = event_data.get("raw_payload", {})
-        issue = raw.get("issue", {})
-        pr = raw.get("pull_request", {})
-        number = issue.get("number") or pr.get("number")
-        if number:
-            return f"{repo_name}/{number}"
-        return f"{repo_name}/{event_data.get('delivery_id', 'unknown')}"
+        issue = raw.get("issue", {}) if isinstance(raw, dict) else {}
+        pr = raw.get("pull_request", {}) if isinstance(raw, dict) else {}
+        number = (issue.get("number") if isinstance(issue, dict) else None) or (
+            pr.get("number") if isinstance(pr, dict) else None
+        )
+        if not number:
+            raise ValueError(
+                f"Cannot derive session ID: event for repository '{repo_name}' is missing PR/issue number"
+            )
+        return f"{repo_name}/{number}"
 
     def _build_user_message(self, event_data: dict[str, Any]) -> genai_types.Content:
         """Build a user message from the webhook event data."""
