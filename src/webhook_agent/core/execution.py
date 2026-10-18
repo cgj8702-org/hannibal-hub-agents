@@ -138,12 +138,11 @@ async def _execute_adk_runner(
 
         if is_code_audit:
             has_investigated = any(r.tool in investigative_tools for r in results)
-            has_reviewed = any(r.tool == "review" and r.success for r in results)
             turn = 1
-            while not has_investigated and not has_reviewed and turn < max_investigation_turns:
+            while not has_investigated and turn < max_investigation_turns:
                 turn += 1
                 logger.info(
-                    "🔍 [Investigation Gate] Model attempted single-turn review on code changes without "
+                    "🔍 [Investigation Gate] Model attempted review on code changes without "
                     "using investigative tools (trace: %s). Enforcing multi-turn exploration turn %d/%d...",
                     trace_id[-4:],
                     turn,
@@ -164,7 +163,6 @@ async def _execute_adk_runner(
                 )
                 await _run_single_turn(followup_directive)
                 has_investigated = any(r.tool in investigative_tools for r in results)
-                has_reviewed = any(r.tool == "review" and r.success for r in results)
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
             logger.warning(
@@ -454,7 +452,22 @@ def execute_agent_event(
     final_session = None
 
     changed_files_list = list(raw.get("changed_files") or [])
+    doc_extensions = (
+        ".md",
+        ".markdown",
+        ".txt",
+        ".rst",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+    )
+    is_code_audit = policy.mode == Mode.FORMAL_AUDIT and any(
+        not f.lower().endswith(doc_extensions) for f in changed_files_list
+    )
     deterministic_state = {
+        "is_code_audit": is_code_audit,
         "deterministic_changed_files": changed_files_list,
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
         "formal_review_eligible": policy.mode == Mode.FORMAL_AUDIT,
@@ -614,21 +627,6 @@ def execute_agent_event(
                         installation_id=installation_id,
                     )
 
-                doc_extensions = (
-                    ".md",
-                    ".markdown",
-                    ".txt",
-                    ".rst",
-                    ".png",
-                    ".jpg",
-                    ".jpeg",
-                    ".gif",
-                    ".svg",
-                )
-                is_code_audit = policy.mode == Mode.FORMAL_AUDIT and any(
-                    not f.lower().endswith(doc_extensions) for f in changed_files_list
-                )
-
                 # Execute runner
                 await _execute_adk_runner(
                     active_runner=active_runner,
@@ -767,19 +765,26 @@ def execute_agent_event(
                     trace_id[-4:],
                 )
 
+        has_investigated = any(r.tool in {"read_file", "search_files"} for r in results)
         if (
             policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation
         ) and not has_review_action:
-            _submit_deterministic_review(
-                gh_client=gh_client,
-                repo_full_name=repo_full_name,
-                pr_number=pr_number,
-                head_sha=head_sha,
-                canonical=canonical,
-                final_session=final_session,
-                emitted_texts=emitted_texts,
-                results=results,
-            )
+            if is_code_audit and not has_investigated:
+                logger.warning(
+                    "⚠️ [Investigation Gate] Code audit completed without any investigative tool calls (%s); suppressing ungrounded review writeback.",
+                    trace_id[-4:],
+                )
+            else:
+                _submit_deterministic_review(
+                    gh_client=gh_client,
+                    repo_full_name=repo_full_name,
+                    pr_number=pr_number,
+                    head_sha=head_sha,
+                    canonical=canonical,
+                    final_session=final_session,
+                    emitted_texts=emitted_texts,
+                    results=results,
+                )
         elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
             _post_conversational_reply(
                 gh_client=gh_client,
