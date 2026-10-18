@@ -149,11 +149,13 @@ async def test_on_tool_error_callback() -> None:
 
 @pytest.mark.anyio
 async def test_before_tool_callback_allow_multiple_tools() -> None:
+    from webhook_agent.core.policy import Mode
+
     tool = MagicMock()
     tool.name = "review"
     args1 = {"pr_number": 1, "body": "{}"}
     ctx = MagicMock()
-    ctx.state = {}
+    ctx.state = {"agent_mode": Mode.FORMAL_AUDIT}
 
     res1 = await before_tool_callback(tool, args1, ctx)
     assert res1 is None
