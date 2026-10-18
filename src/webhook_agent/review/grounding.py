@@ -31,14 +31,20 @@ defect class.
 
 from __future__ import annotations
 
+import contextlib
+import functools
+import logging
 import os
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from webhook_agent.constants import DEFAULT_STRICT_REVIEW_GROUNDING
 from webhook_agent.tools.diff_tools import walk_right_side
+
+logger = logging.getLogger("webhook_agent.review.grounding")
 
 Severity = Literal["hard", "soft"]
 Kind = Literal["critical", "suggestion", "invariant"]
@@ -725,6 +731,340 @@ def partition_invariants(
     return verified, semantic
 
 
+_COMMON_BUILTINS: frozenset[str] = frozenset(
+    {
+        "none",
+        "true",
+        "false",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "dict",
+        "list",
+        "set",
+        "tuple",
+        "any",
+        "optional",
+        "union",
+        "callable",
+        "mapping",
+        "sequence",
+        "iterable",
+        "exception",
+        "valueerror",
+        "typeerror",
+        "runtimeerror",
+        "keyerror",
+        "attributeerror",
+        "os",
+        "sys",
+        "re",
+        "json",
+        "asyncio",
+        "logging",
+        "path",
+        "self",
+        "cls",
+        "args",
+        "kwargs",
+        "return",
+        "pass",
+        "yield",
+        "await",
+        "async",
+    }
+)
+
+_UNCERTAINTY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "unverified",
+        "unclear",
+        "uncertainty",
+        "speculative",
+        "cannot verify",
+        "cannot confirm",
+        "untested hypothesis",
+        "residual uncertainty",
+        "unsubstantiated",
+    }
+)
+
+
+def _resolve_repo_root(repo_root: Path | str | None = None) -> Path | None:
+    """Resolve repository root directory if available."""
+    if repo_root is not None:
+        p = Path(repo_root)
+        return p if p.is_dir() else None
+    with contextlib.suppress(Exception):
+        from webhook_agent.environment.context import get_active_environment
+
+        env = get_active_environment()
+        if env and env.root and Path(env.root).is_dir():
+            return Path(env.root)
+    cwd = Path.cwd()
+    if (cwd / "src").is_dir() or (cwd / "tests").is_dir():
+        return cwd
+    return None
+
+
+@functools.lru_cache(maxsize=4)
+def _get_repo_file_index(repo_root_str: str) -> frozenset[str]:
+    """Return set of normalized relative file paths and basenames in the repository."""
+    root_path = Path(repo_root_str)
+    if not root_path.is_dir():
+        return frozenset()
+    paths: set[str] = set()
+    for root, dirs, files in os.walk(root_path):
+        dirs[:] = [
+            d
+            for d in dirs
+            if d
+            not in {
+                ".git",
+                ".venv",
+                "venv",
+                "__pycache__",
+                ".pytest_cache",
+                ".ruff_cache",
+                "node_modules",
+            }
+        ]
+        for f in files:
+            rel = (
+                bare_path(os.path.relpath(os.path.join(root, f), root_path))
+                .lower()
+                .replace("\\", "/")
+            )
+            paths.add(rel)
+            paths.add(Path(f).name.lower())
+    return frozenset(paths)
+
+
+@functools.lru_cache(maxsize=4)
+def _get_repo_src_symbols(repo_root_str: str) -> frozenset[str]:
+    """Return set of code tokens and identifiers in src/."""
+    root_path = Path(repo_root_str)
+    if not root_path.is_dir():
+        return frozenset()
+    words: set[str] = set()
+    src_dir = root_path / "src"
+    if src_dir.is_dir():
+        for py_file in src_dir.glob("**/*.py"):
+            with contextlib.suppress(Exception):
+                content = py_file.read_text(encoding="utf-8", errors="ignore")
+                for token in _IDENTIFIER_RE.findall(content):
+                    words.add(token.lower())
+    return frozenset(words)
+
+
+@functools.lru_cache(maxsize=4)
+def _get_repo_test_definitions(repo_root_str: str) -> frozenset[str]:
+    """Return set of defined test function names in tests/."""
+    root_path = Path(repo_root_str)
+    if not root_path.is_dir():
+        return frozenset()
+    tests: set[str] = set()
+    tests_dir = root_path / "tests"
+    if tests_dir.is_dir():
+        for py_file in tests_dir.glob("**/*.py"):
+            with contextlib.suppress(Exception):
+                content = py_file.read_text(encoding="utf-8", errors="ignore")
+                for match in re.finditer(r"def\s+(test_[a-zA-Z0-9_]+)\b", content):
+                    tests.add(match.group(1).lower())
+    return frozenset(tests)
+
+
+def _file_exists_in_repo(
+    path: str,
+    changed_paths: Collection[str] | None = None,
+    repo_files: Collection[str] | None = None,
+    repo_root: Path | str | None = None,
+) -> bool:
+    """Return True if path exists in changed_paths, repo_files, or locally in repository."""
+    bp = bare_path(path).lower().replace("\\", "/")
+    if changed_paths:
+        for cp in changed_paths:
+            bcp = bare_path(cp).lower().replace("\\", "/")
+            if bp == bcp or bcp.endswith("/" + bp) or bp.endswith("/" + bcp):
+                return True
+
+    if repo_files:
+        for rf in repo_files:
+            brf = bare_path(rf).lower().replace("\\", "/")
+            if bp == brf or brf.endswith("/" + bp) or bp.endswith("/" + brf):
+                return True
+
+    resolved_root = _resolve_repo_root(repo_root)
+    if resolved_root:
+        file_index = _get_repo_file_index(str(resolved_root))
+        if bp in file_index or any(
+            bp.endswith("/" + k) or k.endswith("/" + bp) for k in file_index
+        ):
+            return True
+
+    return False
+
+
+def _test_exists_in_suite(
+    test_name: str,
+    diff_text: str,
+    repo_symbols: Collection[str] | None = None,
+    repo_root: Path | str | None = None,
+) -> bool:
+    """Return True if test_name exists in diff_text, repo_symbols, or repo test suite."""
+    t_lower = test_name.lower()
+    if bool(re.search(rf"\bdef\s+{re.escape(t_lower)}\b", (diff_text or "").lower())):
+        return True
+    if repo_symbols and any(s.lower() == t_lower for s in repo_symbols):
+        return True
+
+    resolved_root = _resolve_repo_root(repo_root)
+    if resolved_root:
+        test_defs = _get_repo_test_definitions(str(resolved_root))
+        if t_lower in test_defs:
+            return True
+
+    return False
+
+
+def _symbol_exists_in_codebase(
+    symbol: str,
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+    repo_symbols: Collection[str] | None = None,
+    repo_root: Path | str | None = None,
+) -> bool:
+    """Return True if symbol exists in diff_text, repo_symbols, or repo code."""
+    s_lower = symbol.lower()
+    if s_lower in _COMMON_BUILTINS:
+        return True
+    if s_lower in (diff_text or "").lower():
+        return True
+    if repo_symbols and any(s.lower() == s_lower for s in repo_symbols):
+        return True
+
+    resolved_root = _resolve_repo_root(repo_root)
+    if resolved_root:
+        src_symbols = _get_repo_src_symbols(str(resolved_root))
+        if s_lower in src_symbols:
+            return True
+
+    return False
+
+
+def verify_semantic_invariant(
+    invariant: str,
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+    repo_files: Collection[str] | None = None,
+    repo_symbols: Collection[str] | None = None,
+    repo_root: Path | str | None = None,
+) -> tuple[Literal["GROUNDED", "UNVERIFIED", "HALLUCINATED"], str]:
+    """Deterministically fact-check a single semantic invariant against diff and repository.
+
+    Returns:
+        (status, reason) where status is one of:
+        - "GROUNDED": Real entities, validated existence, anchored in PR diff.
+        - "UNVERIFIED": Valid repository concepts without direct diff anchors (demoted to unverified_claims).
+        - "HALLUCINATED": Cites non-existent files, phantom symbols, or non-existent tests (purged/dropped).
+    """
+    raw_inv = (invariant or "").strip()
+    if not raw_inv:
+        return "HALLUCINATED", "empty invariant"
+
+    # 1. Fact-check cited paths
+    cited_paths = extract_cited_paths(raw_inv)
+    for m in _INVARIANT_CITATION_RE.finditer(raw_inv):
+        cited_paths.add(bare_path(m.group(1)).lower())
+
+    for cp in cited_paths:
+        if cp in PLACEHOLDER_PATHS:
+            return "HALLUCINATED", f"Cited placeholder path '{cp}'"
+        if not _file_exists_in_repo(cp, changed_paths, repo_files, repo_root):
+            return "HALLUCINATED", f"Cited file '{cp}' does not exist in repository or diff"
+
+    # 2. Fact-check claimed test functions
+    test_claims = re.findall(r"\btest_[a-zA-Z0-9_]+", raw_inv)
+    for tc in test_claims:
+        if not _test_exists_in_suite(tc, diff_text, repo_symbols, repo_root):
+            return (
+                "HALLUCINATED",
+                f"Claimed test '{tc}' does not exist in diff or repository test suite",
+            )
+
+    # 3. Fact-check cited symbols in backticks
+    cited_symbols = extract_cited_symbols(raw_inv)
+    domain_symbols = [s for s in cited_symbols if s not in _COMMON_BUILTINS]
+    if domain_symbols:
+        existing = [
+            s
+            for s in domain_symbols
+            if _symbol_exists_in_codebase(s, diff_text, changed_paths, repo_symbols, repo_root)
+        ]
+        if not existing:
+            return (
+                "HALLUCINATED",
+                f"Cited code symbol(s) {domain_symbols} do not exist in diff or repository",
+            )
+
+    # 4. Check for residual uncertainty or explicit unverified phrasing
+    ev_lower = raw_inv.lower()
+    if any(kw in ev_lower for kw in _UNCERTAINTY_KEYWORDS):
+        return (
+            "UNVERIFIED",
+            "Expresses residual uncertainty or unverified claim; demoting to unverified_claims",
+        )
+
+    return "GROUNDED", "Grounded in valid repository entities and behavioral reasoning"
+
+
+def filter_and_ground_semantic_invariants(
+    invariants: Sequence[str],
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+    repo_files: Collection[str] | None = None,
+    repo_symbols: Collection[str] | None = None,
+    repo_root: Path | str | None = None,
+) -> tuple[list[str], list[str]]:
+    """Deterministically fact-check and triage semantic invariants.
+
+    Returns:
+        (grounded_semantic_invariants, demoted_unverified_claims)
+    Any hallucinated invariant citing non-existent files or phantom symbols
+    is purged completely and logged.
+    """
+    grounded: list[str] = []
+    demoted: list[str] = []
+
+    for inv in invariants:
+        clean = (inv or "").strip()
+        if not clean:
+            continue
+        status, reason = verify_semantic_invariant(
+            clean,
+            diff_text,
+            changed_paths=changed_paths,
+            repo_files=repo_files,
+            repo_symbols=repo_symbols,
+            repo_root=repo_root,
+        )
+        if status == "GROUNDED":
+            if clean not in grounded:
+                grounded.append(clean)
+        elif status == "UNVERIFIED":
+            if clean not in demoted:
+                demoted.append(clean)
+        else:
+            logger.warning(
+                "🛡️ Fact-Check: Purged hallucinated semantic invariant: '%s' (%s)",
+                clean,
+                reason,
+            )
+
+    return grounded, demoted
+
+
 def extract_identifiers(text: str) -> set[str]:
     """Extract lowercased identifier-like tokens from arbitrary text.
 
@@ -977,6 +1317,7 @@ __all__ = [
     "extract_cited_symbols",
     "extract_grounding_findings",
     "extract_identifiers",
+    "filter_and_ground_semantic_invariants",
     "hard_reasons",
     "is_machine_verified_invariant",
     "ngram_containment",
@@ -986,4 +1327,5 @@ __all__ = [
     "touched_lines_by_file",
     "verify_citations",
     "verify_resolutions",
+    "verify_semantic_invariant",
 ]

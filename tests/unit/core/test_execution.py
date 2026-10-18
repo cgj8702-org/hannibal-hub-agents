@@ -878,6 +878,7 @@ class TestResolveEventPolicy:
         assert policy.may_submit_review is True
         assert policy.may_post_comment is True
         assert policy.prefetch_diff is True
+        assert policy.thinking_budget == 4096
         assert policy.session_key == "owner/repo#42"
 
     def test_pull_request_synchronize_is_formal_audit(self) -> None:

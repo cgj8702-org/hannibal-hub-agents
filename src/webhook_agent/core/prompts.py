@@ -65,12 +65,12 @@ Evaluate modified files systematically across 5 core dimensions:
 
 ### 2. Investigation & Tools (Adaptive Exploration)
 You have access to repository inspection tools: `read_file` and `search_files`.
-- **Fast-Path Single-Turn (Self-Contained Changes)**: If the pull request changes are self-contained (all callers, callees, definitions, and tests are within the diff or obvious local scope), synthesize and output your final review verdict directly in a single turn without unnecessary tool calls.
-- **Proactive Multi-Turn Investigation (Cross-File Contracts)**: If the pull request alters shared public APIs, function signatures, class interfaces, constants, exports, or data schemas:
-  1. Use `search_files` to locate external callers, imports, and usages across the repository.
-  2. Use `read_file` to inspect candidate invocation sites, dependent modules, or test suites outside the diff.
-  3. Verify whether external callers remain compatible or if the change introduces breaking signature mismatches, missing keyword arguments, unhandled exceptions, or silent semantic regressions.
-- **Review Submission**: When your investigation is complete (or immediately for self-contained changes), output your completed code review verdict directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a `review` tool (the orchestrator deterministically submits the review from your final JSON response).
+- **Proactive Multi-Turn Investigation (Mandatory Deep Research)**: Do NOT simply one-shot the review in a single turn without investigation. Every pull request audit requires active tool exploration before finalizing your review.
+  1. Use `search_files` to locate external callers, imports, usages, and test suites across the repository.
+  2. Use `read_file` to inspect candidate invocation sites, dependent modules, and related test coverage outside the diff.
+  3. Verify that the proposed changes integrate safely, introduce no breaking signature mismatches or silent regressions, and that candidate invariants correspond to actual repository code.
+- **Fast-Path Single-Turn (Strictly Limited to Pure Docs/Typos)**: Do NOT use Fast-Path Single-Turn for logic, refactoring, or feature PRs. Premature one-shotting without tool calls produces shallow reviews. Fast-Path Single-Turn is strictly reserved for pure documentation or single-word typo fixes where no code behavior is touched. For all code changes, multi-turn tool investigation is mandatory.
+- **Review Submission**: Only after completing your investigation and verifying surrounding context with tools, output your completed code review verdict directly in your final response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a `review` tool (the orchestrator deterministically submits the review from your final JSON response).
 
 ### 3. High-Signal Audit Output Requirements
 Output your completed code review verdict directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a review tool.
@@ -528,17 +528,18 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             "\n### 🚀 ACTION DIRECTIVE: ADAPTIVE FORMAL AUDIT\n"
             "Evaluate the pre-fetched PR diff, AST verification findings, symbol impact analysis, "
             "and test coverage findings above.\n"
-            "- **Self-Contained Changes**: If the changes are self-contained and require no external repository lookup, "
-            "output your completed CodeReviewResponse (or SyncReviewResponse) directly as a valid JSON object in Turn 1.\n"
-            "- **Cross-File / Complex Changes**: If the changes alter public interfaces, function signatures, or shared contracts, "
-            "use your investigative tools (`search_files`, `read_file`) to inspect external callers and verify cross-file integrity before concluding.\n"
+            "- **Mandatory Tool Exploration**: Do NOT simply one-shot this review. Use your investigative tools "
+            "(`search_files`, `read_file`) to inspect relevant callers, usages, and test files across the repository "
+            "to thoroughly research the wider impact of these changes.\n"
+            "- **Invariant Grounding**: Verify that any behavioral claims or semantic invariants you assert correspond to "
+            "actual files, actual symbols, and actual tests in the codebase. Assertions citing non-existent files or phantom symbols will be rejected.\n"
             "Perform a clinical, high-signal audit:\n"
             "- Provide a concise executive summary explaining the verified behavior.\n"
             "- Populate 'scorecard' evaluating all 5 audit dimensions ('Logic & Boundaries', 'Concurrency & State', 'Security & Secrets', 'Contract Integrity', 'Test Coverage & Regressions') with diff-grounded evidence.\n"
             "- Populate 2-4 'verified_invariants' citing concrete behavioral guarantees proven by the diff (with file/line citations where applicable).\n"
-            "- Optionally populate 'semantic_invariants' for high-level domain guarantees asserted without mechanical proof.\n"
+            "- Optionally populate 'semantic_invariants' for high-level domain guarantees grounded in real repository entities.\n"
             "- If the change is sound, approve cleanly with empty critical_issues and minor_suggestions.\n"
-            "When your audit is complete, output your formal review JSON directly."
+            "When your investigation is complete, output your formal review JSON directly."
         )
 
     return "\n".join(parts)

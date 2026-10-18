@@ -509,12 +509,19 @@ gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python" AND ti
 Two gotchas from `.agents/skills/gcloud-logging`: relative offsets like `"-15m"` are **rejected inside the filter expression** (use `--freshness` instead), and most interesting lines are `logger.debug(...)` — silently dropped by GCP unless logging is set to `DEBUG`.
 
 6. **A second walkthrough of the two foggiest stations.** Still unidentified: `analysis/` (what the model actually receives) or `review/grounding.py` (989 lines, the real remaining complexity).
-7. **Gating & Proving Semantic Invariants (Research / Brainstorm):**
+7. **Gating & Proving Semantic Invariants (Deterministic Fact-Checking Architecture):**
 The review schema partitions audit guarantees into `verified_invariants` (grounded in concrete line/file diff citations and AST verification) vs. `semantic_invariants` (high-level behavioral guarantees asserted by the model without deterministic proof).
-*Goal:* Brainstorm and research mechanisms to gate, test, or formally verify semantic invariants before allowing them into published review writebacks:
-- **Executable/Static Proofs:** Can semantic invariant assertions be tested against deterministic AST predicates, test suites, or symbol cross-references before rendering?
-- **Critic Verification Gate:** Can a secondary critic agent challenge and attempt to disprove each proposed semantic invariant against the diff, rejecting unprovable assertions?
-- **Formal Verification Contracts:** Require every semantic invariant to declare a verification predicate, evidence path, or test expectation, downgrading unverifiable claims to general comments.
+*Goal:* Deterministically fact-check the model's assertions and semantic invariants, and prevent it from including ones that do not actually exist:
+- **Hard Entity Existence Verification:**
+  - *Path Fact-Checking:* Extract cited file paths (`extract_cited_paths`, `_INVARIANT_CITATION_RE`). Every cited path must exist in `changed_paths` or on disk in the repository tree. If an invariant cites a non-existent file, it is a hallucination and is purged immediately.
+  - *Symbol Fact-Checking:* Extract cited code identifiers and backticked symbols (`extract_cited_symbols`). Exclude standard library/Python built-ins. If the invariant cites domain code symbols that exist neither in the PR diff nor in the repository AST/symbol index, it is purged immediately.
+  - *Test Assertion Fact-Checking:* If an invariant claims verification via a test function (`test_\w+`), that test must exist in the PR diff or in the repository test suite (`tests/`). Fabricated test claims are purged immediately.
+- **Diff Relevance & Residual Uncertainty Triage:**
+  - Invariants that reference real entities and exhibit semantic overlap with the PR diff remain as grounded `semantic_invariants` (Model-Asserted).
+  - High-level assertions that reference valid repository concepts but lack direct diff anchoring or exhibit residual uncertainty are demoted to `unverified_claims` (Residual Uncertainty), ensuring speculative claims never masquerade as authoritative invariants.
+- **Code Auditing Thinking Budget & Mandatory Exploration:**
+  - Increased `AUDITOR_THINKING_BUDGET` default to 4096 (up from 1024) across `agent_definition.py` and `policy.py` (`FORMAL_AUDIT`), providing deep reasoning bandwidth.
+  - Replaced the single-turn fast-path directive with a mandatory investigative protocol: the auditor must actively use `search_files` and `read_file` to inspect callers, downstream usages, and test suites across the repository before delivering its final review JSON.
 
 ---
 

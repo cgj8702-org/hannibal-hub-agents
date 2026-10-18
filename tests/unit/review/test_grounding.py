@@ -543,3 +543,77 @@ def test_partition_invariants() -> None:
         "handles retries when retry_count = None (`src/main.py:10`)",
         "Backward compatibility preserved across async workers.",
     ]
+
+
+def test_verify_semantic_invariant_rejects_nonexistent_file() -> None:
+    """An invariant citing a file that does not exist in changed_paths or repo is hallucinated."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Ensures valid transactions in `src/nonexistent/phantom_db.py:42`"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "phantom_db.py" in reason
+
+
+def test_verify_semantic_invariant_rejects_nonexistent_test() -> None:
+    """An invariant claiming a test that does not exist in diff or suite is hallucinated."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Thread safety guaranteed by test_phantom_concurrency_race_condition"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "test_phantom_concurrency_race_condition" in reason
+
+
+def test_verify_semantic_invariant_rejects_phantom_symbol() -> None:
+    """An invariant citing domain symbols that exist nowhere in diff or repo is hallucinated."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Maintains that `PhantomDistributedMutex` prevents lock contention"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "phantomdistributedmutex" in reason
+
+
+def test_verify_semantic_invariant_accepts_grounded_invariant() -> None:
+    """An invariant citing a valid changed file and diff symbol is grounded."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Ensures that `new_line_1` properly initializes logger in `src/main.py`"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "GROUNDED"
+    assert "Grounded" in reason
+
+
+def test_verify_semantic_invariant_demotes_unanchored_claim() -> None:
+    """An invariant asserting unverified claims or residual uncertainty is demoted to unverified."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Residual uncertainty regarding whether telemetry storage scales linearly"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "UNVERIFIED"
+    assert "unverified_claims" in reason
+
+
+def test_filter_and_ground_semantic_invariants_triages_and_purges() -> None:
+    """filter_and_ground_semantic_invariants keeps grounded, demotes unanchored, and purges hallucinations."""
+    from webhook_agent.review.grounding import filter_and_ground_semantic_invariants
+
+    invariants = [
+        "Ensures that `new_line_1` properly initializes logger in `src/main.py`",
+        "Ensures valid transactions in `src/nonexistent/phantom_db.py:42`",
+        "Residual uncertainty regarding global cluster memory scaling",
+        "Thread safety guaranteed by test_phantom_concurrency_race_condition",
+        "Maintains that `PhantomDistributedMutex` prevents lock contention",
+    ]
+
+    grounded, demoted = filter_and_ground_semantic_invariants(
+        invariants, SAMPLE_DIFF, ["src/main.py"]
+    )
+
+    assert grounded == [
+        "Ensures that `new_line_1` properly initializes logger in `src/main.py`",
+    ]
+    assert demoted == [
+        "Residual uncertainty regarding global cluster memory scaling",
+    ]

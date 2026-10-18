@@ -167,7 +167,7 @@ class WebhookAgent:
 
         # Streamlined workflow: START -> code_auditor
         # Single-pass high-velocity auditor eliminating redundant sub-agent hops.
-        auditor_thinking_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "1024"))
+        auditor_thinking_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "4096"))
 
         self._code_auditor = LlmAgent(
             name="code_auditor",

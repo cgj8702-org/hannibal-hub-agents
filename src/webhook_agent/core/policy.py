@@ -12,6 +12,7 @@ in response to any webhook event.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -153,12 +154,13 @@ def resolve_event_policy(
     # Partner bots (Cline, Jules) and human contributors get zero-bypass formal audit on PR events
     if canonical in FORMAL_REVIEW_EVENTS:
         session_key = _derive_session_key(event_data, raw, canonical)
+        auditor_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "4096"))
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
             may_post_comment=True,
             prefetch_diff=True,
-            thinking_budget=1024,
+            thinking_budget=auditor_budget,
             session_key=session_key,
             reason=f"formal review event: {canonical}",
         )
@@ -167,12 +169,13 @@ def resolve_event_policy(
     comment_text = comment_body.lower()
     if any(kw in comment_text for kw in REVIEW_INTENT_KEYWORDS):
         session_key = _derive_session_key(event_data, raw, canonical)
+        auditor_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "4096"))
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
             may_post_comment=True,
             prefetch_diff=True,
-            thinking_budget=1024,
+            thinking_budget=auditor_budget,
             session_key=session_key,
             reason=f"review intent: {canonical}",
         )
