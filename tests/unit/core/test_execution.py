@@ -369,10 +369,11 @@ def test_retry_loop_resets_user_message_prompt(monkeypatch: pytest.MonkeyPatch):
     mock_agent._runner = MagicMock()
     mock_agent._runner.app.name = "test_app"
 
+    fixed_time = 1700000000.0
     # Mock session service
     mock_session = MagicMock()
     mock_session.state = {
-        "last_review_timestamp": time.time(),
+        "last_review_timestamp": fixed_time - 5.0,
         "last_review_critique": "Fix line 10",
     }
     mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
@@ -406,6 +407,7 @@ def test_retry_loop_resets_user_message_prompt(monkeypatch: pytest.MonkeyPatch):
 
     with (
         patch("webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute),
+        patch("webhook_agent.core.execution.time.time", return_value=fixed_time),
         patch(
             "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
             return_value=None,
@@ -933,6 +935,21 @@ class TestResolveEventPolicy:
         assert policy.mode == Mode.GENERAL_PAIR_PROGRAMMING
         assert policy.may_post_comment is True
         assert policy.may_submit_review is False
+
+    def test_issue_comment_mentioning_coderabbit_is_ignored(self) -> None:
+        for body in ("@coderabbitai review", "Hey @coderabbitai[bot] help", "@dependabot update"):
+            event_data = {
+                "canonical": "issue_comment.created",
+                "repository": {"full_name": "owner/repo"},
+                "sender": {"login": "cgj8702"},
+                "raw_payload": {
+                    "issue": {"number": 42, "pull_request": None},
+                    "comment": {"body": body},
+                },
+            }
+            policy = resolve_event_policy(event_data)
+            assert policy.mode == Mode.IGNORE
+            assert "comment targets third-party bot" in policy.reason
 
     def test_bot_event_is_ignore(self) -> None:
         event_data = {

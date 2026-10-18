@@ -364,7 +364,7 @@ class WebhookProcessor:
 
         * Duplicate deliveries are suppressed.
         * Bot events originating from the app are suppressed.
-        * Comments mentioning @dependabot are suppressed.
+        * Comments mentioning @dependabot or @coderabbitai are suppressed.
         * The ``edited`` action is filtered out.
         * check_suite.completed is let through (it re-triggers reviews held back by the CI
           gate); other automated CI noise events (check_run, status) are suppressed.
@@ -426,7 +426,14 @@ class WebhookProcessor:
 
         comment = raw.get("comment") or raw.get("review_comment") or {}
         comment_body = comment.get("body") or ""
-        if "@dependabot" in comment_body.lower():
+        cb_lower = comment_body.lower()
+        if "@dependabot" in cb_lower:
+            return False
+        if any(bot in cb_lower for bot in ("@coderabbitai", "@coderabbitai[bot]")):
+            logger.debug(
+                "Suppressing comment mentioning CodeRabbit (delivery_id=%s)",
+                delivery_id,
+            )
             return False
 
         # Prevent bot-to-bot conversational ping-pong loops:
