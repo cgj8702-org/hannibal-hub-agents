@@ -802,19 +802,26 @@ def _resolve_repo_root(repo_root: Path | str | None = None) -> Path | None:
         env = get_active_environment()
         if env and env.root and Path(env.root).is_dir():
             return Path(env.root)
-    cwd = Path.cwd()
-    if (cwd / "src").is_dir() or (cwd / "tests").is_dir():
-        return cwd
+    # Only fall back to local cwd when running under pytest so offline tests
+    # can inspect the local test suite and codebase.
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        cwd = Path.cwd()
+        if (cwd / "src").is_dir() or (cwd / "tests").is_dir():
+            return cwd
     return None
 
 
-@functools.lru_cache(maxsize=4)
-def _get_repo_file_index(repo_root_str: str) -> frozenset[str]:
-    """Return set of normalized relative file paths and basenames in the repository."""
+@functools.lru_cache(maxsize=16)
+def _get_repo_file_index(
+    repo_root_str: str,
+    head_sha: str = "",
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return tuple of (relative_paths, basenames) in the repository."""
     root_path = Path(repo_root_str)
     if not root_path.is_dir():
-        return frozenset()
-    paths: set[str] = set()
+        return frozenset(), frozenset()
+    rel_paths: set[str] = set()
+    basenames: set[str] = set()
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [
             d
@@ -836,13 +843,13 @@ def _get_repo_file_index(repo_root_str: str) -> frozenset[str]:
                 .lower()
                 .replace("\\", "/")
             )
-            paths.add(rel)
-            paths.add(Path(f).name.lower())
-    return frozenset(paths)
+            rel_paths.add(rel)
+            basenames.add(Path(f).name.lower())
+    return frozenset(rel_paths), frozenset(basenames)
 
 
-@functools.lru_cache(maxsize=4)
-def _get_repo_src_symbols(repo_root_str: str) -> frozenset[str]:
+@functools.lru_cache(maxsize=16)
+def _get_repo_src_symbols(repo_root_str: str, head_sha: str = "") -> frozenset[str]:
     """Return set of code tokens and identifiers in src/."""
     root_path = Path(repo_root_str)
     if not root_path.is_dir():
@@ -858,8 +865,8 @@ def _get_repo_src_symbols(repo_root_str: str) -> frozenset[str]:
     return frozenset(words)
 
 
-@functools.lru_cache(maxsize=4)
-def _get_repo_test_definitions(repo_root_str: str) -> frozenset[str]:
+@functools.lru_cache(maxsize=16)
+def _get_repo_test_definitions(repo_root_str: str, head_sha: str = "") -> frozenset[str]:
     """Return set of defined test function names in tests/."""
     root_path = Path(repo_root_str)
     if not root_path.is_dir():
@@ -870,7 +877,7 @@ def _get_repo_test_definitions(repo_root_str: str) -> frozenset[str]:
         for py_file in tests_dir.glob("**/*.py"):
             with contextlib.suppress(Exception):
                 content = py_file.read_text(encoding="utf-8", errors="ignore")
-                for match in re.finditer(r"def\s+(test_[a-zA-Z0-9_]+)\b", content):
+                for match in re.finditer(r"(?m)^[ \t]*def\s+(test_[a-zA-Z0-9_]+)\s*\(", content):
                     tests.add(match.group(1).lower())
     return frozenset(tests)
 
@@ -880,27 +887,36 @@ def _file_exists_in_repo(
     changed_paths: Collection[str] | None = None,
     repo_files: Collection[str] | None = None,
     repo_root: Path | str | None = None,
+    head_sha: str | None = None,
 ) -> bool:
     """Return True if path exists in changed_paths, repo_files, or locally in repository."""
     bp = bare_path(path).lower().replace("\\", "/")
+    has_slash = "/" in bp
+
     if changed_paths:
         for cp in changed_paths:
             bcp = bare_path(cp).lower().replace("\\", "/")
-            if bp == bcp or bcp.endswith("/" + bp) or bp.endswith("/" + bcp):
+            if bp == bcp or bcp.endswith("/" + bp):
+                return True
+            if not has_slash and Path(bcp).name == bp:
                 return True
 
     if repo_files:
         for rf in repo_files:
             brf = bare_path(rf).lower().replace("\\", "/")
-            if bp == brf or brf.endswith("/" + bp) or bp.endswith("/" + brf):
+            if bp == brf or brf.endswith("/" + bp):
+                return True
+            if not has_slash and Path(brf).name == bp:
                 return True
 
     resolved_root = _resolve_repo_root(repo_root)
     if resolved_root:
-        file_index = _get_repo_file_index(str(resolved_root))
-        if bp in file_index or any(
-            bp.endswith("/" + k) or k.endswith("/" + bp) for k in file_index
-        ):
+        rel_paths, basenames = _get_repo_file_index(str(resolved_root), head_sha or "")
+        if has_slash:
+            # Directory-qualified citation: require exact relative path or suffix of a real path
+            if bp in rel_paths or any(k.endswith("/" + bp) for k in rel_paths):
+                return True
+        elif bp in basenames or bp in rel_paths:
             return True
 
     return False
@@ -911,17 +927,24 @@ def _test_exists_in_suite(
     diff_text: str,
     repo_symbols: Collection[str] | None = None,
     repo_root: Path | str | None = None,
+    head_sha: str | None = None,
 ) -> bool:
     """Return True if test_name exists in diff_text, repo_symbols, or repo test suite."""
     t_lower = test_name.lower()
-    if bool(re.search(rf"\bdef\s+{re.escape(t_lower)}\b", (diff_text or "").lower())):
+    if bool(
+        re.search(
+            rf"(?m)^[ \t]*(?:\+| )[ \t]*def\s+{re.escape(t_lower)}\s*\(",
+            diff_text or "",
+            re.IGNORECASE,
+        )
+    ):
         return True
     if repo_symbols and any(s.lower() == t_lower for s in repo_symbols):
         return True
 
     resolved_root = _resolve_repo_root(repo_root)
     if resolved_root:
-        test_defs = _get_repo_test_definitions(str(resolved_root))
+        test_defs = _get_repo_test_definitions(str(resolved_root), head_sha or "")
         if t_lower in test_defs:
             return True
 
@@ -934,19 +957,26 @@ def _symbol_exists_in_codebase(
     changed_paths: Collection[str] | None = None,
     repo_symbols: Collection[str] | None = None,
     repo_root: Path | str | None = None,
+    head_sha: str | None = None,
+    diff_tokens: Collection[str] | None = None,
 ) -> bool:
     """Return True if symbol exists in diff_text, repo_symbols, or repo code."""
     s_lower = symbol.lower()
     if s_lower in _COMMON_BUILTINS:
         return True
-    if s_lower in (diff_text or "").lower():
+    tokens = (
+        diff_tokens
+        if diff_tokens is not None
+        else {t.lower() for t in _IDENTIFIER_RE.findall(diff_text or "")}
+    )
+    if s_lower in tokens:
         return True
     if repo_symbols and any(s.lower() == s_lower for s in repo_symbols):
         return True
 
     resolved_root = _resolve_repo_root(repo_root)
     if resolved_root:
-        src_symbols = _get_repo_src_symbols(str(resolved_root))
+        src_symbols = _get_repo_src_symbols(str(resolved_root), head_sha or "")
         if s_lower in src_symbols:
             return True
 
@@ -960,13 +990,14 @@ def verify_semantic_invariant(
     repo_files: Collection[str] | None = None,
     repo_symbols: Collection[str] | None = None,
     repo_root: Path | str | None = None,
+    head_sha: str | None = None,
 ) -> tuple[Literal["GROUNDED", "UNVERIFIED", "HALLUCINATED"], str]:
     """Deterministically fact-check a single semantic invariant against diff and repository.
 
     Returns:
         (status, reason) where status is one of:
-        - "GROUNDED": Real entities, validated existence, anchored in PR diff.
-        - "UNVERIFIED": Valid repository concepts without direct diff anchors (demoted to unverified_claims).
+        - "GROUNDED": Passes entity-existence checks and contains no uncertainty keyword.
+        - "UNVERIFIED": Contains an uncertainty keyword and is demoted to unverified_claims.
         - "HALLUCINATED": Cites non-existent files, phantom symbols, or non-existent tests (purged/dropped).
     """
     raw_inv = (invariant or "").strip()
@@ -975,19 +1006,25 @@ def verify_semantic_invariant(
 
     # 1. Fact-check cited paths
     cited_paths = extract_cited_paths(raw_inv)
+    cited_paths = {
+        p
+        for p in cited_paths
+        if "." in p.rsplit("/", 1)[-1]
+        and p.rsplit("/", 1)[-1].rsplit(".", 1)[-1] in _KNOWN_EXTENSIONS
+    }
     for m in _INVARIANT_CITATION_RE.finditer(raw_inv):
         cited_paths.add(bare_path(m.group(1)).lower())
 
     for cp in cited_paths:
         if cp in PLACEHOLDER_PATHS:
             return "HALLUCINATED", f"Cited placeholder path '{cp}'"
-        if not _file_exists_in_repo(cp, changed_paths, repo_files, repo_root):
+        if not _file_exists_in_repo(cp, changed_paths, repo_files, repo_root, head_sha=head_sha):
             return "HALLUCINATED", f"Cited file '{cp}' does not exist in repository or diff"
 
     # 2. Fact-check claimed test functions
     test_claims = re.findall(r"\btest_[a-zA-Z0-9_]+", raw_inv)
     for tc in test_claims:
-        if not _test_exists_in_suite(tc, diff_text, repo_symbols, repo_root):
+        if not _test_exists_in_suite(tc, diff_text, repo_symbols, repo_root, head_sha=head_sha):
             return (
                 "HALLUCINATED",
                 f"Claimed test '{tc}' does not exist in diff or repository test suite",
@@ -997,15 +1034,24 @@ def verify_semantic_invariant(
     cited_symbols = extract_cited_symbols(raw_inv)
     domain_symbols = [s for s in cited_symbols if s not in _COMMON_BUILTINS]
     if domain_symbols:
-        existing = [
+        diff_tokens = {t.lower() for t in _IDENTIFIER_RE.findall(diff_text or "")}
+        missing = [
             s
             for s in domain_symbols
-            if _symbol_exists_in_codebase(s, diff_text, changed_paths, repo_symbols, repo_root)
+            if not _symbol_exists_in_codebase(
+                s,
+                diff_text,
+                changed_paths,
+                repo_symbols,
+                repo_root,
+                head_sha=head_sha,
+                diff_tokens=diff_tokens,
+            )
         ]
-        if not existing:
+        if missing:
             return (
                 "HALLUCINATED",
-                f"Cited code symbol(s) {domain_symbols} do not exist in diff or repository",
+                f"Cited code symbol(s) {missing} do not exist in diff or repository",
             )
 
     # 4. Check for residual uncertainty or explicit unverified phrasing
@@ -1026,6 +1072,7 @@ def filter_and_ground_semantic_invariants(
     repo_files: Collection[str] | None = None,
     repo_symbols: Collection[str] | None = None,
     repo_root: Path | str | None = None,
+    head_sha: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Deterministically fact-check and triage semantic invariants.
 
@@ -1048,6 +1095,7 @@ def filter_and_ground_semantic_invariants(
             repo_files=repo_files,
             repo_symbols=repo_symbols,
             repo_root=repo_root,
+            head_sha=head_sha,
         )
         if status == "GROUNDED":
             if clean not in grounded:

@@ -731,6 +731,47 @@ def execute_agent_event(
                 )
             )
 
+    def _finalize_results() -> None:
+        has_review_action = any(r.tool == "review" and r.success for r in results)
+
+        is_comment_reconciliation = False
+        if policy.mode != Mode.FORMAL_AUDIT and not has_review_action and emitted_texts:
+            full_text = "\n\n".join(emitted_texts)
+            has_resolutions = '"resolutions"' in full_text
+            has_verdict = '"verdict"' in full_text
+            is_pr_comment = canonical.startswith(
+                ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
+            )
+            if is_pr_comment and has_resolutions and has_verdict:
+                is_comment_reconciliation = True
+                logger.info(
+                    "Comment reconciliation detected (trace: %s): promoting to deterministic review submission",
+                    trace_id[-4:],
+                )
+
+        if (
+            policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation
+        ) and not has_review_action:
+            _submit_deterministic_review(
+                gh_client=gh_client,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                canonical=canonical,
+                final_session=final_session,
+                emitted_texts=emitted_texts,
+                results=results,
+            )
+        elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
+            _post_conversational_reply(
+                gh_client=gh_client,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                emitted_texts=emitted_texts,
+                trace_id=trace_id,
+                results=results,
+            )
+
     async def _execute_with_workspace() -> None:
         nonlocal user_message
         async with pr_workspace(gh_client, repo_full_name, head_sha) as ws_env:
@@ -759,6 +800,7 @@ def execute_agent_event(
                                 len(getattr(user_message.parts[0], "text", "") or ""),
                             )
                     await _run()
+                    _finalize_results()
             else:
                 if user_message is None:
                     user_message = agent._build_user_message(event_data)
@@ -783,47 +825,9 @@ def execute_agent_event(
                             len(getattr(user_message.parts[0], "text", "") or ""),
                         )
                 await _run()
+                _finalize_results()
 
     run_in_bg_loop(_execute_with_workspace())
-
-    # Deterministic review submission
-    has_review_action = any(r.tool == "review" and r.success for r in results)
-
-    is_comment_reconciliation = False
-    if policy.mode != Mode.FORMAL_AUDIT and not has_review_action and emitted_texts:
-        full_text = "\n\n".join(emitted_texts)
-        has_resolutions = '"resolutions"' in full_text
-        has_verdict = '"verdict"' in full_text
-        is_pr_comment = canonical.startswith(
-            ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
-        )
-        if is_pr_comment and has_resolutions and has_verdict:
-            is_comment_reconciliation = True
-            logger.info(
-                "Comment reconciliation detected (trace: %s): promoting to deterministic review submission",
-                trace_id[-4:],
-            )
-
-    if (policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation) and not has_review_action:
-        _submit_deterministic_review(
-            gh_client=gh_client,
-            repo_full_name=repo_full_name,
-            pr_number=pr_number,
-            head_sha=head_sha,
-            canonical=canonical,
-            final_session=final_session,
-            emitted_texts=emitted_texts,
-            results=results,
-        )
-    elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
-        _post_conversational_reply(
-            gh_client=gh_client,
-            repo_full_name=repo_full_name,
-            pr_number=pr_number,
-            emitted_texts=emitted_texts,
-            trace_id=trace_id,
-            results=results,
-        )
 
     if not results:
         logger.info(

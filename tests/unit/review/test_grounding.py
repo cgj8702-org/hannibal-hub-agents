@@ -7,6 +7,8 @@ useless as one that only ever accepts.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from webhook_agent.review.grounding import (
@@ -642,3 +644,77 @@ def test_extract_json_payload_recovers_from_trailing_commas() -> None:
     assert len(parsed["scorecard"]) == 1
     assert len(parsed["verified_invariants"]) == 2
     assert parsed["verdict"] == "APPROVE"
+
+
+def test_verify_semantic_invariant_rejects_fabricated_directory_with_real_basename() -> None:
+    """A fabricated path with a common basename (e.g. src/nonexistent/main.py) must be rejected."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Maintains event integrity in `src/nonexistent/main.py:15`"
+    # Even though main.py exists in changed_paths, src/nonexistent/main.py does not!
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "src/nonexistent/main.py" in reason
+
+
+def test_test_exists_in_suite_ignores_commented_definitions(tmp_path: Path) -> None:
+    """_test_exists_in_suite must ignore comments like '# def test_foo' in diff text."""
+    from webhook_agent.review.grounding import _test_exists_in_suite
+
+    diff_with_comment = """
+--- a/src/test_example.py
++++ b/src/test_example.py
+@@ -10,3 +10,4 @@
++# def test_commented_fake(): pass
++# def test_something_else(self):
+    return True
+"""
+    assert not _test_exists_in_suite("test_commented_fake", diff_with_comment, repo_root=tmp_path)
+    assert not _test_exists_in_suite("test_something_else", diff_with_comment, repo_root=tmp_path)
+
+    diff_with_real_def = """
+--- a/src/test_example.py
++++ b/src/test_example.py
+@@ -10,3 +10,4 @@
++def test_real_new_test():
++    assert True
+"""
+    assert _test_exists_in_suite("test_real_new_test", diff_with_real_def, repo_root=tmp_path)
+
+
+def test_verify_semantic_invariant_preserves_prose_slashes() -> None:
+    """Prose containing slashes (e.g. read/write, async/await) must not be purged as missing files."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Preserves read/write ordering and handles async/await concurrency under high load"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "GROUNDED"
+    assert "Grounded" in reason
+
+
+def test_verify_semantic_invariant_rejects_compound_symbol_with_phantom_token() -> None:
+    """A claim citing a compound symbol with a phantom token must be rejected even if one token exists."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    # 'open' or 'acquire' might exist in builtins/codebase, but 'PhantomDistributedMutex' does not!
+    inv = "Maintains that `PhantomDistributedMutex.acquire()` serializes callers across nodes"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "phantomdistributedmutex" in reason.lower()
+
+
+def test_symbol_exists_in_codebase_token_level_match(tmp_path: Path) -> None:
+    """_symbol_exists_in_codebase must match diff identifiers as tokens, not substrings."""
+    from webhook_agent.review.grounding import _symbol_exists_in_codebase
+
+    diff_text = """
++    # Diff mentioning running workers
++    is_phantom_worker_active = True
+"""
+    # 'phantom_worker' is a substring of 'is_phantom_worker_active', but not a standalone token
+    assert not _symbol_exists_in_codebase(
+        "phantom_worker", diff_text, changed_paths=["src/main.py"], repo_root=tmp_path
+    )
+    assert _symbol_exists_in_codebase(
+        "is_phantom_worker_active", diff_text, changed_paths=["src/main.py"], repo_root=tmp_path
+    )

@@ -263,8 +263,8 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 f"Before SHA: {before_sha}\n"
                 f"Head SHA: {head_sha}\n"
                 f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
-                f"Review the pre-fetched incremental commit diff and full PR diff below to evaluate "
-                f"the changes and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                f"Review the pre-fetched incremental commit diff and full PR diff below, investigate affected "
+                f"areas with tools if needed, and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
             )
     elif canonical.startswith("pull_request_review_comment."):
         comment = raw.get("comment", {})

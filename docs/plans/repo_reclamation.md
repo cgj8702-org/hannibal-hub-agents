@@ -516,9 +516,10 @@ The review schema partitions audit guarantees into `verified_invariants` (ground
   - *Path Fact-Checking:* Extract cited file paths (`extract_cited_paths`, `_INVARIANT_CITATION_RE`). Every cited path must exist in `changed_paths` or on disk in the repository tree. If an invariant cites a non-existent file, it is a hallucination and is purged immediately.
   - *Symbol Fact-Checking:* Extract cited code identifiers and backticked symbols (`extract_cited_symbols`). Exclude standard library/Python built-ins. If the invariant cites domain code symbols that exist neither in the PR diff nor in the repository AST/symbol index, it is purged immediately.
   - *Test Assertion Fact-Checking:* If an invariant claims verification via a test function (`test_\w+`), that test must exist in the PR diff or in the repository test suite (`tests/`). Fabricated test claims are purged immediately.
-- **Diff Relevance & Residual Uncertainty Triage:**
-  - Invariants that reference real entities and exhibit semantic overlap with the PR diff remain as grounded `semantic_invariants` (Model-Asserted).
-  - High-level assertions that reference valid repository concepts but lack direct diff anchoring or exhibit residual uncertainty are demoted to `unverified_claims` (Residual Uncertainty), ensuring speculative claims never masquerade as authoritative invariants.
+- **Entity Existence & Residual Uncertainty Triage:**
+  - Invariants whose cited paths, tests, or symbols fail the implemented existence checks are purged.
+  - Invariants containing `_UNCERTAINTY_KEYWORDS` are demoted to `unverified_claims` (Residual Uncertainty).
+  - Other non-empty invariants that pass those checks remain as grounded `semantic_invariants`; this gate does not assess semantic overlap with the PR diff.
 - **Code Auditing Thinking Budget & Mandatory Exploration:**
   - Increased `AUDITOR_THINKING_BUDGET` default to 4096 (up from 1024) across `agent_definition.py` and `policy.py` (`FORMAL_AUDIT`), providing deep reasoning bandwidth.
   - Replaced the single-turn fast-path directive with a mandatory investigative protocol: the auditor must actively use `search_files` and `read_file` to inspect callers, downstream usages, and test suites across the repository before delivering its final review JSON.

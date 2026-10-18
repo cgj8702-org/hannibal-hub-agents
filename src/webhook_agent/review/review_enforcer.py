@@ -267,6 +267,7 @@ def _enforce_verdict(
     det_contract_item: ScorecardItem | None = deterministic_contract_item
     det_security_item: ScorecardItem | None = deterministic_security_item
     det_test_item: ScorecardItem | None = deterministic_test_item
+    head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
 
     if state is not None:
         state_dict_val = (
@@ -565,6 +566,7 @@ def _enforce_verdict(
                                 sync_obj.semantic_invariants,
                                 diff_for_grounding,
                                 changed_paths=changed_paths,
+                                head_sha=head_sha,
                             )
                             sync_obj.semantic_invariants = grounded_sem
                             for dc in demoted_claims:
@@ -660,6 +662,7 @@ def _enforce_verdict(
                                 cr_obj.semantic_invariants,
                                 diff_for_grounding,
                                 changed_paths=changed_paths,
+                                head_sha=head_sha,
                             )
                             cr_obj.semantic_invariants = grounded_sem
                             for dc in demoted_claims:
@@ -763,6 +766,7 @@ def _enforce_verdict(
                         sync_obj.semantic_invariants,
                         diff_for_grounding,
                         changed_paths=changed_paths,
+                        head_sha=head_sha,
                     )
                     sync_obj.semantic_invariants = grounded_sem
                     for dc in demoted_claims:
@@ -823,6 +827,7 @@ def _enforce_verdict(
                     cr_obj.semantic_invariants,
                     diff_for_grounding,
                     changed_paths=changed_paths,
+                    head_sha=head_sha,
                 )
                 cr_obj.semantic_invariants = grounded_sem
                 for dc in demoted_claims:

@@ -1037,6 +1037,54 @@ class TestResolveEventPolicy:
             resolve_event_policy(event_data)
 
 
+class TestAuditorThinkingBudget:
+    """Tests for get_auditor_thinking_budget parsing and fallbacks."""
+
+    def test_default_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from webhook_agent.core.policy import (
+            DEFAULT_AUDITOR_THINKING_BUDGET,
+            get_auditor_thinking_budget,
+        )
+
+        monkeypatch.delenv("AUDITOR_THINKING_BUDGET", raising=False)
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+    def test_valid_integer_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from webhook_agent.core.policy import get_auditor_thinking_budget
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "8192")
+        assert get_auditor_thinking_budget() == 8192
+
+    def test_whitespace_and_invalid_overrides_fall_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from webhook_agent.core.policy import (
+            DEFAULT_AUDITOR_THINKING_BUDGET,
+            get_auditor_thinking_budget,
+        )
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "   ")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "4k")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "auto")
+        assert get_auditor_thinking_budget() == DEFAULT_AUDITOR_THINKING_BUDGET
+
+    def test_zero_and_negative_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from webhook_agent.core.policy import get_auditor_thinking_budget
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "0")
+        assert get_auditor_thinking_budget() == 0
+
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "-1")
+        assert get_auditor_thinking_budget() == -1
+
+
 class TestToolGating:
     """Tests for mode-based tool gating in before_tool_callback."""
 
