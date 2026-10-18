@@ -757,3 +757,45 @@ def test_enforce_verdict_grounding_emergency_bypass_label(monkeypatch: pytest.Mo
         state=state_with_bypass,
     )
     assert verdict_with_bypass == "APPROVE"
+
+
+def test_enforce_verdict_recovers_scorecard_invariants() -> None:
+    """_enforce_verdict must recover verified invariants from scorecard citations when none provided."""
+    from webhook_agent.review.metadata import extract_review_metadata
+
+    diff_text = """--- a/src/app.py
++++ b/src/app.py
+@@ -10,3 +10,3 @@
+-def old():
++def new_feature():
+"""
+    review_dict = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation clean.",
+        "scorecard": [
+            {
+                "dimension": "Logic & Boundaries",
+                "status": "PASS",
+                "notes": "Verified at (src/app.py:10).",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/app.py"],
+    }
+
+    rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert verdict == "APPROVE"
+    assert "### 3. Verified Invariants" in rendered_body
+    assert "- [x] src/app.py:10: Logic & Boundaries check verified in PR diff." in rendered_body
+
+    meta = extract_review_metadata(rendered_body)
+    assert meta is not None
+    assert meta["verified_invariants"] == [
+        "src/app.py:10: Logic & Boundaries check verified in PR diff."
+    ]

@@ -47,7 +47,7 @@ from webhook_agent.tools.diff_tools import walk_right_side
 logger = logging.getLogger("webhook_agent.review.grounding")
 
 Severity = Literal["hard", "soft"]
-Kind = Literal["critical", "suggestion", "invariant"]
+Kind = Literal["critical", "suggestion", "invariant", "scorecard"]
 
 PLACEHOLDER_PATHS = frozenset({"codebase", "unknown", "n/a", "none", "null"})
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
@@ -421,6 +421,16 @@ def _check_one(
         return issues
 
     if path not in changed:
+        if finding.kind == "scorecard":
+            issues.append(
+                _issue(
+                    "soft",
+                    "scorecard_path_not_changed",
+                    finding,
+                    f"Scorecard note cites '{path}', which is not changed by this PR.",
+                )
+            )
+            return issues
         issues.append(
             _issue(
                 "hard",
@@ -674,13 +684,22 @@ def is_machine_verified_invariant(
 
     if match:
         path = bare_path(match.group(1))
+        try:
+            line_num = int(match.group(2))
+        except (ValueError, TypeError):
+            line_num = None
+
         if changed_paths is not None:
             changed = {bare_path(p) for p in changed_paths if p}
             if path not in changed:
                 return False
-        else:
-            anchors, line_text = walk_right_side(diff_text)
-            if path not in line_text and path not in anchors:
+
+        anchors, line_text = walk_right_side(diff_text)
+        if path not in line_text and path not in anchors:
+            return False
+        if line_num is not None:
+            known_lines = line_text.get(path, {})
+            if known_lines and line_num not in known_lines:
                 return False
 
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(raw_inv) if q.strip()]
@@ -1334,7 +1353,82 @@ def extract_grounding_findings(review_obj: Any) -> list[Finding]:
         elif hasattr(item, "path") or isinstance(item, dict):
             findings.append(_citation_finding("invariant", item))
 
+    scorecard_items = getattr(review_obj, "scorecard", None)
+    if scorecard_items is None and isinstance(review_obj, dict):
+        scorecard_items = review_obj.get("scorecard")
+    for item in scorecard_items or []:
+        notes = (
+            getattr(item, "notes", None) or (item.get("notes") if isinstance(item, dict) else "")
+        ) or ""
+        for m in _INVARIANT_CITATION_RE.finditer(notes):
+            try:
+                line_val = int(m.group(2))
+            except (ValueError, TypeError):
+                line_val = None
+            findings.append(
+                Finding(
+                    kind="scorecard",
+                    path=bare_path(m.group(1)),
+                    line=line_val,
+                    evidence=notes,
+                )
+            )
+
     return findings
+
+
+def extract_scorecard_invariants(
+    scorecard: Sequence[Any],
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+) -> list[str]:
+    """Recover verified invariants from diff-grounded citations in scorecard notes.
+
+    When a model cites concrete, valid path:line references inside its scorecard notes
+    instead of populating verified_invariants directly, this function extracts those
+    grounded references into verified invariants so mechanical proof is preserved.
+    """
+    if not scorecard or not diff_text:
+        return []
+
+    _anchors, line_text = walk_right_side(diff_text)
+    recovered: list[str] = []
+    seen: set[str] = set()
+
+    for item in scorecard:
+        dimension = (
+            getattr(item, "dimension", None)
+            or (item.get("dimension") if isinstance(item, dict) else "")
+        ) or "Scorecard"
+        notes = (
+            getattr(item, "notes", None) or (item.get("notes") if isinstance(item, dict) else "")
+        ) or ""
+        if not notes:
+            continue
+
+        for m in _INVARIANT_CITATION_RE.finditer(notes):
+            path = bare_path(m.group(1))
+            try:
+                line_num = int(m.group(2))
+            except (ValueError, TypeError):
+                continue
+
+            if changed_paths is not None:
+                changed = {bare_path(p) for p in changed_paths if p}
+                if path not in changed:
+                    continue
+
+            known_lines = line_text.get(path, {})
+            if line_num not in known_lines:
+                continue
+
+            key = f"{path}:{line_num}"
+            if key in seen:
+                continue
+            seen.add(key)
+            recovered.append(f"{path}:{line_num}: {dimension} check verified in PR diff.")
+
+    return recovered
 
 
 def strict_grounding_enabled() -> bool:
@@ -1365,6 +1459,7 @@ __all__ = [
     "extract_cited_symbols",
     "extract_grounding_findings",
     "extract_identifiers",
+    "extract_scorecard_invariants",
     "filter_and_ground_semantic_invariants",
     "hard_reasons",
     "is_machine_verified_invariant",

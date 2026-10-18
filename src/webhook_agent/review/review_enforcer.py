@@ -576,6 +576,17 @@ def _enforce_verdict(
                                 if s not in sync_obj.semantic_invariants:
                                     sync_obj.semantic_invariants.append(s)
 
+                        if not sync_obj.verified_invariants and sync_obj.scorecard:
+                            from webhook_agent.review.grounding import extract_scorecard_invariants
+
+                            recovered_invariants = extract_scorecard_invariants(
+                                sync_obj.scorecard,
+                                diff_for_grounding,
+                                changed_paths=changed_paths,
+                            )
+                            if recovered_invariants:
+                                sync_obj.verified_invariants = recovered_invariants
+
                         if sync_obj.semantic_invariants:
                             from webhook_agent.review.grounding import (
                                 filter_and_ground_semantic_invariants,
@@ -671,6 +682,17 @@ def _enforce_verdict(
                             for s in s_invs:
                                 if s not in cr_obj.semantic_invariants:
                                     cr_obj.semantic_invariants.append(s)
+
+                        if not cr_obj.verified_invariants and cr_obj.scorecard:
+                            from webhook_agent.review.grounding import extract_scorecard_invariants
+
+                            recovered_invariants = extract_scorecard_invariants(
+                                cr_obj.scorecard,
+                                diff_for_grounding,
+                                changed_paths=changed_paths,
+                            )
+                            if recovered_invariants:
+                                cr_obj.verified_invariants = recovered_invariants
 
                         if cr_obj.semantic_invariants:
                             from webhook_agent.review.grounding import (
@@ -782,6 +804,17 @@ def _enforce_verdict(
                         if s not in sync_obj.semantic_invariants:
                             sync_obj.semantic_invariants.append(s)
 
+                if not sync_obj.verified_invariants and sync_obj.scorecard:
+                    from webhook_agent.review.grounding import extract_scorecard_invariants
+
+                    recovered_invariants = extract_scorecard_invariants(
+                        sync_obj.scorecard,
+                        diff_for_grounding,
+                        changed_paths=changed_paths,
+                    )
+                    if recovered_invariants:
+                        sync_obj.verified_invariants = recovered_invariants
+
                 if sync_obj.semantic_invariants:
                     from webhook_agent.review.grounding import (
                         filter_and_ground_semantic_invariants,
@@ -842,6 +875,17 @@ def _enforce_verdict(
                 for s in s_invs:
                     if s not in cr_obj.semantic_invariants:
                         cr_obj.semantic_invariants.append(s)
+
+            if not cr_obj.verified_invariants and cr_obj.scorecard:
+                from webhook_agent.review.grounding import extract_scorecard_invariants
+
+                recovered_invariants = extract_scorecard_invariants(
+                    cr_obj.scorecard,
+                    diff_for_grounding,
+                    changed_paths=changed_paths,
+                )
+                if recovered_invariants:
+                    cr_obj.verified_invariants = recovered_invariants
 
             if cr_obj.semantic_invariants:
                 from webhook_agent.review.grounding import (
