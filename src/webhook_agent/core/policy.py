@@ -123,59 +123,64 @@ def resolve_event_policy(
 
     # --- FORMAL_AUDIT: PR lifecycle events ---
     if canonical in FORMAL_REVIEW_EVENTS:
+        session_key = _derive_session_key(event_data, raw, canonical)
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
             may_post_comment=True,
             prefetch_diff=True,
             thinking_budget=1024,
-            session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
+            session_key=session_key,
             reason=f"formal review event: {canonical}",
         )
 
     # --- THREAD_COLLAB: inline review comment events ---
     if canonical.startswith("pull_request_review_comment."):
+        session_key = _derive_session_key(event_data, raw, canonical)
         return EventPolicy(
             mode=Mode.THREAD_COLLAB,
             may_post_comment=True,
             may_resolve_threads=True,
             prefetch_diff=True,
             thinking_budget=512,
-            session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
+            session_key=session_key,
             reason=f"review thread collaboration: {canonical}",
         )
 
     # --- Review-intent comments on PRs/issues -> FORMAL_AUDIT ---
     comment_text = comment_body.lower()
     if any(kw in comment_text for kw in REVIEW_INTENT_KEYWORDS):
+        session_key = _derive_session_key(event_data, raw, canonical)
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
             may_post_comment=True,
             prefetch_diff=True,
             thinking_budget=1024,
-            session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
+            session_key=session_key,
             reason=f"review intent: {canonical}",
         )
 
     # --- ISSUE_TRIAGE: issue events ---
     if canonical.startswith("issues."):
+        session_key = _derive_session_key(event_data, raw, canonical)
         return EventPolicy(
             mode=Mode.ISSUE_TRIAGE,
             may_post_comment=True,
             may_create_issue=True,
             thinking_budget=1024,
-            session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
+            session_key=session_key,
             reason=f"issue event: {canonical}",
         )
 
     # --- GENERAL_PAIR_PROGRAMMING: general comments on PRs/issues ---
     if canonical.startswith("issue_comment."):
+        session_key = _derive_session_key(event_data, raw, canonical)
         return EventPolicy(
             mode=Mode.GENERAL_PAIR_PROGRAMMING,
             may_post_comment=True,
             thinking_budget=512,
-            session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
+            session_key=session_key,
             reason=f"general discussion: {canonical}",
         )
 
@@ -186,21 +191,33 @@ def resolve_event_policy(
     )
 
 
-def _pr_number(raw: dict[str, Any]) -> str:
-    """Extract PR/issue number from raw payload."""
-    pr = raw.get("pull_request") or {}
-    if pr.get("number"):
-        return str(pr["number"])
-    issue = raw.get("issue") or {}
-    if issue.get("number"):
-        return str(issue["number"])
-    return "unknown"
+def _extract_issue_or_pr_number(raw: dict[str, Any]) -> int | None:
+    """Extract PR or issue number from raw payload."""
+    if not isinstance(raw, dict):
+        return None
+    pr = raw.get("pull_request")
+    if isinstance(pr, dict) and pr.get("number"):
+        return int(pr["number"])
+    issue = raw.get("issue")
+    if isinstance(issue, dict) and issue.get("number"):
+        return int(issue["number"])
+    return None
 
 
-def _is_inline_review_comment(canonical: str, raw: dict[str, Any]) -> bool:
-    """Check if this is an inline review comment thread (vs general comment)."""
-    if not canonical.startswith("pull_request_review_comment."):
-        return False
-    # Inline review comments have a thread context; general comments don't
-    comment = raw.get("comment", {}) or {}
-    return bool(comment.get("thread_id") or comment.get("in_reply_to") or comment.get("body"))
+def _derive_session_key(event_data: dict[str, Any], raw: dict[str, Any], canonical: str) -> str:
+    """Derive PR-scoped session key (owner/repo#42) for actionable events. Fast-fails without fallback."""
+    repo = event_data.get("repository") or {}
+    repo_name = repo.get("full_name") if isinstance(repo, dict) else None
+    if not repo_name or repo_name == "unknown":
+        repo_name = event_data.get("repo_name")
+    if not repo_name or repo_name == "unknown":
+        raise ValueError(
+            f"Cannot resolve event policy: actionable event '{canonical}' is missing repository full_name"
+        )
+
+    number = _extract_issue_or_pr_number(raw)
+    if not number:
+        raise ValueError(
+            f"Cannot resolve event policy: actionable event '{canonical}' for repository '{repo_name}' is missing PR/issue number"
+        )
+    return f"{repo_name}#{number}"

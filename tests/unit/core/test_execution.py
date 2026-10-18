@@ -948,6 +948,25 @@ class TestResolveEventPolicy:
         policy_live = resolve_event_policy(event_data, dry_run=False)
         assert policy_dry.mode == policy_live.mode == Mode.FORMAL_AUDIT
 
+    def test_actionable_event_missing_repository_fast_fails(self) -> None:
+        event_data = {
+            "canonical": "pull_request.opened",
+            "sender": {"login": "cgj8702-agents"},
+            "raw_payload": {"pull_request": {"number": 42}},
+        }
+        with pytest.raises(ValueError, match="missing repository full_name"):
+            resolve_event_policy(event_data)
+
+    def test_actionable_event_missing_pr_number_fast_fails(self) -> None:
+        event_data = {
+            "canonical": "pull_request.opened",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702-agents"},
+            "raw_payload": {"pull_request": {}},
+        }
+        with pytest.raises(ValueError, match="missing PR/issue number"):
+            resolve_event_policy(event_data)
+
 
 class TestToolGating:
     """Tests for mode-based tool gating in before_tool_callback."""

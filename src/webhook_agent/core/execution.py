@@ -305,7 +305,7 @@ def execute_agent_event(
     # Derive session and user IDs via policy layer (PR-scoped, not sender-scoped)
     session_id = agent._derive_session_id(event_data)
     policy = resolve_event_policy(event_data, dry_run=agent.dry_run)
-    user_id = policy.session_key or f"{repo_full_name}#{pr_number}"
+    user_id = policy.session_key
 
     logger.debug(
         "👤 Session context: session_id=%s, user_id=%s",
