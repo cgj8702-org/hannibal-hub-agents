@@ -270,7 +270,6 @@ class TestWebhookAgentModelChain:
         agent._code_auditor = SimpleNamespace(model=None)
         agent._app = MagicMock()
         agent._session_service = MagicMock()
-        agent._memory_service = MagicMock()
 
         monkeypatch.setattr(module, "get_model_chain", lambda: chain)
         monkeypatch.setattr(module, "_DEPLETED_MODEL_REGISTRY", MagicMock())
