@@ -808,6 +808,24 @@ def test_execute_agent_event_fast_fails_on_missing_sender() -> None:
         )
 
 
+def test_execute_agent_event_short_circuits_on_ignore_mode() -> None:
+    """Verify execute_agent_event short-circuits immediately with empty results on Mode.IGNORE."""
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/1"
+    event: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "coderabbitai[bot]"},
+        "raw_payload": {"pull_request": {"number": 1}},
+    }
+    results = execute_agent_event(
+        agent=mock_agent, event_data=event, gh_client=MagicMock(), trace_id="tr-test"
+    )
+    assert results == []
+    assert not mock_agent._runner.mock_calls
+    assert not mock_agent._conversational_runner.mock_calls
+
+
 def test_derive_session_id_fast_fails_without_fallback() -> None:
     """Verify WebhookAgent._derive_session_id fast-fails with ValueError instead of fallback GUID."""
     from webhook_agent.core.agent_definition import WebhookAgent
@@ -926,6 +944,56 @@ class TestResolveEventPolicy:
         assert policy.mode == Mode.IGNORE
         assert policy.may_submit_review is False
         assert policy.may_post_comment is False
+
+    def test_partner_bot_pull_request_opened_is_formal_audit(self) -> None:
+        for bot_login in ("cline-cloud[bot]", "google-labs-jules[bot]"):
+            event_data = {
+                "canonical": "pull_request.opened",
+                "repository": {"full_name": "owner/repo"},
+                "sender": {"login": bot_login},
+                "raw_payload": {"pull_request": {"number": 42}},
+            }
+            policy = resolve_event_policy(event_data)
+            assert policy.mode == Mode.FORMAL_AUDIT
+            assert policy.may_submit_review is True
+            assert policy.session_key == "owner/repo#42"
+
+    def test_partner_bot_comment_with_review_intent_is_formal_audit(self) -> None:
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "google-labs-jules[bot]"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": {}},
+                "comment": {"body": "/review please"},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.FORMAL_AUDIT
+        assert policy.may_submit_review is True
+
+    def test_partner_bot_comment_without_review_intent_is_ignore(self) -> None:
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "google-labs-jules[bot]"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": {}},
+                "comment": {"body": "I updated the files."},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.IGNORE
+
+    def test_own_bot_event_is_ignore(self) -> None:
+        event_data = {
+            "canonical": "pull_request.opened",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "hannibal-hub-agents[bot]"},
+            "raw_payload": {"pull_request": {"number": 42}},
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.IGNORE
 
     def test_unknown_event_is_ignore(self) -> None:
         event_data = {

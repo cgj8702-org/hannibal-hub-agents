@@ -16,7 +16,31 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from webhook_agent.github.bot_identity import is_hannibal_bot_login
+
 logger = logging.getLogger("webhook_agent.core.policy")
+
+# Bot logins that are never actionable (own bot loop avoidance or automated reviewers)
+SUPPRESSED_BOT_LOGINS: frozenset[str] = frozenset(
+    {
+        "coderabbitai",
+        "coderabbitai[bot]",
+        "github-actions[bot]",
+        "github-actions",
+    }
+)
+
+# Autonomous partner coding bots whose PRs are subject to zero-bypass code review
+PARTNER_BOT_LOGINS: frozenset[str] = frozenset(
+    {
+        "google-labs-jules[bot]",
+        "google-labs-jules",
+        "google-jules[bot]",
+        "google-jules",
+        "cline-cloud[bot]",
+        "cline-cloud",
+    }
+)
 
 # Review-intent keywords, synchronized with review/writeback_policy.py
 REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
@@ -108,20 +132,25 @@ def resolve_event_policy(
 
     # --- IGNORE: bot events, non-actionable events ---
     sender = event_data.get("sender", {}) or {}
-    sender_login = sender.get("login", "") if isinstance(sender, dict) else ""
+    sender_login = sender.get("login", "") if isinstance(sender, dict) else str(sender or "")
+    sender_login_lower = sender_login.lower().strip()
 
-    # Bot events are never actionable
-    if sender_login.endswith("[bot]") or sender_login in (
-        "coderabbitai",
-        "coderabbitai[bot]",
-        "google-labs-jules[bot]",
-    ):
+    # 1. Own bot events are never actionable (loop avoidance)
+    if is_hannibal_bot_login(sender_login_lower):
         return EventPolicy(
             mode=Mode.IGNORE,
-            reason=f"bot event from {sender_login or 'unknown'}",
+            reason=f"own-bot event from {sender_login or 'unknown'}",
+        )
+
+    # 2. Suppressed automated reviewer bots are never actionable
+    if sender_login_lower in SUPPRESSED_BOT_LOGINS:
+        return EventPolicy(
+            mode=Mode.IGNORE,
+            reason=f"suppressed bot event from {sender_login or 'unknown'}",
         )
 
     # --- FORMAL_AUDIT: PR lifecycle events ---
+    # Partner bots (Cline, Jules) and human contributors get zero-bypass formal audit on PR events
     if canonical in FORMAL_REVIEW_EVENTS:
         session_key = _derive_session_key(event_data, raw, canonical)
         return EventPolicy(
@@ -132,19 +161,6 @@ def resolve_event_policy(
             thinking_budget=1024,
             session_key=session_key,
             reason=f"formal review event: {canonical}",
-        )
-
-    # --- THREAD_COLLAB: inline review comment events ---
-    if canonical.startswith("pull_request_review_comment."):
-        session_key = _derive_session_key(event_data, raw, canonical)
-        return EventPolicy(
-            mode=Mode.THREAD_COLLAB,
-            may_post_comment=True,
-            may_resolve_threads=True,
-            prefetch_diff=True,
-            thinking_budget=512,
-            session_key=session_key,
-            reason=f"review thread collaboration: {canonical}",
         )
 
     # --- Review-intent comments on PRs/issues -> FORMAL_AUDIT ---
@@ -159,6 +175,26 @@ def resolve_event_policy(
             thinking_budget=1024,
             session_key=session_key,
             reason=f"review intent: {canonical}",
+        )
+
+    # 3. Non-PR bot activity (comments/reviews) is ignored unless review intent was requested
+    if sender_login_lower.endswith("[bot]") or sender_login_lower in PARTNER_BOT_LOGINS:
+        return EventPolicy(
+            mode=Mode.IGNORE,
+            reason=f"unprompted bot comment/activity from {sender_login or 'unknown'}",
+        )
+
+    # --- THREAD_COLLAB: inline review comment events from humans ---
+    if canonical.startswith("pull_request_review_comment."):
+        session_key = _derive_session_key(event_data, raw, canonical)
+        return EventPolicy(
+            mode=Mode.THREAD_COLLAB,
+            may_post_comment=True,
+            may_resolve_threads=True,
+            prefetch_diff=True,
+            thinking_budget=512,
+            session_key=session_key,
+            reason=f"review thread collaboration: {canonical}",
         )
 
     # --- ISSUE_TRIAGE: issue events ---
