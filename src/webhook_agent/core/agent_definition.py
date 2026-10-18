@@ -36,6 +36,7 @@ from webhook_agent.core.plugins import (
     ToolOutputPruningPlugin,
     WebhookHistoryPruningPlugin,
 )
+from webhook_agent.core.policy import get_auditor_thinking_budget
 from webhook_agent.core.prompts import (
     AUDITOR_CONTEXT_INSTRUCTION,
     CONVERSATIONAL_INSTRUCTION,
@@ -167,7 +168,7 @@ class WebhookAgent:
 
         # Streamlined workflow: START -> code_auditor
         # Single-pass high-velocity auditor eliminating redundant sub-agent hops.
-        auditor_thinking_budget = int(os.environ.get("AUDITOR_THINKING_BUDGET", "1024"))
+        auditor_thinking_budget = get_auditor_thinking_budget()
 
         self._code_auditor = LlmAgent(
             name="code_auditor",

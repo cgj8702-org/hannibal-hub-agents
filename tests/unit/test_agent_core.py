@@ -516,15 +516,15 @@ class TestToolRegistration:
         assert tool_names.isdisjoint(removed), f"Found removed tools: {tool_names & removed}"
 
     def test_code_auditor_bounded_thinking_budget(self, monkeypatch):
-        """Auditor thinking budget must default to 1024 or respect AUDITOR_THINKING_BUDGET."""
+        """Auditor thinking budget must default to 4096 or respect AUDITOR_THINKING_BUDGET."""
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent_default = WebhookAgent(dry_run=True)
-        assert agent_default._code_auditor.planner.thinking_config.thinking_budget == 1024
+        assert agent_default._code_auditor.planner.thinking_config.thinking_budget == 4096
 
-        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "2048")
+        monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "8192")
         agent_custom = WebhookAgent(dry_run=True)
-        assert agent_custom._code_auditor.planner.thinking_config.thinking_budget == 2048
+        assert agent_custom._code_auditor.planner.thinking_config.thinking_budget == 8192
 
     def test_review_accepts_deterministic_precompiled_ast(self):
         """Deterministic precompiled AST satisfies review gate without runtime tool execution."""

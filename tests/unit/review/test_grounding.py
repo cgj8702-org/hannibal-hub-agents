@@ -7,6 +7,8 @@ useless as one that only ever accepts.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from webhook_agent.review.grounding import (
@@ -543,3 +545,176 @@ def test_partition_invariants() -> None:
         "handles retries when retry_count = None (`src/main.py:10`)",
         "Backward compatibility preserved across async workers.",
     ]
+
+
+def test_verify_semantic_invariant_rejects_nonexistent_file() -> None:
+    """An invariant citing a file that does not exist in changed_paths or repo is hallucinated."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Ensures valid transactions in `src/nonexistent/phantom_db.py:42`"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "phantom_db.py" in reason
+
+
+def test_verify_semantic_invariant_rejects_nonexistent_test() -> None:
+    """An invariant claiming a test that does not exist in diff or suite is hallucinated."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Thread safety guaranteed by test_phantom_concurrency_race_condition"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "test_phantom_concurrency_race_condition" in reason
+
+
+def test_verify_semantic_invariant_rejects_phantom_symbol() -> None:
+    """An invariant citing domain symbols that exist nowhere in diff or repo is hallucinated."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Maintains that `PhantomDistributedMutex` prevents lock contention"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "phantomdistributedmutex" in reason
+
+
+def test_verify_semantic_invariant_accepts_grounded_invariant() -> None:
+    """An invariant citing a valid changed file and diff symbol is grounded."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Ensures that `new_line_1` properly initializes logger in `src/main.py`"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "GROUNDED"
+    assert "Grounded" in reason
+
+
+def test_verify_semantic_invariant_demotes_unanchored_claim() -> None:
+    """An invariant asserting unverified claims or residual uncertainty is demoted to unverified."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Residual uncertainty regarding whether telemetry storage scales linearly"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "UNVERIFIED"
+    assert "unverified_claims" in reason
+
+
+def test_filter_and_ground_semantic_invariants_triages_and_purges() -> None:
+    """filter_and_ground_semantic_invariants keeps grounded, demotes unanchored, and purges hallucinations."""
+    from webhook_agent.review.grounding import filter_and_ground_semantic_invariants
+
+    invariants = [
+        "Ensures that `new_line_1` properly initializes logger in `src/main.py`",
+        "Ensures valid transactions in `src/nonexistent/phantom_db.py:42`",
+        "Residual uncertainty regarding global cluster memory scaling",
+        "Thread safety guaranteed by test_phantom_concurrency_race_condition",
+        "Maintains that `PhantomDistributedMutex` prevents lock contention",
+    ]
+
+    grounded, demoted = filter_and_ground_semantic_invariants(
+        invariants, SAMPLE_DIFF, ["src/main.py"]
+    )
+
+    assert grounded == [
+        "Ensures that `new_line_1` properly initializes logger in `src/main.py`",
+    ]
+    assert demoted == [
+        "Residual uncertainty regarding global cluster memory scaling",
+    ]
+
+
+def test_extract_json_payload_recovers_from_trailing_commas() -> None:
+    """extract_json_payload must cleanly recover full review object when trailing commas are present."""
+    from webhook_agent.review.formatter import extract_json_payload
+
+    raw = """```json
+    {
+      "executive_summary": "Comprehensive architectural overhaul.",
+      "scorecard": [
+        {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Solid."},
+      ],
+      "verified_invariants": [
+        "Invariant A",
+        "Invariant B",
+      ],
+      "verdict": "APPROVE",
+    }
+    ```"""
+    parsed = extract_json_payload(raw)
+    assert parsed is not None
+    assert parsed["executive_summary"] == "Comprehensive architectural overhaul."
+    assert len(parsed["scorecard"]) == 1
+    assert len(parsed["verified_invariants"]) == 2
+    assert parsed["verdict"] == "APPROVE"
+
+
+def test_verify_semantic_invariant_rejects_fabricated_directory_with_real_basename() -> None:
+    """A fabricated path with a common basename (e.g. src/nonexistent/main.py) must be rejected."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Maintains event integrity in `src/nonexistent/main.py:15`"
+    # Even though main.py exists in changed_paths, src/nonexistent/main.py does not!
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "src/nonexistent/main.py" in reason
+
+
+def test_test_exists_in_suite_ignores_commented_definitions(tmp_path: Path) -> None:
+    """_test_exists_in_suite must ignore comments like '# def test_foo' in diff text."""
+    from webhook_agent.review.grounding import _test_exists_in_suite
+
+    diff_with_comment = """
+--- a/src/test_example.py
++++ b/src/test_example.py
+@@ -10,3 +10,4 @@
++# def test_commented_fake(): pass
++# def test_something_else(self):
+    return True
+"""
+    assert not _test_exists_in_suite("test_commented_fake", diff_with_comment, repo_root=tmp_path)
+    assert not _test_exists_in_suite("test_something_else", diff_with_comment, repo_root=tmp_path)
+
+    diff_with_real_def = """
+--- a/src/test_example.py
++++ b/src/test_example.py
+@@ -10,3 +10,4 @@
++def test_real_new_test():
++    assert True
+"""
+    assert _test_exists_in_suite("test_real_new_test", diff_with_real_def, repo_root=tmp_path)
+
+
+def test_verify_semantic_invariant_preserves_prose_slashes() -> None:
+    """Prose containing slashes (e.g. read/write, async/await) must not be purged as missing files."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    inv = "Preserves read/write ordering and handles async/await concurrency under high load"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "GROUNDED"
+    assert "Grounded" in reason
+
+
+def test_verify_semantic_invariant_rejects_compound_symbol_with_phantom_token() -> None:
+    """A claim citing a compound symbol with a phantom token must be rejected even if one token exists."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    # 'open' or 'acquire' might exist in builtins/codebase, but 'PhantomDistributedMutex' does not!
+    inv = "Maintains that `PhantomDistributedMutex.acquire()` serializes callers across nodes"
+    status, reason = verify_semantic_invariant(inv, SAMPLE_DIFF, ["src/main.py"])
+    assert status == "HALLUCINATED"
+    assert "phantomdistributedmutex" in reason.lower()
+
+
+def test_symbol_exists_in_codebase_token_level_match(tmp_path: Path) -> None:
+    """_symbol_exists_in_codebase must match diff identifiers as tokens, not substrings."""
+    from webhook_agent.review.grounding import _symbol_exists_in_codebase
+
+    diff_text = """
++    # Diff mentioning running workers
++    is_phantom_worker_active = True
+"""
+    # 'phantom_worker' is a substring of 'is_phantom_worker_active', but not a standalone token
+    assert not _symbol_exists_in_codebase(
+        "phantom_worker", diff_text, changed_paths=["src/main.py"], repo_root=tmp_path
+    )
+    assert _symbol_exists_in_codebase(
+        "is_phantom_worker_active", diff_text, changed_paths=["src/main.py"], repo_root=tmp_path
+    )

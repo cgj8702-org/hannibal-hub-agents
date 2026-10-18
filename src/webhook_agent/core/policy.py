@@ -12,6 +12,7 @@ in response to any webhook event.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -53,6 +54,18 @@ REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
     "audit this",
     "code review",
 )
+
+DEFAULT_AUDITOR_THINKING_BUDGET = 4096
+
+
+def get_auditor_thinking_budget() -> int:
+    """Return configured thinking budget for the code auditor, falling back to 4096."""
+    raw = os.environ.get("AUDITOR_THINKING_BUDGET", "").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_AUDITOR_THINKING_BUDGET
+
 
 # Canonical PR lifecycle events that trigger formal review
 FORMAL_REVIEW_EVENTS: frozenset[str] = frozenset(
@@ -153,12 +166,13 @@ def resolve_event_policy(
     # Partner bots (Cline, Jules) and human contributors get zero-bypass formal audit on PR events
     if canonical in FORMAL_REVIEW_EVENTS:
         session_key = _derive_session_key(event_data, raw, canonical)
+        auditor_budget = get_auditor_thinking_budget()
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
             may_post_comment=True,
             prefetch_diff=True,
-            thinking_budget=1024,
+            thinking_budget=auditor_budget,
             session_key=session_key,
             reason=f"formal review event: {canonical}",
         )
@@ -167,12 +181,13 @@ def resolve_event_policy(
     comment_text = comment_body.lower()
     if any(kw in comment_text for kw in REVIEW_INTENT_KEYWORDS):
         session_key = _derive_session_key(event_data, raw, canonical)
+        auditor_budget = get_auditor_thinking_budget()
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
             may_post_comment=True,
             prefetch_diff=True,
-            thinking_budget=1024,
+            thinking_budget=auditor_budget,
             session_key=session_key,
             reason=f"review intent: {canonical}",
         )
