@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger("webhook_agent.core.policy")
@@ -52,7 +53,7 @@ PREFETCH_DIFF_EVENTS: frozenset[str] = frozenset(
 )
 
 
-class Mode(str):
+class Mode(StrEnum):
     """Operational mode for the WebhookAgent."""
 
     FORMAL_AUDIT = "formal_audit"  # PR lifecycle: clinical code review
@@ -132,20 +133,21 @@ def resolve_event_policy(
             reason=f"formal review event: {canonical}",
         )
 
-    # --- Review-intent comments on PRs/issues -> FORMAL_AUDIT or THREAD_COLLAB ---
+    # --- THREAD_COLLAB: inline review comment events ---
+    if canonical.startswith("pull_request_review_comment."):
+        return EventPolicy(
+            mode=Mode.THREAD_COLLAB,
+            may_post_comment=True,
+            may_resolve_threads=True,
+            prefetch_diff=True,
+            thinking_budget=512,
+            session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
+            reason=f"review thread collaboration: {canonical}",
+        )
+
+    # --- Review-intent comments on PRs/issues -> FORMAL_AUDIT ---
     comment_text = comment_body.lower()
     if any(kw in comment_text for kw in REVIEW_INTENT_KEYWORDS):
-        # Determine if this is a thread reply (thread context present) or general comment
-        if _is_inline_review_comment(canonical, raw):
-            return EventPolicy(
-                mode=Mode.THREAD_COLLAB,
-                may_post_comment=True,
-                may_resolve_threads=True,
-                prefetch_diff=True,
-                thinking_budget=512,
-                session_key=f"{event_data.get('repository', {}).get('full_name', 'unknown')}#{_pr_number(raw)}",
-                reason=f"review thread collaboration: {canonical}",
-            )
         return EventPolicy(
             mode=Mode.FORMAL_AUDIT,
             may_submit_review=True,
@@ -168,7 +170,7 @@ def resolve_event_policy(
         )
 
     # --- GENERAL_PAIR_PROGRAMMING: general comments on PRs/issues ---
-    if canonical.startswith(("issue_comment.", "pull_request_review_comment.")):
+    if canonical.startswith("issue_comment."):
         return EventPolicy(
             mode=Mode.GENERAL_PAIR_PROGRAMMING,
             may_post_comment=True,
@@ -202,4 +204,3 @@ def _is_inline_review_comment(canonical: str, raw: dict[str, Any]) -> bool:
     # Inline review comments have a thread context; general comments don't
     comment = raw.get("comment", {}) or {}
     return bool(comment.get("thread_id") or comment.get("in_reply_to") or comment.get("body"))
-

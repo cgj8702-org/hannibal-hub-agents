@@ -304,6 +304,19 @@ async def before_tool_callback(
         with contextlib.suppress(ValueError):
             args["pr_number"] = int(args["pr_number"])
 
+    # Mode-based tool gating (fail closed before argument parsing)
+    mode = tool_context.state.get("agent_mode", Mode.IGNORE)
+    if tool.name == "review" and mode != Mode.FORMAL_AUDIT:
+        return {
+            "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
+            f"Only permitted in mode '{Mode.FORMAL_AUDIT}'."
+        }
+    if tool.name == "resolve_review_thread" and mode != Mode.THREAD_COLLAB:
+        return {
+            "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
+            f"Only permitted in mode '{Mode.THREAD_COLLAB}'."
+        }
+
     # Universal Pydantic input validation gate
     from pydantic import ValidationError
 
@@ -325,22 +338,8 @@ async def before_tool_callback(
                 "error": f"Tool '{tool.name}' argument validation failed. Please fix the argument types/names and try again."
             }
 
-    # Mode-based tool gating
-    mode = tool_context.state.get("agent_mode", Mode.IGNORE)
-    if tool.name == "review" and mode != Mode.FORMAL_AUDIT:
-        return {
-            "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
-            f"Only permitted in mode '{Mode.FORMAL_AUDIT}'."
-        }
-    if tool.name == "resolve_review_thread" and mode not in (
-        Mode.FORMAL_AUDIT,
-        Mode.THREAD_COLLAB,
-    ):
-        return {
-            "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
-            f"Only permitted in modes '{Mode.FORMAL_AUDIT}', '{Mode.THREAD_COLLAB}'."
-        }
-
+    # Track executed tools in session state for downstream audit gates
+    tools_executed = tool_context.state.setdefault("tools_executed", [])
     if isinstance(tools_executed, list):
         if tool.name not in tools_executed:
             tools_executed.append(tool.name)

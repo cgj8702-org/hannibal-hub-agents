@@ -656,6 +656,195 @@ def test_agent_plugins_iteration_and_guardrail_budget() -> None:
     assert agent._iteration_budget_plugin.max_tool_calls == 25
     assert agent._guardrails_plugin.no_progress_window == 4
 
+
+def test_second_sender_on_same_pr_shares_session_history() -> None:
+    """Two events, same PR, different senders -> one shared session."""
+    from google.adk.events import Event, EventActions
+    from google.adk.sessions import InMemorySessionService
+
+    session_service = InMemorySessionService()
+
+    mock_agent = MagicMock()
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name.return_value = "gemini-3.5-flash-lite"
+    mock_agent._app_name = "test_app"
+    mock_agent._session_service = session_service
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+    mock_agent._build_user_message.return_value = MagicMock(parts=[MagicMock(text="Audit request")])
+
+    mock_runner = MagicMock()
+    mock_runner.app = MagicMock(name="test_app")
+    mock_runner.app.name = "test_app"
+    mock_agent._runner = mock_runner
+    mock_agent._conversational_runner = mock_runner
+
+    # Event 1: pull_request.opened, sender=cgj8702-agents
+    event1: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "cgj8702-agents"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+    }
+
+    # Simulate runner executing and updating session state with review critique
+    async def fake_execute_runner_1(**kwargs: Any) -> None:
+        user_id = kwargs["user_id"]
+        session_id = kwargs["session_id"]
+        sess = await session_service.get_session(
+            app_name="test_app", user_id=user_id, session_id=session_id
+        )
+        assert sess is not None
+        await session_service.append_event(
+            sess,
+            Event(
+                invocation_id="tr1",
+                author="code_auditor",
+                actions=EventActions(
+                    state_delta={"review_critique": "Prior review critique for PR 42"}
+                ),
+            ),
+        )
+
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch(
+            "webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute_runner_1
+        ),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event1, gh_client=MagicMock(), trace_id="tr1"
+        )
+
+    # Event 2: issue_comment.created, sender=cgj8702 on the same PR 42
+    event2: dict[str, Any] = {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "cgj8702"},
+        "raw_payload": {
+            "issue": {"number": 42},
+            "comment": {"body": "Could you explain the critique?"},
+        },
+    }
+
+    event2_session_state: dict[str, Any] = {}
+
+    async def fake_execute_runner_2(**kwargs: Any) -> None:
+        user_id = kwargs["user_id"]
+        session_id = kwargs["session_id"]
+        sess = await session_service.get_session(
+            app_name="test_app", user_id=user_id, session_id=session_id
+        )
+        assert sess is not None
+        event2_session_state.update(sess.state)
+
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch(
+            "webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute_runner_2
+        ),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event2, gh_client=MagicMock(), trace_id="tr2"
+        )
+
+    # Event 2's session MUST contain Event 1's review findings
+    assert event2_session_state.get("review_critique") == "Prior review critique for PR 42"
+
+    # Confirm sender attribution survives in user_state_map as sender_login, not PR user_id
+    user_state = session_service.user_state["test_app"]["owner/repo#42"]
+    assert user_state["sender"] == "cgj8702"
+    assert user_state["repo_full_name"] == "owner/repo"
+
+
+def test_execute_agent_event_fast_fails_on_missing_repo() -> None:
+    """Verify execute_agent_event fast-fails with ValueError when repo full_name is missing."""
+    event: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "sender": {"login": "dev"},
+        "raw_payload": {"pull_request": {"number": 1}},
+    }
+    with pytest.raises(ValueError, match="missing repository full_name"):
+        execute_agent_event(
+            agent=MagicMock(), event_data=event, gh_client=MagicMock(), trace_id="tr"
+        )
+
+
+def test_execute_agent_event_fast_fails_on_missing_pr_number() -> None:
+    """Verify execute_agent_event fast-fails with ValueError when PR/issue number is missing."""
+    event: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {"pull_request": {}},
+    }
+    with pytest.raises(ValueError, match="missing PR or issue number"):
+        execute_agent_event(
+            agent=MagicMock(), event_data=event, gh_client=MagicMock(), trace_id="tr"
+        )
+
+
+def test_execute_agent_event_fast_fails_on_missing_sender() -> None:
+    """Verify execute_agent_event fast-fails with ValueError when sender login is missing."""
+    event: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {},
+        "raw_payload": {"pull_request": {"number": 1}},
+    }
+    with pytest.raises(ValueError, match="missing sender login"):
+        execute_agent_event(
+            agent=MagicMock(), event_data=event, gh_client=MagicMock(), trace_id="tr"
+        )
+
+
+def test_derive_session_id_fast_fails_without_fallback() -> None:
+    """Verify WebhookAgent._derive_session_id fast-fails with ValueError instead of fallback GUID."""
+    from webhook_agent.core.agent_definition import WebhookAgent
+
+    agent = WebhookAgent(dry_run=True)
+
+    # Valid PR
+    pr_event = {
+        "repository": {"full_name": "owner/repo"},
+        "raw_payload": {"pull_request": {"number": 10}},
+    }
+    assert agent._derive_session_id(pr_event) == "owner/repo/10"
+
+    # Valid Issue
+    issue_event = {
+        "repository": {"full_name": "owner/repo"},
+        "raw_payload": {"issue": {"number": 20}},
+    }
+    assert agent._derive_session_id(issue_event) == "owner/repo/20"
+
+    # Missing repo full_name
+    missing_repo_event = {
+        "raw_payload": {"pull_request": {"number": 10}},
+    }
+    with pytest.raises(ValueError, match="missing repository full_name"):
+        agent._derive_session_id(missing_repo_event)
+
+    # Missing PR/issue number (EV-C: no delivery GUID fallback allowed)
+    no_number_event = {
+        "repository": {"full_name": "owner/repo"},
+        "delivery_id": "b1353d10-ca40-11f1-guid",
+        "raw_payload": {"workflow_run": {"id": 123}},
+    }
+    with pytest.raises(ValueError, match="missing PR/issue number"):
+        agent._derive_session_id(no_number_event)
+
+
 class TestResolveEventPolicy:
     """Tests for resolve_event_policy() - the single source of truth for event policy."""
 
@@ -760,70 +949,74 @@ class TestResolveEventPolicy:
         assert policy_dry.mode == policy_live.mode == Mode.FORMAL_AUDIT
 
 
-
 class TestToolGating:
     """Tests for mode-based tool gating in before_tool_callback."""
 
     def _make_tool_context(self, mode: Mode) -> Any:
         """Create a mock ToolContext with the given mode in session state."""
-        from google.adk.tools import ToolContext
-
         ctx = MagicMock()
         ctx.state = {"agent_mode": mode}
         return ctx
 
-    def test_review_tool_allowed_in_formal_audit(self) -> None:
-        from webhook_agent.tools.github_tools import review
+    @pytest.mark.anyio
+    async def test_review_tool_allowed_in_formal_audit(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
 
         tool = MagicMock()
         tool.name = "review"
         ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
-        result = before_tool_callback(tool, {}, ctx)
+        result = await before_tool_callback(tool, {"pr_number": 42, "body": "{}"}, ctx)
         assert result is None  # Allowed
 
-    def test_review_tool_rejected_in_thread_collab(self) -> None:
-        from webhook_agent.tools.github_tools import review
+    @pytest.mark.anyio
+    async def test_review_tool_rejected_in_thread_collab(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
 
         tool = MagicMock()
         tool.name = "review"
         ctx = self._make_tool_context(Mode.THREAD_COLLAB)
-        result = before_tool_callback(tool, {}, ctx)
+        result = await before_tool_callback(tool, {}, ctx)
         assert result is not None
-        assert "Error" in result
-        assert "not permitted" in result
+        assert "error" in result
+        assert "not permitted" in result["error"]
 
-    def test_review_tool_rejected_in_issue_triage(self) -> None:
-        from webhook_agent.tools.github_tools import review
+    @pytest.mark.anyio
+    async def test_review_tool_rejected_in_issue_triage(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
 
         tool = MagicMock()
         tool.name = "review"
         ctx = self._make_tool_context(Mode.ISSUE_TRIAGE)
-        result = before_tool_callback(tool, {}, ctx)
+        result = await before_tool_callback(tool, {}, ctx)
         assert result is not None
-        assert "Error" in result
-        assert "not permitted" in result
+        assert "error" in result
+        assert "not permitted" in result["error"]
 
-    def test_resolve_review_thread_allowed_in_thread_collab(self) -> None:
-        from webhook_agent.tools.github_tools import resolve_review_thread
+    @pytest.mark.anyio
+    async def test_resolve_review_thread_allowed_in_thread_collab(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
 
         tool = MagicMock()
         tool.name = "resolve_review_thread"
         ctx = self._make_tool_context(Mode.THREAD_COLLAB)
-        result = before_tool_callback(tool, {}, ctx)
+        result = await before_tool_callback(tool, {}, ctx)
         assert result is None  # Allowed
 
-    def test_resolve_review_thread_rejected_in_formal_audit(self) -> None:
-        from webhook_agent.tools.github_tools import resolve_review_thread
+    @pytest.mark.anyio
+    async def test_resolve_review_thread_rejected_in_formal_audit(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
 
         tool = MagicMock()
         tool.name = "resolve_review_thread"
         ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
-        result = before_tool_callback(tool, {}, ctx)
+        result = await before_tool_callback(tool, {}, ctx)
         assert result is not None
-        assert "Error" in result
+        assert "error" in result
+        assert "not permitted" in result["error"]
 
-    def test_read_file_allowed_in_all_modes(self) -> None:
-        from webhook_agent.tools.github_tools import read_file
+    @pytest.mark.anyio
+    async def test_read_file_allowed_in_all_modes(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
 
         tool = MagicMock()
         tool.name = "read_file"
@@ -835,5 +1028,5 @@ class TestToolGating:
             Mode.IGNORE,
         ]:
             ctx = self._make_tool_context(mode)
-            result = before_tool_callback(tool, {}, ctx)
+            result = await before_tool_callback(tool, {"file_path": "main.py"}, ctx)
             assert result is None, f"read_file should be allowed in mode {mode}"
