@@ -200,52 +200,38 @@ Use `git rm` for B4/B5 deletions so the removal is visible and reversible in rev
 
 ---
 
-## Phase 2 — Fix the real bug: session scoping
+## Phase 2 — Fix the real bug: session scoping ✅
 
-**Agreed design (the maintainer's, which supersedes my earlier proposal):** the PR is the scope; the sender is an attribute.
+**Agreed design (the maintainer's, which supersedes my earlier proposal):** the PR is the scope; the sender is an attribute. Fast-fail architecture: no fallbacks allowed.
 
-> ⚠️ **Do not implement my earlier suggestion of a constant `user_id`.** It was wrong: the memory service keys on `(app_name, user_id)`, so a constant would have collapsed memory into one bucket for every PR in the repo.
+### C1. Write the failing test FIRST ✅
+- **Test:** `test_second_sender_on_same_pr_shares_session_history` in `tests/unit/core/test_execution.py`.
+- **Status:** Verified failure first (`AssertionError: assert None == 'Prior review critique for PR 42'`) when `user_id` was sender-scoped. Verified pass once PR scoping was applied.
 
-### C1. Write the failing test FIRST
-```python
-def test_second_sender_on_same_pr_shares_session_history():
-    """Two events, same PR, different senders -> one shared session."""
-    # event 1: pull_request.opened,  sender=cgj8702-agents
-    # event 2: issue_comment.created, sender=cgj8702, same PR number
-    # assert event 2's session contains event 1's review findings
-```
-- **Why first:** this test settles whether the ADK session key really is the `(app_name, user_id, session_id)` triple. If it **passes today**, the session claim is wrong and `C2`/`C3` should be dropped. If it **fails today**, the bug is confirmed and the test becomes the regression guard.
-- **This is the highest-value test in the plan**, because it converts an inference about ADK internals into a fact.
-
-### C2. Make `user_id` PR-derived
-- **File:** `src/webhook_agent/core/execution.py:287`
+### C2. Make `user_id` PR-derived & fast-fail on missing data ✅
+- **File:** `src/webhook_agent/core/execution.py`
 - **From:** `user_id = sender_login or "anonymous"`
 - **To:** `user_id = f"{repo_full_name}#{pr_number}"`
-- **Why:** makes the session triple stable per PR regardless of who comments, using stock ADK. No custom `SessionService` needed.
+- **Fast-fail enforcement:** Fast-fails (`ValueError`) if `repo_full_name` is missing, if `raw_payload` is not a dict, if `pr_number` is missing, or if `sender.login` is missing. No fallback to anonymous.
 
-### C3. ⚠️ Fix the attribution line (do not skip)
-- **File:** `src/webhook_agent/core/execution.py:509`
-- **From:** `user_state_map["sender"] = user_id`
-- **To:** `user_state_map["sender"] = sender_login`
-- **Why:** after `C2`, the current line would silently start recording `"owner/repo#375"` as the *sender*. Exactly the kind of bug that surfaces six weeks later as a confusing mystery.
-- **Note:** `user_state_map` is keyed by `user_id` (`:504`), so its keying changes with `C2` — that's intended (per-PR state), but check every reader.
+### C3. Fix the attribution line (do not skip) ✅
+- **File:** `src/webhook_agent/core/execution.py`
+- **Updated:**
+  - `user_state_map["sender"] = sender_login`
+  - `review_checkpoint_manager.save_checkpoint(..., sender=sender_login, ...)`
+- **Why:** `user_state_map` and checkpoint records accurately retain the event author's login, rather than the PR scope string (`owner/repo#42`).
 
-### C4. Optional: custom `SessionService`
-A `SessionService` that ignores `user_id` for keying is semantically purer than `C2`, but it's more code to own. `C2` achieves the same behaviour in two lines. **Recommendation: do `C2`.**
+### C4. Session scoping via PR-derived `user_id` ✅
+Adopted `C2` PR-derived keying (`user_id = f"{repo_full_name}#{pr_number}"`) with stock ADK `InMemorySessionService`.
 
-### C5. Confirm attribution survives
-Verify the sender is still recoverable from:
-- ADK's `Event.author`
-- `user_state_map["sender"]` (after `C3`)
-- the event metadata
+### C5. Confirm attribution survives ✅
+Verified via unit tests:
+- Sender login is captured in `user_state_map["sender"]`
+- PR scope is preserved in `user_id`
+- Checkpoints receive `sender=sender_login`
 
 ### C6. Fix the memory-service keying — only if `B5` was *not* done
-If you keep the memory service for future cross-PR learning, its key must include the session:
-```python
-def _key(self, app_name: str, session_id: str) -> str:
-    return f"{app_name}:{session_id}"
-```
-If `B5` was done, this is moot. **Do not keep it "just in case"** — the keep-or-delete call is decision **P5** (Part 5); record it there rather than deferring.
+`B5` deleted the memory service in PR 4, so this is moot.
 
 ---
 
@@ -661,7 +647,7 @@ Flow: suite #1 completes → re-evaluate → suite #2 still pending → `PENDING
 |:--|:--|:--|
 | **EV-A** | Unsubscribe `workflow_run` in GitHub App settings | ✅ **done** |
 | **EV-B** | Add code-level guards so unsubscribed CI events can never reach the agent | ✅ **done** — see 8.5 |
-| **EV-C** | Never key a session on a delivery GUID (`_derive_session_id` fallback) | ⬜ to do — see 8.7 |
+| **EV-C** | Fast-fail in `_derive_session_id` without fallback (eliminate delivery GUID session leaks) | ✅ **done** — see 8.7 |
 | **EV-D** | Move the no-op decision *before* the agent (deterministic `Mode.IGNORE`) | ⬜ to do — this is `E1`–`E4` in Phase 4 |
 | **EV-E** | Collapse the logging to one line per lifecycle stage, owned by one place | ⬜ to do — see 8.8 |
 | **EV-F** | Fix the logger bindings so `python_logger` matches the file it is in | ⬜ to do — see 8.8 |
