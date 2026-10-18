@@ -175,10 +175,9 @@ All verified by hand with zero reachable callers. One PR, or two if you prefer s
 - **File:** `src/webhook_agent/review/duplicate_detector.py` — deleted (was 7 lines with `DEFANG_IMAGE`)
 - **Status:** completed in PR 2.
 
-### B4. Delete the orphaned canary module 🧊
-- **Files:** `src/webhook_agent/analysis/audit_canary.py` (40 lines) + `tests/unit/analysis/test_audit_canary.py`
-- **Why:** the module has **no importer in `src/` at all**. Only its own test imports it. All three functions are test-only.
-- **Action:** `git rm` both (per `AGENTS.md` §4 — never `rm` on tracked files).
+### B4. Delete the orphaned canary module 🧊 ✅
+- **Files:** `src/webhook_agent/analysis/audit_canary.py` (40 lines) + `tests/unit/analysis/test_audit_canary.py` — deleted via `git rm`
+- **Status:** completed in PR 3.
 
 ### B5. Delete the abandoned memory subsystem 🧊
 - **Delete:** `src/webhook_agent/core/memory_service.py` (189 lines), `tests/unit/core/test_memory_service.py` (83 lines)
