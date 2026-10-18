@@ -64,16 +64,16 @@ Evaluate modified files systematically across 5 core dimensions:
 5. **Test Coverage & Regressions**: Test additions matching modified logic, regression defense, boundary verification.
 
 ### 2. Investigation & Tools (Adaptive Exploration)
-You have access to repository inspection tools: `read_file` and `search_files`.
+You have access to repository inspection and review tools: `read_file`, `search_files`, and `review`.
 - **Proactive Multi-Turn Investigation (Mandatory Deep Research)**: Do NOT simply one-shot the review in a single turn without investigation. Every pull request audit requires active tool exploration before finalizing your review.
   1. Use `search_files` to locate external callers, imports, usages, and test suites across the repository.
   2. Use `read_file` to inspect candidate invocation sites, dependent modules, and related test coverage outside the diff.
   3. Verify that the proposed changes integrate safely, introduce no breaking signature mismatches or silent regressions, and that candidate invariants correspond to actual repository code.
 - **Fast-Path Single-Turn (Strictly Limited to Pure Docs/Typos)**: Do NOT use Fast-Path Single-Turn for logic, refactoring, or feature PRs. Premature one-shotting without tool calls produces shallow reviews. Fast-Path Single-Turn is strictly reserved for pure documentation or single-word typo fixes where no code behavior is touched. For all code changes, multi-turn tool investigation is mandatory.
-- **Review Submission**: Only after completing your investigation and verifying surrounding context with tools, output your completed code review verdict directly in your final response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a `review` tool (the orchestrator deterministically submits the review from your final JSON response).
+- **Review Submission**: Only after completing your investigation and verifying surrounding context with tools, submit your completed code review verdict by calling the `review` tool with your structured JSON payload matching `CodeReviewResponse` or `SyncReviewResponse`, or output the valid JSON object directly in your final response.
 
 ### 3. High-Signal Audit Output Requirements
-Output your completed code review verdict directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`. Do NOT call a review tool.
+Submit your completed code review verdict via the `review` tool or directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`.
 Every audit must be high-signal, professional, and thorough:
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
 2. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
@@ -264,7 +264,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 f"Head SHA: {head_sha}\n"
                 f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
                 f"Review the pre-fetched incremental commit diff and full PR diff below to evaluate "
-                f"the changes in turn 1 and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                f"the changes and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
             )
     elif canonical.startswith("pull_request_review_comment."):
         comment = raw.get("comment", {})
@@ -539,7 +539,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             "- Populate 2-4 'verified_invariants' citing concrete behavioral guarantees proven by the diff (with file/line citations where applicable).\n"
             "- Optionally populate 'semantic_invariants' for high-level domain guarantees grounded in real repository entities.\n"
             "- If the change is sound, approve cleanly with empty critical_issues and minor_suggestions.\n"
-            "When your investigation is complete, output your formal review JSON directly."
+            "When your investigation is complete, submit your formal review via the `review` tool or output your formal review JSON directly."
         )
 
     return "\n".join(parts)

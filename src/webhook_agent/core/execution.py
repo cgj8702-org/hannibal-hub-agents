@@ -56,17 +56,28 @@ async def _execute_adk_runner(
     trace_id: str,
     results: list[ActionResult],
     emitted_texts: list[str],
+    *,
+    is_code_audit: bool = False,
+    max_investigation_turns: int = 2,
 ) -> None:
-    """Execute the ADK runner asynchronously and collect tool results and emitted text."""
+    """Execute the ADK runner asynchronously and collect tool results and emitted text.
+
+    For code PR audits (is_code_audit=True), enforces multi-turn repository investigation:
+    if the model terminates Turn 1 without executing investigative tools (read_file, search_files)
+    or submitting via review(), it prompts for mandatory codebase exploration before accepting
+    the final review.
+    """
     max_llm_calls = int(
         os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "10"
     )
     run_config = RunConfig(max_llm_calls=max_llm_calls)
-    try:
+    investigative_tools = {"read_file", "search_files"}
+
+    async def _run_single_turn(msg: genai_types.Content) -> None:
         async for event in active_runner.run_async(
             user_id=user_id,
             session_id=session_id,
-            new_message=user_message,
+            new_message=msg,
             run_config=run_config,
         ):
             # Handle token recording if usage metadata is available
@@ -121,6 +132,39 @@ async def _execute_adk_runner(
                             part.text,
                             trace_id[-4:],
                         )
+
+    try:
+        await _run_single_turn(user_message)
+
+        if is_code_audit:
+            has_investigated = any(r.tool in investigative_tools for r in results)
+            has_reviewed = any(r.tool == "review" and r.success for r in results)
+            turn = 1
+            while not has_investigated and not has_reviewed and turn < max_investigation_turns:
+                turn += 1
+                logger.info(
+                    "🔍 [Investigation Gate] Model attempted single-turn review on code changes without "
+                    "using investigative tools (trace: %s). Enforcing multi-turn exploration turn %d/%d...",
+                    trace_id[-4:],
+                    turn,
+                    max_investigation_turns,
+                )
+                emitted_texts.clear()
+                followup_directive = genai_types.Content(
+                    role="user",
+                    parts=[
+                        genai_types.Part.from_text(
+                            text=(
+                                "Mandatory Investigation Gate: You cannot finalize a code review in a single turn without "
+                                "active repository exploration. Use `search_files` or `read_file` to inspect callers, "
+                                "contract boundaries, and related test suites across the repository before providing your final review."
+                            )
+                        )
+                    ],
+                )
+                await _run_single_turn(followup_directive)
+                has_investigated = any(r.tool in investigative_tools for r in results)
+                has_reviewed = any(r.tool == "review" and r.success for r in results)
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
             logger.warning(
@@ -552,6 +596,21 @@ def execute_agent_event(
                         installation_id=installation_id,
                     )
 
+                doc_extensions = (
+                    ".md",
+                    ".markdown",
+                    ".txt",
+                    ".rst",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".svg",
+                )
+                is_code_audit = policy.mode == Mode.FORMAL_AUDIT and any(
+                    not f.lower().endswith(doc_extensions) for f in changed_files_list
+                )
+
                 # Execute runner
                 await _execute_adk_runner(
                     active_runner=active_runner,
@@ -562,6 +621,7 @@ def execute_agent_event(
                     trace_id=trace_id,
                     results=results,
                     emitted_texts=emitted_texts,
+                    is_code_audit=is_code_audit,
                 )
 
                 # Fetch final session
