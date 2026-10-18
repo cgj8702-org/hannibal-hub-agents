@@ -320,33 +320,6 @@ class WebhookProcessor:
             )
         return self._agent_core
 
-    def normalize_event_type(self, raw: dict[str, Any], headers: dict[str, str]) -> str:
-        """Resolve a canonical event name from headers and payload."""
-        event_name = headers.get("X-GitHub-Event") or headers.get("x-github-event")
-        action = raw.get("action")
-        mapping = {
-            ("pull_request", "opened"): "pull_request.opened",
-            ("pull_request", "reopened"): "pull_request.reopened",
-            ("pull_request", "synchronize"): "pull_request.synchronize",
-            ("issue_comment", "created"): "issue_comment.created",
-            (
-                "pull_request_review_comment",
-                "created",
-            ): "pull_request_review_comment.created",
-            ("pull_request_review", "submitted"): "pull_request_review.submitted",
-            ("pull_request", "review_requested"): "pull_request_review_requested",
-            ("label", "created"): "label.created",
-            ("label", "deleted"): "label.deleted",
-            ("installation", "created"): "installation.created",
-            ("installation", "deleted"): "installation.deleted",
-        }
-        if event_name and action:
-            if canonical := mapping.get((str(event_name), str(action))):
-                return canonical
-        if action:
-            return f"{event_name}.{action}"
-        return "unknown"
-
     # ---------------------------------------------------------------------------
     # Routing helpers
     # ---------------------------------------------------------------------------

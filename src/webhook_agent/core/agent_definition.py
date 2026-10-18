@@ -378,17 +378,6 @@ class WebhookAgent:
                 memory_service=self._memory_service,
             )
 
-    def _create_fallback_agent(self, error: Exception | None = None) -> None:
-        """Switch to fallback model when primary model is unavailable."""
-        self._advance_model_chain(error=error)
-
-        # Recreate runner with new agent
-        self._runner = Runner(
-            app=self._app,
-            session_service=self._session_service,
-            memory_service=self._memory_service,
-        )
-
     def _derive_session_id(self, event_data: dict[str, Any]) -> str:
         """Derive a session ID from the event data for conversation continuity.
 

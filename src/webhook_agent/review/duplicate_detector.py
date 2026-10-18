@@ -101,12 +101,6 @@ _STOPWORDS = {
 
 _GROUP_NOTE = re.compile(r"\n*\(Same thing in \d+ other places? in this review\.\)\s*$")
 TAG_PREFIX = re.compile(r"^\[(?:CRITICAL|MAJOR|MINOR)\]\s*", re.IGNORECASE)
-DEFANG_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-
-
-def defang_content(text: str) -> str:
-    """Disarm markdown image links so untrusted diff text cannot embed external images."""
-    return DEFANG_IMAGE.sub(r"[\1](\2)", str(text or ""))
 
 
 def _tokens(text: str) -> set[str]:

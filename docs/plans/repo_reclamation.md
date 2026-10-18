@@ -163,18 +163,17 @@ Any future capability question must be answerable by editing **one file**. If it
 
 All verified by hand with zero reachable callers. One PR, or two if you prefer smaller diffs.
 
-### B1. Delete `normalize_event_type()` 🧊
-- **File:** `src/webhook_agent/processor.py:297` — 26 lines
-- **Why:** zero references anywhere (verified by grep — only its own definition line). `route_event` (`:327`) is the live implementation, called at `:473` and `:599`. This is not "duplication to consolidate," it is dead code.
-- **Note:** this also removes the confusing near-identical mapping dict at `:301-316`. The dict at `:338-355` stays.
+### B1. Delete `normalize_event_type()` 🧊 ✅
+- **File:** `src/webhook_agent/processor.py` — deleted (was 27 lines)
+- **Status:** completed in PR 2.
 
-### B2. Delete `_create_fallback_agent()` 🧊
-- **File:** `src/webhook_agent/core/agent_definition.py:381` — 10 lines
-- **Why:** zero references anywhere. (It only rebuilds `_runner`, not `_conversational_runner` — moot, since nothing calls it.)
+### B2. Delete `_create_fallback_agent()` 🧊 ✅
+- **File:** `src/webhook_agent/core/agent_definition.py` — deleted (was 11 lines)
+- **Status:** completed in PR 2.
 
-### B3. Delete `defang_content()` 🧊
-- **File:** `src/webhook_agent/review/duplicate_detector.py:107` — 3 lines
-- **Why:** zero references anywhere.
+### B3. Delete `defang_content()` 🧊 ✅
+- **File:** `src/webhook_agent/review/duplicate_detector.py` — deleted (was 7 lines with `DEFANG_IMAGE`)
+- **Status:** completed in PR 2.
 
 ### B4. Delete the orphaned canary module 🧊
 - **Files:** `src/webhook_agent/analysis/audit_canary.py` (40 lines) + `tests/unit/analysis/test_audit_canary.py`
