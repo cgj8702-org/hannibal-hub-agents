@@ -37,22 +37,20 @@ for f in sorted(Path("tests").rglob("*.py")):
         if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         nm = n.name
-        if not nm.startswith("test_") or nm.startswith("__") or nm.startswith("visit_") or n.decorator_list:
+        if not nm.startswith("test_") or nm.startswith(("__", "visit_")) or n.decorator_list:
             continue
         cls = owner.get((nm, n.lineno))
-        cands.append({
-            "name": nm,
-            "file": str(f),
-            "line": n.lineno,
-            "end": n.end_lineno,
-            "loc": n.end_lineno - n.lineno + 1,
-            "cls": cls,
-        })
-
-for c in cands:
-    tree = ast.parse(Path(c["file"]).read_text())
-    n = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == c["name"] and n.lineno == c["line"]][0]
-    c["sig"] = sk(n)
+        cands.append(
+            {
+                "name": nm,
+                "file": str(f),
+                "line": n.lineno,
+                "end": n.end_lineno,
+                "loc": n.end_lineno - n.lineno + 1,
+                "cls": cls,
+                "sig": sk(n),
+            }
+        )
 
 used = set()
 families = []
@@ -62,10 +60,14 @@ for i, c1 in enumerate(cands):
     fam = [c1]
     used.add(id(c1))
     s1 = c1["sig"]
-    for c2 in cands[i+1:]:
+    l1 = len(s1)
+    for c2 in cands[i + 1 :]:
         if id(c2) in used:
             continue
         s2 = c2["sig"]
+        l2 = len(s2)
+        if 2 * min(l1, l2) / (l1 + l2) <= 0.90:
+            continue
         r = difflib.SequenceMatcher(None, s1, s2).ratio()
         if r > 0.90:
             fam.append(c2)
@@ -78,5 +80,7 @@ families.sort(key=len, reverse=True)
 print(f"Total test functions: {len(cands)}")
 print(f"Duplicate families (>0.90): {len(families)}")
 print(f"Tests in those families: {sum(len(f) for f in families)}")
-print(f"If collapsed to 1/case-set: {len(cands) - sum(len(f) for f in families) + len(families)}  (saves {sum(len(f) - 1 for f in families)} funcs)")
+print(
+    f"If collapsed to 1/case-set: {len(cands) - sum(len(f) for f in families) + len(families)}  (saves {sum(len(f) - 1 for f in families)} funcs)"
+)
 print(f"Largest families: {sorted((len(f) for f in families), reverse=True)[:6]}")
