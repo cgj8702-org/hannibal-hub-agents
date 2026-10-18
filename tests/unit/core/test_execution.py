@@ -631,10 +631,10 @@ async def test_execute_adk_runner_max_llm_calls_default_and_env(
         emitted_texts=[],
     )
     assert len(captured_run_configs) == 1
-    assert captured_run_configs[0].max_llm_calls == 10
+    assert captured_run_configs[0].max_llm_calls == 15
 
     # Test override
-    monkeypatch.setenv("MAX_AUDITOR_LLM_CALLS", "15")
+    monkeypatch.setenv("MAX_AUDITOR_LLM_CALLS", "25")
     await _execute_adk_runner(
         active_runner=runner,
         user_id="user1",
@@ -646,7 +646,7 @@ async def test_execute_adk_runner_max_llm_calls_default_and_env(
         emitted_texts=[],
     )
     assert len(captured_run_configs) == 2
-    assert captured_run_configs[1].max_llm_calls == 15
+    assert captured_run_configs[1].max_llm_calls == 25
 
 
 def test_agent_plugins_iteration_and_guardrail_budget() -> None:

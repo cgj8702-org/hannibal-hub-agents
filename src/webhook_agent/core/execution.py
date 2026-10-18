@@ -58,17 +58,16 @@ async def _execute_adk_runner(
     emitted_texts: list[str],
     *,
     is_code_audit: bool = False,
-    max_investigation_turns: int = 2,
+    max_investigation_turns: int = 3,
 ) -> None:
     """Execute the ADK runner asynchronously and collect tool results and emitted text.
 
     For code PR audits (is_code_audit=True), enforces multi-turn repository investigation:
-    if the model terminates Turn 1 without executing investigative tools (read_file, search_files)
-    or submitting via review(), it prompts for mandatory codebase exploration before accepting
-    the final review.
+    if the model terminates Turn 1 without executing investigative tools (read_file, search_files),
+    it prompts for mandatory codebase exploration before accepting the final review.
     """
     max_llm_calls = int(
-        os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "10"
+        os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "15"
     )
     run_config = RunConfig(max_llm_calls=max_llm_calls)
     investigative_tools = {"read_file", "search_files"}
