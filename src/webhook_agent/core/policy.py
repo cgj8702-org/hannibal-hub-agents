@@ -141,7 +141,9 @@ def resolve_event_policy(
     """
     canonical = event_data.get("canonical", "")
     raw = event_data.get("raw_payload", {}) or {}
-    comment_body = (raw.get("comment", {}) or {}).get("body", "")
+    comment_obj = raw.get("comment") or raw.get("review_comment") or {}
+    comment_body = (comment_obj if isinstance(comment_obj, dict) else {}).get("body", "")
+    comment_text = comment_body.lower()
 
     # --- IGNORE: bot events, non-actionable events ---
     sender = event_data.get("sender", {}) or {}
@@ -160,6 +162,13 @@ def resolve_event_policy(
         return EventPolicy(
             mode=Mode.IGNORE,
             reason=f"suppressed bot event from {sender_login or 'unknown'}",
+        )
+
+    # 3. Comments directed to third-party bots (CodeRabbit, Dependabot) are ignored
+    if any(bot in comment_text for bot in ("@coderabbitai", "@coderabbitai[bot]", "@dependabot")):
+        return EventPolicy(
+            mode=Mode.IGNORE,
+            reason=f"comment targets third-party bot: {canonical}",
         )
 
     # --- FORMAL_AUDIT: PR lifecycle events ---

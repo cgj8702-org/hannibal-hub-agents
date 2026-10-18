@@ -291,6 +291,20 @@ class TestShouldProcessEvent:
         ev["raw_payload"]["comment"]["body"] = "@dependabot recreate"
         assert self.processor.should_process_event(ev) is False
 
+    def test_suppress_coderabbit_comment(self):
+        """Comments mentioning @coderabbitai or @coderabbitai[bot] should be suppressed."""
+        ev = _make_normalized(
+            "issue_comment",
+            action="created",
+            include_comment=True,
+            comment_author="human-user",
+        )
+        ev["raw_payload"]["comment"]["body"] = "@coderabbitai summary"
+        assert self.processor.should_process_event(ev) is False
+
+        ev["raw_payload"]["comment"]["body"] = "Hey @coderabbitai[bot] please review this"
+        assert self.processor.should_process_event(ev) is False
+
     def test_suppress_deleted_comment(self):
         """Deleted comment events should be suppressed from processing."""
         ev = _make_normalized("issue_comment", action="deleted")

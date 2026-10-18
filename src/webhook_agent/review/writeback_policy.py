@@ -77,6 +77,8 @@ def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
         return is_automatic_pr_review_enabled()
 
     cb_lower = comment_body.lower()
+    if any(bot in cb_lower for bot in ("@coderabbitai", "@coderabbitai[bot]", "@dependabot")):
+        return False
     return any(keyword in cb_lower for keyword in REVIEW_INTENT_KEYWORDS)
 
 

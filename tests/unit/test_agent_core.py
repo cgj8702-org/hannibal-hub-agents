@@ -1079,6 +1079,16 @@ class TestConversationalAgent:
             _is_formal_review_eligible("issue_comment.created", "Can we deploy this to staging?")
             is False
         )
+        assert (
+            _is_formal_review_eligible("issue_comment.created", "@coderabbitai please review this")
+            is False
+        )
+        assert (
+            _is_formal_review_eligible(
+                "issue_comment.created", "@coderabbitai[bot] run review on this PR"
+            )
+            is False
+        )
         assert _is_formal_review_eligible("issues.opened", "Bug in parser") is False
 
     @pytest.mark.regression
