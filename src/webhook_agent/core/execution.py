@@ -18,6 +18,7 @@ from google.adk.runners import RunConfig
 from google.genai import types as genai_types
 
 from webhook_agent.core.loop_helpers import run_in_bg_loop
+from webhook_agent.core.policy import Mode, resolve_event_policy
 from webhook_agent.environment import pr_workspace, use_environment
 from webhook_agent.models.model_chain import (
     _is_transient_error,
@@ -32,7 +33,6 @@ from webhook_agent.models.rate_limiter import (
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import (
     _COMMENT_RATE_LIMITER,
-    _is_formal_review_eligible,
 )
 from webhook_agent.state.review_checkpoint import review_checkpoint_manager
 from webhook_agent.webhook_types import ActionResult
@@ -302,9 +302,10 @@ def execute_agent_event(
         trace_id[-4:],
     )
 
-    # Derive session and user IDs
+    # Derive session and user IDs via policy layer (PR-scoped, not sender-scoped)
     session_id = agent._derive_session_id(event_data)
-    user_id = f"{repo_full_name}#{pr_number}"
+    policy = resolve_event_policy(event_data, dry_run=agent.dry_run)
+    user_id = policy.session_key
 
     logger.debug(
         "👤 Session context: session_id=%s, user_id=%s",
@@ -312,13 +313,12 @@ def execute_agent_event(
         user_id,
     )
 
-    comment_body = (raw.get("comment", {}) or {}).get("body", "") if isinstance(raw, dict) else ""
-    is_pr_review_event = _is_formal_review_eligible(canonical, comment_body)
+    comment_body = (raw.get("comment", {}) or {}).get("body", "")
 
     results: list[ActionResult] = []
 
     # Checkpoint gate: skip if commit has already been reviewed, or pause if rate-limited backoff active
-    if is_pr_review_event and pr_number and head_sha:
+    if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
         checkpoint = review_checkpoint_manager.get_checkpoint(repo_full_name, pr_number, head_sha)
         if checkpoint and checkpoint.get("status") == "completed":
             logger.info(
@@ -387,7 +387,8 @@ def execute_agent_event(
     deterministic_state = {
         "deterministic_changed_files": changed_files_list,
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
-        "formal_review_eligible": _is_formal_review_eligible(canonical, comment_body),
+        "formal_review_eligible": policy.mode == Mode.FORMAL_AUDIT,
+        "agent_mode": policy.mode,
         "deterministic_contract_scorecard_item": event_data.get(
             "deterministic_contract_scorecard_item"
         ),
@@ -422,7 +423,9 @@ def execute_agent_event(
         if user_message is None:
             raise RuntimeError("Failed to build user message for execution")
 
-        active_runner = agent._runner if is_pr_review_event else agent._conversational_runner
+        active_runner = (
+            agent._runner if policy.mode == Mode.FORMAL_AUDIT else agent._conversational_runner
+        )
         active_app_name = (
             getattr(getattr(active_runner, "app", None), "name", agent._app_name) or agent._app_name
         )
@@ -438,7 +441,9 @@ def execute_agent_event(
                 if user_message.parts and hasattr(user_message.parts[0], "text"):
                     user_message.parts[0].text = base_prompt_text
                 active_runner = (
-                    agent._runner if is_pr_review_event else agent._conversational_runner
+                    agent._runner
+                    if policy.mode == Mode.FORMAL_AUDIT
+                    else agent._conversational_runner
                 )
                 active_app_name = (
                     getattr(getattr(active_runner, "app", None), "name", agent._app_name)
@@ -519,11 +524,9 @@ def execute_agent_event(
                 user_state_map["review_mode"] = (
                     "sync" if canonical == "pull_request.synchronize" else "initial"
                 )
-                user_state_map["formal_review_eligible"] = _is_formal_review_eligible(
-                    canonical,
-                    comment_body,
-                )
-                if is_pr_review_event and pr_number and head_sha:
+                user_state_map["formal_review_eligible"] = policy.mode == Mode.FORMAL_AUDIT
+
+                if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")
                     installation_id = event_data.get("installation_id")
                     review_checkpoint_manager.save_checkpoint(
@@ -719,7 +722,7 @@ def execute_agent_event(
     has_review_action = any(r.tool == "review" and r.success for r in results)
 
     is_comment_reconciliation = False
-    if not is_pr_review_event and not has_review_action and emitted_texts:
+    if policy.mode != Mode.FORMAL_AUDIT and not has_review_action and emitted_texts:
         full_text = "\n\n".join(emitted_texts)
         has_resolutions = '"resolutions"' in full_text
         has_verdict = '"verdict"' in full_text
@@ -733,7 +736,7 @@ def execute_agent_event(
                 trace_id[-4:],
             )
 
-    if (is_pr_review_event or is_comment_reconciliation) and not has_review_action:
+    if (policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation) and not has_review_action:
         _submit_deterministic_review(
             gh_client=gh_client,
             repo_full_name=repo_full_name,
@@ -744,7 +747,7 @@ def execute_agent_event(
             emitted_texts=emitted_texts,
             results=results,
         )
-    elif not is_pr_review_event and not is_comment_reconciliation:
+    elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
         _post_conversational_reply(
             gh_client=gh_client,
             repo_full_name=repo_full_name,
