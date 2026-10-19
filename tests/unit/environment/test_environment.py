@@ -36,6 +36,11 @@ def test_local_environment_file_operations():
             capped = await env.read_file("sub/hello.txt", max_chars=5)
             assert capped == "Hello"
 
+            # Read with src/ fallback
+            await env.write_file("src/mypackage/app.py", "app_code")
+            fallback_content = await env.read_file("mypackage/app.py")
+            assert fallback_content == "app_code"
+
             # List dir
             listing = await env.list_dir("sub")
             assert listing == ["hello.txt"]

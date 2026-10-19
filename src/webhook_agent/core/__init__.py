@@ -46,6 +46,7 @@ from webhook_agent.core.loop_helpers import (
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
 from webhook_agent.tools.github_tools import (
     get_issue,
+    list_dir,
     read_file,
     review,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "get_max_input_tokens",
     "get_shared_genai_client",
     "get_shared_text_generation_provider",
+    "list_dir",
     "on_tool_error_callback",
     "pr_closed_registry",
     "read_file",

@@ -78,18 +78,105 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
+    clean_path = file_path.strip().strip("/")
     try:
         repo = gh.get_repo(repo_name)
         kwargs: dict[str, Any] = {}
         if ref is not None:
             kwargs["ref"] = ref
-        content_file = repo.get_contents(file_path, **kwargs)
+
+        candidate_paths = [clean_path]
+        if not clean_path.startswith("src/"):
+            candidate_paths.append(f"src/{clean_path}")
+        else:
+            candidate_paths.append(clean_path[4:])
+
+        content_file = None
+        last_exc: Exception | None = None
+        for p in candidate_paths:
+            try:
+                content_file = repo.get_contents(p, **kwargs)
+                break
+            except Exception as exc:
+                last_exc = exc
+                continue
+
+        if content_file is None:
+            return f"Error reading file: {last_exc}"
+
         if isinstance(content_file, list):
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
         return decoded
     except Exception as e:
         return f"Error reading file: {e}"
+
+
+def list_dir(ctx: Context, dir_path: str = "", ref: str | None = None) -> str:
+    """List directory contents from the repository at a specific git ref.
+
+    Args:
+        dir_path: Path to the directory in the repository (leave empty for root).
+        ref: Branch name, tag, or commit SHA. Defaults to the repo default branch.
+
+    Returns:
+        Formatted listing of files and subdirectories.
+    """
+    gh = _get_gh_from_ctx(ctx)
+    repo_name = _get_repo_full_name(ctx)
+    clean_path = dir_path.strip().strip("/")
+    try:
+        repo = gh.get_repo(repo_name)
+        kwargs: dict[str, Any] = {}
+        if ref is not None:
+            kwargs["ref"] = ref
+
+        candidate_paths = [clean_path]
+        if clean_path and not clean_path.startswith("src/"):
+            candidate_paths.append(f"src/{clean_path}")
+
+        contents = None
+        last_exc: Exception | None = None
+        for p in candidate_paths:
+            try:
+                contents = repo.get_contents(p, **kwargs)
+                break
+            except Exception as exc:
+                last_exc = exc
+                continue
+
+        if contents is None:
+            return f"Error listing directory: {last_exc}"
+
+        if not isinstance(contents, list):
+            return (
+                f"Error: '{dir_path}' is a file, not a directory. "
+                "Use read_file to view its contents."
+            )
+
+        lines = [f"Directory listing for '{clean_path or '/'}':"]
+        sorted_entries = sorted(
+            contents,
+            key=lambda c: (
+                0 if getattr(c, "type", "") == "dir" else 1,
+                getattr(c, "name", "").lower(),
+            ),
+        )
+        max_entries = 100
+        for item in sorted_entries[:max_entries]:
+            item_type = getattr(item, "type", "file")
+            item_name = getattr(item, "name", "")
+            item_path = getattr(item, "path", "")
+            item_size = getattr(item, "size", 0)
+            prefix = "[DIR] " if item_type == "dir" else f"[FILE] ({item_size} bytes) "
+            lines.append(f"  {prefix}{item_name} -> {item_path}")
+
+        if len(contents) > max_entries:
+            lines.append(f"  ... and {len(contents) - max_entries} more entries")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error listing directory: {e}"
 
 
 # ---------------------------------------------------------------------------

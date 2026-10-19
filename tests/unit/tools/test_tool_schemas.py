@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from webhook_agent.tools.schemas import (
     TOOL_INPUT_SCHEMAS,
     GetIssueInput,
+    ListDirInput,
     ReadFileInput,
     ReviewInput,
 )
@@ -28,6 +29,26 @@ def test_read_file_input():
     # Empty file_path
     with pytest.raises(ValidationError):
         ReadFileInput.model_validate({"file_path": ""})
+
+
+def test_list_dir_input():
+    # Valid default (root)
+    inp1 = ListDirInput.model_validate({})
+    assert inp1.dir_path == ""
+    assert inp1.ref is None
+
+    # Valid with path
+    inp2 = ListDirInput.model_validate({"dir_path": "src/webhook_agent", "ref": "main"})
+    assert inp2.dir_path == "src/webhook_agent"
+    assert inp2.ref == "main"
+
+    # Coerced from path alias
+    inp3 = ListDirInput.model_validate({"path": "tests"})
+    assert inp3.dir_path == "tests"
+
+    # Coerced from directory alias
+    inp4 = ListDirInput.model_validate({"directory": "docs"})
+    assert inp4.dir_path == "docs"
 
 
 def test_get_issue_input():
@@ -71,6 +92,7 @@ def test_review_input():
 
 def test_tool_input_schemas_registry():
     assert "read_file" in TOOL_INPUT_SCHEMAS
+    assert "list_dir" in TOOL_INPUT_SCHEMAS
     assert "get_issue" in TOOL_INPUT_SCHEMAS
     assert "review" in TOOL_INPUT_SCHEMAS
     assert "create_issue" not in TOOL_INPUT_SCHEMAS

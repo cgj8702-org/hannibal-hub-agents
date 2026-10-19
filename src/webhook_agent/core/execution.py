@@ -63,14 +63,14 @@ async def _execute_adk_runner(
     """Execute the ADK runner asynchronously and collect tool results and emitted text.
 
     For code PR audits (is_code_audit=True), enforces multi-turn repository investigation:
-    if the model terminates Turn 1 without executing investigative tools (read_file, search_files),
+    if the model terminates Turn 1 without executing investigative tools (read_file, search_files, list_dir),
     it prompts for mandatory codebase exploration before accepting the final review.
     """
     max_llm_calls = int(
         os.environ.get("MAX_AUDITOR_LLM_CALLS") or os.environ.get("ADK_MAX_LLM_CALLS") or "15"
     )
     run_config = RunConfig(max_llm_calls=max_llm_calls)
-    investigative_tools = {"read_file", "search_files"}
+    investigative_tools = {"read_file", "search_files", "list_dir"}
 
     async def _run_single_turn(msg: genai_types.Content) -> None:
         async for event in active_runner.run_async(
@@ -154,8 +154,8 @@ async def _execute_adk_runner(
                         genai_types.Part.from_text(
                             text=(
                                 "Mandatory Investigation Gate: You cannot finalize a code review in a single turn without "
-                                "active repository exploration. Use `search_files` or `read_file` to inspect callers, "
-                                "contract boundaries, and related test suites across the repository before providing your final review."
+                                "active repository exploration. Use `search_files`, `list_dir`, or `read_file` to inspect callers, "
+                                "directory layout, contract boundaries, and related test suites across the repository before providing your final review."
                             )
                         )
                     ],
@@ -764,7 +764,7 @@ def execute_agent_event(
                     trace_id[-4:],
                 )
 
-        has_investigated = any(r.tool in {"read_file", "search_files"} for r in results)
+        has_investigated = any(r.tool in {"read_file", "search_files", "list_dir"} for r in results)
         if (
             policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation
         ) and not has_review_action:

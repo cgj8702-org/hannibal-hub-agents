@@ -66,8 +66,30 @@ class ReviewInput(ToolInputBase):
         return data
 
 
+class ListDirInput(ToolInputBase):
+    """Input schema for list_dir tool."""
+
+    dir_path: str = Field(
+        default="",
+        description="Path to the directory in the repository (leave empty for root).",
+    )
+    ref: str | None = Field(default=None, description="Branch name, tag, or commit SHA.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "dir_path" not in data:
+                if "path" in data:
+                    data["dir_path"] = data["path"]
+                elif "directory" in data:
+                    data["dir_path"] = data["directory"]
+        return data
+
+
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
+    "list_dir": ListDirInput,
     "get_issue": GetIssueInput,
     "review": ReviewInput,
 }
@@ -75,6 +97,7 @@ TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
     "GetIssueInput",
+    "ListDirInput",
     "ReadFileInput",
     "ReviewInput",
     "ToolInputBase",

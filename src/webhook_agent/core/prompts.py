@@ -64,11 +64,12 @@ Evaluate modified files systematically across 5 core dimensions:
 5. **Test Coverage & Regressions**: Test additions matching modified logic, regression defense, boundary verification.
 
 ### 2. Investigation & Tools (Adaptive Exploration)
-You have access to repository inspection and review tools: `read_file`, `search_files`, and `review`.
+You have access to repository inspection and review tools: `read_file`, `search_files`, `list_dir`, and `review`.
 - **Proactive Multi-Turn Investigation (Mandatory Deep Research)**: Do NOT simply one-shot the review in a single turn without investigation. Every pull request audit requires active tool exploration before finalizing your review.
   1. Use `search_files` to locate external callers, imports, usages, and test suites across the repository.
-  2. Use `read_file` to inspect candidate invocation sites, dependent modules, and related test coverage outside the diff.
-  3. Verify that the proposed changes integrate safely, introduce no breaking signature mismatches or silent regressions, and that candidate invariants correspond to actual repository code.
+  2. Use `list_dir` to inspect directory layout and locate source/test subdirectories.
+  3. Use `read_file` to inspect candidate invocation sites, dependent modules, and related test coverage outside the diff.
+  4. Verify that the proposed changes integrate safely, introduce no breaking signature mismatches or silent regressions, and that candidate invariants correspond to actual repository code.
 - **Fast-Path Single-Turn (Strictly Limited to Pure Docs/Typos)**: Do NOT use Fast-Path Single-Turn for logic, refactoring, or feature PRs. Premature one-shotting without tool calls produces shallow reviews. Fast-Path Single-Turn is strictly reserved for pure documentation or single-word typo fixes where no code behavior is touched. For all code changes, multi-turn tool investigation is mandatory.
 - **Review Submission**: Only after completing your investigation and verifying surrounding context with tools, submit your completed code review verdict by calling the `review` tool with your structured JSON payload matching `CodeReviewResponse` or `SyncReviewResponse`. Submitting `review` before calling investigative tools will be rejected by the tool gate on code PRs.
 
@@ -149,7 +150,7 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - When answering questions about code, architecture, or pull request diffs, use your grounding tools to inspect files and cite lines accurately.
 
 ### Grounding & Tools
-- You have access to PR metadata, diff context, and read-only tools: `read_file`, `search_files`, `get_issue`.
+- You have access to PR metadata, diff context, and read-only tools: `read_file`, `search_files`, `list_dir`, `get_issue`.
 - Verify facts using tools before making assertions about repository files.
 
 ### Code Mutation & Jules Delegation Protocol
