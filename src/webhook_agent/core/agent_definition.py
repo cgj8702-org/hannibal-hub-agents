@@ -69,6 +69,7 @@ from webhook_agent.review.writeback_policy import (
 )
 from webhook_agent.tools.github_tools import (
     get_issue,
+    list_dir,
     read_file,
     review,
 )
@@ -192,6 +193,7 @@ class WebhookAgent:
             tools=[
                 read_file,
                 search_files,
+                list_dir,
                 review,
             ],
         )
@@ -225,6 +227,7 @@ class WebhookAgent:
             tools=[
                 read_file,
                 search_files,
+                list_dir,
                 get_issue,
             ],
         )

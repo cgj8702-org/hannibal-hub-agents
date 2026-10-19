@@ -449,7 +449,7 @@ class TestToolRegistration:
     def test_agent_tools_count(self):
         """Verify the exact tool count registered on the code auditor sub-agent.
 
-        Code auditor uses 3 focused tools: read_file, review, search_files.
+        Code auditor uses 4 focused tools: read_file, review, search_files, list_dir.
         """
         from webhook_agent.core.agent_definition import WebhookAgent
 
@@ -457,10 +457,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 3
+        assert len(tool_names) == 4
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match read_file, review, and search_files."""
+        """Tool names should match list_dir, read_file, review, and search_files."""
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -469,6 +469,7 @@ class TestToolRegistration:
         )
         expected = sorted(
             [
+                "list_dir",
                 "read_file",
                 "review",
                 "search_files",
@@ -650,6 +651,106 @@ class TestReadFile:
 
         result = read_file(ctx, "src/")
         assert "directory" in result.lower()
+
+    def test_read_file_src_fallback(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        mock_content = MagicMock()
+        mock_content.decoded_content = b"print('fallback success')"
+        repo = ctx.state["gh_client"].get_repo.return_value
+
+        def _get_contents(path, **kwargs):
+            if path == "webhook_agent/main.py":
+                raise FileNotFoundError("404 Not Found")
+            if path == "src/webhook_agent/main.py":
+                return mock_content
+            raise FileNotFoundError("Not found")
+
+        repo.get_contents.side_effect = _get_contents
+
+        result = read_file(ctx, "webhook_agent/main.py")
+        assert "fallback success" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: list_dir tool
+# ---------------------------------------------------------------------------
+
+
+class TestListDir:
+    def test_list_dir_returns_formatted_entries(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import list_dir
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        dir_item = MagicMock()
+        dir_item.type = "dir"
+        dir_item.name = "review"
+        dir_item.path = "src/webhook_agent/review"
+
+        file_item = MagicMock()
+        file_item.type = "file"
+        file_item.name = "main.py"
+        file_item.path = "src/webhook_agent/main.py"
+        file_item.size = 1024
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.get_contents.return_value = [file_item, dir_item]
+
+        result = list_dir(ctx, "src/webhook_agent")
+        assert "[DIR] review -> src/webhook_agent/review" in result
+        assert "[FILE] (1024 bytes) main.py -> src/webhook_agent/main.py" in result
+
+    def test_list_dir_file_returns_error(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import list_dir
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        file_item = MagicMock()
+        repo = ctx.state["gh_client"].get_repo.return_value
+        repo.get_contents.return_value = file_item  # Not a list
+
+        result = list_dir(ctx, "src/main.py")
+        assert "is a file, not a directory" in result
+
+    def test_list_dir_src_fallback(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import list_dir
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        item = MagicMock()
+        item.type = "file"
+        item.name = "schemas.py"
+        item.path = "src/webhook_agent/schemas.py"
+        item.size = 500
+
+        repo = ctx.state["gh_client"].get_repo.return_value
+
+        def _get_contents(path, **kwargs):
+            if path == "webhook_agent":
+                raise FileNotFoundError("404 Not Found")
+            if path == "src/webhook_agent":
+                return [item]
+            raise FileNotFoundError("Not found")
+
+        repo.get_contents.side_effect = _get_contents
+
+        result = list_dir(ctx, "webhook_agent")
+        assert "[FILE] (500 bytes) schemas.py" in result
 
 
 # ---------------------------------------------------------------------------

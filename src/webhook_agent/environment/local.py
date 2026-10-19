@@ -90,6 +90,13 @@ class LocalEnvironment(BaseEnvironment):
     ) -> str:
         """Read a file strictly within the environment's working directory."""
         resolved = self.resolve_path(path)
+        if resolved is None or not resolved.is_file():
+            p_str = str(path).strip().strip("/")
+            alt_path = f"src/{p_str}" if not p_str.startswith("src/") else p_str[4:]
+            alt_resolved = self.resolve_path(alt_path)
+            if alt_resolved is not None and alt_resolved.is_file():
+                resolved = alt_resolved
+
         if resolved is None:
             raise PermissionError(f"Access denied: path '{path}' escapes workspace root")
 

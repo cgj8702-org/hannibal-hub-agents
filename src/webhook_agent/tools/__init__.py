@@ -12,10 +12,12 @@ from typing import Any
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
     "GetIssueInput",
+    "ListDirInput",
     "ReadFileInput",
     "ReviewInput",
     "check_window",
     "get_issue",
+    "list_dir",
     "read_file",
     "resolve_bot_review_threads",
     "resolve_review_thread",
@@ -31,6 +33,7 @@ def __getattr__(name: str) -> Any:
     if name in {
         "TOOL_INPUT_SCHEMAS",
         "GetIssueInput",
+        "ListDirInput",
         "ReadFileInput",
         "ReviewInput",
     }:
@@ -39,6 +42,7 @@ def __getattr__(name: str) -> Any:
 
     if name in {
         "get_issue",
+        "list_dir",
         "read_file",
         "resolve_bot_review_threads",
         "resolve_review_thread",

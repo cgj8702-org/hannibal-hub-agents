@@ -1210,6 +1210,23 @@ class TestToolGating:
             result = await before_tool_callback(tool, {"file_path": "main.py"}, ctx)
             assert result is None, f"read_file should be allowed in mode {mode}"
 
+    @pytest.mark.anyio
+    async def test_list_dir_allowed_in_all_modes(self) -> None:
+        from webhook_agent.core.callbacks import before_tool_callback
+
+        tool = MagicMock()
+        tool.name = "list_dir"
+        for mode in [
+            Mode.FORMAL_AUDIT,
+            Mode.THREAD_COLLAB,
+            Mode.ISSUE_TRIAGE,
+            Mode.GENERAL_PAIR_PROGRAMMING,
+            Mode.IGNORE,
+        ]:
+            ctx = self._make_tool_context(mode)
+            result = await before_tool_callback(tool, {"dir_path": "src"}, ctx)
+            assert result is None, f"list_dir should be allowed in mode {mode}"
+
 
 @pytest.mark.anyio
 async def test_execute_adk_runner_enforces_multi_turn_investigation_on_code_pr() -> None:
