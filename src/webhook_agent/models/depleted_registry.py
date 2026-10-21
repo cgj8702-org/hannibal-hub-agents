@@ -24,6 +24,21 @@ except ImportError:
     _HAS_FIRESTORE = False
 
 
+def _active_tier() -> str:
+    """Resolve the active tier lazily (avoids a circular import with rate_limiter)."""
+    try:
+        from webhook_agent.models.rate_limiter import _resolve_tier
+
+        return _resolve_tier()
+    except Exception:
+        return "free"
+
+
+def _doc_id(model_name: str, key_alias: str = "") -> str:
+    """Depletion is per model AND per key/tier: free-tier quota says nothing about paid."""
+    return f"{key_alias or _active_tier()}_{model_name}"
+
+
 class FirestoreDepletedModelRegistry:
     """Tracks models and API key pairs that hit 429 quota exhaustion.
 
@@ -137,7 +152,7 @@ class FirestoreDepletedModelRegistry:
                 cooldown = max(float(retry_after), 120.0)
                 metric_type = f"EXACT ({cooldown:.0f}s)"
 
-        doc_id = f"{key_alias}_{model_name}" if key_alias else model_name
+        doc_id = _doc_id(model_name, key_alias)
         now = time.time()
         self._local_depleted[doc_id] = (now, cooldown)
         logger.warning("🔴 Model '%s' marked DEPLETED [%s]", doc_id, metric_type)
@@ -168,7 +183,7 @@ class FirestoreDepletedModelRegistry:
 
     def is_depleted(self, model_name: str, key_alias: str = "") -> bool:
         """Check whether a model/key pair is currently depleted."""
-        doc_id = f"{key_alias}_{model_name}" if key_alias else model_name
+        doc_id = _doc_id(model_name, key_alias)
         now = time.time()
 
         # Check local memory first
