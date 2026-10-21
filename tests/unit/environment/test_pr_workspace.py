@@ -79,14 +79,17 @@ class MockAsyncClient:
         return self.stream_resp
 
 
-def test_pr_workspace_happy_path():
+def test_pr_workspace_happy_path(caplog):
     """Happy path: extracts PR head tarball, strips root dir, confines env, and cleans up."""
 
     async def _run():
+        file_app = b"print('Hello PR')"
+        file_readme = b"# Welcome"
+        expected_bytes = len(file_app) + len(file_readme)
         tar_bytes = _create_test_tarball(
             {
-                "src/app.py": b"print('Hello PR')",
-                "README.md": b"# Welcome",
+                "src/app.py": file_app,
+                "README.md": file_readme,
             }
         )
 
@@ -97,7 +100,7 @@ def test_pr_workspace_happy_path():
         client = MockAsyncClient(MockStreamResponse([tar_bytes]))
 
         extracted_dir: Path | None = None
-        with patch("httpx.AsyncClient", return_value=client):
+        with caplog.at_level(logging.INFO), patch("httpx.AsyncClient", return_value=client):
             async with pr_workspace(mock_gh, "owner/repo", "headsha123") as env:
                 assert env is not None
                 extracted_dir = env.root
@@ -113,6 +116,16 @@ def test_pr_workspace_happy_path():
         assert extracted_dir is not None
         assert not extracted_dir.exists()
         assert get_active_environment() is None
+
+        # Verify lifecycle logs
+        assert "Beginning PR workspace download and setup for owner/repo@headsha123" in caplog.text
+        assert (
+            f"PR workspace extracted successfully for owner/repo@headsha123: 2 files, {expected_bytes} bytes at {extracted_dir}"
+            in caplog.text
+        )
+        assert (
+            f"Cleaning up PR workspace for owner/repo@headsha123 at {extracted_dir}" in caplog.text
+        )
 
     asyncio.run(_run())
 
@@ -177,17 +190,35 @@ def test_pr_workspace_rejects_traversal_and_absolute_paths():
     asyncio.run(_run())
 
 
-def test_pr_workspace_kill_switch(monkeypatch):
-    """When ENABLE_PR_WORKSPACE=0, yields None without network calls."""
+def test_pr_workspace_kill_switch(caplog, monkeypatch):
+    """When ENABLE_PR_WORKSPACE=0, yields None without network calls and logs skip info."""
 
     async def _run():
         monkeypatch.setenv("ENABLE_PR_WORKSPACE", "0")
         mock_gh = MagicMock()
 
-        async with pr_workspace(mock_gh, "owner/repo", "headsha123") as env:
-            assert env is None
+        with caplog.at_level(logging.INFO):
+            async with pr_workspace(mock_gh, "owner/repo", "headsha123") as env:
+                assert env is None
 
         mock_gh.get_repo.assert_not_called()
+        assert "PR workspace disabled via ENABLE_PR_WORKSPACE=0" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_pr_workspace_missing_context_skip(caplog):
+    """When missing head_sha or gh or repo_full_name, yields None and logs skip info."""
+
+    async def _run():
+        mock_gh = MagicMock()
+
+        with caplog.at_level(logging.INFO):
+            async with pr_workspace(mock_gh, "owner/repo", "") as env:
+                assert env is None
+
+        mock_gh.get_repo.assert_not_called()
+        assert "Skipping PR workspace setup: missing head SHA or PR context" in caplog.text
 
     asyncio.run(_run())
 

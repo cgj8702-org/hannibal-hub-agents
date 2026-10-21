@@ -52,8 +52,11 @@ async def pr_workspace(
         return
 
     if not gh or not repo_full_name or not head_sha:
+        logger.info("Skipping PR workspace setup: missing head SHA or PR context")
         yield None
         return
+
+    logger.info("Beginning PR workspace download and setup for %s@%s", repo_full_name, head_sha)
 
     try:
         repo = gh.get_repo(repo_full_name)
@@ -108,11 +111,11 @@ async def pr_workspace(
 
         async with ephemeral_environment() as env:
             extraction_ok = False
+            file_count = 0
+            extracted_bytes = 0
             try:
                 with tarfile.open(fileobj=temp_archive, mode="r:*") as tar:
                     members: list[tarfile.TarInfo] = []
-                    file_count = 0
-                    extracted_bytes = 0
                     for m in tar.getmembers():
                         # Reject symlinks and hardlinks
                         if m.issym() or m.islnk():
@@ -147,6 +150,22 @@ async def pr_workspace(
                 )
 
             if extraction_ok:
-                yield env
+                logger.info(
+                    "PR workspace extracted successfully for %s@%s: %d files, %d bytes at %s",
+                    repo_full_name,
+                    head_sha,
+                    file_count,
+                    extracted_bytes,
+                    env.root,
+                )
+                try:
+                    yield env
+                finally:
+                    logger.info(
+                        "Cleaning up PR workspace for %s@%s at %s",
+                        repo_full_name,
+                        head_sha,
+                        env.root,
+                    )
             else:
                 yield None
