@@ -504,6 +504,14 @@ class TestShouldProcessEvent:
         ev_canonical = {"canonical": "pull_request.labeled", "delivery_id": "test-labeled-1"}
         assert self.processor.should_process_event(ev_canonical) is False
 
+        # Verify issue metadata events are also suppressed
+        ev_issue_labeled = _make_normalized("issues", action="labeled")
+        assert self.processor.should_process_event(ev_issue_labeled) is False
+        ev_issue_unlabeled = _make_normalized("issues", action="unlabeled")
+        assert self.processor.should_process_event(ev_issue_unlabeled) is False
+        ev_issue_canonical = {"canonical": "issues.labeled", "delivery_id": "test-issue-labeled-1"}
+        assert self.processor.should_process_event(ev_issue_canonical) is False
+
     def test_pr_code_and_review_events_allowed(self):
         """PR code change and review events must not be suppressed."""
         for act in ("opened", "reopened", "synchronize", "ready_for_review"):
