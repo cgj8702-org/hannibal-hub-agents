@@ -49,6 +49,11 @@ DEFAULT_EXCLUSION_KEYWORDS = [
     "transcribe",
     "speech",
     "music",
+    "antigravity",
+    "deep-research",
+    "banana",
+    "omni",
+    "argon",
 ]
 
 
