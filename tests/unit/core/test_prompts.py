@@ -344,3 +344,11 @@ def test_build_user_message_runs_symbol_and_test_impact_when_workspace_active(
     assert contract_item is not None
     assert contract_item["dimension"] == "Contract Integrity"
     assert contract_item["status"] == "FAIL"
+
+
+def test_conversational_instruction_includes_system_mode_awareness() -> None:
+    """Conversational instruction must explicitly document dual modes and prevent tool denial."""
+    assert "System Architecture & Mode Awareness" in CONVERSATIONAL_INSTRUCTION
+    assert "conversational_agent" in CONVERSATIONAL_INSTRUCTION
+    assert "code_auditor" in CONVERSATIONAL_INSTRUCTION
+    assert "review" in CONVERSATIONAL_INSTRUCTION
