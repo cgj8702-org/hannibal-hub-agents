@@ -331,22 +331,6 @@
       }
     },
     {
-      "name": "models/gemini-3.5-transcribe",
-      "version": "3.5-transcribe-08-2026",
-      "display_name": "Gemini 3.5 Transcribe",
-      "description": "Gemini 3.5 Transcribe",
-      "input_token_limit": 98304,
-      "output_token_limit": 32768,
-      "supported_actions": [
-        "generateContent",
-        "countTokens"
-      ],
-      "accessible_tiers": [
-        "free",
-        "paid"
-      ]
-    },
-    {
       "name": "models/gemini-3.6-flash",
       "version": "3.6-flash-07-2026",
       "display_name": "Gemini 3.6 Flash",
@@ -613,5 +597,5 @@
       }
     }
   ],
-  "updated_at": "2026-10-16T19:52:32.836362+00:00"
+  "updated_at": "2026-10-21T23:38:28.317059+00:00"
 }
