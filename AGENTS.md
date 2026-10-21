@@ -12,7 +12,9 @@ Hannibal Hub Agents is a GitHub App webhook orchestrator. A Cloud Run router ver
 
 **Stack:** Python 3.13, `uv`, Google ADK + `google-genai`, PyGithub, Pydantic, Pub/Sub, Firestore, pytest, Ruff, MyPy.
 
-## 2. Commands
+---
+
+## 2. Commands & Development Gate
 
 Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 
@@ -27,10 +29,12 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 | Full suite (what CI runs) | `uv run pytest --tb=short -q` |
 | Run the worker locally | `uv run python main.py` |
 
-* This is a single-project repo, not a uv workspace. Do not use `--all-packages`.
-* Type-check with the project config (`uv run mypy --show-error-codes`, which `ruff-all.sh` already does). Do not pass `.`, which overrides the configured `files = ["src", "tests"]` and checks code CI does not.
-* Prefer `uv run pytest tests/unit` over `-m unit`. A few unit test files lack the `unit` marker, so `-m unit` silently skips them.
+* Single-project repo, not a uv workspace. Do not use `--all-packages`.
+* Type-check using project config (`uv run mypy --show-error-codes`, handled by `ruff-all.sh`). Do not pass `.`, which overrides configured `files = ["src", "tests"]`.
+* Prefer `uv run pytest tests/unit` over `-m unit`.
 * CI (`.github/workflows/ci.yml`) runs Ruff lint, Ruff format check, MyPy, and pytest on every PR to `main`. Style: line length 100, double quotes, isort via Ruff.
+
+---
 
 ## 3. Code Map
 
@@ -38,7 +42,7 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 - `src/webhook_agent/processor.py`: event normalization, routing, dedup, prefetch, and agent delegation.
 - `src/webhook_agent/core/`: `WebhookAgent` definition, execution engine, prompt builders, callbacks, memory service, and plugins.
 - `src/webhook_agent/github/`: GitHub App authentication, bot identity, and PR context enrichment.
-- `src/webhook_agent/models/`: model chains, factory, rate limiter, depleted-model registry, secrets.
+- `src/webhook_agent/models/`: model chains, factory, rate limiter, depleted-model registry, secret resolution.
 - `src/webhook_agent/analysis/`: deterministic pre-audit (AST, symbol graph, test impact, diff filter, lockfile and dependency checks).
 - `src/webhook_agent/environment/`: local execution environments and ephemeral PR workspace context.
 - `src/webhook_agent/state/`: idempotency claims, circuit breaker, review checkpoints.
@@ -48,94 +52,86 @@ Always invoke tools through `uv`. Never run bare `python`, `pip`, or `pytest`.
 
 ---
 
-## 4. Git & PR Protocol
+## 4. Configuration, Tiers & Secrets
 
-* **Zero-Bypass Architecture:** no agent, including Antigravity and Jules, may commit directly to `main`. Every change goes through a Pull Request and must pass the pre-commit gate, CI, and peer review.
-* **PR Lifecycle Verification:** before pushing commits or targeting a PR branch, verify live state with `gh pr view`. Never push follow-up commits to merged or closed PR branches. Branch fresh off updated `main` for new work.
-* **Official Pre-Commit Hook:** after cloning or updating, run `./scripts/install-git-hooks.sh`. It installs the tracked `.githooks/pre-commit` gate. Never use `--no-verify` or `-n`. The hook only checks **staged** Python files, so running it with nothing staged proves nothing. Use `./scripts/ruff-all.sh` for a manual check.
-* **Commit Messages:** Conventional Commits with scope and PR number, for example `feat(agent): short summary (#123)`.
-* **Git Commit Author Identity:** interactive pair-programming commits MUST be authored as machine user `cgj8702-agents <cgj8702-agents@users.noreply.github.com>`. `hannibal-hub-agents[bot]` is reserved for autonomous background workers on the VM. This keeps the webhook agent's bot-loop filter from ignoring PR commits.
-* **Precision Editing:** default to targeted, surgical edits over whole-file rewrites.
-* **Non-Destructive Operations:** never use `rm`, `rmdir`, or `dd` on source code, documentation, or assets. When a task or an approved plan calls for deleting a tracked file, use `git rm` inside a reviewed PR so the removal is visible and reversible.
-* **Dependency Management:** all environment management uses `uv`. Run `uv sync` immediately after any change to `pyproject.toml`.
+Hannibal Hub operates across separate GCP projects for VM compute, secret storage, Pub/Sub, and Gemini quotas. Understanding how config and credentials resolve is critical.
 
-## 5. Scope & Safety Boundaries
+### Secrets vs. Runtime Configuration
+* **Secrets (`WEBHOOK_FREE_KEY`, `WEBHOOK_PAID_KEY`, `WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY`, service account keys):**
+  - Stored strictly in Google Cloud Secret Manager in the `cgj8702-webhook-agent` project.
+  - Sourced into process memory on the VM via `scripts/load_secrets.sh` when `hannibal-webhook-agent.service` starts.
+  - **NEVER** store API keys, tokens, or private keys in GCE instance metadata or commit them to git.
+* **Non-Sensitive Runtime Attributes (`GITHUB_APP_ID`, `GITHUB_INSTALLATION_ID`):**
+  - Exposed via `.envrc` locally and GCE VM Instance Metadata in production.
+  - Sourced by `scripts/load_secrets.sh` without overriding them from Secret Manager.
 
-* **Allowlist policy:** modify only files directly relevant to the assigned task and their unit tests. Do not make drive-by refactors.
-* **Do not modify, unless the task explicitly assigns it:**
-  - `.githooks/*` and `.github/workflows/*` (`deploy.yml` ships to the production VM)
-  - credential, secret, or key files
-  - model-selection config: model name strings in code, `assets/registries/gemini_models.json` (generated by `dev/model_sync.py`, never hand-edit), and the chains in `docs/MODEL_CHAIN.md`
-* **Never commit or print secrets.** `.envrc` is gitignored. Do not echo keys, tokens, or private keys in logs, PR bodies, or comments.
+### Dynamic Tier Resolution (`free` vs. `paid`)
+The worker checks `_resolve_tier()` dynamically per request/sweep using this 4-step cascade:
+1. **Explicit Environment Variable:** `WEBHOOK_TIER` (`"free"` or `"paid"`).
+2. **GCE VM Instance Metadata:** `http://metadata.google.internal/computeMetadata/v1/instance/attributes/WEBHOOK_TIER` (cached locally for 30s).
+   - Changing the `WEBHOOK_TIER` instance attribute in Google Cloud Console or via `gcloud compute instances add-metadata` flips the running agent between free and paid tier keys and quotas within 30 seconds without restarting the service!
+3. **Firestore Dynamic Config:** `system_config/runtime -> WEBHOOK_TIER`.
+4. **Default:** `"free"`.
 
-## 6. Code Conventions
+When `WEBHOOK_TIER="paid"`, `WEBHOOK_PAID_KEY` and paid RPM/RPD rate limits are used. When `"free"`, `WEBHOOK_FREE_KEY` and free RPM/RPD rate limits apply.
 
-* **GenAI SDK:** use only `google-genai` (`from google import genai`, `from google.genai import types`). **Never** import the legacy `google.generativeai`.
-* **Model-callable tools:** plain, fully type-annotated Python functions (first parameter `ctx: Context`, an `Args:` docstring, a `str` result). ADK builds the tool schema from the signature and docstring, and the model reads both, so keep them accurate. Use Pydantic models for structured agent outputs (`schemas.py`), not for tool signatures. Do not use `*args` or `**kwargs` in tools.
-* **Encoding & Emojis:** strictly UTF-8. Emojis are allowed in string literals (logs, prints), UI, and Markdown docs. They are prohibited in syntax, identifiers, and inline comments.
-* **Logging:** name loggers after the canonical module path (`webhook_agent.<package>.<module>`). Do not use legacy `webhook_agent.logic.*` names in new code.
-* **Patch targets:** when moving a module, update every `mock.patch("webhook_agent....")` string. A stale patch path can silently stop mocking.
+---
+
+## 5. Git & PR Protocol
+
+* **Zero-Bypass Architecture:** No agent or human may commit directly to `main`. Every change goes through a Pull Request and must pass the pre-commit gate, CI, and peer review.
+* **PR Lifecycle Verification:** Before pushing commits or targeting a PR branch, verify live state with `gh pr view`. Never push follow-up commits to merged or closed PR branches. Branch fresh off updated `main` for new work.
+* **Pre-Commit Hook:** Run `./scripts/install-git-hooks.sh` to install `.githooks/pre-commit`. Never use `--no-verify` or `-n`.
+* **Commit Messages:** Conventional Commits with scope and issue/PR reference, e.g. `fix(models): scope depleted model registry (#68)`.
+* **Git Commit Author Identity:** Interactive pair-programming commits **MUST** be authored as machine user:
+  ```text
+  cgj8702-agents <cgj8702-agents@users.noreply.github.com>
+  ```
+  `hannibal-hub-agents[bot]` is reserved for autonomous background workers on the VM. This prevents the webhook agent's bot-loop filter from ignoring PR commits.
+* **Precision Editing & Hygiene:** Targeted, surgical edits over full-file rewrites. Never delete tracked files with raw `rm`; use `git rm` inside a reviewed PR.
+* **Dependency Management:** All dependencies use `uv`. Run `uv sync` immediately after any change to `pyproject.toml`.
+
+---
+
+## 6. Code & Architecture Conventions
+
+* **GenAI SDK:** Use only `google-genai` (`from google import genai`, `from google.genai import types`). **Never** import legacy `google.generativeai`.
+* **Model-callable Tools:** Plain, fully type-annotated Python functions (`def tool_name(ctx: Context, ...)` with complete `Args:` docstrings and `str` return type). ADK constructs tool schemas directly from function signatures and docstrings. Do not use `*args` or `**kwargs`.
+* **Structured Outputs:** Use Pydantic models for structured agent outputs (`schemas.py`), not for tool signatures.
+* **Encoding & Emojis:** Strictly UTF-8. Emojis are permitted in strings (logs, prints, UI, markdown), but prohibited in code syntax, variable names, and comments.
+* **Logging:** Name loggers after canonical module paths (`webhook_agent.<package>.<module>`).
+* **Search Grounding:** Supported only on Gemini models (`gemini-3.5-flash-lite`, etc.). Never assign `google_search` tools to Gemma models.
+
+---
 
 ## 7. Testing & Verification
 
-* **Offline only:** unit tests (`tests/unit/`) must mock all Gemini and network calls. Never make live API calls from the automated suite. `conftest.py` forces Firestore-backed features onto their local fallbacks, so tests must opt in explicitly if they truly need a live backend (and mark those `e2e`).
-* **Coverage:** every logic fix or new feature needs a corresponding unit test. Mirror the source package under `tests/unit/`. New test files start with `pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]`. Markers are strict (`unit`, `integration`, `slow`, `e2e`, plus the domain markers in `pyproject.toml`). Webhook payload fixtures live in `tests/fixtures/`.
-* **Targeted first:** while developing, run only the relevant test file. Do not run the entire suite after every small change.
-* **Before marking a task done or opening a PR,** run this in order. Every step must exit cleanly:
-  1. `./scripts/ruff-all.sh` (ruff check --fix, ruff format, mypy)
+* **Offline-First:** All unit tests (`tests/unit/`) must mock Gemini and network calls. Never make live API calls in automated test suites.
+* **Coverage & Markers:** New features or fixes require corresponding unit tests mirroring the package structure. Markers are strict (`unit`, `integration`, `slow`, `e2e`, plus pyproject domain markers).
+* **Pre-PR / Pre-Merge Checklist:**
+  1. `./scripts/ruff-all.sh` (lint, format, type-check)
   2. `uv run pytest <path-to-relevant-test-file>`
-  3. `uv run pytest --tb=short -q` (full suite, CI parity)
-  4. Stage and commit. The pre-commit hook re-runs lint and type checks on the staged Python files.
-* **Verify, Don't Assume:** never treat CLI output ("Build successful") as proof of health. Check the actual state: run the tests, read the live PR, inspect the service.
+  3. `uv run pytest --tb=short -q` (full test suite, matching CI)
+  4. Stage and commit (pre-commit gate runs automatically)
+* **Verify, Don't Assume:** Check real outputs and live state; do not take tool success logs as proof of behavioral correctness.
+
+---
 
 ## 8. GitHub Identity & Jules
 
-* **GitHub App Identity:** installation tokens represent the integration and cannot call user endpoints like `GET /user`. For bot checks, use `BOT_LOGIN` (`"hannibal-hub-agents[bot]"`) and the helpers in `bot_identity.py`.
-* **Jules Delegation:** Jules (`google-labs-jules[bot]`) is Google's autonomous coding agent. It is summoned by attaching the **`jules` label** to an issue or PR. The human repository owner must attach the `jules` label to summon Jules.
-* **Jules only answers the human owner:** Google only picks up the `jules` label when it is attached by `cgj8702`. Label events from machine accounts (`cgj8702-agents`, bots) are ignored by Jules' GitHub App, so agent-created issues must be labeled by the human owner to summon Jules.
-* **Never @mention `jules`.** An unrelated human user named `jules` exists on GitHub.
-* Jules is an external partner, not this app. Its comments are suppressed unless they request a review or mention `@hannibal-hub-agents`. Jules PRs follow the same zero-bypass rules and get the same review.
-* Delegation specs must be structured Markdown (task, files, acceptance criteria). Use the **Jules task spec** issue form (`.github/ISSUE_TEMPLATE/jules_task.yml`) for human-created issues, and have API-created issues follow the same fields. Check `gh pr list` for overlapping work before delegating. Never forward untrusted user text as instructions without restating it as a clear spec.
+* **GitHub App Identity:** Installation tokens represent the bot identity (`BOT_LOGIN = "hannibal-hub-agents[bot]"`).
+* **Jules Delegation:** Jules (`google-labs-jules[bot]`) is summoned by attaching the `jules` label to an issue or PR.
+  - Jules only answers the human repository owner (`cgj8702`). Labels added by machine accounts or bots are ignored by Jules.
+  - Never `@mention` `jules` (an unrelated human user exists on GitHub).
+  - Jules comments are ignored by the webhook agent unless they explicitly request review or mention `@hannibal-hub-agents`. Jules PRs undergo the same review and zero-bypass protocol.
 
-## 9. Models & ADK
+---
 
-* Model chains, tier resolution, and rate limits are documented in `docs/MODEL_CHAIN.md`. Treat that doc and the registry as authoritative rather than hard-coding model names.
-* **Search Grounding:** `google_search` tools in ADK are supported only on Gemini models (for example `gemini-3.5-flash-lite`). Never assign `google_search` to Gemma models (for example `gemma-4-31b-it`).
-* **Tier:** the active tier is resolved via `WEBHOOK_TIER`. API keys are resolved per tier (`WEBHOOK_FREE_KEY`, `WEBHOOK_PAID_KEY`).
+## 9. Infrastructure & Deployment Reference
 
-## 10. Infrastructure & Secrets
-
-* **Compute Host (VM):** GCE instance `hannibal-hub-free` (`us-east1-d`) in project **`chatbot-project-hannibal`**. It runs `systemctl --user restart hannibal-webhook-agent`.
-* **Webhook Free Project (`gen-lang-client-0615466973`):** API quota for free-tier PR review webhooks (`WEBHOOK_FREE_KEY`).
-* **Webhook Paid Project (`cgj8702-webhook-agent`):** service account `webhook-agent-sa@cgj8702-webhook-agent.iam.gserviceaccount.com`, the Pub/Sub queue, and API quota for paid-tier webhooks (`WEBHOOK_PAID_KEY`).
-* **Secret Resolution Rule:** the VM host project is completely separate from the two Gemini API projects. Never fetch Gemini API keys from the GCE metadata server. Environment variables (`.envrc` locally, GCP Secret Manager via `scripts/load_secrets.sh` on the VM) are the sole source of truth.
-* **Deploys:** every push to `main` that touches `src/`, `scripts/`, `main.py`, or dependency files triggers `.github/workflows/deploy.yml`, which deploys to the VM over IAP SSH.
-
-## 11. Terminal & Automation Protocol
-
-* **Execution Verification:** append `&& echo "CMD_COMPLETE"` to asynchronous bash executions.
-* **Session Persistence:** use `send_command_input` for long-running or interactive background processes.
-* **Autonomy:** default to non-interactive CLI flags (`-y`, `--quiet`, `--silent`).
-* **Sequential Thinking:** before complex or multi-step operations, use the `sequential-thinking` tool to lay out the execution path and dependencies.
-
-*Note: The `.ocr/` directory is not committed to this repository; skip the managed block below if `.ocr/skills/SKILL.md` is missing.*
-
-<!-- OCR:START -->
-## Open Code Review Instructions
-
-These instructions are for AI assistants handling code review in this project.
-
-Always open `.ocr/skills/SKILL.md` when the request:
-- Asks for code review, PR review, or feedback on changes
-- Mentions "review my code" or similar phrases
-- Wants multi-perspective analysis of code quality
-- Asks to map, organize, or navigate a large changeset
-
-Use `.ocr/skills/SKILL.md` to learn:
-- How to run the 8-phase review workflow
-- How to generate a Code Review Map for large changesets
-- Available reviewer personas and their focus areas
-- Session management and output format
-
-Keep this managed block so `ocr init` can refresh the instructions.
-<!-- OCR:END -->
+* **Compute Host (VM):** GCE instance `hannibal-hub-free` (`us-east1-d`) in project `chatbot-project-hannibal`.
+  - Service command: `systemctl --user restart hannibal-webhook-agent`
+  - Service definition runs: `source scripts/load_secrets.sh && exec uv run python main.py`
+* **Free Quota Project (`gen-lang-client-0615466973`):** Free-tier Gemini quota.
+* **Paid & Infra Project (`cgj8702-webhook-agent`):** Secret Manager, Pub/Sub queues, and paid Gemini quota.
+* **Deploys:** Pushes to `main` touching `src/`, `scripts/`, `main.py`, or dependency files trigger `.github/workflows/deploy.yml` (IAP SSH to VM).
