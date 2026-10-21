@@ -46,6 +46,14 @@ DEFAULT_EXCLUSION_KEYWORDS = [
     "tools",
     "embedding",
     "audio",
+    "transcribe",
+    "speech",
+    "music",
+    "antigravity",
+    "deep-research",
+    "banana",
+    "omni",
+    "argon",
 ]
 
 
