@@ -352,3 +352,4 @@ def test_conversational_instruction_includes_system_mode_awareness() -> None:
     assert "conversational_agent" in CONVERSATIONAL_INSTRUCTION
     assert "code_auditor" in CONVERSATIONAL_INSTRUCTION
     assert "review" in CONVERSATIONAL_INSTRUCTION
+    assert "NO ISSUE CREATION TOOL" in CONVERSATIONAL_INSTRUCTION
