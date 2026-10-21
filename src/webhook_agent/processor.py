@@ -514,20 +514,20 @@ class WebhookProcessor:
         if canonical.startswith("pull_request_review_thread."):
             return False
 
-        # Suppress non-code PR metadata noise (labels, assignees, milestones, locks)
-        # to prevent unsolicited conversational comments and review noise.
+        # Suppress non-code metadata noise (labels, assignees, milestones, locks)
+        # on both pull requests and issues to prevent unsolicited conversational comments and review noise.
         if (
             action in SUPPRESSED_PR_METADATA_ACTIONS
             and (
-                event_name in ("pull_request", "pr")
-                or canonical.startswith(("pull_request.", "pr."))
+                event_name in ("pull_request", "pr", "issues", "issue")
+                or canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
             )
         ) or (
-            canonical.startswith(("pull_request.", "pr."))
+            canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
             and canonical.split(".", 1)[1] in SUPPRESSED_PR_METADATA_ACTIONS
         ):
             logger.debug(
-                "Suppressing PR metadata event '%s' (action=%s) to prevent review noise",
+                "Suppressing metadata event '%s' (action=%s) to prevent noise",
                 canonical,
                 action,
             )
