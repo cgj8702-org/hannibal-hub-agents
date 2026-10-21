@@ -8,22 +8,9 @@ from webhook_agent.review.formatter import calculate_sync_verdict
 from webhook_agent.review.schemas import (
     CodeReviewResponse,
     SyncReviewResponse,
-    has_genuine_summary_risk,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.regression]
-
-
-def test_has_genuine_summary_risk_disabled() -> None:
-    """Verify has_genuine_summary_risk returns False and does not trip on resolution or risk phrases."""
-    summary = (
-        "Verified that the uv.lock updates correctly reflect the upgrade of mypy from 2.0.0 to 2.3.1 "
-        "along with its standard transitive dependency resolution updates. Previous concerns regarding "
-        "unrelated packages and environment markers have been evaluated and resolved as standard resolver behavior."
-    )
-    assert has_genuine_summary_risk(summary) is False
-    assert has_genuine_summary_risk("lockfile corruption was resolved") is False
-    assert has_genuine_summary_risk(None) is False
 
 
 def test_sync_review_response_positive_summary_no_synthetic_critical() -> None:
