@@ -1038,6 +1038,13 @@ def _submit_formal_review(
             )
             return f"Failed: {parse_err}", False
 
+        # Re-anchor citations against the files this audit actually read. The
+        # auditor counts lines by hand, so a two-line slip is routine even when the
+        # quoted code is verbatim; the quote is the reliable half of the citation.
+        from webhook_agent.review.citation_repair import repair_rendered_citations
+
+        rendered_body = repair_rendered_citations(rendered_body, pr=pr)
+
         # Record the analysed commit in the review metadata so the body is
         # self-describing even after the PR moves on.
         if reviewed_sha:
@@ -1049,7 +1056,6 @@ def _submit_formal_review(
         if reviewed_sha:
             # GitHub stamps the review with the live head unless told otherwise.
             review_kwargs["commit"] = reviewed_sha
-
         try:
             if inline_comments:
                 try:

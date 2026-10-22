@@ -66,15 +66,65 @@ def _extract_state_dict(session_state: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
-    """Read a file from the repository at a specific git ref.
+def _format_numbered_slice(
+    path: str,
+    text: str,
+    start_line: int | None = None,
+    max_lines: int | None = None,
+) -> str:
+    """Render file content with 1-based line-number prefixes, optionally windowed.
+
+    Args:
+        path: Repo-relative path, used in the header.
+        text: Decoded file content.
+        start_line: 1-based first line to include.
+        max_lines: Maximum number of lines to include.
+
+    Returns:
+        Header line plus ``NN│ code`` rows.
+    """
+    all_lines = text.splitlines()
+    total = len(all_lines)
+    if total == 0:
+        return f"{path}: (empty file)"
+
+    first = max(1, start_line or 1)
+    if first > total:
+        noun = "line" if total == 1 else "lines"
+        return f"{path}: start_line {first} is past end of file ({total} {noun})"
+
+    last = total if max_lines is None else min(total, first + max(0, max_lines) - 1)
+    window = all_lines[first - 1 : last]
+    width = len(str(last))
+    body = "\n".join(f"{first + offset:>{width}}│ {line}" for offset, line in enumerate(window))
+
+    header = f"{path}: lines {first}-{last} of {total}"
+    if last < total:
+        header += f" (call again with start_line={last + 1} for more)"
+    return f"{header}\n{body}"
+
+
+def read_file(
+    ctx: Context,
+    file_path: str,
+    ref: str | None = None,
+    start_line: int | None = None,
+    max_lines: int | None = None,
+) -> str:
+    """Read a file from the repository at a specific git ref, with line numbers.
+
+    Output rows look like ``42│ some_code()``. The ``NN│ `` prefix is display only:
+    copy line numbers into citations, but never copy the prefix into code or a
+    suggested fix.
 
     Args:
         file_path: Path to the file in the repository.
         ref: Branch name, tag, or commit SHA. Defaults to the repo default branch.
+        start_line: 1-based line to start from. Defaults to the first line.
+        max_lines: Maximum number of lines to return. Defaults to the whole file.
 
     Returns:
-        The file content string, token-capped.
+        Header plus line-numbered content, or an error string.
     """
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
@@ -107,7 +157,7 @@ def read_file(ctx: Context, file_path: str, ref: str | None = None) -> str:
         if isinstance(content_file, list):
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
-        return decoded
+        return _format_numbered_slice(clean_path, decoded, start_line, max_lines)
     except Exception as e:
         return f"Error reading file: {e}"
 
