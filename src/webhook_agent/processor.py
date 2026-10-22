@@ -908,7 +908,20 @@ class WebhookProcessor:
                     tool_label,
                     truncate_log_payload(msg, 300),
                 )
+            # If a PR audit did not post a successful review or action, release reconciliation lock so retries/webhooks proceed
+            if audit_cache_key and not any(r.success and r.tool == "review" for r in results):
+                from webhook_agent.review.proactive_service import (
+                    release_reconciliation_claim,
+                )
+
+                release_reconciliation_claim(audit_cache_key)
         else:
+            if audit_cache_key:
+                from webhook_agent.review.proactive_service import (
+                    release_reconciliation_claim,
+                )
+
+                release_reconciliation_claim(audit_cache_key)
             logger.info(
                 "Agent completed execution with no actions taken for repo %s",
                 repo_name,

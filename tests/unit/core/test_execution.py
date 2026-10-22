@@ -1468,3 +1468,67 @@ def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
     ):
         execute_agent_event(mock_agent, event_data, mock_gh, "trace-pure-issue-1")
         mock_pr_ws.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_records_tool_error_success_flag() -> None:
+    """Verifies that tool responses containing errors set success=False in ActionResults."""
+    fn_ok = MagicMock()
+    fn_ok.name = "read_file"
+    fn_ok.response = {"content": "def foo(): pass"}
+
+    fn_err_dict = MagicMock()
+    fn_err_dict.name = "review"
+    fn_err_dict.response = {"error": "Tool execution halted: turn_budget_exceeded"}
+
+    fn_err_result_str = MagicMock()
+    fn_err_result_str.name = "review"
+    fn_err_result_str.response = {
+        "result": "Error: Review submission rejected. Invalid findings: ungrounded"
+    }
+
+    fn_err_raw_str = MagicMock()
+    fn_err_raw_str.name = "search_files"
+    fn_err_raw_str.response = "Error: Invalid directory pattern"
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            yield MagicMock(
+                usage_metadata=None,
+                get_function_responses=lambda: [
+                    fn_ok,
+                    fn_err_dict,
+                    fn_err_result_str,
+                    fn_err_raw_str,
+                ],
+                content=None,
+            )
+
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Review code")])
+
+    await _execute_adk_runner(
+        active_runner=MockRunner(),
+        user_id="user-1",
+        session_id="session-1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="test-trace-err",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=False,
+    )
+
+    assert len(results) == 4
+    assert results[0].tool == "read_file"
+    assert results[0].success is True
+
+    assert results[1].tool == "review"
+    assert results[1].success is False
+
+    assert results[2].tool == "review"
+    assert results[2].success is False
+
+    assert results[3].tool == "search_files"
+    assert results[3].success is False

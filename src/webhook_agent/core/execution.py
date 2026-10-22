@@ -99,10 +99,21 @@ async def _execute_adk_runner(
                         len(responses),
                     )
                     for response in responses:
+                        resp_data = response.response
+                        is_success = True
+                        if isinstance(resp_data, dict):
+                            if "error" in resp_data or (
+                                isinstance(resp_data.get("result"), str)
+                                and resp_data["result"].startswith("Error:")
+                            ):
+                                is_success = False
+                        elif isinstance(resp_data, str) and resp_data.startswith("Error:"):
+                            is_success = False
+
                         results.append(
                             ActionResult(
                                 tool=str(response.name or ""),
-                                success=True,
+                                success=is_success,
                                 detail=f"tool executed: {response.response}",
                             )
                         )
