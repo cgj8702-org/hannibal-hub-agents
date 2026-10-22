@@ -333,6 +333,40 @@ def _submit_deterministic_review(
         )
 
 
+_CONVERSATIONAL_REPLY_STATE_KEY = "conversational_reply"
+
+
+def _fresh_session_reply(final_session: Any, prior_state: dict[str, Any]) -> str:
+    """Return the reply this run wrote to session state, or "" when there is none.
+
+    ADK's ``output_key`` capture (``conversational_reply``) is an authoritative
+    final answer: ``LlmAgent`` writes it only for events that satisfy
+    ``is_final_response()`` and carry non-thought text, which is exactly the
+    gate this runner applies when collecting emitted text. Reading it back is an
+    independent second layer, mirroring the precedence the audit path already
+    uses for ``code_review_analysis``.
+
+    Comparing against the pre-run snapshot matters: session state is scoped to
+    the PR thread, so a reply written by an earlier webhook would otherwise be
+    reposted when the current run produced no answer of its own.
+
+    Args:
+        final_session: Session object fetched after the run, or None.
+        prior_state: Session state captured immediately before the run.
+
+    Returns:
+        The fresh reply text, or "" if state holds no new answer.
+    """
+    if not final_session or not getattr(final_session, "state", None):
+        return ""
+    candidate = final_session.state.get(_CONVERSATIONAL_REPLY_STATE_KEY)
+    if not isinstance(candidate, str) or not candidate.strip():
+        return ""
+    if candidate == prior_state.get(_CONVERSATIONAL_REPLY_STATE_KEY):
+        return ""
+    return candidate
+
+
 def _post_conversational_reply(
     gh_client: Github,
     repo_full_name: str,
@@ -340,14 +374,28 @@ def _post_conversational_reply(
     emitted_texts: list[str],
     trace_id: str,
     results: list[ActionResult],
+    *,
+    state_reply: str | None = None,
 ) -> None:
-    """Post conversational reply comment to issue or PR thread."""
-    if not emitted_texts or not pr_number:
+    """Post conversational reply comment to issue or PR thread.
+
+    Prefers the session-state reply (ADK's own final-output capture) and falls
+    back to text collected from final-response events.
+    """
+    if not pr_number:
         return
 
-    full_reply = "\n\n".join(emitted_texts).strip()
+    full_reply = (state_reply or "").strip() or "\n\n".join(emitted_texts).strip()
     if not full_reply:
         return
+
+    source = "session_state" if (state_reply or "").strip() else "emitted_texts"
+    logger.debug(
+        "💬 Reply source: %s (trace: %s, %d chars)",
+        source,
+        trace_id[-4:],
+        len(full_reply),
+    )
 
     target_key = f"{repo_full_name}#{pr_number}"
     if _COMMENT_RATE_LIMITER.is_allowed(target_key):
@@ -519,6 +567,7 @@ def execute_agent_event(
 
     emitted_texts: list[str] = []
     final_session = None
+    prior_state: dict[str, Any] = {}
 
     changed_files_list = list(raw.get("changed_files") or [])
     doc_extensions = (
@@ -641,6 +690,14 @@ def execute_agent_event(
                         user_id=user_id,
                         session_id=session_id,
                     )
+
+                # Snapshot the pre-run state so the session's `conversational_reply`
+                # can be trusted as this run's answer only if the run rewrote it.
+                # Without this, a session-scoped stale reply from an earlier
+                # webhook on the same PR could be reposted verbatim.
+                prior_state.clear()
+                if session is not None and session.state:
+                    prior_state.update(session.state)
 
                 # Deduplication check: if a review was submitted < 30s ago, inject notice
                 if session and session.state:
@@ -862,6 +919,7 @@ def execute_agent_event(
                 emitted_texts=emitted_texts,
                 trace_id=trace_id,
                 results=results,
+                state_reply=_fresh_session_reply(final_session, prior_state),
             )
 
     async def _execute_with_workspace() -> None:

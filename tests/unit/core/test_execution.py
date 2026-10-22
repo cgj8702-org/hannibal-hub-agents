@@ -1612,3 +1612,170 @@ def test_finality_helpers_tolerate_mock_doubles() -> None:
 
     assert _has_tool_calls(real_tool_step) is True
     assert _is_final_response_event(real_tool_step) is False
+
+
+def test_post_conversational_reply_prefers_session_state_reply() -> None:
+    """ADK's own final-output capture wins over replayed event text."""
+    from webhook_agent.core.execution import _post_conversational_reply
+
+    mock_gh = MagicMock()
+    mock_issue = mock_gh.get_repo.return_value.get_issue.return_value
+    results: list[ActionResult] = []
+
+    with (
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.is_allowed", return_value=True),
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.record"),
+    ):
+        _post_conversational_reply(
+            gh_client=mock_gh,
+            repo_full_name="owner/repo",
+            pr_number=405,
+            emitted_texts=["Let's inspect the repository.", "Final answer."],
+            trace_id="trace-state",
+            results=results,
+            state_reply="Final answer.",
+        )
+
+    mock_issue.create_comment.assert_called_once_with("Final answer.")
+
+
+def test_post_conversational_reply_falls_back_when_state_reply_blank() -> None:
+    """A blank or missing state reply must not suppress the event-text fallback."""
+    from webhook_agent.core.execution import _post_conversational_reply
+
+    mock_gh = MagicMock()
+    mock_issue = mock_gh.get_repo.return_value.get_issue.return_value
+    results: list[ActionResult] = []
+
+    with (
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.is_allowed", return_value=True),
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.record"),
+    ):
+        _post_conversational_reply(
+            gh_client=mock_gh,
+            repo_full_name="owner/repo",
+            pr_number=405,
+            emitted_texts=["Final answer."],
+            trace_id="trace-fallback",
+            results=results,
+            state_reply="   ",
+        )
+
+    mock_issue.create_comment.assert_called_once_with("Final answer.")
+
+
+def test_fresh_session_reply_ignores_stale_and_non_string_values() -> None:
+    """Only a string reply rewritten by this run counts as fresh."""
+    from types import SimpleNamespace
+
+    from webhook_agent.core.execution import _fresh_session_reply
+
+    stale = "Stale answer from an earlier webhook."
+    fresh = "Fresh answer for this comment."
+
+    # Fresh: state changed during the run.
+    assert (
+        _fresh_session_reply(
+            SimpleNamespace(state={"conversational_reply": fresh}),
+            {"conversational_reply": stale},
+        )
+        == fresh
+    )
+
+    # Stale: identical to the pre-run snapshot.
+    assert (
+        _fresh_session_reply(
+            SimpleNamespace(state={"conversational_reply": stale}),
+            {"conversational_reply": stale},
+        )
+        == ""
+    )
+
+    # Nothing to offer.
+    assert _fresh_session_reply(None, {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state={}), {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state=None), {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state={"conversational_reply": 42}), {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state={"conversational_reply": "   "}), {}) == ""
+
+
+def _issue_comment_event() -> dict[str, Any]:
+    """Build a minimal non-PR issue_comment event payload."""
+    return {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "human_dev"},
+        "raw_payload": {
+            "issue": {"number": 405},
+            "comment": {"body": "Why is the agent doing this?"},
+        },
+    }
+
+
+def _conversational_agent(session_returns: list[Any]) -> MagicMock:
+    """Build a WebhookAgent double whose session reads drain ``session_returns``."""
+    agent = MagicMock()
+    agent.dry_run = False
+    agent._derive_session_id.return_value = "session-405"
+    agent._build_user_message.return_value = genai_types.Content(
+        parts=[genai_types.Part.from_text(text="Issue discussion")]
+    )
+    agent._session_service.get_session = AsyncMock(side_effect=session_returns)
+    agent._session_service.create_session = AsyncMock()
+    agent._session_service.user_state = {}
+    agent._current_model_name = "gemini-3.5-flash-lite"
+    agent._normalize_model_name = lambda name: name
+    return agent
+
+
+def test_execute_agent_event_forwards_fresh_session_reply() -> None:
+    """A reply written during this run reaches the writeback path as state_reply."""
+    from types import SimpleNamespace
+
+    # state.get("deterministic_precompiled_ast") must match to skip the extra append.
+    old_session = SimpleNamespace(
+        state={
+            "deterministic_precompiled_ast": False,
+            "conversational_reply": "Stale answer from an earlier webhook.",
+        }
+    )
+    new_session = SimpleNamespace(
+        state={
+            "deterministic_precompiled_ast": False,
+            "conversational_reply": "Fresh answer for this comment.",
+        }
+    )
+    agent = _conversational_agent([old_session, new_session])
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
+        patch("webhook_agent.core.execution._post_conversational_reply") as mock_post,
+    ):
+        execute_agent_event(agent, _issue_comment_event(), MagicMock(), "trace-state-1")
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["state_reply"] == "Fresh answer for this comment."
+    assert mock_post.call_args.kwargs["emitted_texts"] == []
+
+
+def test_execute_agent_event_suppresses_stale_session_reply() -> None:
+    """An unchanged session reply from an earlier webhook must not be reposted."""
+    from types import SimpleNamespace
+
+    stale = "Stale answer from an earlier webhook."
+    old_session = SimpleNamespace(
+        state={"deterministic_precompiled_ast": False, "conversational_reply": stale}
+    )
+    new_session = SimpleNamespace(
+        state={"deterministic_precompiled_ast": False, "conversational_reply": stale}
+    )
+    agent = _conversational_agent([old_session, new_session])
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
+        patch("webhook_agent.core.execution._post_conversational_reply") as mock_post,
+    ):
+        execute_agent_event(agent, _issue_comment_event(), MagicMock(), "trace-state-2")
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["state_reply"] == ""
