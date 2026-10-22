@@ -655,6 +655,15 @@ def execute_agent_event(
                     user_id=user_id,
                     session_id=session_id,
                 )
+
+                # Snapshot the pre-run state so the session's `conversational_reply`
+                # can be trusted as this run's answer only if the run rewrote it.
+                # Taken on the first read, before any deterministic state append,
+                # so bookkeeping writes can never masquerade as a fresh reply.
+                prior_state.clear()
+                if session is not None and session.state:
+                    prior_state.update(session.state)
+
                 if session is None:
                     await agent._session_service.create_session(
                         app_name=active_app_name,
@@ -690,14 +699,6 @@ def execute_agent_event(
                         user_id=user_id,
                         session_id=session_id,
                     )
-
-                # Snapshot the pre-run state so the session's `conversational_reply`
-                # can be trusted as this run's answer only if the run rewrote it.
-                # Without this, a session-scoped stale reply from an earlier
-                # webhook on the same PR could be reposted verbatim.
-                prior_state.clear()
-                if session is not None and session.state:
-                    prior_state.update(session.state)
 
                 # Deduplication check: if a review was submitted < 30s ago, inject notice
                 if session and session.state:
