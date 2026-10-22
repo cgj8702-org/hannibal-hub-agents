@@ -87,15 +87,35 @@ class ListDirInput(ToolInputBase):
         return data
 
 
+class CreateIssueInput(ToolInputBase):
+    """Input schema for create_issue tool."""
+
+    title: str = Field(description="Issue title.")
+    body: str = Field(description="Markdown issue description and structured task specification.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "title" not in data and "name" in data:
+                data["title"] = data["name"]
+            if "body" not in data and "description" in data:
+                data["body"] = data["description"]
+        return data
+
+
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
     "list_dir": ListDirInput,
     "get_issue": GetIssueInput,
     "review": ReviewInput,
+    "create_issue": CreateIssueInput,
 }
+
 
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
+    "CreateIssueInput",
     "GetIssueInput",
     "ListDirInput",
     "ReadFileInput",

@@ -95,7 +95,7 @@ def test_tool_input_schemas_registry():
     assert "list_dir" in TOOL_INPUT_SCHEMAS
     assert "get_issue" in TOOL_INPUT_SCHEMAS
     assert "review" in TOOL_INPUT_SCHEMAS
-    assert "create_issue" not in TOOL_INPUT_SCHEMAS
+    assert "create_issue" in TOOL_INPUT_SCHEMAS
     assert "get_commit_diff" not in TOOL_INPUT_SCHEMAS
     assert "add_label" not in TOOL_INPUT_SCHEMAS
     assert "update_issue" not in TOOL_INPUT_SCHEMAS
