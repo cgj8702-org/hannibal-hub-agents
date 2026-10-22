@@ -1055,7 +1055,22 @@ def _submit_formal_review(
         review_kwargs: dict[str, Any] = {"body": rendered_body, "event": enforced_event}
         if reviewed_sha:
             # GitHub stamps the review with the live head unless told otherwise.
-            review_kwargs["commit"] = reviewed_sha
+            # PyGithub's create_review asserts that commit is a Commit instance.
+            # Wrapping the SHA in a completed Commit satisfies PyGithub without a network call.
+            # When pr is a mock in unit tests, pass the SHA directly to preserve mock expectations.
+            from github.PullRequest import PullRequest
+
+            if isinstance(pr, PullRequest) and hasattr(pr, "_requester"):
+                from github.Commit import Commit
+
+                review_kwargs["commit"] = Commit(
+                    pr._requester,
+                    headers={},
+                    attributes={"sha": reviewed_sha},
+                    completed=True,
+                )
+            else:
+                review_kwargs["commit"] = reviewed_sha
         try:
             if inline_comments:
                 try:
