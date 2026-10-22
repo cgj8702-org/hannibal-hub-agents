@@ -109,7 +109,9 @@ async def pr_workspace(
             yield None
             return
 
-        async with ephemeral_environment() as env:
+        short_sha = head_sha[:7] if head_sha else "ephemeral"
+        sandbox_prefix = f"hannibal-sandbox-{short_sha}-"
+        async with ephemeral_environment(prefix=sandbox_prefix) as env:
             extraction_ok = False
             file_count = 0
             extracted_bytes = 0
