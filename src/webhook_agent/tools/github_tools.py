@@ -584,6 +584,7 @@ def review(
             event,
             target_key,
             getattr(ctx, "state", None),
+            analyzed_sha=str(state_dict.get("head_sha") or state_dict.get("user:head_sha") or ""),
         )
         if _submitted:
             inv = getattr(ctx, "_invocation_context", None)

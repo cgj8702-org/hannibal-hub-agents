@@ -101,6 +101,10 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
 
         changed_files: list[str] = []
         diff_lines: list[str] = []
+        # Bind the diff snapshot to the head it was taken from. `pr.get_files()`
+        # always reflects the live head, which may be newer than the SHA the
+        # webhook targets; recording it lets the auditor refuse a mixed pair.
+        diff_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
         for f in pr.get_files():
             changed_files.append(f.filename)
             patch = f.patch or "No patch available (binary/renamed/empty)."
@@ -108,15 +112,17 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
 
         if diff_lines:
             raw["changed_files"] = changed_files
+            raw["diff_sha"] = diff_sha
             raw_diff = "\n".join(diff_lines)
             filtered = filter_review_diff(raw_diff)
             raw["pr_diff"] = filtered.filtered_diff or raw_diff
             logger.info(
-                "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d) for review execution",
+                "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d, sha=%s) for review execution",
                 pr_num_int,
                 len(diff_lines),
                 len(filtered.kept_files),
                 filtered.reviewable_lines,
+                (diff_sha or "unknown")[:7],
             )
 
         if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":

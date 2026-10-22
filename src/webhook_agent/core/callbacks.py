@@ -65,7 +65,7 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
     agent_name = getattr(callback_context, "agent_name", None) or getattr(
         getattr(callback_context, "agent", None), "name", "unknown_agent"
     )
-    logger.info("🤖 [SubAgent: %s] Starting sub-agent execution...", agent_name)
+    logger.debug("🤖 [SubAgent: %s] Starting sub-agent execution...", agent_name)
     logger.debug(
         "before_agent_callback: initialized active_tier=%s in state for sub-agent '%s'",
         active_tier,
@@ -221,14 +221,14 @@ async def after_model_callback(
         callback_context.state["total_tokens"] = total_tokens
     if cached_tokens > 0:
         callback_context.state["cached_content_tokens"] = cached_tokens
-        logger.info(
+        logger.debug(
             "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
             cached_tokens,
             callback_context.state.get("active_model", "gemini-3"),
         )
     elif active_cache_name:
         callback_context.state["active_cache_name"] = active_cache_name
-        logger.info(
+        logger.debug(
             "💎 [Gemini Context Cache Reused] Active cache %s attached for model %s",
             active_cache_name,
             callback_context.state.get("active_model", "gemini-3"),
@@ -264,7 +264,7 @@ async def after_model_callback(
                 name = getattr(func_call, "name", "") or ""
                 if name.startswith("github:"):
                     clean_name = name.removeprefix("github:")
-                    logger.info(
+                    logger.debug(
                         "Sanitized hallucinated tool prefix: '%s' -> '%s'",
                         name,
                         clean_name,
@@ -363,7 +363,7 @@ async def before_tool_callback(
     elif isinstance(tools_executed, set):
         tools_executed.add(tool.name)
 
-    logger.info("🔧 [Tool Executing] %s (args=%s)", tool.name, _format_tool_args_for_logging(args))
+    logger.debug("🔧 [Tool Executing] %s (args=%s)", tool.name, _format_tool_args_for_logging(args))
     return None
 
 

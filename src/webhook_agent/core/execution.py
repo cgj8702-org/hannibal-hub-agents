@@ -47,6 +47,77 @@ _MAX_RETRIES = int(
 )
 
 
+def _visible_text_parts(event: Any) -> list[str]:
+    """Return the human-readable text parts of an ADK event, excluding thoughts.
+
+    Args:
+        event: An ADK ``Event`` (or a test double) emitted by ``runner.run_async``.
+
+    Returns:
+        Non-empty text payloads that are not flagged as model thought tokens.
+    """
+    content = getattr(event, "content", None)
+    parts = getattr(content, "parts", None) or []
+    return [
+        part.text
+        for part in parts
+        if getattr(part, "text", None) and not getattr(part, "thought", False)
+    ]
+
+
+def _has_tool_calls(event: Any) -> bool:
+    """Return True when an event carries function calls (a tool-working step).
+
+    The ``hasattr(type(event), ...)`` guard keeps ``unittest.mock.MagicMock``
+    doubles honest: they fabricate any attribute on access, so only a method
+    that genuinely exists on the event's class is trusted.
+    """
+    getter = getattr(event, "get_function_calls", None)
+    if callable(getter) and hasattr(type(event), "get_function_calls"):
+        try:
+            return bool(getter())
+        except Exception:  # pragma: no cover - defensive against malformed events
+            return False
+    parts = getattr(getattr(event, "content", None), "parts", None) or []
+    return any(
+        hasattr(type(part), "function_call") and getattr(part, "function_call", None)
+        for part in parts
+    )
+
+
+def _is_final_response_event(event: Any) -> bool:
+    """Return True only for the model step that produces the user-facing answer.
+
+    ADK emits one event per model step inside a single turn. Any step that ends
+    in a tool call is an intermediate working step: its text is the model
+    narrating what it is about to do ("Let's inspect ...", "Ah, excellent!").
+    ADK flags those events as ``is_final_response() is False``; only the closing
+    text-only step is final. Publishing the intermediate ones concatenates raw
+    chain-of-thought into the GitHub comment.
+
+    Args:
+        event: An ADK ``Event`` (or a test double) emitted by ``runner.run_async``.
+
+    Returns:
+        True when the event's text represents a finished, user-facing answer.
+    """
+    if _has_tool_calls(event):
+        return False
+    # Streaming chunks are never a complete answer. `is True` rather than
+    # truthiness: mock doubles fabricate truthy attributes, while a real
+    # streaming part sets partial=True explicitly.
+    if getattr(event, "partial", False) is True:
+        return False
+    final_check = getattr(event, "is_final_response", None)
+    if final_check is not None and hasattr(type(event), "is_final_response"):
+        try:
+            # Tolerate both the historical method and a property-based helper.
+            return bool(final_check() if callable(final_check) else final_check)
+        except Exception:  # pragma: no cover - defensive against partial events
+            return False
+    return True
+
+
 async def _execute_adk_runner(
     active_runner: Any,
     user_id: str,
@@ -118,30 +189,26 @@ async def _execute_adk_runner(
                             )
                         )
 
-            # Handle text responses — log the agent's reasoning (filtering out thought tokens)
-            if (
-                event.content
-                and event.content.parts
-                and any(
-                    hasattr(p, "text") and p.text and not getattr(p, "thought", False)
-                    for p in event.content.parts
-                )
-            ):
-                for part in event.content.parts:
-                    if getattr(part, "thought", False):
-                        continue
-                    if hasattr(part, "text") and part.text:
-                        emitted_texts.append(part.text)
+            # Handle text responses. Only the final, user-facing answer is written
+            # back to GitHub; intermediate model steps narrate their plan and are
+            # dropped here (see _is_final_response_event).
+            text_parts = _visible_text_parts(event)
+            if text_parts:
+                if _is_final_response_event(event):
+                    emitted_texts.extend(text_parts)
+                    for text in text_parts:
                         logger.debug(
-                            "💭 Agent response received (trace: %s): %s",
-                            trace_id[-4:],
-                            part.text,
-                        )
-                        logger.info(
                             "🧠 Agent response: %s (trace: %s)",
-                            part.text,
+                            text,
                             trace_id[-4:],
                         )
+                else:
+                    logger.debug(
+                        "💭 Dropped intermediate narration from an unfinished model step "
+                        "(trace: %s): %s",
+                        trace_id[-4:],
+                        " ".join(text_parts)[:500],
+                    )
 
     try:
         await _run_single_turn(user_message)
@@ -241,6 +308,7 @@ def _submit_deterministic_review(
                 "COMMENT",
                 f"{repo_full_name}#{pr_number}",
                 {"review_mode": ("sync" if canonical == "pull_request.synchronize" else "initial")},
+                analyzed_sha=head_sha,
             )
             results.append(
                 ActionResult(
@@ -249,7 +317,12 @@ def _submit_deterministic_review(
                     detail=detail,
                 )
             )
-            logger.info("Deterministic review result for PR #%d: %s", pr_number, detail)
+            logger.info(
+                "Deterministic review result [repo=%s, item_id=%s, result=%s]",
+                repo_full_name,
+                pr_number,
+                detail,
+            )
             if submitted and head_sha:
                 review_checkpoint_manager.mark_completed(repo_full_name, pr_number, head_sha)
             elif not submitted:
@@ -277,6 +350,40 @@ def _submit_deterministic_review(
         )
 
 
+_CONVERSATIONAL_REPLY_STATE_KEY = "conversational_reply"
+
+
+def _fresh_session_reply(final_session: Any, prior_state: dict[str, Any]) -> str:
+    """Return the reply this run wrote to session state, or "" when there is none.
+
+    ADK's ``output_key`` capture (``conversational_reply``) is an authoritative
+    final answer: ``LlmAgent`` writes it only for events that satisfy
+    ``is_final_response()`` and carry non-thought text, which is exactly the
+    gate this runner applies when collecting emitted text. Reading it back is an
+    independent second layer, mirroring the precedence the audit path already
+    uses for ``code_review_analysis``.
+
+    Comparing against the pre-run snapshot matters: session state is scoped to
+    the PR thread, so a reply written by an earlier webhook would otherwise be
+    reposted when the current run produced no answer of its own.
+
+    Args:
+        final_session: Session object fetched after the run, or None.
+        prior_state: Session state captured immediately before the run.
+
+    Returns:
+        The fresh reply text, or "" if state holds no new answer.
+    """
+    if not final_session or not getattr(final_session, "state", None):
+        return ""
+    candidate = final_session.state.get(_CONVERSATIONAL_REPLY_STATE_KEY)
+    if not isinstance(candidate, str) or not candidate.strip():
+        return ""
+    if candidate == prior_state.get(_CONVERSATIONAL_REPLY_STATE_KEY):
+        return ""
+    return candidate
+
+
 def _post_conversational_reply(
     gh_client: Github,
     repo_full_name: str,
@@ -284,14 +391,28 @@ def _post_conversational_reply(
     emitted_texts: list[str],
     trace_id: str,
     results: list[ActionResult],
+    *,
+    state_reply: str | None = None,
 ) -> None:
-    """Post conversational reply comment to issue or PR thread."""
-    if not emitted_texts or not pr_number:
+    """Post conversational reply comment to issue or PR thread.
+
+    Prefers the session-state reply (ADK's own final-output capture) and falls
+    back to text collected from final-response events.
+    """
+    if not pr_number:
         return
 
-    full_reply = "\n\n".join(emitted_texts).strip()
+    full_reply = (state_reply or "").strip() or "\n\n".join(emitted_texts).strip()
     if not full_reply:
         return
+
+    source = "session_state" if (state_reply or "").strip() else "emitted_texts"
+    logger.debug(
+        "💬 Reply source: %s (trace: %s, %d chars)",
+        source,
+        trace_id[-4:],
+        len(full_reply),
+    )
 
     target_key = f"{repo_full_name}#{pr_number}"
     if _COMMENT_RATE_LIMITER.is_allowed(target_key):
@@ -308,7 +429,7 @@ def _post_conversational_reply(
                 )
             )
             logger.info(
-                "💬 Posted conversational comment to %s#%d (trace: %s)",
+                "💬 Posted conversational comment [repo=%s, item_id=%s, trace_id=%s]",
                 repo_full_name,
                 pr_number,
                 trace_id[-4:],
@@ -398,6 +519,31 @@ def execute_agent_event(
 
     results: list[ActionResult] = []
 
+    # Snapshot guard: the prefetched diff reflects the live PR head, which may have
+    # moved past the commit this event targets. Auditing a mixed pair (diff from
+    # SHA B against a tree at SHA A) produces reviews about code nobody merged in
+    # that shape, so defer and let the newer commit's own event run.
+    diff_sha = str(raw.get("diff_sha") or "")
+    if policy.mode == Mode.FORMAL_AUDIT and diff_sha and head_sha and diff_sha != head_sha:
+        logger.warning(
+            "⏭️ Deferring formal audit for %s#%s: diff snapshot %s does not match event head %s",
+            repo_full_name,
+            pr_number,
+            diff_sha[:7],
+            head_sha[:7],
+        )
+        results.append(
+            ActionResult(
+                tool="plan",
+                success=False,
+                detail=(
+                    f"Deferred: prefetched diff is for {diff_sha[:7]} but the event targets "
+                    f"{head_sha[:7]}; the newer commit will be reviewed on its own run."
+                ),
+            )
+        )
+        return results
+
     # Checkpoint gate: skip if commit has already been reviewed, or pause if rate-limited backoff active
     if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
         checkpoint = review_checkpoint_manager.get_checkpoint(repo_full_name, pr_number, head_sha)
@@ -463,6 +609,7 @@ def execute_agent_event(
 
     emitted_texts: list[str] = []
     final_session = None
+    prior_state: dict[str, Any] = {}
 
     changed_files_list = list(raw.get("changed_files") or [])
     doc_extensions = (
@@ -550,6 +697,15 @@ def execute_agent_event(
                     user_id=user_id,
                     session_id=session_id,
                 )
+
+                # Snapshot the pre-run state so the session's `conversational_reply`
+                # can be trusted as this run's answer only if the run rewrote it.
+                # Taken on the first read, before any deterministic state append,
+                # so bookkeeping writes can never masquerade as a fresh reply.
+                prior_state.clear()
+                if session is not None and session.state:
+                    prior_state.update(session.state)
+
                 if session is None:
                     await agent._session_service.create_session(
                         app_name=active_app_name,
@@ -562,7 +718,7 @@ def execute_agent_event(
                         user_id=user_id,
                         session_id=session_id,
                     )
-                    logger.info(
+                    logger.debug(
                         "Created new ADK session %s for user %s",
                         session_id,
                         user_id,
@@ -621,6 +777,9 @@ def execute_agent_event(
                     "sync" if canonical == "pull_request.synchronize" else "initial"
                 )
                 user_state_map["formal_review_eligible"] = policy.mode == Mode.FORMAL_AUDIT
+                # Pin the analysed commit so writeback cannot stamp a review onto
+                # a commit that landed while the audit was running.
+                user_state_map["head_sha"] = head_sha
 
                 if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")
@@ -632,6 +791,7 @@ def execute_agent_event(
                         canonical=canonical,
                         precompiled_dossier=base_prompt_text,
                         pr_diff=str(raw.get("pr_diff") or ""),
+                        diff_sha=str(raw.get("diff_sha") or ""),
                         changed_files=changed_files_list,
                         status="pending",
                         delivery_id=delivery_id,
@@ -806,6 +966,7 @@ def execute_agent_event(
                 emitted_texts=emitted_texts,
                 trace_id=trace_id,
                 results=results,
+                state_reply=_fresh_session_reply(final_session, prior_state),
             )
 
     async def _execute_with_workspace() -> None:
@@ -889,7 +1050,9 @@ def execute_agent_event(
 
     if not results:
         logger.info(
-            "🏁 Agent completed with no actions (trace: %s)",
+            "🏁 Agent completed with no actions [repo=%s, item_id=%s, trace_id=%s]",
+            repo_full_name,
+            pr_number,
             trace_id[-4:],
         )
 

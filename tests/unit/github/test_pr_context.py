@@ -46,6 +46,7 @@ def test_prefetch_pr_diff_populates_payload() -> None:
 
     mock_pr.state = "open"
     mock_pr.merged = False
+    mock_pr.head.sha = "f" * 40
     mock_pr.get_files.return_value = [mock_file]
     mock_repo.get_pull.return_value = mock_pr
     mock_gh.get_repo.return_value = mock_repo
@@ -63,6 +64,9 @@ def test_prefetch_pr_diff_populates_payload() -> None:
     assert "pr_diff" in raw
     assert "src/main.py" in raw["pr_diff"]
     assert raw["changed_files"] == ["src/main.py"]
+    # The diff snapshot must record the head it was taken from, so the auditor can
+    # refuse to pair it with a mismatched event SHA.
+    assert raw["diff_sha"] == "f" * 40
 
 
 def test_prefetch_inline_comment_context() -> None:

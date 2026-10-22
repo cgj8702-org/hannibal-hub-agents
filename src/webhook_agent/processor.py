@@ -165,6 +165,39 @@ def generate_trace_id() -> str:
     return uuid.uuid4().hex
 
 
+def _extract_log_context(payload: dict[str, Any]) -> dict[str, str]:
+    """Extract standardized structured context fields for logging."""
+    raw = payload.get("raw_payload") or {}
+    raw_repo = payload.get("repository")
+    if not isinstance(raw_repo, dict) and isinstance(raw, dict):
+        raw_repo = raw.get("repository")
+    repo = raw_repo.get("full_name", "unknown") if isinstance(raw_repo, dict) else "unknown"
+
+    event = str(payload.get("canonical") or payload.get("event_name") or "unknown")
+
+    pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+    item_id = (
+        pr_data.get("number")
+        if isinstance(pr_data, dict)
+        else (raw.get("issue") or {}).get("number")
+    )
+    if item_id is None and isinstance(raw.get("issue"), dict):
+        item_id = raw["issue"].get("number")
+    item_str = str(item_id) if item_id is not None else "N/A"
+
+    from webhook_agent.models.rate_limiter import _resolve_tier
+
+    tier = _resolve_tier()
+
+    return {
+        "repo": repo,
+        "event": event,
+        "tier": tier,
+        "item_id": item_str,
+        "delivery_id": str(payload.get("delivery_id", "unknown")),
+    }
+
+
 class AgentCore:
     """Entry point for webhook event processing and LLM agent lifecycle.
 
@@ -202,7 +235,7 @@ class AgentCore:
             repo_full_name,
         )
 
-        core_logger.info(
+        core_logger.debug(
             "🧠 Processing event via ADK agent (trace: %s, repo: %s)",
             trace_id[-4:],
             repo_full_name,
@@ -598,13 +631,19 @@ class WebhookProcessor:
         and delegates execution to AgentCore.
         """
         event_key = self.route_event(payload)
+        ctx = _extract_log_context(payload)
         if event_key == "unknown":
             logger.debug(
                 "Unknown event (event_name=%s, delivery_id=%s)",
                 payload.get("event_name"),
                 payload.get("delivery_id"),
             )
-        logger.debug("Processing event: %s", event_key)
+        logger.debug(
+            "Processing event: %s [repo=%s, delivery_id=%s]",
+            event_key,
+            ctx["repo"],
+            ctx["delivery_id"],
+        )
         if not self.should_process_event(payload):
             return
 
@@ -616,7 +655,14 @@ class WebhookProcessor:
                 oldest_delivery_id = next(iter(self._processed_deliveries))
                 del self._processed_deliveries[oldest_delivery_id]
 
-        logger.info("Event processed: %s", event_key)
+        logger.info(
+            "🚀 Webhook processing started [repo=%s, event=%s, tier=%s, item_id=%s, delivery_id=%s]",
+            ctx["repo"],
+            event_key,
+            ctx["tier"],
+            ctx["item_id"],
+            ctx["delivery_id"],
+        )
 
         # Set canonical event name in payload for AgentCore and WebhookAgent
         payload["canonical"] = event_key
@@ -652,7 +698,7 @@ class WebhookProcessor:
             logger.warning("No repository found in event payload")
             return
 
-        logger.info("Agent starting execution for repo %s", repo_name)
+        ctx = _extract_log_context(payload)
 
         dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
         if handle_jules_pr_opened(gh, repo_name, payload, dry_run=dry_run):
@@ -811,6 +857,8 @@ class WebhookProcessor:
                 payload["resumed_checkpoint"] = resumed_checkpoint
                 if not raw.get("pr_diff") and resumed_checkpoint.get("pr_diff"):
                     raw["pr_diff"] = resumed_checkpoint["pr_diff"]
+                if not raw.get("diff_sha") and resumed_checkpoint.get("diff_sha"):
+                    raw["diff_sha"] = resumed_checkpoint["diff_sha"]
                 if not payload.get("precompiled_dossier") and resumed_checkpoint.get(
                     "precompiled_dossier"
                 ):
@@ -903,13 +951,26 @@ class WebhookProcessor:
                 tool_name = getattr(r, "tool", "")
                 tool_label = f" (tool: {tool_name})" if tool_name else ""
                 logger.info(
-                    "Agent action [%s]%s: %s",
+                    "Agent action [%s]%s: %s [repo=%s, item_id=%s]",
                     status_symbol,
                     tool_label,
                     truncate_log_payload(msg, 300),
+                    ctx["repo"],
+                    ctx["item_id"],
                 )
+            logger.info(
+                "✅ Webhook processing completed [repo=%s, event=%s, tier=%s, item_id=%s, actions=%d]",
+                ctx["repo"],
+                ctx["event"],
+                ctx["tier"],
+                ctx["item_id"],
+                len(results),
+            )
         else:
             logger.info(
-                "Agent completed execution with no actions taken for repo %s",
-                repo_name,
+                "✅ Webhook processing completed with no actions taken [repo=%s, event=%s, tier=%s, item_id=%s]",
+                ctx["repo"],
+                ctx["event"],
+                ctx["tier"],
+                ctx["item_id"],
             )
