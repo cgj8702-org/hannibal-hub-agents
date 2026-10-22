@@ -28,11 +28,11 @@ def _execution_like_file() -> str:
     return "\n".join(lines)
 
 
-def _loader(content: str | None = None) -> Callable[[str], str | None]:
+def _loader(content: str | None = None, path: str = PATH) -> Callable[[str], str | None]:
     payload = _execution_like_file() if content is None else content
 
-    def load(path: str) -> str | None:
-        return payload if path == PATH else None
+    def load(requested: str) -> str | None:
+        return payload if requested == path else None
 
     return load
 
@@ -105,7 +105,7 @@ def test_ambiguous_occurrences_outside_drift_are_left_alone() -> None:
     lines[189] = "    if cache_hit: return None"
     body = "- [x] src/app.py:120: 'if cache_hit: return None'"
 
-    repaired, repairs = repair_line_citations(body, _loader("\n".join(lines)))
+    repaired, repairs = repair_line_citations(body, _loader("\n".join(lines), path="src/app.py"))
 
     assert repairs == []
     assert repaired == body
@@ -117,7 +117,7 @@ def test_single_distant_occurrence_is_still_repaired() -> None:
     lines[179] = "    if cache_hit: return None"
     body = "- [x] src/app.py:20: 'if cache_hit: return None'"
 
-    _, repairs = repair_line_citations(body, _loader("\n".join(lines)))
+    _, repairs = repair_line_citations(body, _loader("\n".join(lines), path="src/app.py"))
 
     assert [(r.original_line, r.repaired_line) for r in repairs] == [(20, 180)]
 
