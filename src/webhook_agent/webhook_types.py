@@ -9,6 +9,7 @@ types only.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -18,6 +19,7 @@ class ActionResult:
     tool: str
     success: bool
     detail: str
+    action_result: Any = None
 
 
 # Backwards-compat import name for a transitional period when other
