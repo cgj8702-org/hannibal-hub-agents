@@ -22,6 +22,14 @@ def test_read_file_input():
     assert inp.file_path == "src/main.py"
     assert inp.ref == "feat-branch"
 
+    # start_line and max_lines accepted
+    inp2 = ReadFileInput.model_validate(
+        {"file_path": "src/main.py", "start_line": 42, "max_lines": 10}
+    )
+    assert inp2.file_path == "src/main.py"
+    assert inp2.start_line == 42
+    assert inp2.max_lines == 10
+
     # Missing file_path
     with pytest.raises(ValidationError):
         ReadFileInput.model_validate({})
@@ -29,6 +37,31 @@ def test_read_file_input():
     # Empty file_path
     with pytest.raises(ValidationError):
         ReadFileInput.model_validate({"file_path": ""})
+
+    # Negative start_line rejected
+    with pytest.raises(ValidationError):
+        ReadFileInput.model_validate({"file_path": "src/main.py", "start_line": 0})
+
+    # Negative max_lines rejected
+    with pytest.raises(ValidationError):
+        ReadFileInput.model_validate({"file_path": "src/main.py", "max_lines": -1})
+
+    # Aliases coerced
+    inp3 = ReadFileInput.model_validate({"file_path": "src/main.py", "start": "5", "limit": "20"})
+    assert inp3.start_line == 5
+    assert inp3.max_lines == 20
+
+    # startLine / maxLines aliases
+    inp4 = ReadFileInput.model_validate(
+        {"file_path": "src/main.py", "startLine": 100, "maxLines": 3}
+    )
+    assert inp4.start_line == 100
+    assert inp4.max_lines == 3
+
+    # from_line / lines aliases
+    inp5 = ReadFileInput.model_validate({"file_path": "src/main.py", "from_line": 7, "lines": 50})
+    assert inp5.start_line == 7
+    assert inp5.max_lines == 50
 
 
 def test_list_dir_input():
