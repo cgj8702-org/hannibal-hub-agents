@@ -86,11 +86,12 @@ def test_sync_review_drops_placeholder_resolutions_without_grounding() -> None:
 
     sync_obj = SyncReviewResponse.model_validate(data)
     assert sync_obj.resolutions == []
-    # No zombie rows rendered
+    # No zombie rows rendered — Resolution Tracker section omitted entirely when empty
     md = sync_obj.to_markdown(verdict="APPROVE")
     assert "Review finding resolution" not in md
     assert "Verified in commit diff." not in md
-    assert "No prior review items tracked." in md
+    assert "No prior review items tracked." not in md
+    assert "Resolution Tracker" not in md
 
 
 def test_sync_review_drops_string_only_resolutions() -> None:
@@ -158,3 +159,53 @@ def test_sync_review_preserves_resolutions_from_approved_review_with_suggestions
     assert "✅" in rendered_body
     assert "RESOLVED" in rendered_body
     assert "No prior review items tracked" not in rendered_body
+
+
+def test_sync_review_empty_resolutions_omits_resolution_tracker_section() -> None:
+    """When resolutions is empty, the Resolution Tracker section must be omitted entirely."""
+    data = {
+        "summary": "Clean incremental update, no prior items to resolve.",
+        "resolutions": [],
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    sync_obj = SyncReviewResponse.model_validate(data)
+    md = sync_obj.to_markdown(verdict="APPROVE")
+    # Resolution Tracker section must not appear at all
+    assert "Resolution Tracker" not in md
+    assert "No prior review items tracked" not in md
+    # Scorecard should start at section 2 (not 3)
+    assert "### 2. Audit Dimension Scorecard" in md
+    assert "### 1. Synchronization Summary" in md
+
+
+def test_sync_review_with_resolutions_renders_resolution_tracker() -> None:
+    """When resolutions exist, the Resolution Tracker section must appear with correct numbering."""
+    data = {
+        "summary": "Addressed prior findings.",
+        "resolutions": [
+            {
+                "item_description": "Fix null check in handler",
+                "status": "RESOLVED",
+                "evidence": "Added None guard at handler.py:42.",
+                "category": "CRITICAL",
+            }
+        ],
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    sync_obj = SyncReviewResponse.model_validate(data)
+    md = sync_obj.to_markdown(verdict="APPROVE")
+    # Resolution Tracker section must appear at section 2
+    assert "### 2. Resolution Tracker" in md
+    assert "Fix null check in handler" in md
+    assert "✅" in md
+    assert "RESOLVED" in md
+    # Scorecard should be section 3
+    assert "### 3. Audit Dimension Scorecard" in md
