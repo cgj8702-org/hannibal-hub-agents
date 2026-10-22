@@ -811,6 +811,8 @@ class WebhookProcessor:
                 payload["resumed_checkpoint"] = resumed_checkpoint
                 if not raw.get("pr_diff") and resumed_checkpoint.get("pr_diff"):
                     raw["pr_diff"] = resumed_checkpoint["pr_diff"]
+                if not raw.get("diff_sha") and resumed_checkpoint.get("diff_sha"):
+                    raw["diff_sha"] = resumed_checkpoint["diff_sha"]
                 if not payload.get("precompiled_dossier") and resumed_checkpoint.get(
                     "precompiled_dossier"
                 ):

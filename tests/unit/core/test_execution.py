@@ -1468,3 +1468,43 @@ def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
     ):
         execute_agent_event(mock_agent, event_data, mock_gh, "trace-pure-issue-1")
         mock_pr_ws.assert_not_called()
+
+
+def test_execute_agent_event_defers_formal_audit_when_diff_snapshot_is_stale() -> None:
+    """A diff captured at a newer head than the event must not be audited.
+
+    `pr.get_files()` always reflects the live head, so a push landing between
+    prefetch and execution yields a diff from one commit and a workspace from
+    another. Auditing that pair would describe code that never existed.
+    """
+    mock_agent = MagicMock()
+    mock_agent.dry_run = False
+    mock_agent._derive_session_id.return_value = "session-415"
+    mock_agent._build_user_message.return_value = genai_types.Content(
+        parts=[genai_types.Part.from_text(text="Review this PR")]
+    )
+
+    event_data = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "human_dev"},
+        "raw_payload": {
+            "pull_request": {"number": 415, "head": {"sha": "a" * 40}},
+            "pr_diff": "diff --git a/x.py b/x.py",
+            "diff_sha": "b" * 40,
+        },
+    }
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock) as runner,
+        patch("webhook_agent.core.execution.pr_workspace") as workspace,
+    ):
+        results = execute_agent_event(mock_agent, event_data, MagicMock(), "trace-stale")
+
+    runner.assert_not_called()
+    workspace.assert_not_called()
+    assert len(results) == 1
+    assert results[0].success is False
+    assert "Deferred" in results[0].detail
+    assert "aaaaaaaa" in results[0].detail  # event head
+    assert "bbbbbbbb" in results[0].detail  # diff snapshot

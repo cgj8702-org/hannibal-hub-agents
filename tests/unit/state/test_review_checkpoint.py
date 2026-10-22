@@ -355,6 +355,30 @@ def test_list_resumable_local_and_firestore():
     assert payload["resumed_checkpoint"] == ready[0]
 
 
+def test_checkpoint_round_trips_diff_sha_through_resume():
+    """A resumed review must replay the diff *and* the SHA it was captured at."""
+    from webhook_agent.state.review_checkpoint import build_resume_payload
+
+    mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)
+    mgr.save_checkpoint(
+        repo="owner/repo",
+        pr_number=7,
+        head_sha="sha7",
+        canonical="pull_request.opened",
+        pr_diff="diff --git a/foo.py b/foo.py",
+        diff_sha="sha7",
+    )
+
+    checkpoint = mgr.get_checkpoint("owner/repo", 7, "sha7")
+    assert checkpoint is not None
+    assert checkpoint["diff_sha"] == "sha7"
+
+    payload = build_resume_payload(checkpoint)
+    assert payload["raw_payload"]["diff_sha"] == "sha7"
+    assert payload["raw_payload"]["pull_request"]["head"]["sha"] == "sha7"
+    assert payload["raw_payload"]["pr_diff"] == "diff --git a/foo.py b/foo.py"
+
+
 def test_list_resumable_firestore_query():
     """Verify list_resumable streams and filters from mocked Firestore."""
     mgr = ReviewCheckpointManager(collection_name="test_checkpoints", sliding_ttl_days=14)

@@ -950,10 +950,42 @@ def _submit_formal_review(
     event: str,
     target_key: str,
     state: Any = None,
+    *,
+    analyzed_sha: str = "",
 ) -> tuple[str, bool]:
-    """Submit one guarded review, shared by the tool and deterministic fallback."""
+    """Submit one guarded review, shared by the tool and deterministic fallback.
+
+    Args:
+        pr: PyGithub pull request object.
+        body: Review payload (schema JSON rendered to markdown by the enforcer).
+        event: Requested review event (APPROVE / COMMENT / REQUEST_CHANGES).
+        target_key: ``owner/repo#number`` key used for locking and claims.
+        state: Optional ADK state or dict carrying ``review_mode``.
+        analyzed_sha: Commit the caller actually analysed. When the live head has
+            moved past it, the review is deferred rather than stamped onto a
+            commit it never saw.
+
+    Returns:
+        ``(status_message, submitted)``.
+    """
     with _review_lock(target_key):
-        head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        live_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        requested_sha = analyzed_sha.strip()
+        reviewed_sha = requested_sha or live_sha
+
+        if requested_sha and live_sha and requested_sha != live_sha:
+            logger.warning(
+                "Deferring review for %s: head moved from %s to %s during the audit",
+                target_key,
+                requested_sha[:7],
+                live_sha[:7],
+            )
+            return (
+                f"Deferred: PR head moved to {live_sha[:7]} during the audit "
+                f"(analysed {requested_sha[:7]}); the new commit will be reviewed on its own run.",
+                False,
+            )
+
         from webhook_agent.github.bot_identity import is_hannibal_bot_login
 
         reviews = list(pr.get_reviews())
@@ -963,23 +995,23 @@ def _submit_formal_review(
             if is_hannibal_bot_login(login):
                 bot_reviews.append(rv)
 
-        if head_sha and any(
-            str(getattr(rv, "commit_id", "") or "") == head_sha for rv in bot_reviews
+        if reviewed_sha and any(
+            str(getattr(rv, "commit_id", "") or "") == reviewed_sha for rv in bot_reviews
         ):
-            logger.info("Skipping duplicate bot review for %s at head %s", target_key, head_sha)
-            return f"Skipped: bot review already exists for current head {head_sha}.", False
+            logger.info("Skipping duplicate bot review for %s at head %s", target_key, reviewed_sha)
+            return f"Skipped: bot review already exists for head {reviewed_sha}.", False
 
         claim = None
-        if head_sha:
+        if reviewed_sha:
             repo_name, _, number_text = target_key.rpartition("#")
             claim = review_claim_registry.claim(
                 repo_name,
                 int(number_text),
-                head_sha,
+                reviewed_sha,
                 github_review_exists=False,
             )
             if claim is None:
-                return f"Skipped: review claim already exists for current head {head_sha}.", False
+                return f"Skipped: review claim already exists for head {reviewed_sha}.", False
 
         state_dict = (
             state.to_dict()
@@ -1003,23 +1035,31 @@ def _submit_formal_review(
             )
             return f"Failed: {parse_err}", False
 
+        # Record the analysed commit in the review metadata so the body is
+        # self-describing even after the PR moves on.
+        if reviewed_sha:
+            from webhook_agent.review.metadata import stamp_review_metadata
+
+            rendered_body = stamp_review_metadata(rendered_body, sha=reviewed_sha)
+
+        review_kwargs: dict[str, Any] = {"body": rendered_body, "event": enforced_event}
+        if reviewed_sha:
+            # GitHub stamps the review with the live head unless told otherwise.
+            review_kwargs["commit"] = reviewed_sha
+
         try:
             if inline_comments:
                 try:
-                    rv = pr.create_review(
-                        body=rendered_body,
-                        event=enforced_event,
-                        comments=inline_comments,
-                    )
+                    rv = pr.create_review(comments=inline_comments, **review_kwargs)
                 except Exception as review_err:
                     logger.warning(
                         "pr.create_review with %d inline comments failed (%s); falling back to body-only review",
                         len(inline_comments),
                         review_err,
                     )
-                    rv = pr.create_review(body=rendered_body, event=enforced_event)
+                    rv = pr.create_review(**review_kwargs)
             else:
-                rv = pr.create_review(body=rendered_body, event=enforced_event)
+                rv = pr.create_review(**review_kwargs)
         except Exception:
             if claim is not None:
                 review_claim_registry.release(claim)
