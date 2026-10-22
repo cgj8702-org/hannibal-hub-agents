@@ -47,6 +47,77 @@ _MAX_RETRIES = int(
 )
 
 
+def _visible_text_parts(event: Any) -> list[str]:
+    """Return the human-readable text parts of an ADK event, excluding thoughts.
+
+    Args:
+        event: An ADK ``Event`` (or a test double) emitted by ``runner.run_async``.
+
+    Returns:
+        Non-empty text payloads that are not flagged as model thought tokens.
+    """
+    content = getattr(event, "content", None)
+    parts = getattr(content, "parts", None) or []
+    return [
+        part.text
+        for part in parts
+        if getattr(part, "text", None) and not getattr(part, "thought", False)
+    ]
+
+
+def _has_tool_calls(event: Any) -> bool:
+    """Return True when an event carries function calls (a tool-working step).
+
+    The ``hasattr(type(event), ...)`` guard keeps ``unittest.mock.MagicMock``
+    doubles honest: they fabricate any attribute on access, so only a method
+    that genuinely exists on the event's class is trusted.
+    """
+    getter = getattr(event, "get_function_calls", None)
+    if callable(getter) and hasattr(type(event), "get_function_calls"):
+        try:
+            return bool(getter())
+        except Exception:  # pragma: no cover - defensive against malformed events
+            return False
+    parts = getattr(getattr(event, "content", None), "parts", None) or []
+    return any(
+        hasattr(type(part), "function_call") and getattr(part, "function_call", None)
+        for part in parts
+    )
+
+
+def _is_final_response_event(event: Any) -> bool:
+    """Return True only for the model step that produces the user-facing answer.
+
+    ADK emits one event per model step inside a single turn. Any step that ends
+    in a tool call is an intermediate working step: its text is the model
+    narrating what it is about to do ("Let's inspect ...", "Ah, excellent!").
+    ADK flags those events as ``is_final_response() is False``; only the closing
+    text-only step is final. Publishing the intermediate ones concatenates raw
+    chain-of-thought into the GitHub comment.
+
+    Args:
+        event: An ADK ``Event`` (or a test double) emitted by ``runner.run_async``.
+
+    Returns:
+        True when the event's text represents a finished, user-facing answer.
+    """
+    if _has_tool_calls(event):
+        return False
+    # Streaming chunks are never a complete answer. `is True` rather than
+    # truthiness: mock doubles fabricate truthy attributes, while a real
+    # streaming part sets partial=True explicitly.
+    if getattr(event, "partial", False) is True:
+        return False
+    final_check = getattr(event, "is_final_response", None)
+    if final_check is not None and hasattr(type(event), "is_final_response"):
+        try:
+            # Tolerate both the historical method and a property-based helper.
+            return bool(final_check() if callable(final_check) else final_check)
+        except Exception:  # pragma: no cover - defensive against partial events
+            return False
+    return True
+
+
 async def _execute_adk_runner(
     active_runner: Any,
     user_id: str,
@@ -107,30 +178,26 @@ async def _execute_adk_runner(
                             )
                         )
 
-            # Handle text responses — log the agent's reasoning (filtering out thought tokens)
-            if (
-                event.content
-                and event.content.parts
-                and any(
-                    hasattr(p, "text") and p.text and not getattr(p, "thought", False)
-                    for p in event.content.parts
-                )
-            ):
-                for part in event.content.parts:
-                    if getattr(part, "thought", False):
-                        continue
-                    if hasattr(part, "text") and part.text:
-                        emitted_texts.append(part.text)
-                        logger.debug(
-                            "💭 Agent response received (trace: %s): %s",
-                            trace_id[-4:],
-                            part.text,
-                        )
+            # Handle text responses. Only the final, user-facing answer is written
+            # back to GitHub; intermediate model steps narrate their plan and are
+            # dropped here (see _is_final_response_event).
+            text_parts = _visible_text_parts(event)
+            if text_parts:
+                if _is_final_response_event(event):
+                    emitted_texts.extend(text_parts)
+                    for text in text_parts:
                         logger.info(
                             "🧠 Agent response: %s (trace: %s)",
-                            part.text,
+                            text,
                             trace_id[-4:],
                         )
+                else:
+                    logger.debug(
+                        "💭 Dropped intermediate narration from an unfinished model step "
+                        "(trace: %s): %s",
+                        trace_id[-4:],
+                        " ".join(text_parts)[:500],
+                    )
 
     try:
         await _run_single_turn(user_message)
