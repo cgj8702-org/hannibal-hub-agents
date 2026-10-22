@@ -1468,3 +1468,326 @@ def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
     ):
         execute_agent_event(mock_agent, event_data, mock_gh, "trace-pure-issue-1")
         mock_pr_ws.assert_not_called()
+
+
+class _StubEvent:
+    """ADK-shaped event double with real finality semantics (no MagicMock faking)."""
+
+    usage_metadata = None
+
+    def __init__(
+        self,
+        parts: list[genai_types.Part] | None = None,
+        calls: list[genai_types.FunctionCall] | None = None,
+    ) -> None:
+        self.content = genai_types.Content(role="model", parts=parts) if parts is not None else None
+        self._calls = list(calls or [])
+
+    def get_function_calls(self) -> list[genai_types.FunctionCall]:
+        return self._calls
+
+    def get_function_responses(self) -> list[Any]:
+        return []
+
+    def is_final_response(self) -> bool:
+        return not self._calls and self.content is not None
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_posts_only_final_answer_not_narration() -> None:
+    """Only the closing text-only model step may reach emitted_texts (#405).
+
+    Live failure: the reply on issue #405 concatenated 14 blocks of working
+    narration ("Let's use `search_files` ...", "Ah, excellent! The files are ...")
+    ahead of the actual answer, because every non-thought text part of every
+    model step in the tool loop was appended to emitted_texts. Tool-working
+    steps end in a function call and are not final responses, so their text must
+    be discarded.
+    """
+    search_call = genai_types.FunctionCall(name="search_files", args={"query": "logger"})
+    read_call = genai_types.FunctionCall(name="read_file", args={"path": "worker.py"})
+
+    narration_one = _StubEvent(
+        parts=[
+            genai_types.Part(text="Hello! Let's first inspect the repository files."),
+            genai_types.Part(function_call=search_call),
+        ],
+        calls=[search_call],
+    )
+    tool_result = _StubEvent(
+        parts=[
+            genai_types.Part(
+                function_response=genai_types.FunctionResponse(
+                    name="search_files", response={"result": "matched 3 lines"}
+                )
+            )
+        ]
+    )
+    narration_two = _StubEvent(
+        parts=[
+            genai_types.Part(text="Ah, excellent! The files are under src/webhook_agent/core/."),
+            genai_types.Part(function_call=read_call),
+        ],
+        calls=[read_call],
+    )
+    final_answer = _StubEvent(parts=[genai_types.Part(text="Here is the finished answer.")])
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            for event in (narration_one, tool_result, narration_two, final_answer):
+                yield event
+
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+
+    await _execute_adk_runner(
+        active_runner=MockRunner(),
+        user_id="user1",
+        session_id="sess-405",
+        user_message=genai_types.Content(
+            parts=[genai_types.Part.from_text(text="Help me with issue #405")]
+        ),
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-405",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=False,
+    )
+
+    assert emitted_texts == ["Here is the finished answer."]
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_never_collects_thought_parts() -> None:
+    """Thought-flagged parts stay out of emitted_texts even on the final step."""
+    thought_and_answer = _StubEvent(
+        parts=[
+            genai_types.Part(text="Internal deliberation about the issue.", thought=True),
+            genai_types.Part(text="Final answer only."),
+        ]
+    )
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            yield thought_and_answer
+
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+
+    await _execute_adk_runner(
+        active_runner=MockRunner(),
+        user_id="user1",
+        session_id="sess-thought",
+        user_message=genai_types.Content(parts=[genai_types.Part.from_text(text="Hello")]),
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-tht",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=False,
+    )
+
+    assert emitted_texts == ["Final answer only."]
+
+
+def test_finality_helpers_tolerate_mock_doubles() -> None:
+    """MagicMock fabricates attributes, so only real class methods are trusted.
+
+    Legacy unit tests build event doubles as ``MagicMock`` objects; they must
+    still be treated as final text events rather than dropped as tool steps.
+    """
+    from webhook_agent.core.execution import _has_tool_calls, _is_final_response_event
+
+    fabricated = MagicMock(
+        usage_metadata=None,
+        content=MagicMock(parts=[MagicMock(text="Docs review", thought=False)]),
+    )
+
+    assert _has_tool_calls(fabricated) is False
+    assert _is_final_response_event(fabricated) is True
+
+    real_tool_step = _StubEvent(
+        parts=[genai_types.Part(function_call=genai_types.FunctionCall(name="list_dir", args={}))],
+        calls=[genai_types.FunctionCall(name="list_dir", args={})],
+    )
+
+    assert _has_tool_calls(real_tool_step) is True
+    assert _is_final_response_event(real_tool_step) is False
+
+
+def test_post_conversational_reply_prefers_session_state_reply() -> None:
+    """ADK's own final-output capture wins over replayed event text."""
+    from webhook_agent.core.execution import _post_conversational_reply
+
+    mock_gh = MagicMock()
+    mock_issue = mock_gh.get_repo.return_value.get_issue.return_value
+    results: list[ActionResult] = []
+
+    with (
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.is_allowed", return_value=True),
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.record"),
+    ):
+        _post_conversational_reply(
+            gh_client=mock_gh,
+            repo_full_name="owner/repo",
+            pr_number=405,
+            emitted_texts=["Let's inspect the repository.", "Final answer."],
+            trace_id="trace-state",
+            results=results,
+            state_reply="Final answer.",
+        )
+
+    mock_issue.create_comment.assert_called_once_with("Final answer.")
+
+
+def test_post_conversational_reply_falls_back_when_state_reply_blank() -> None:
+    """A blank or missing state reply must not suppress the event-text fallback."""
+    from webhook_agent.core.execution import _post_conversational_reply
+
+    mock_gh = MagicMock()
+    mock_issue = mock_gh.get_repo.return_value.get_issue.return_value
+    results: list[ActionResult] = []
+
+    with (
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.is_allowed", return_value=True),
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.record"),
+    ):
+        _post_conversational_reply(
+            gh_client=mock_gh,
+            repo_full_name="owner/repo",
+            pr_number=405,
+            emitted_texts=["Final answer."],
+            trace_id="trace-fallback",
+            results=results,
+            state_reply="   ",
+        )
+
+    mock_issue.create_comment.assert_called_once_with("Final answer.")
+
+
+def test_fresh_session_reply_ignores_stale_and_non_string_values() -> None:
+    """Only a string reply rewritten by this run counts as fresh."""
+    from types import SimpleNamespace
+
+    from webhook_agent.core.execution import _fresh_session_reply
+
+    stale = "Stale answer from an earlier webhook."
+    fresh = "Fresh answer for this comment."
+
+    # Fresh: state changed during the run.
+    assert (
+        _fresh_session_reply(
+            SimpleNamespace(state={"conversational_reply": fresh}),
+            {"conversational_reply": stale},
+        )
+        == fresh
+    )
+
+    # Stale: identical to the pre-run snapshot.
+    assert (
+        _fresh_session_reply(
+            SimpleNamespace(state={"conversational_reply": stale}),
+            {"conversational_reply": stale},
+        )
+        == ""
+    )
+
+    # Nothing to offer.
+    assert _fresh_session_reply(None, {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state={}), {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state=None), {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state={"conversational_reply": 42}), {}) == ""
+    assert _fresh_session_reply(SimpleNamespace(state={"conversational_reply": "   "}), {}) == ""
+
+
+def _issue_comment_event() -> dict[str, Any]:
+    """Build a minimal non-PR issue_comment event payload."""
+    return {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "human_dev"},
+        "raw_payload": {
+            "issue": {"number": 405},
+            "comment": {"body": "Why is the agent doing this?"},
+        },
+    }
+
+
+def _conversational_agent(old_session: Any, new_session: Any) -> MagicMock:
+    """Build a WebhookAgent double whose first session read sees the pre-run state.
+
+    ``_run`` reads the session at least twice (pre-run snapshot context, then
+    ``final_session``), plus a third read whenever deterministic state has to be
+    appended first, so the first read returns the pre-run session and every
+    later read returns the post-run one.
+    """
+    agent = MagicMock()
+    agent.dry_run = False
+    agent._derive_session_id.return_value = "session-405"
+    agent._build_user_message.return_value = genai_types.Content(
+        parts=[genai_types.Part.from_text(text="Issue discussion")]
+    )
+    reads = {"count": 0}
+
+    def _next_session(**_kwargs: Any) -> Any:
+        reads["count"] += 1
+        return old_session if reads["count"] == 1 else new_session
+
+    agent._session_service.get_session = AsyncMock(side_effect=_next_session)
+    agent._session_service.create_session = AsyncMock()
+    agent._session_service.append_event = AsyncMock()
+    agent._session_service.user_state = {}
+    agent._current_model_name = "gemini-3.5-flash-lite"
+    agent._normalize_model_name = lambda name: name
+    return agent
+
+
+def test_execute_agent_event_forwards_fresh_session_reply() -> None:
+    """A reply written during this run reaches the writeback path as state_reply."""
+    from types import SimpleNamespace
+
+    old_session = SimpleNamespace(
+        state={
+            "deterministic_precompiled_ast": False,
+            "conversational_reply": "Stale answer from an earlier webhook.",
+        }
+    )
+    new_session = SimpleNamespace(
+        state={
+            "deterministic_precompiled_ast": False,
+            "conversational_reply": "Fresh answer for this comment.",
+        }
+    )
+    agent = _conversational_agent(old_session, new_session)
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
+        patch("webhook_agent.core.execution._post_conversational_reply") as mock_post,
+    ):
+        execute_agent_event(agent, _issue_comment_event(), MagicMock(), "trace-state-1")
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["state_reply"] == "Fresh answer for this comment."
+    assert mock_post.call_args.kwargs["emitted_texts"] == []
+
+
+def test_execute_agent_event_suppresses_stale_session_reply() -> None:
+    """An unchanged session reply from an earlier webhook must not be reposted."""
+    from types import SimpleNamespace
+
+    stale = "Stale answer from an earlier webhook."
+    old_session = SimpleNamespace(
+        state={"deterministic_precompiled_ast": False, "conversational_reply": stale}
+    )
+    new_session = SimpleNamespace(
+        state={"deterministic_precompiled_ast": False, "conversational_reply": stale}
+    )
+    agent = _conversational_agent(old_session, new_session)
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
+        patch("webhook_agent.core.execution._post_conversational_reply") as mock_post,
+    ):
+        execute_agent_event(agent, _issue_comment_event(), MagicMock(), "trace-state-2")
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["state_reply"] == ""
