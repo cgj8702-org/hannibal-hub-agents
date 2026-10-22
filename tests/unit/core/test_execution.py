@@ -1712,16 +1712,29 @@ def _issue_comment_event() -> dict[str, Any]:
     }
 
 
-def _conversational_agent(session_returns: list[Any]) -> MagicMock:
-    """Build a WebhookAgent double whose session reads drain ``session_returns``."""
+def _conversational_agent(old_session: Any, new_session: Any) -> MagicMock:
+    """Build a WebhookAgent double whose first session read sees the pre-run state.
+
+    ``_run`` reads the session at least twice (pre-run snapshot context, then
+    ``final_session``), plus a third read whenever deterministic state has to be
+    appended first, so the first read returns the pre-run session and every
+    later read returns the post-run one.
+    """
     agent = MagicMock()
     agent.dry_run = False
     agent._derive_session_id.return_value = "session-405"
     agent._build_user_message.return_value = genai_types.Content(
         parts=[genai_types.Part.from_text(text="Issue discussion")]
     )
-    agent._session_service.get_session = AsyncMock(side_effect=session_returns)
+    reads = {"count": 0}
+
+    def _next_session(**_kwargs: Any) -> Any:
+        reads["count"] += 1
+        return old_session if reads["count"] == 1 else new_session
+
+    agent._session_service.get_session = AsyncMock(side_effect=_next_session)
     agent._session_service.create_session = AsyncMock()
+    agent._session_service.append_event = AsyncMock()
     agent._session_service.user_state = {}
     agent._current_model_name = "gemini-3.5-flash-lite"
     agent._normalize_model_name = lambda name: name
@@ -1732,7 +1745,6 @@ def test_execute_agent_event_forwards_fresh_session_reply() -> None:
     """A reply written during this run reaches the writeback path as state_reply."""
     from types import SimpleNamespace
 
-    # state.get("deterministic_precompiled_ast") must match to skip the extra append.
     old_session = SimpleNamespace(
         state={
             "deterministic_precompiled_ast": False,
@@ -1745,7 +1757,7 @@ def test_execute_agent_event_forwards_fresh_session_reply() -> None:
             "conversational_reply": "Fresh answer for this comment.",
         }
     )
-    agent = _conversational_agent([old_session, new_session])
+    agent = _conversational_agent(old_session, new_session)
 
     with (
         patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
@@ -1769,7 +1781,7 @@ def test_execute_agent_event_suppresses_stale_session_reply() -> None:
     new_session = SimpleNamespace(
         state={"deterministic_precompiled_ast": False, "conversational_reply": stale}
     )
-    agent = _conversational_agent([old_session, new_session])
+    agent = _conversational_agent(old_session, new_session)
 
     with (
         patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
