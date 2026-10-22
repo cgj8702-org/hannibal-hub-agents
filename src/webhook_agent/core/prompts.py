@@ -80,7 +80,7 @@ Submit your completed code review verdict via the `review` tool or directly in y
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
    - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).
    - `notes`: Specific, diff-grounded verification findings or justification (citing verified AST structures, locks, or test assertions).
-3. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants citing specific file paths and lines (`path:line`) or test symbols proven by the diff.
+3. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants citing specific file paths and lines (`path:line: guarantee`). If asserting behavioral logic (e.g. handles, logs, checks, skips), you MUST back it up by quoting the exact modified code in backticks (e.g. 'path:line: `exact_code_quote` performs ...') or citing a specific test function (e.g. `test_foo`). Behavioral claims without a backticked diff quote or test citation will fail automated grounding validation! For broader conceptual or architectural guarantees, use `semantic_invariants` instead.
 4. **semantic_invariants**: 1-3 high-level architectural, domain, or behavioral guarantees asserted by model reasoning without mechanical line citations.
 5. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
 6. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
@@ -209,7 +209,6 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
     parts: list[str] = [
         f"Canonical Event: {canonical}",
         f"Sender: {sender_login}",
-        f"Current UTC Time: {now_utc}",
     ]
 
     comment_body = ""
@@ -539,11 +538,12 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             "Perform a clinical, high-signal audit:\n"
             "- Provide a concise executive summary explaining the verified behavior.\n"
             "- Populate 'scorecard' evaluating all 5 audit dimensions ('Logic & Boundaries', 'Concurrency & State', 'Security & Secrets', 'Contract Integrity', 'Test Coverage & Regressions') with diff-grounded evidence. All citations in notes MUST reference files and line numbers present in the PR diff.\n"
-            "- Populate 2-4 'verified_invariants' with explicit path:line citations from the PR diff (e.g. 'src/auth.py:42: Validates token expiration'). Citations in verified_invariants are machine-checked against the diff; invariants without path:line citations will be demoted to semantic invariants.\n"
+            "- Populate 2-4 'verified_invariants' with explicit path:line citations from the PR diff. If describing behavioral logic (e.g. validates, logs, skips), you MUST enclose the exact modified code in backticks (e.g. 'src/auth.py:42: `expires_at < now` enforces token expiration') or cite a test function (e.g. 'test_token_expiry'). Citations in verified_invariants are machine-checked against the diff; invariants without backticked quotes or test citations will be rejected by grounding validation. Use 'semantic_invariants' for broader conceptual guarantees.\n"
             "- Optionally populate 'semantic_invariants' for high-level domain guarantees grounded in real repository entities.\n"
             "When your investigation with tools is complete, submit your formal review via the `review` tool."
         )
 
+    parts.append(f"\nCurrent UTC Time: {now_utc}")
     return "\n".join(parts)
 
 
