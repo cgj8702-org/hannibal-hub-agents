@@ -266,8 +266,10 @@ class SecurityScanner:
             "-f",
             "json",
             "-q",
+            "-c",
+            str(root / "pyproject.toml"),  # read [tool.bandit] skips from pyproject.toml
             "-s",
-            "B101",  # Skip assert_used
+            "B101",  # Skip assert_used (also in [tool.bandit] skips)
             *existing_py_files,
         ]
 
