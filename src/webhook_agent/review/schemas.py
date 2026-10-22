@@ -123,6 +123,34 @@ class IssueItem(BaseModel):
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        """Coerce common LLM alias fields (file_path -> path, line_number -> line)."""
+        if isinstance(data, dict):
+            if "path" not in data or not data["path"]:
+                for key in ("file_path", "filename", "filepath"):
+                    if data.get(key):
+                        data["path"] = data[key]
+                        break
+            if "line" not in data or data["line"] is None:
+                for key in ("line_number", "lineNumber", "lineno"):
+                    if data.get(key) is not None:
+                        try:
+                            data["line"] = int(data[key])
+                            break
+                        except (ValueError, TypeError):
+                            pass
+            if "start_line" not in data or data["start_line"] is None:
+                for key in ("start_line_number", "startLineNumber", "start_lineno"):
+                    if data.get(key) is not None:
+                        try:
+                            data["start_line"] = int(data[key])
+                            break
+                        except (ValueError, TypeError):
+                            pass
+        return data
+
     @field_validator("suggested_fix", mode="before")
     @classmethod
     def sanitize_suggested_fix(cls, v: Any) -> Any:
@@ -500,9 +528,36 @@ class CodeReviewResponse(BaseModel):
                         )
 
                 elif isinstance(item, dict):
-                    desc = str(item.get("description") or "").strip()
+                    desc = str(item.get("description") or item.get("title") or "").strip()
                     fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
-                    path_val = str(item.get("path") or "").strip()
+                    path_val = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
+                    line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    start_line_val = item.get("start_line")
+                    if start_line_val is None:
+                        start_line_val = (
+                            item.get("start_line_number")
+                            or item.get("startLineNumber")
+                            or item.get("start_lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
+                    try:
+                        start_line_val = int(start_line_val) if start_line_val is not None else None
+                    except (ValueError, TypeError):
+                        start_line_val = None
+
                     steps = str(item.get("verify_steps") or "").strip()
                     window_val = str(item.get("window") or "").strip()
 
@@ -516,12 +571,8 @@ class CodeReviewResponse(BaseModel):
                         clean_crit.append(
                             {
                                 "path": path_val,
-                                "line": item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None,
-                                "start_line": item.get("start_line")
-                                if isinstance(item.get("start_line"), int)
-                                else None,
+                                "line": line_val,
+                                "start_line": start_line_val,
                                 "description": desc,
                                 "suggested_fix": fix,
                                 "window": window_val,
@@ -551,12 +602,28 @@ class CodeReviewResponse(BaseModel):
                         and desc
                         and not any(desc in c.get("description", "") for c in clean_crit)
                     ):
+                        p_val = str(
+                            item.get("path")
+                            or item.get("file_path")
+                            or item.get("filename")
+                            or item.get("filepath")
+                            or ""
+                        ).strip()
+                        l_val = item.get("line")
+                        if l_val is None:
+                            l_val = (
+                                item.get("line_number")
+                                or item.get("lineNumber")
+                                or item.get("lineno")
+                            )
+                        try:
+                            l_val = int(l_val) if l_val is not None else None
+                        except (ValueError, TypeError):
+                            l_val = None
                         clean_crit.append(
                             {
-                                "path": str(item.get("path") or ""),
-                                "line": (
-                                    item.get("line") if isinstance(item.get("line"), int) else None
-                                ),
+                                "path": p_val,
+                                "line": l_val,
                                 "description": desc,
                                 "suggested_fix": fix,
                             }
@@ -586,9 +653,36 @@ class CodeReviewResponse(BaseModel):
                             }
                         )
                 elif isinstance(item, dict):
-                    desc = str(item.get("description") or "").strip()
+                    desc = str(item.get("description") or item.get("title") or "").strip()
                     fix = str(item.get("suggested_fix") or "").strip("\r\n").rstrip()
-                    path_val = str(item.get("path") or "").strip()
+                    path_val = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
+                    line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    start_line_val = item.get("start_line")
+                    if start_line_val is None:
+                        start_line_val = (
+                            item.get("start_line_number")
+                            or item.get("startLineNumber")
+                            or item.get("start_lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
+                    try:
+                        start_line_val = int(start_line_val) if start_line_val is not None else None
+                    except (ValueError, TypeError):
+                        start_line_val = None
+
                     steps = str(item.get("verify_steps") or "").strip()
                     window_val = str(item.get("window") or "").strip()
 
@@ -603,12 +697,8 @@ class CodeReviewResponse(BaseModel):
                         clean_minor.append(
                             {
                                 "path": path_val,
-                                "line": item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None,
-                                "start_line": item.get("start_line")
-                                if isinstance(item.get("start_line"), int)
-                                else None,
+                                "line": line_val,
+                                "start_line": start_line_val,
                                 "description": desc,
                                 "suggested_fix": fix,
                                 "window": window_val,
@@ -632,8 +722,22 @@ class CodeReviewResponse(BaseModel):
                         or item.get("evidence")
                         or ""
                     ).strip()
-                    path_val = str(item.get("path") or "").strip()
+                    path_val = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
                     line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
                     if path_val and line_val:
                         clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
                     elif inv_text:
@@ -1031,7 +1135,33 @@ class SyncReviewResponse(BaseModel):
                             }
                         )
                 elif isinstance(item, dict):
-                    path = str(item.get("path") or "").strip()
+                    path = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
+                    line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    start_line_val = item.get("start_line")
+                    if start_line_val is None:
+                        start_line_val = (
+                            item.get("start_line_number")
+                            or item.get("startLineNumber")
+                            or item.get("start_lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
+                    try:
+                        start_line_val = int(start_line_val) if start_line_val is not None else None
+                    except (ValueError, TypeError):
+                        start_line_val = None
                     desc = str(
                         item.get("description")
                         or item.get("title")
@@ -1048,12 +1178,8 @@ class SyncReviewResponse(BaseModel):
                         clean_crit.append(
                             {
                                 "path": path,
-                                "line": item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None,
-                                "start_line": item.get("start_line")
-                                if isinstance(item.get("start_line"), int)
-                                else None,
+                                "line": line_val,
+                                "start_line": start_line_val,
                                 "description": desc,
                                 "suggested_fix": fix,
                                 "window": window_val,
@@ -1079,7 +1205,33 @@ class SyncReviewResponse(BaseModel):
                             }
                         )
                 elif isinstance(item, dict):
-                    path = str(item.get("path") or "").strip()
+                    path = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
+                    line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    start_line_val = item.get("start_line")
+                    if start_line_val is None:
+                        start_line_val = (
+                            item.get("start_line_number")
+                            or item.get("startLineNumber")
+                            or item.get("start_lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
+                    try:
+                        start_line_val = int(start_line_val) if start_line_val is not None else None
+                    except (ValueError, TypeError):
+                        start_line_val = None
                     desc = str(
                         item.get("description")
                         or item.get("title")
@@ -1096,12 +1248,8 @@ class SyncReviewResponse(BaseModel):
                         clean_minor.append(
                             {
                                 "path": path,
-                                "line": item.get("line")
-                                if isinstance(item.get("line"), int)
-                                else None,
-                                "start_line": item.get("start_line")
-                                if isinstance(item.get("start_line"), int)
-                                else None,
+                                "line": line_val,
+                                "start_line": start_line_val,
                                 "description": desc,
                                 "suggested_fix": fix,
                                 "window": window_val,
@@ -1126,7 +1274,33 @@ class SyncReviewResponse(BaseModel):
                             }
                         )
                 elif isinstance(item, dict):
-                    path = str(item.get("path") or "").strip()
+                    path = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
+                    line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    start_line_val = item.get("start_line")
+                    if start_line_val is None:
+                        start_line_val = (
+                            item.get("start_line_number")
+                            or item.get("startLineNumber")
+                            or item.get("start_lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
+                    try:
+                        start_line_val = int(start_line_val) if start_line_val is not None else None
+                    except (ValueError, TypeError):
+                        start_line_val = None
                     title = str(item.get("title") or "").strip()
                     desc = str(
                         item.get("description") or title or item.get("item_description") or ""
@@ -1138,7 +1312,8 @@ class SyncReviewResponse(BaseModel):
                     if desc and desc.lower() not in ("none", "none found"):
                         issue_dict = {
                             "path": path,
-                            "line": item.get("line") if isinstance(item.get("line"), int) else None,
+                            "line": line_val,
+                            "start_line": start_line_val,
                             "description": full_desc,
                             "suggested_fix": fix,
                         }
@@ -1179,8 +1354,22 @@ class SyncReviewResponse(BaseModel):
                         or item.get("evidence")
                         or ""
                     ).strip()
-                    path_val = str(item.get("path") or "").strip()
+                    path_val = str(
+                        item.get("path")
+                        or item.get("file_path")
+                        or item.get("filename")
+                        or item.get("filepath")
+                        or ""
+                    ).strip()
                     line_val = item.get("line")
+                    if line_val is None:
+                        line_val = (
+                            item.get("line_number") or item.get("lineNumber") or item.get("lineno")
+                        )
+                    try:
+                        line_val = int(line_val) if line_val is not None else None
+                    except (ValueError, TypeError):
+                        line_val = None
                     if path_val and line_val:
                         clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
         normalized["verified_invariants"] = clean_inv
