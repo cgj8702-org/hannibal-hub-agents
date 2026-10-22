@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google.genai import types as genai_types
 
 from webhook_agent.core.execution import (
     _execute_adk_runner,
@@ -1432,3 +1433,38 @@ async def test_execute_adk_runner_multi_turn_when_model_attempts_premature_revie
     assert calls == 2
     assert any(r.tool == "read_file" for r in results)
     assert emitted_texts == ["Final researched review"]
+
+
+def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
+    """Non-PR issue events must skip pr_workspace context creation."""
+    mock_agent = MagicMock()
+    mock_agent.dry_run = False
+    mock_agent._derive_session_id.return_value = "session-123"
+    mock_agent._build_user_message.return_value = genai_types.Content(
+        parts=[genai_types.Part.from_text(text="Issue discussion")]
+    )
+    mock_agent._session_service.get_session = AsyncMock(return_value=None)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.user_state = {}
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name = lambda x: x
+
+    event_data = {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "human_dev"},
+        "raw_payload": {
+            "issue": {"number": 404},
+            "comment": {"body": "Hey there!"},
+        },
+    }
+
+    mock_gh = MagicMock()
+
+    with (
+        patch("webhook_agent.core.execution.pr_workspace") as mock_pr_ws,
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
+        patch("webhook_agent.core.execution._post_conversational_reply"),
+    ):
+        execute_agent_event(mock_agent, event_data, mock_gh, "trace-pure-issue-1")
+        mock_pr_ws.assert_not_called()

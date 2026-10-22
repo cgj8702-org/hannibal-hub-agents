@@ -344,8 +344,11 @@ def execute_agent_event(
             f"Cannot execute agent event: missing PR or issue number for repository '{repo_full_name}'"
         )
 
-    head_sha = str(
-        (raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or ""
+    is_pr_context = bool(raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request"))
+    head_sha = (
+        str((raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or "")
+        if is_pr_context
+        else ""
     )
 
     sender = event_data.get("sender") or {}
@@ -796,6 +799,28 @@ def execute_agent_event(
 
     async def _execute_with_workspace() -> None:
         nonlocal user_message
+        if not is_pr_context or not head_sha:
+            if user_message is None:
+                user_message = agent._build_user_message(event_data)
+                deterministic_state["deterministic_precompiled_ast"] = bool(
+                    event_data.get("deterministic_precompiled_ast")
+                )
+                if "deterministic_contract_scorecard_item" in event_data:
+                    deterministic_state["deterministic_contract_scorecard_item"] = event_data[
+                        "deterministic_contract_scorecard_item"
+                    ]
+                if "deterministic_security_scorecard_item" in event_data:
+                    deterministic_state["deterministic_security_scorecard_item"] = event_data[
+                        "deterministic_security_scorecard_item"
+                    ]
+                if "deterministic_test_scorecard_item" in event_data:
+                    deterministic_state["deterministic_test_scorecard_item"] = event_data[
+                        "deterministic_test_scorecard_item"
+                    ]
+            await _run()
+            _finalize_results()
+            return
+
         async with pr_workspace(gh_client, repo_full_name, head_sha) as ws_env:
             if ws_env is not None:
                 with use_environment(ws_env):
