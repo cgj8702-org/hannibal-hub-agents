@@ -11,11 +11,13 @@ from typing import Any
 
 __all__ = [
     "TOOL_INPUT_SCHEMAS",
+    "CreateIssueInput",
     "GetIssueInput",
     "ListDirInput",
     "ReadFileInput",
     "ReviewInput",
     "check_window",
+    "create_issue",
     "get_issue",
     "list_dir",
     "read_file",
@@ -31,6 +33,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     if name in {
+        "CreateIssueInput",
         "TOOL_INPUT_SCHEMAS",
         "GetIssueInput",
         "ListDirInput",
@@ -41,6 +44,7 @@ def __getattr__(name: str) -> Any:
         return getattr(mod, name)
 
     if name in {
+        "create_issue",
         "get_issue",
         "list_dir",
         "read_file",
