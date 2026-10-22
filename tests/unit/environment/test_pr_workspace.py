@@ -105,6 +105,7 @@ def test_pr_workspace_happy_path(caplog):
                 assert env is not None
                 extracted_dir = env.root
                 assert extracted_dir.is_dir()
+                assert "hannibal-sandbox-headsha-" in extracted_dir.name
                 assert (extracted_dir / "src/app.py").is_file()
                 assert (extracted_dir / "src/app.py").read_text() == "print('Hello PR')"
                 assert (extracted_dir / "README.md").is_file()

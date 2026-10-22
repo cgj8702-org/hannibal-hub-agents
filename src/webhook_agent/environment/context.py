@@ -57,16 +57,18 @@ def use_environment(env: BaseEnvironment) -> Iterator[BaseEnvironment]:
 async def ephemeral_environment(
     root: Path | None = None,
     cleanup: bool = True,
+    prefix: str = "hannibal-sandbox-",
 ) -> AsyncIterator[BaseEnvironment]:
     """Create and activate an ephemeral workspace environment for the duration of a block.
 
     Args:
         root: Optional existing root path. If None, creates a disposable temp directory.
         cleanup: Whether to delete the temporary directory upon exit (if created).
+        prefix: Prefix for the temporary directory if root is None.
     """
     temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
     if root is None:
-        temp_dir_obj = tempfile.TemporaryDirectory(prefix="hannibal-sandbox-")
+        temp_dir_obj = tempfile.TemporaryDirectory(prefix=prefix)
         target_root = Path(temp_dir_obj.name)
     else:
         target_root = Path(root)
