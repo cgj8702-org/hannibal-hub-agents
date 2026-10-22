@@ -108,6 +108,8 @@ async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     resp = MagicMock()
     resp.usage_metadata.total_token_count = 125
+    resp.usage_metadata.prompt_token_count = 100
+    resp.usage_metadata.candidates_token_count = 25
 
     mock_record = AsyncMock()
     monkeypatch.setattr(rpm_waiter, "record_actual_tokens", mock_record)
@@ -115,6 +117,8 @@ async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     res = await after_model_callback(ctx, resp)
     assert res is None
     assert ctx.state.get("total_tokens") == 125
+    assert ctx.state.get("prompt_tokens") == 100
+    assert ctx.state.get("candidates_tokens") == 25
     mock_record.assert_awaited_once_with(
         model="gemini-3.5-flash-lite",
         actual_tokens=125,

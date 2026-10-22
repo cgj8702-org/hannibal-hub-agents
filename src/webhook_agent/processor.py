@@ -802,12 +802,12 @@ class WebhookProcessor:
                 )
                 return
 
-        # Fast-push debouncing: abort if head commit has been superseded by a newer push
+        # Fast-push debouncing & duplicate review gate: abort if superseded or already reviewed
         if (
             is_pr_event
             and head_sha
             and pr_num_int is not None
-            and canonical in GATED_EVENTS
+            and (canonical in GATED_EVENTS or canonical == "pull_request_review_requested")
             and gh is not None
         ):
             try:
@@ -829,6 +829,15 @@ class WebhookProcessor:
                         pr_number,
                         head_sha[:7],
                         live_head_sha[:7],
+                    )
+                    return
+                already_reviewed, _ = last_bot_review_sha(live_pr, head_sha)
+                if already_reviewed:
+                    logger.info(
+                        "Skipping duplicate bot review for %s#%s at head %s (already reviewed)",
+                        repo_name,
+                        pr_number,
+                        head_sha[:7],
                     )
                     return
             except Exception as live_err:
