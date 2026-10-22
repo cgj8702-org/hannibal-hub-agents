@@ -133,3 +133,43 @@ def test_stamp_review_metadata_appends_when_absent() -> None:
 
     assert stamped.startswith("Plain review body")
     assert extract_review_metadata(stamped) == {"sha": ANALYSED}
+
+
+def test_submits_pinned_to_analysed_commit_pygithub_pull_request_instance() -> None:
+    """On a real PyGithub PullRequest instance, a Commit object wrapping the SHA is passed."""
+    from github.Commit import Commit
+    from github.PullRequest import PullRequest
+
+    mock_requester = MagicMock()
+    mock_requester.requestJsonAndCheck.return_value = ({}, {})
+    pr = PullRequest(
+        mock_requester,
+        headers={},
+        attributes={
+            "url": "https://api.github.com/repos/owner/repo/pulls/415",
+            "head": {"sha": ANALYSED},
+        },
+        completed=True,
+    )
+
+    with (
+        patch(
+            "webhook_agent.review.review_enforcer._enforce_verdict",
+            return_value=("Rendered body", "COMMENT", []),
+        ),
+        patch("webhook_agent.review.review_enforcer.review_claim_registry") as registry,
+    ):
+        registry.claim.return_value = object()
+        message, submitted = _submit_formal_review(
+            pr, "{}", "COMMENT", "owner/repo#415", analyzed_sha=ANALYSED
+        )
+
+    assert submitted is True
+    assert message != "Deferred"
+    post_calls = [c for c in mock_requester.requestJsonAndCheck.call_args_list if c[0][0] == "POST"]
+    assert len(post_calls) == 1
+    method, url = post_calls[0][0][:2]
+    assert method == "POST"
+    assert url == "https://api.github.com/repos/owner/repo/pulls/415/reviews"
+    call_input = post_calls[0].kwargs["input"]
+    assert call_input["commit_id"] == ANALYSED

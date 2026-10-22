@@ -676,6 +676,56 @@ class TestReadFile:
         result = read_file(ctx, "webhook_agent/main.py")
         assert "fallback success" in result
 
+    def test_read_file_numbers_lines(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+        mock_content = MagicMock()
+        mock_content.decoded_content = b"first()\nsecond()\nthird()"
+        ctx.state["gh_client"].get_repo.return_value.get_contents.return_value = mock_content
+
+        result = read_file(ctx, "src/main.py")
+
+        assert "src/main.py: lines 1-3 of 3" in result
+        assert "1│ first()" in result
+        assert "3│ third()" in result
+
+    def test_read_file_window_reports_original_line_numbers(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+        mock_content = MagicMock()
+        mock_content.decoded_content = b"first()\nsecond()\nthird()"
+        ctx.state["gh_client"].get_repo.return_value.get_contents.return_value = mock_content
+
+        result = read_file(ctx, "src/main.py", start_line=2, max_lines=1)
+
+        assert "src/main.py: lines 2-2 of 3" in result
+        assert "start_line=3" in result
+        assert "2│ second()" in result
+        assert "first()" not in result
+
+    def test_read_file_start_line_past_eof(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.tools.github_tools import read_file
+
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+        mock_content = MagicMock()
+        mock_content.decoded_content = b"only()"
+        ctx.state["gh_client"].get_repo.return_value.get_contents.return_value = mock_content
+
+        result = read_file(ctx, "src/main.py", start_line=5)
+
+        assert "past end of file" in result
+
 
 # ---------------------------------------------------------------------------
 # Tests: list_dir tool
