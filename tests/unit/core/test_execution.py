@@ -1506,5 +1506,5 @@ def test_execute_agent_event_defers_formal_audit_when_diff_snapshot_is_stale() -
     assert len(results) == 1
     assert results[0].success is False
     assert "Deferred" in results[0].detail
-    assert "aaaaaaaa" in results[0].detail  # event head
-    assert "bbbbbbbb" in results[0].detail  # diff snapshot
+    assert "aaaaaaa" in results[0].detail  # event head, truncated to 7
+    assert "bbbbbbb" in results[0].detail  # diff snapshot, truncated to 7

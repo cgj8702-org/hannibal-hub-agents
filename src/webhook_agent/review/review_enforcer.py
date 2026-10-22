@@ -999,7 +999,7 @@ def _submit_formal_review(
             str(getattr(rv, "commit_id", "") or "") == reviewed_sha for rv in bot_reviews
         ):
             logger.info("Skipping duplicate bot review for %s at head %s", target_key, reviewed_sha)
-            return f"Skipped: bot review already exists for head {reviewed_sha}.", False
+            return f"Skipped: bot review already exists for current head {reviewed_sha}.", False
 
         claim = None
         if reviewed_sha:
@@ -1011,7 +1011,10 @@ def _submit_formal_review(
                 github_review_exists=False,
             )
             if claim is None:
-                return f"Skipped: review claim already exists for head {reviewed_sha}.", False
+                return (
+                    f"Skipped: review claim already exists for current head {reviewed_sha}.",
+                    False,
+                )
 
         state_dict = (
             state.to_dict()
