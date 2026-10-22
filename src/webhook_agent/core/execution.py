@@ -186,7 +186,7 @@ async def _execute_adk_runner(
                 if _is_final_response_event(event):
                     emitted_texts.extend(text_parts)
                     for text in text_parts:
-                        logger.info(
+                        logger.debug(
                             "🧠 Agent response: %s (trace: %s)",
                             text,
                             trace_id[-4:],
@@ -306,7 +306,12 @@ def _submit_deterministic_review(
                     detail=detail,
                 )
             )
-            logger.info("Deterministic review result for PR #%d: %s", pr_number, detail)
+            logger.info(
+                "Deterministic review result [repo=%s, item_id=%s, result=%s]",
+                repo_full_name,
+                pr_number,
+                detail,
+            )
             if submitted and head_sha:
                 review_checkpoint_manager.mark_completed(repo_full_name, pr_number, head_sha)
             elif not submitted:
@@ -413,7 +418,7 @@ def _post_conversational_reply(
                 )
             )
             logger.info(
-                "💬 Posted conversational comment to %s#%d (trace: %s)",
+                "💬 Posted conversational comment [repo=%s, item_id=%s, trace_id=%s]",
                 repo_full_name,
                 pr_number,
                 trace_id[-4:],
@@ -702,7 +707,7 @@ def execute_agent_event(
                         user_id=user_id,
                         session_id=session_id,
                     )
-                    logger.info(
+                    logger.debug(
                         "Created new ADK session %s for user %s",
                         session_id,
                         user_id,
@@ -1034,7 +1039,9 @@ def execute_agent_event(
 
     if not results:
         logger.info(
-            "🏁 Agent completed with no actions (trace: %s)",
+            "🏁 Agent completed with no actions [repo=%s, item_id=%s, trace_id=%s]",
+            repo_full_name,
+            pr_number,
             trace_id[-4:],
         )
 

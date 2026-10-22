@@ -152,9 +152,12 @@ def setup_cloud_logging() -> None:
     try:
         import google.cloud.logging
 
+        log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+        log_level = getattr(logging, log_level_name, logging.INFO)
+
         project_id = os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
         client = google.cloud.logging.Client(project=project_id)
-        client.setup_logging(log_level=logging.INFO)
+        client.setup_logging(log_level=log_level)
 
         # Ensure third-party transport loggers remain quiet under cloud logging
         logging.getLogger("httpcore").setLevel(logging.WARNING)
