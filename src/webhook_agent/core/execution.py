@@ -297,6 +297,7 @@ def _submit_deterministic_review(
                 "COMMENT",
                 f"{repo_full_name}#{pr_number}",
                 {"review_mode": ("sync" if canonical == "pull_request.synchronize" else "initial")},
+                analyzed_sha=head_sha,
             )
             results.append(
                 ActionResult(
@@ -501,6 +502,31 @@ def execute_agent_event(
     comment_body = (raw.get("comment", {}) or {}).get("body", "")
 
     results: list[ActionResult] = []
+
+    # Snapshot guard: the prefetched diff reflects the live PR head, which may have
+    # moved past the commit this event targets. Auditing a mixed pair (diff from
+    # SHA B against a tree at SHA A) produces reviews about code nobody merged in
+    # that shape, so defer and let the newer commit's own event run.
+    diff_sha = str(raw.get("diff_sha") or "")
+    if policy.mode == Mode.FORMAL_AUDIT and diff_sha and head_sha and diff_sha != head_sha:
+        logger.warning(
+            "⏭️ Deferring formal audit for %s#%s: diff snapshot %s does not match event head %s",
+            repo_full_name,
+            pr_number,
+            diff_sha[:7],
+            head_sha[:7],
+        )
+        results.append(
+            ActionResult(
+                tool="plan",
+                success=False,
+                detail=(
+                    f"Deferred: prefetched diff is for {diff_sha[:7]} but the event targets "
+                    f"{head_sha[:7]}; the newer commit will be reviewed on its own run."
+                ),
+            )
+        )
+        return results
 
     # Checkpoint gate: skip if commit has already been reviewed, or pause if rate-limited backoff active
     if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
@@ -735,6 +761,9 @@ def execute_agent_event(
                     "sync" if canonical == "pull_request.synchronize" else "initial"
                 )
                 user_state_map["formal_review_eligible"] = policy.mode == Mode.FORMAL_AUDIT
+                # Pin the analysed commit so writeback cannot stamp a review onto
+                # a commit that landed while the audit was running.
+                user_state_map["head_sha"] = head_sha
 
                 if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")
@@ -746,6 +775,7 @@ def execute_agent_event(
                         canonical=canonical,
                         precompiled_dossier=base_prompt_text,
                         pr_diff=str(raw.get("pr_diff") or ""),
+                        diff_sha=str(raw.get("diff_sha") or ""),
                         changed_files=changed_files_list,
                         status="pending",
                         delivery_id=delivery_id,

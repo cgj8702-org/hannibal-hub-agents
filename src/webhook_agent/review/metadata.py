@@ -52,6 +52,33 @@ def extract_review_metadata(body: str) -> dict[str, Any] | None:
     return None
 
 
+def stamp_review_metadata(body: str, **fields: Any) -> str:
+    """Merge ``fields`` into the review's embedded metadata comment.
+
+    Reviews rendered by the schema layer cannot know which commit the caller
+    analysed, so the submission path stamps that in afterwards. Existing keys are
+    preserved; a metadata comment is appended when the body has none.
+
+    Args:
+        body: Rendered review markdown.
+        **fields: Metadata entries to set, e.g. ``sha="abc123"``.
+
+    Returns:
+        The body with the updated metadata comment.
+    """
+    if not body:
+        return body
+
+    metadata = extract_review_metadata(body) or {}
+    metadata.update(fields)
+    comment = serialize_review_metadata(metadata)
+
+    match = METADATA_COMMENT_PATTERN.search(body)
+    if match:
+        return body[: match.start()] + comment + body[match.end() :]
+    return f"{body.rstrip()}\n\n{comment}\n"
+
+
 def parse_legacy_review_findings(body: str) -> dict[str, list[dict[str, Any]]]:
     """Fallback parser that extracts findings from legacy human-readable Markdown reviews.
 
