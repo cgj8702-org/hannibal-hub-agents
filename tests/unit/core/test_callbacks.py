@@ -346,7 +346,7 @@ async def test_before_tool_callback_logs_real_arguments(caplog: pytest.LogCaptur
     ctx = MagicMock()
     ctx.state = {}
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         await before_tool_callback(tool, args, ctx)
 
     assert any(
