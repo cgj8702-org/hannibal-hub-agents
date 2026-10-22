@@ -267,6 +267,46 @@ def test_symbol_impact_analyzer_without_baseline_loader(tmp_path: Path):
     assert reports[0].broken_call_sites[0].confidence == "PROVEN"
 
 
+def test_analyze_modified_files_skips_dunder_methods(tmp_path: Path) -> None:
+    """Dunder methods like __init__ must be skipped to avoid phantom WARNs.
+
+    Regression test for #418: __init__ was not skipped by the private-symbol
+    gate, so super().__init__(name=...) call sites were flagged as
+    SUSPECTED UNEXPECTED_KEYWORD broken call sites even though __init__ does
+    not accept keyword arguments.
+    """
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+
+    mod_file = src_dir / "plugin.py"
+    mod_file.write_text(
+        "class WebhookPlugin:\n"
+        "    def __init__(self):\n"
+        "        self.started = False\n"
+        "    def _helper(self):\n"
+        "        pass\n"
+        "    def public_method(self, value):\n"
+        "        return value\n"
+    )
+
+    caller_file = src_dir / "caller.py"
+    caller_file.write_text(
+        "from src.plugin import WebhookPlugin\n"
+        "\n"
+        "class SubPlugin(WebhookPlugin):\n"
+        "    def __init__(self):\n"
+        '        super().__init__(name="sub")\n'
+        "        super().public_method(1)\n"
+    )
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/plugin.py"])
+
+    symbol_names = {r.symbol_name for r in reports}
+    assert "__init__" not in symbol_names
+    assert "_helper" not in symbol_names
+
+
 def test_verify_call_site_confidence_proven_vs_suspected():
     code = "def compute(x, y): pass"
     sig = extract_signatures_from_code(code)["compute"]

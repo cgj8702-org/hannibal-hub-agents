@@ -688,7 +688,7 @@ class SymbolImpactAnalyzer:
 
             for sym_name, new_sig in new_sigs.items():
                 # Skip private symbols or dunder methods
-                if sym_name.startswith("_") and not sym_name.startswith("__"):
+                if sym_name.startswith("_"):
                     continue
 
                 old_sig = old_sigs.get(sym_name)
