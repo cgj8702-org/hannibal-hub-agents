@@ -1,6 +1,6 @@
 # 🤖 Hannibal Hub Agents: Distributed GitHub App Webhook Orchestrator
 
-A unified, event-driven service that handles GitHub webhooks via a serverless router, queues event processing asynchronously using **Google Cloud Pub/Sub**, and runs an agentic workflow powered by **Gemini 3.8 / 3.5 Flash**, **Google GenAI**, & **Google ADK** to safely orchestrate GitHub repository reviews, conflict resolutions, and proactive code health sweeps.
+A unified, event-driven service that handles GitHub webhooks via a serverless router, queues event processing asynchronously using **Google Cloud Pub/Sub**, and runs an agentic workflow powered by **Gemini 3.8 / 3.5 Flash**, **Google GenAI**, & **Google ADK** to safely orchestrate GitHub repository reviews, review-thread collaboration, and proactive PR hygiene sweeps.
 
 ---
 
@@ -10,7 +10,7 @@ The orchestrator uses a decoupled, distributed architecture with a current ADK w
 
 ```mermaid
 flowchart TD
-    GH["GitHub Webhook Event"] -->|"1. HTTPS POST"| Router["Cloud Run Function Router"]
+    GH["GitHub Webhook Event"] -->|"1. HTTPS POST"| Router["Cloud Functions Webhook Router"]
     Router -->|"Verify HMAC Signature"| Auth["Signature Validator"]
     Router -->|"Quick ACK 202 Accepted"| GH
     Router -->|"Normalize & Enqueue"| Queue[("Google Cloud Pub/Sub")]
@@ -18,9 +18,9 @@ flowchart TD
     Queue -->|"Trigger Pull"| Worker["Background Worker Task"]
     Worker -->|"App Authentication"| Creds["GitHub App JWT / Installation Token"]
     Worker -->|"Instant 👀 Reaction (0-Token)"| GH_React["GitHub Comment Reaction"]
-    Worker -->|"ADK workflow evaluation"| StateGraph["ADK Workflow Runner"]
-    StateGraph -->|"Proactive Sweeps (5m Ticker, Opt-In)"| Proactive["Proactive PR Evaluator"]
-    Proactive -->|"Stale / Conflict / CI Warnings"| GH_Write
+    Worker -->|"ADK workflow evaluation"| StateGraph["ADK Workflow Runner (google.adk.workflow.Workflow)"]
+    Worker -->|"5m Ticker (ENABLE_PROACTIVE_SWEEP=1)"| Proactive["Proactive PR Evaluator (deterministic, no LLM)"]
+    Proactive -->|"Stale Thread Reminders"| GH_Write
     
     StateGraph -->|"Policy Verification"| Policy{"Mutations Allowed?"}
     Policy -->|"Yes"| Exec["Execute Tool Actions"]
@@ -64,6 +64,9 @@ flowchart TD
 │       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
 │       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
 │       └── webhook_types.py # Common dataclasses and ActionResult definitions
+├── router/                  # Serverless webhook ingress (Cloud Functions entry point)
+│   ├── main.py              # HMAC verify, event classify, normalize, Pub/Sub publish
+│   └── requirements.txt     # Router-only deploy dependencies
 ├── tests/
 │   ├── eval/                # Continuous quality evaluation datasets & configs
 │   ├── fixtures/            # Sample webhook payloads & review event fixtures
@@ -73,6 +76,8 @@ flowchart TD
 └── README.md                # Repository documentation
 ```
 
+> **Note:** `router/` is deployed independently of this repository's workflows — `.github/workflows/deploy.yml` only updates the VM worker, so changes under `router/` require a manual function redeploy.
+
 ---
 
 ## ⚡ High-Efficiency Token Optimization & Advanced Features
@@ -80,16 +85,16 @@ flowchart TD
 The project includes built-in strategies to maximize context efficiency, eliminate unnecessary LLM calls, and execute 1-turn webhook responses:
 
 1. **ADK workflow evaluation**:
-   - Event scope is classified by the deterministic scope router.
+   - Event scope is classified deterministically by `resolve_event_policy()` (`core/policy.py`), which assigns one of `FORMAL_AUDIT`, `THREAD_COLLAB`, `ISSUE_TRIAGE`, or `IGNORE` before any model call.
    - Pull-request context and diffs are hydrated before model evaluation.
    - Structured review output is normalized before writeback.
 2. **Proactive PR Evaluator (`ProactiveEvaluator`)**:
    - Runs a 5-minute background ticker in the worker process (disabled by default unless `ENABLE_PROACTIVE_SWEEP=1`).
-   - Scans open PRs for:
-     - **Stale Review Threads**: Unresolved review feedback idle >24h ➔ Posts soft reminder comment.
-     - **Merge Conflicts**: Target branch conflicts (`mergeable_state == "dirty"`) ➔ Posts conflict warning comment.
-     - **Failing CI Runs**: Failed status check runs ➔ Posts targeted diagnostic recommendations.
-3. **Universal Pydantic Field Validators (`clean_field_string`)**:
+   - Pure deterministic PR hygiene: it never invokes an LLM. It acts on exactly two signals:
+     - **Stale Review Threads**: Inline review comments idle >24h ➔ posts a `Proactive Reminder: Unresolved Feedback` issue comment.
+     - **Merge Conflicts**: `mergeable is False` or `mergeable_state == "dirty"` ➔ reports `merge_conflict_detected` in the sweep result (no comment is posted).
+   - CI status is handled separately by the pre-review gate in `review/ci_gate.py`, not by this sweep.
+3. **Universal String Normalizer (`clean_field_string`), applied via Pydantic `field_validator`s**:
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
 4. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
@@ -116,9 +121,9 @@ Key environment variables configuring orchestrator operation:
 | `ENABLE_PR_WORKSPACE` | `1` | Clone PR head into an ephemeral sandbox workspace for accurate AST, symbol, and diff analysis (`1` = enabled, `0` = disabled). |
 | `LOG_LEVEL` | `INFO` | Application logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `ALLOW_AUTOMATED_MUTATIONS` | `1` | Master policy gate for automated writeback actions (comments, formal reviews). |
-| `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute background sweep ticker for stale PRs, conflicts, and CI failures. |
+| `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute background sweep ticker for stale review threads and merge conflicts. |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
-| `STRICT_REVIEW_GROUNDING` | `0` | When `1`, strictly reject review submissions containing unverified line or symbol citations. |
+| `STRICT_REVIEW_GROUNDING` | `1` | When `1` (default), reject or downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
 
 ---
 
@@ -140,7 +145,7 @@ pre-commit linting and type checks for every commit and re-stages only Python fi
 staged. It never adds an unstaged Python file to the commit.
 
 ### 2. Running Tests
-Run the full test suite (including token optimization, proactive evaluator, ADK AgentCore, and worker tests):
+Run the suite exactly as CI does (`--strict-markers -m 'not regression'`, so `regression`-marked tests are excluded):
 
 ```bash
 uv run pytest
@@ -174,4 +179,4 @@ systemctl --user restart hannibal-webhook-agent.service
 journalctl --user -u hannibal-webhook-agent.service -f
 ```
 
-All pushes to `main` automatically trigger [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) to deploy code updates and restart `hannibal-webhook-agent.service` via IAP SSH!
+Pushes to `main` touching `src/`, `scripts/`, `main.py`, `pyproject.toml`, `uv.lock`, or `deploy.yml` automatically trigger [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) to deploy code updates and restart `hannibal-webhook-agent.service` via IAP SSH!
