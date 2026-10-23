@@ -187,6 +187,3 @@ module = [
 ]
 ignore_missing_imports = true
 
-[tool.bandit]
-skips = ["B101", "B108"]
-
