@@ -264,7 +264,12 @@ class SecurityScanner:
         config_arg: list[str] = []
         pyproject_path = root / "pyproject.toml"
         if pyproject_path.is_file():
-            config_arg = ["-c", str(pyproject_path)]
+            config_arg = [
+                "-c",
+                str(pyproject_path),  # read [tool.bandit] skips from pyproject.toml
+                "-s",
+                "B101",  # Skip assert_used (also in [tool.bandit] skips)
+            ]
         else:
             config_arg = ["-s", "B101"]
 
