@@ -330,6 +330,13 @@ class WebhookAgent:
             "⚠️ Cascading model chain from %s -> %s",
             self._current_model_name,
             next_model,
+            extra={
+                "json_fields": {
+                    "event_type": "model_cascade",
+                    "from_model": self._current_model_name,
+                    "to_model": next_model,
+                }
+            },
         )
         self._switch_model(next_model)
         return next_model

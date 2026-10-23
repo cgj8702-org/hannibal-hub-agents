@@ -186,6 +186,7 @@ async def _execute_adk_runner(
                                 tool=str(response.name or ""),
                                 success=is_success,
                                 detail=f"tool executed: {response.response}",
+                                action_result=resp_data,
                             )
                         )
 
@@ -247,6 +248,14 @@ async def _execute_adk_runner(
                 max_llm_calls,
                 trace_id[-4:],
                 run_err,
+                extra={
+                    "json_fields": {
+                        "event_type": "max_llm_calls_exceeded",
+                        "max_llm_calls": max_llm_calls,
+                        "trace_id": trace_id,
+                        "error": str(run_err),
+                    }
+                },
             )
         else:
             raise
@@ -870,6 +879,17 @@ def execute_agent_event(
                         e,
                         agent._current_model_name,
                         retry_delay,
+                        extra={
+                            "json_fields": {
+                                "event_type": "transient_model_error",
+                                "attempt": attempt + 1,
+                                "max_retries": _MAX_RETRIES,
+                                "trace_id": trace_id,
+                                "error": str(e),
+                                "failover_model": agent._current_model_name,
+                                "retry_delay": retry_delay,
+                            }
+                        },
                     )
                     if retry_delay > 0:
                         await asyncio.sleep(retry_delay)

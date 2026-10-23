@@ -6,6 +6,7 @@ via HTML comments, and decouples human-readable Markdown rendering from agent pr
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -191,6 +192,38 @@ def parse_legacy_review_findings(body: str) -> dict[str, list[dict[str, Any]]]:
                         }
                     )
 
+    # Extract Scorecard warnings/failures from legacy table
+    scorecard_match = re.search(
+        r"###\s*(?:\d+\.)?\s*Audit Dimension Scorecard[^\n]*\n([\s\S]*?)(?=\n###|\n---|\Z)",
+        normalized,
+        re.IGNORECASE,
+    )
+    if scorecard_match:
+        for row in scorecard_match.group(1).split("\n"):
+            if "|" in row:
+                cells = [c.strip() for c in row.split("|")[1:-1]]
+                if len(cells) >= 3:
+                    dim = cells[0].replace("*", "").strip()
+                    status = (
+                        cells[1]
+                        .replace("`", "")
+                        .replace("✅", "")
+                        .replace("⚠️", "")
+                        .replace("🔴", "")
+                        .strip()
+                        .upper()
+                    )
+                    notes = cells[2].strip()
+                    if status in ("WARN", "FAIL", "ERROR") and dim.lower() != "dimension":
+                        cat = "CRITICAL" if status in ("FAIL", "ERROR") else "SUGGESTION"
+                        target_key = "critical_issues" if cat == "CRITICAL" else "minor_suggestions"
+                        results[target_key].append(
+                            {
+                                "category": cat,
+                                "description": f"[{dim}] {notes}",
+                            }
+                        )
+
     return results
 
 
@@ -238,6 +271,31 @@ def get_actionable_findings(body: str) -> list[dict[str, Any]]:
                         "recommendation": risk.get("recommendation"),
                     }
                 )
+        for sc in metadata.get("scorecard", []):
+            if isinstance(sc, dict):
+                sc_status = str(sc.get("status", "")).upper()
+                if sc_status in ("WARN", "FAIL", "ERROR"):
+                    dim = sc.get("dimension", "Scorecard")
+                    notes = sc.get("notes", "")
+                    cat = "CRITICAL" if sc_status in ("FAIL", "ERROR") else "SUGGESTION"
+                    file_path = None
+                    line_num = None
+                    path_match = re.search(
+                        r"\b([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9_]+)(?::(\d+))?", notes
+                    )
+                    if path_match:
+                        file_path = path_match.group(1)
+                        if path_match.group(2):
+                            with contextlib.suppress(ValueError):
+                                line_num = int(path_match.group(2))
+                    findings.append(
+                        {
+                            "category": cat,
+                            "description": f"[{dim}] {notes}",
+                            "file_path": file_path,
+                            "line_number": line_num,
+                        }
+                    )
         return findings
 
     # Fallback to legacy parser
@@ -265,7 +323,12 @@ def has_actionable_findings(body: str, state: str = "") -> bool:
         crit = metadata.get("critical_issues", [])
         sugg = metadata.get("minor_suggestions", [])
         risks = metadata.get("risks", [])
-        return bool(crit or sugg or risks)
+        scorecard = metadata.get("scorecard", [])
+        has_scorecard_warn = any(
+            isinstance(s, dict) and str(s.get("status", "")).upper() in ("WARN", "FAIL", "ERROR")
+            for s in scorecard
+        )
+        return bool(crit or sugg or risks or has_scorecard_warn)
 
     # Check review header for explicit verdict
     if re.search(

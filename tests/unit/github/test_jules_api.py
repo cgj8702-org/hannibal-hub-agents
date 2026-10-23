@@ -1,0 +1,107 @@
+"""Unit tests for the Jules REST API client."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import httpx
+import pytest
+
+from webhook_agent.github.jules_api import (
+    approve_plan,
+    extract_session_id,
+    get_session,
+    list_activities,
+    send_message,
+    session_state,
+)
+
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
+
+class TestExtractSessionId:
+    def test_extracts_from_jules_url(self):
+        assert extract_session_id("Check out https://jules.google.com/session/abc123") == "abc123"
+
+    def test_extracts_from_sessions_path(self):
+        assert extract_session_id("Session: sessions/31415926535897932384") == (
+            "31415926535897932384"
+        )
+
+    def test_extracts_bare_id(self):
+        assert extract_session_id("Session ID: xyz789") == "xyz789"
+
+    def test_returns_none_when_no_match(self):
+        assert extract_session_id("No session here") is None
+        assert extract_session_id("") is None
+        assert extract_session_id(None) is None
+
+
+class TestJulesApiClient:
+    def test_get_session_returns_session_dict(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "name": "sessions/abc123",
+            "id": "abc123",
+            "state": "AWAITING_PLAN_APPROVAL",
+        }
+        with patch("webhook_agent.github.jules_api._request", return_value=mock_resp) as mock_req:
+            result = get_session("abc123")
+            assert result == mock_resp.json.return_value
+            mock_req.assert_called_once_with("GET", "/sessions/abc123")
+
+    def test_get_session_returns_none_when_no_api_key(self, monkeypatch):
+        monkeypatch.delenv("JULES_API_KEY", raising=False)
+        assert get_session("abc123") is None
+
+    def test_list_activities_returns_activity_list(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "activities": [{"id": "act1", "originator": "agent", "description": "Plan generated"}]
+        }
+        with patch("webhook_agent.github.jules_api._request", return_value=mock_resp):
+            result = list_activities("abc123")
+            assert len(result) == 1
+            assert result[0]["id"] == "act1"
+
+    def test_list_activities_returns_empty_on_failure(self):
+        with patch("webhook_agent.github.jules_api._request", return_value=None):
+            assert list_activities("abc123") == []
+
+    def test_approve_plan_returns_true_on_success(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch("webhook_agent.github.jules_api._request", return_value=mock_resp):
+            assert approve_plan("abc123") is True
+
+    def test_approve_plan_returns_failure_on_error(self):
+        with patch("webhook_agent.github.jules_api._request", return_value=None):
+            assert approve_plan("abc123") is False
+
+    def test_send_message_returns_true_on_success(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch("webhook_agent.github.jules_api._request", return_value=mock_resp) as mock_req:
+            assert send_message("abc123", "Please proceed") is True
+            mock_req.assert_called_once_with(
+                "POST",
+                "/sessions/abc123:sendMessage",
+                json={"prompt": "Please proceed"},
+            )
+
+    def test_session_state_returns_state_string(self):
+        with patch(
+            "webhook_agent.github.jules_api.get_session",
+            return_value={"state": "IN_PROGRESS"},
+        ):
+            assert session_state("abc123") == "IN_PROGRESS"
+
+    def test_session_state_returns_none_on_failure(self):
+        with patch("webhook_agent.github.jules_api.get_session", return_value=None):
+            assert session_state("abc123") is None
+
+    def test_request_skips_when_no_api_key(self, monkeypatch):
+        monkeypatch.delenv("JULES_API_KEY", raising=False)
+        from webhook_agent.github.jules_api import _request
+
+        assert _request("GET", "/sessions/abc123") is None

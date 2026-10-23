@@ -44,3 +44,9 @@ DEFAULT_WEBHOOK_TIER = "free"
 DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS = "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR"
 # Exempt logins that bypass author association trigger gate (comma-separated).
 DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]"
+
+# --- Jules API Configuration ---
+DEFAULT_JULES_BASE_URL = "https://jules.googleapis.com/v1alpha"
+# When 1, the agent auto-approves Jules plans that await approval. Set to 0 to require
+# manual plan approval via the Jules web app or API.
+DEFAULT_JULES_AUTO_APPROVE_PLAN = "1"

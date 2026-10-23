@@ -622,7 +622,18 @@ def review(
 
         if invalid_findings:
             error_details = "; ".join(invalid_findings)
-            logger.warning("Rejecting invalid review tool call: %s", error_details)
+            logger.warning(
+                "Rejecting invalid review tool call: %s",
+                error_details,
+                extra={
+                    "json_fields": {
+                        "event_type": "review_rejected",
+                        "repo": repo_name,
+                        "pr_number": pr_number,
+                        "invalid_reasons": invalid_findings,
+                    }
+                },
+            )
             return (
                 f"Error: Review submission rejected. Invalid findings: {error_details}. "
                 "Please re-examine the diff and call review() again with precise file paths, line numbers, and actionable replacement code in suggested_fix."
