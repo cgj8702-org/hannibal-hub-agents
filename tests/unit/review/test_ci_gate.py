@@ -354,6 +354,14 @@ def test_already_reviewed_commit_is_not_reviewed_again(processor: WebhookProcess
     processor._agent_core.run.assert_not_called()
 
 
+def test_direct_pr_event_skips_when_already_reviewed(processor: WebhookProcessor) -> None:
+    gh = _gh([_run()])
+    gh.get_repo.return_value.get_pull.return_value = _pr([_bot_review(SHA)])
+    processor._gh = gh
+    processor.process_event(_pr_event("opened"))
+    processor._agent_core.run.assert_not_called()
+
+
 def test_automatic_reviews_disabled_by_default_skips_pr_and_suite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

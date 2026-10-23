@@ -150,6 +150,62 @@ async def before_model_callback(
     return None
 
 
+def _extract_prompt_tokens(llm_response: LlmResponse) -> int:
+    """Extract prompt token count resiliently across SDK object and dictionary schemas."""
+    usage = getattr(llm_response, "usage_metadata", None)
+    if not usage:
+        return 0
+
+    # 1. Attribute access (Pydantic / SDK dataclass)
+    for attr in ("prompt_token_count", "prompt_tokens", "input_tokens", "input_token_count"):
+        val = getattr(usage, attr, None)
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+
+    # 2. Dictionary access (serialized JSON / dict payload)
+    if isinstance(usage, dict):
+        for key in ("prompt_token_count", "prompt_tokens", "input_tokens", "input_token_count"):
+            val = usage.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                return int(val)
+
+    return 0
+
+
+def _extract_candidates_tokens(llm_response: LlmResponse) -> int:
+    """Extract output/candidate token count resiliently across SDK object and dictionary schemas."""
+    usage = getattr(llm_response, "usage_metadata", None)
+    if not usage:
+        return 0
+
+    # 1. Attribute access (Pydantic / SDK dataclass)
+    for attr in (
+        "candidates_token_count",
+        "candidates_tokens",
+        "output_tokens",
+        "output_token_count",
+        "completion_tokens",
+    ):
+        val = getattr(usage, attr, None)
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+
+    # 2. Dictionary access (serialized JSON / dict payload)
+    if isinstance(usage, dict):
+        for key in (
+            "candidates_token_count",
+            "candidates_tokens",
+            "output_tokens",
+            "output_token_count",
+            "completion_tokens",
+        ):
+            val = usage.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                return int(val)
+
+    return 0
+
+
 def _extract_total_tokens(llm_response: LlmResponse) -> int:
     """Extract total token count resiliently across SDK object and dictionary schemas."""
     usage = getattr(llm_response, "usage_metadata", None)
@@ -210,6 +266,8 @@ async def after_model_callback(
     callback_context: CallbackContext, llm_response: LlmResponse
 ) -> LlmResponse | None:
     """Record token usage metadata and sanitize hallucinated tool prefixes after Gemini responds."""
+    prompt_tokens = _extract_prompt_tokens(llm_response)
+    candidates_tokens = _extract_candidates_tokens(llm_response)
     total_tokens = _extract_total_tokens(llm_response)
     cached_tokens = _extract_cached_tokens(llm_response)
 
@@ -217,26 +275,42 @@ async def after_model_callback(
     cache_meta = getattr(llm_response, "cache_metadata", None)
     active_cache_name = getattr(cache_meta, "cache_name", None) if cache_meta else None
 
+    target_model = callback_context.state.get("active_model", "gemini-3")
+    logger.info(
+        "📊 [LLM Token Usage] model=%s, total=%d, prompt=%d, candidates=%d, cached=%d",
+        target_model,
+        total_tokens,
+        prompt_tokens,
+        candidates_tokens,
+        cached_tokens,
+    )
+
     if total_tokens > 0:
         callback_context.state["total_tokens"] = total_tokens
+    if prompt_tokens > 0:
+        callback_context.state["prompt_tokens"] = prompt_tokens
+    if candidates_tokens > 0:
+        callback_context.state["candidates_tokens"] = candidates_tokens
     if cached_tokens > 0:
         callback_context.state["cached_content_tokens"] = cached_tokens
-        logger.debug(
+        logger.info(
             "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
             cached_tokens,
-            callback_context.state.get("active_model", "gemini-3"),
+            target_model,
         )
     elif active_cache_name:
         callback_context.state["active_cache_name"] = active_cache_name
-        logger.debug(
+        logger.info(
             "💎 [Gemini Context Cache Reused] Active cache %s attached for model %s",
             active_cache_name,
-            callback_context.state.get("active_model", "gemini-3"),
+            target_model,
         )
 
     logger.debug(
-        "after_model_callback: recorded total_tokens=%d cached_tokens=%d cache_name=%s",
+        "after_model_callback: recorded total_tokens=%d prompt_tokens=%d candidates_tokens=%d cached_tokens=%d cache_name=%s",
         total_tokens,
+        prompt_tokens,
+        candidates_tokens,
         cached_tokens,
         active_cache_name,
     )

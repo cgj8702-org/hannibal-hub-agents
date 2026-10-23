@@ -261,15 +261,24 @@ class SecurityScanner:
         if not existing_py_files:
             return [], []
 
+        config_arg: list[str] = []
+        pyproject_path = root / "pyproject.toml"
+        if pyproject_path.is_file():
+            config_arg = [
+                "-c",
+                str(pyproject_path),  # read [tool.bandit] skips from pyproject.toml
+                "-s",
+                "B101",  # Skip assert_used (also in [tool.bandit] skips)
+            ]
+        else:
+            config_arg = ["-s", "B101"]
+
         cmd = [
             "bandit",
             "-f",
             "json",
             "-q",
-            "-c",
-            str(root / "pyproject.toml"),  # read [tool.bandit] skips from pyproject.toml
-            "-s",
-            "B101",  # Skip assert_used (also in [tool.bandit] skips)
+            *config_arg,
             *existing_py_files,
         ]
 
