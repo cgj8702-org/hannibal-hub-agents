@@ -1465,9 +1465,6 @@ class SyncReviewResponse(BaseModel):
                         res_lines.append(
                             f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
                         )
-        else:
-            res_lines.append("* *No prior review items tracked.*")
-
         crit_lines: list[str] = []
         if self.critical_issues:
             for issue in self.critical_issues:
@@ -1484,15 +1481,22 @@ class SyncReviewResponse(BaseModel):
             "### 1. Synchronization Summary",
             "",
             self.summary,
-            "",
-            "---",
-            "",
-            "### 2. Resolution Tracker",
-            "",
-            "\n".join(res_lines),
         ]
 
-        section_counter = 3
+        section_counter = 2
+
+        if self.resolutions:
+            markdown_parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    f"### {section_counter}. Resolution Tracker",
+                    "",
+                    "\n".join(res_lines),
+                ]
+            )
+            section_counter += 1
 
         if self.scorecard:
             scorecard_rows = [item.to_table_row() for item in self.scorecard]

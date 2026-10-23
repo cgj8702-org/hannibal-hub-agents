@@ -74,7 +74,10 @@ You have access to repository inspection tools (`read_file`, `search_files`, `li
 - **Review Submission**: When your investigation is complete, submit your completed code review verdict by calling the `review` tool with your structured JSON payload matching `CodeReviewResponse` or `SyncReviewResponse`.
 
 ### 3. High-Signal Audit Output Requirements
-Submit your completed code review verdict via the `review` tool or directly in your response as a valid JSON object matching `CodeReviewResponse` or `SyncReviewResponse`:
+Submit your completed code review verdict via the `review` tool as a valid JSON object.
+Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and **`SyncReviewResponse`** for synchronization re-reviews (`pull_request.synchronize`).
+
+#### 3a. `CodeReviewResponse` (Initial Reviews)
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
 2. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
@@ -85,6 +88,20 @@ Submit your completed code review verdict via the `review` tool or directly in y
 5. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
 6. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
 7. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
+
+#### 3b. `SyncReviewResponse` (Synchronization Re-Reviews)
+1. **summary**: 1-2 concise sentences summarizing incremental commit changes and their impact.
+2. **resolutions**: Resolution status for ALL prior review findings (critical issues, suggestions, risks, and scorecard warnings). For EACH prior finding supplied in the "Pre-Fetched Prior Review Findings" section:
+   - `item_description`: Description of the previously flagged item.
+   - `status`: "RESOLVED" if addressed by new commits, "UNRESOLVED" if still outstanding.
+   - `evidence`: Concrete diff citation or line reference proving resolution or persistence.
+   - `category`: "CRITICAL", "SUGGESTION", or "RISK" (matching the original finding category).
+   If no prior findings were flagged (clean prior pass), leave `resolutions` as an empty list (`[]`). Do NOT invent or backfill items.
+3. **scorecard**: Same 5-dimension matrix as `CodeReviewResponse`, evaluated against the incremental diff.
+4. **critical_issues**: New blocking defects introduced in this update only. Empty (`[]`) if clean.
+5. **minor_suggestions**: New non-blocking suggestions introduced in this update only. Empty (`[]`) if clean.
+6. **verified_invariants**: Same as `CodeReviewResponse`, grounded in the incremental diff.
+7. **semantic_invariants**: Same as `CodeReviewResponse`.
 
 ### 4. Grounding & Verification Directives
 1. **Observable Defects & Diff Grounding**:
