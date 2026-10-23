@@ -33,13 +33,18 @@ from webhook_agent.constants import (
     DEFAULT_TRIGGER_EXEMPT_LOGINS,
 )
 from webhook_agent.core.cancellation import pr_closed_registry
-from webhook_agent.github.bot_identity import _is_bot_event, is_jules_sender
+from webhook_agent.github.bot_identity import OWNER_LOGIN, _is_bot_event, is_jules_sender
 from webhook_agent.github.credentials import (
     generate_jwt,
     get_installation_token,
     load_cached_token,
     load_private_key,
     save_cached_token,
+)
+from webhook_agent.github.jules_api import (
+    approve_plan,
+    extract_session_id,
+    session_state,
 )
 from webhook_agent.github.jules_proxy import handle_jules_pr_opened
 from webhook_agent.github.pr_context import (
@@ -547,24 +552,42 @@ class WebhookProcessor:
         if canonical.startswith("pull_request_review_thread."):
             return False
 
-        # Suppress non-code metadata noise (labels, assignees, milestones, locks)
-        # on both pull requests and issues to prevent unsolicited conversational comments and review noise.
-        if (
-            action in SUPPRESSED_PR_METADATA_ACTIONS
-            and (
-                event_name in ("pull_request", "pr", "issues", "issue")
-                or canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
+        # Owner-attached ``jules`` label triggers Jules API interaction — never suppress.
+        # Non-owner jules labels are ignored entirely (Google ignores them anyway).
+        is_owner_jules_label = False
+        if action in ("created", "labeled"):
+            raw = ev.get("raw_payload") or {}
+            label = raw.get("label") or {}
+            label_name = (label.get("name") or "").strip().lower()
+            sender_login = (
+                (ev.get("sender") or raw.get("sender") or {}).get("login", "").strip().lower()
             )
-        ) or (
-            canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
-            and canonical.split(".", 1)[1] in SUPPRESSED_PR_METADATA_ACTIONS
-        ):
-            logger.debug(
-                "Suppressing metadata event '%s' (action=%s) to prevent noise",
-                canonical,
-                action,
-            )
-            return False
+            if label_name == "jules":
+                if sender_login == OWNER_LOGIN.lower():
+                    is_owner_jules_label = True
+                else:
+                    logger.debug("Suppressing non-owner jules label from %s", sender_login)
+                    return False
+
+        if not is_owner_jules_label:
+            # Suppress non-code metadata noise (labels, assignees, milestones, locks)
+            # on both pull requests and issues to prevent unsolicited conversational comments and review noise.
+            if (
+                action in SUPPRESSED_PR_METADATA_ACTIONS
+                and (
+                    event_name in ("pull_request", "pr", "issues", "issue")
+                    or canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
+                )
+            ) or (
+                canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
+                and canonical.split(".", 1)[1] in SUPPRESSED_PR_METADATA_ACTIONS
+            ):
+                logger.debug(
+                    "Suppressing metadata event '%s' (action=%s) to prevent noise",
+                    canonical,
+                    action,
+                )
+                return False
 
         # Ignore automated CI infrastructure noise, installation lifecycle events, and review
         # thread state changes. See SUPPRESSED_EVENT_NAMES.
@@ -623,6 +646,96 @@ class WebhookProcessor:
             pr, repo_name, head_sha, last_reviewed_sha, f"ci-gate-{uuid.uuid4()}"
         )
         self.process_event(event, ci_verified=True)
+
+    def handle_jules_label(self, payload: dict[str, Any]) -> bool:
+        """Handle an owner-attached ``jules`` label by interacting with Jules via the API.
+
+        Discovers the Jules session ID from Jules's comment on the issue/PR,
+        then gets the session state and approves the plan if it is awaiting
+        approval (when ``JULES_AUTO_APPROVE_PLAN`` is enabled).
+
+        Does NOT post any comments to GitHub — all communication with Jules
+        happens via the Jules REST API.
+
+        Returns True if the event was handled as a Jules label event.
+        """
+        raw = payload.get("raw_payload") or {}
+        label = raw.get("label") or {}
+        label_name = (label.get("name") or "").strip().lower()
+        if label_name != "jules":
+            return False
+
+        sender = payload.get("sender") or raw.get("sender") or {}
+        sender_login = (sender.get("login") or "").strip().lower()
+        if sender_login != OWNER_LOGIN.lower():
+            return False
+
+        issue = raw.get("issue") or {}
+        pr_data = raw.get("pull_request") or {}
+        item_number = issue.get("number") or pr_data.get("number")
+        repo_name = (raw.get("repository") or {}).get("full_name")
+        if not repo_name or item_number is None:
+            return False
+
+        gh = self.gh
+        try:
+            repo = gh.get_repo(repo_name)
+            try:
+                item: Any = repo.get_issue(int(item_number))
+            except Exception:
+                item = repo.get_pull(int(item_number))
+
+            for comment in item.get_comments():
+                user_obj = comment.user
+                if user_obj is None:
+                    continue
+                user: dict[str, Any] = getattr(user_obj, "raw_data", {}) or {}
+                if not is_jules_sender(user):
+                    continue
+                session_id = extract_session_id(comment.body or "")
+                if not session_id:
+                    continue
+                return self._interact_with_jules_session(session_id)
+
+        except Exception:
+            logger.exception("Failed to handle jules label for %s#%s", repo_name, item_number)
+
+        return False
+
+    def _interact_with_jules_session(self, session_id: str) -> bool:
+        """Inspect a Jules session and act on its current state.
+
+        - If ``AWAITING_PLAN_APPROVAL`` and auto-approve is enabled, approves the plan.
+        - If ``AWAITING_USER_FEEDBACK``, logs for awareness (no message sent).
+        - Terminal states are acknowledged.
+
+        Returns True on successful interaction.
+        """
+        state = session_state(session_id)
+        if state is None:
+            logger.warning("Could not resolve Jules session %s state", session_id)
+            return False
+
+        logger.info("Jules session %s is in state %s", session_id, state)
+
+        if state == "AWAITING_PLAN_APPROVAL":
+            auto_approve = os.environ.get("JULES_AUTO_APPROVE_PLAN", "1").strip().lower()
+            if auto_approve in ("1", "true", "yes", "on"):
+                return approve_plan(session_id)
+            logger.info(
+                "Jules session %s plan awaiting approval; auto-approve disabled", session_id
+            )
+            return False
+
+        if state == "AWAITING_USER_FEEDBACK":
+            logger.info("Jules session %s awaiting user feedback; no message sent", session_id)
+            return False
+
+        if state in ("COMPLETED", "FAILED"):
+            logger.info("Jules session %s already in terminal state %s", session_id, state)
+            return True
+
+        return True
 
     def process_event(self, payload: dict[str, Any], *, ci_verified: bool = False) -> None:
         """Process a Pub/Sub payload.
@@ -703,6 +816,12 @@ class WebhookProcessor:
         dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
         if handle_jules_pr_opened(gh, repo_name, payload, dry_run=dry_run):
             logger.info("Jules PR adoption proxy handled PR in %s; stopping processing.", repo_name)
+            return
+
+        if self.handle_jules_label(payload):
+            logger.info(
+                "Jules label event handled via Jules API in %s; stopping processing.", repo_name
+            )
             return
 
         if event_key == "pull_request.synchronize" and is_base_branch_merge_sync(
