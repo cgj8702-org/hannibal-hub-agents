@@ -18,6 +18,7 @@ The implementation deliberately avoids importing heavy packages until the
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -775,6 +776,15 @@ class WebhookProcessor:
             ctx["tier"],
             ctx["item_id"],
             ctx["delivery_id"],
+            extra={
+                "json_fields": {
+                    "repo": ctx["repo"],
+                    "event": event_key,
+                    "tier": ctx["tier"],
+                    "item_id": ctx["item_id"],
+                    "delivery_id": ctx["delivery_id"],
+                }
+            },
         )
 
         # Set canonical event name in payload for AgentCore and WebhookAgent
@@ -1078,6 +1088,29 @@ class WebhookProcessor:
                 status_symbol = "OK" if r.success else "FAIL"
                 tool_name = getattr(r, "tool", "")
                 tool_label = f" (tool: {tool_name})" if tool_name else ""
+                raw_act_result = getattr(r, "action_result", None)
+                if (
+                    raw_act_result is None
+                    and isinstance(msg, str)
+                    and msg.startswith("tool executed: ")
+                ):
+                    import ast
+
+                    with contextlib.suppress(Exception):
+                        raw_act_result = ast.literal_eval(msg[len("tool executed: ") :])
+                if raw_act_result is None:
+                    raw_act_result = msg
+
+                json_fields = {
+                    "status": status_symbol,
+                    "tool": tool_name,
+                    "action_result": raw_act_result,
+                    "repo": ctx["repo"],
+                    "item_id": ctx["item_id"],
+                    "event": ctx["event"],
+                    "tier": ctx["tier"],
+                    "delivery_id": ctx["delivery_id"],
+                }
                 logger.info(
                     "Agent action [%s]%s: %s [repo=%s, item_id=%s]",
                     status_symbol,
@@ -1085,6 +1118,7 @@ class WebhookProcessor:
                     truncate_log_payload(msg, 300),
                     ctx["repo"],
                     ctx["item_id"],
+                    extra={"json_fields": json_fields},
                 )
             logger.info(
                 "✅ Webhook processing completed [repo=%s, event=%s, tier=%s, item_id=%s, actions=%d]",
@@ -1093,6 +1127,16 @@ class WebhookProcessor:
                 ctx["tier"],
                 ctx["item_id"],
                 len(results),
+                extra={
+                    "json_fields": {
+                        "repo": ctx["repo"],
+                        "event": ctx["event"],
+                        "tier": ctx["tier"],
+                        "item_id": ctx["item_id"],
+                        "delivery_id": ctx["delivery_id"],
+                        "action_count": len(results),
+                    }
+                },
             )
         else:
             logger.info(
@@ -1101,4 +1145,14 @@ class WebhookProcessor:
                 ctx["event"],
                 ctx["tier"],
                 ctx["item_id"],
+                extra={
+                    "json_fields": {
+                        "repo": ctx["repo"],
+                        "event": ctx["event"],
+                        "tier": ctx["tier"],
+                        "item_id": ctx["item_id"],
+                        "delivery_id": ctx["delivery_id"],
+                        "action_count": 0,
+                    }
+                },
             )

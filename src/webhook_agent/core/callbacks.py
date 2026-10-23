@@ -276,6 +276,11 @@ async def after_model_callback(
     active_cache_name = getattr(cache_meta, "cache_name", None) if cache_meta else None
 
     target_model = callback_context.state.get("active_model", "gemini-3")
+    repo = callback_context.state.get("repo_full_name", "")
+    item_id = callback_context.state.get("pr_number") or callback_context.state.get(
+        "issue_number", ""
+    )
+    tier = callback_context.state.get("active_tier", "")
     logger.info(
         "📊 [LLM Token Usage] model=%s, total=%d, prompt=%d, candidates=%d, cached=%d",
         target_model,
@@ -283,6 +288,19 @@ async def after_model_callback(
         prompt_tokens,
         candidates_tokens,
         cached_tokens,
+        extra={
+            "json_fields": {
+                "event_type": "llm_token_usage",
+                "model": target_model,
+                "total_tokens": total_tokens,
+                "prompt_tokens": prompt_tokens,
+                "candidates_tokens": candidates_tokens,
+                "cached_tokens": cached_tokens,
+                "repo": repo,
+                "item_id": item_id,
+                "tier": tier,
+            }
+        },
     )
 
     if total_tokens > 0:
@@ -297,6 +315,16 @@ async def after_model_callback(
             "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
             cached_tokens,
             target_model,
+            extra={
+                "json_fields": {
+                    "event_type": "cache_hit",
+                    "model": target_model,
+                    "cached_tokens": cached_tokens,
+                    "repo": repo,
+                    "item_id": item_id,
+                    "tier": tier,
+                }
+            },
         )
     elif active_cache_name:
         callback_context.state["active_cache_name"] = active_cache_name
@@ -304,6 +332,16 @@ async def after_model_callback(
             "💎 [Gemini Context Cache Reused] Active cache %s attached for model %s",
             active_cache_name,
             target_model,
+            extra={
+                "json_fields": {
+                    "event_type": "cache_reused",
+                    "model": target_model,
+                    "cache_name": active_cache_name,
+                    "repo": repo,
+                    "item_id": item_id,
+                    "tier": tier,
+                }
+            },
         )
 
     logger.debug(
@@ -397,8 +435,20 @@ async def before_tool_callback(
         tools_executed = tool_context.state.get("tools_executed") or []
         has_investigated = any(t in investigative_tools for t in tools_executed)
         if not has_investigated:
+            repo = tool_context.state.get("repo_full_name", "")
+            item_id = tool_context.state.get("pr_number") or tool_context.state.get(
+                "issue_number", ""
+            )
             logger.info(
-                "🛑 [Investigation Gate] Blocked premature review() tool call on code PR without prior investigation."
+                "🛑 [Investigation Gate] Blocked premature review() tool call on code PR without prior investigation.",
+                extra={
+                    "json_fields": {
+                        "event_type": "investigation_gate_blocked",
+                        "tool": "review",
+                        "repo": repo,
+                        "item_id": item_id,
+                    }
+                },
             )
             return {
                 "error": (
