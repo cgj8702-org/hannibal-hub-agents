@@ -88,7 +88,7 @@ def is_base_branch_merge_sync(gh: Github, repo_name: str, payload: dict[str, Any
             if not base_blob_sha or base_blob_sha != head_blob_sha:
                 return False
 
-        logger.info(
+        logger.debug(
             "Verified base-branch merge sync for %s (head=%s, base_parent=%s, files=%d)",
             repo_name,
             head_sha[:8],

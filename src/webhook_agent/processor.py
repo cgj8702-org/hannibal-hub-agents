@@ -943,7 +943,7 @@ class WebhookProcessor:
                 live_pr = gh.get_repo(repo_name).get_pull(pr_num_int)
                 live_state = getattr(live_pr, "state", None)
                 if isinstance(live_state, str) and live_state != "open":
-                    logger.info(
+                    logger.debug(
                         "🔒 PR %s#%s is not open (state=%s); skipping.",
                         repo_name,
                         pr_number,
@@ -1019,7 +1019,7 @@ class WebhookProcessor:
                     (updated_pr.get("state") or "").lower() if isinstance(updated_pr, dict) else ""
                 )
                 if updated_state == "closed" or pr_closed_registry.is_closed(repo_name, pr_num_int):
-                    logger.info(
+                    logger.debug(
                         "🔒 PR %s#%s was closed or merged on GitHub; skipping agent execution.",
                         repo_name,
                         pr_number,

@@ -105,7 +105,7 @@ def get_shared_genai_client() -> Any:
         from google.genai import Client
 
         _GENAI_CLIENT = Client(api_key=api_key)
-        logger.info("Shared GenAI client created and cached successfully")
+        logger.debug("Shared GenAI client created and cached successfully")
         return _GENAI_CLIENT
     except Exception as exc:
         logger.exception("Failed to create shared GenAI client: %s", exc)

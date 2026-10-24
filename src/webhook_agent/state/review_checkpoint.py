@@ -325,11 +325,18 @@ class ReviewCheckpointManager:
                 else:
                     db_payload["attempts"] = (existing.get("attempts", 0) + 1) if existing else 1
                 doc_ref.set(db_payload, merge=True)
-                logger.info(
-                    "💾 Saved review checkpoint for %s (status: %s, TTL: 14d)",
-                    doc_id,
-                    payload["status"],
-                )
+                if payload["status"] == "pending":
+                    logger.debug(
+                        "💾 Saved review checkpoint for %s (status: %s, TTL: 14d)",
+                        doc_id,
+                        payload["status"],
+                    )
+                else:
+                    logger.info(
+                        "💾 Saved review checkpoint for %s (status: %s, TTL: 14d)",
+                        doc_id,
+                        payload["status"],
+                    )
                 return True
             except Exception as exc:
                 logger.debug(
