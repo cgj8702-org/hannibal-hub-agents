@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -74,20 +73,13 @@ class ProactiveEvaluator:
     """Evaluates repository state proactively without requiring user webhooks.
 
     Performs pure deterministic hygiene:
-    - Flags merge conflicts
     - Posts reminders for stale unresolved review threads (>24h idle)
     Does NOT invoke LLMs or inject synthetic PR review events.
     """
 
-    def __init__(
-        self,
-        gh: Github,
-        repo_name: str,
-        on_unreviewed_pr: Callable[[dict[str, Any]], None] | None = None,
-    ) -> None:
+    def __init__(self, gh: Github, repo_name: str) -> None:
         self.gh = gh
         self.repo_name = repo_name
-        self.on_unreviewed_pr = on_unreviewed_pr
 
     def evaluate_open_prs(self) -> list[dict[str, Any]]:
         """Scans open pull requests and performs proactive maintenance actions."""
@@ -113,23 +105,11 @@ class ProactiveEvaluator:
         return results
 
     def _evaluate_single_pr(self, pr: Any) -> dict[str, Any] | None:
-        """Evaluate a PR for merge conflicts and stale review threads."""
+        """Evaluate a PR for stale review threads."""
         pr_number = pr.number
         actions_taken: list[str] = []
 
-        # 1. Check Merge Conflicts
-        is_dirty = getattr(pr, "mergeable_state", None) == "dirty"
-        if getattr(pr, "mergeable", None) is False or is_dirty:
-            if not self._has_recent_comment_with_text(
-                pr, "Unable to automatically resolve merge conflicts"
-            ):
-                logger.info(
-                    "Proactive Action: Detected merge conflict on PR #%d",
-                    pr_number,
-                )
-                actions_taken.append("merge_conflict_detected")
-
-        # 2. Check Stale Unresolved Threads (>24h)
+        # Check stale unresolved threads (>24h)
         if self._has_stale_unresolved_thread(pr) and not self._has_recent_comment_with_text(
             pr, "Proactive Reminder: Unresolved Feedback"
         ):

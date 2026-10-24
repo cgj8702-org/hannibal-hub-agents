@@ -91,11 +91,10 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Event scope is classified deterministically by `resolve_event_policy()` (`core/policy.py`), which assigns one of `FORMAL_AUDIT`, `THREAD_COLLAB`, `ISSUE_TRIAGE`, or `IGNORE` before any model call.
    - Pull-request context and diffs are hydrated before model evaluation.
    - Structured review output is normalized before writeback.
-2. **Proactive PR Evaluator (`ProactiveEvaluator`)**:
-   - Runs a 5-minute background ticker in the worker process (disabled by default unless `ENABLE_PROACTIVE_SWEEP=1`).
-   - Pure deterministic PR hygiene: it never invokes an LLM. It acts on exactly two signals:
-     - **Stale Review Threads**: Inline review comments idle >24h ➔ posts a `Proactive Reminder: Unresolved Feedback` issue comment.
-     - **Merge Conflicts**: `mergeable is False` or `mergeable_state == "dirty"` ➔ recorded as `merge_conflict_detected` in the returned result. No comment is posted, and `worker.py` currently discards that return value, so nothing is surfaced today (see #435).
+2. **Proactive PR Evaluator (`ProactiveEvaluator`)**: currently **dormant** — read this before wiring it up.
+   - Runs a 5-minute background ticker in the worker process. The ticker requires `ENABLE_PROACTIVE_SWEEP=1`, which nothing in this repo or its deploy path currently sets.
+   - Pure deterministic PR hygiene: it never invokes an LLM. It has one signal — **Stale Review Threads**: *inline* review comments idle >24h ➔ posts a `Proactive Reminder: Unresolved Feedback` issue comment. Formal review bodies are deliberately excluded, so a PR with no inline review comments never triggers it.
+   - Its comment write is not routed through `evaluate_writeback_policy()`, so `ALLOW_AUTOMATED_MUTATIONS=0` would **not** suppress it if the sweep were enabled.
    - CI status is handled separately by the pre-review gate in `review/ci_gate.py`, not by this sweep.
 3. **Universal String Normalizer (`clean_field_string`), applied via Pydantic `field_validator`s**:
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
@@ -126,7 +125,7 @@ Key environment variables configuring orchestrator operation:
 | `ALLOW_AUTOMATED_MUTATIONS` | `1` | Master policy gate for automated writeback actions (comments, formal reviews). |
 | `REVIEW_WAIT_FOR_CI` | `1` | Hold automatic reviews until every check on the PR head commit is green. CI still running ➔ defer silently; CI failed ➔ skip silently. Set `0` to review immediately. See `review/ci_gate.py`. |
 | `ENABLE_AUTOMATIC_PR_REVIEWS` | `1` | Review opened/synchronized PRs automatically once CI is green. Set `0` to require manual `/review` triggers. |
-| `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute background sweep ticker for stale review threads and merge conflicts. |
+| `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute sweep ticker for stale review threads. Nothing in this repo sets it, so the sweep is dormant. |
 | `TARGET_REPOSITORIES` | `cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents` | Comma-separated repositories scanned by the proactive sweep. |
 | `ENABLE_REVIEW_RESUME` | `0` | Enable the periodic sweep that resumes paused review checkpoints (see `docs/CHECKPOINT_RESUME.md`). |
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Seconds between checkpoint resume sweeps, when `ENABLE_REVIEW_RESUME=1`. |

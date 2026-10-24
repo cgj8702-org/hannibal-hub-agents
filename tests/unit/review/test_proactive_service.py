@@ -83,59 +83,6 @@ class TestProactiveEvaluator:
         assert evaluator.evaluate_open_prs() == []
         mock_pr.create_issue_comment.assert_not_called()
 
-    def test_merge_conflict_detected_on_unmergeable_pr(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 101
-        mock_pr.mergeable = False
-        mock_pr.mergeable_state = "clean"
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_review_comments.return_value = []
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
-        results = evaluator.evaluate_open_prs()
-
-        assert len(results) == 1
-        assert results[0]["pr_number"] == 101
-        assert "merge_conflict_detected" in results[0]["actions"]
-
-    def test_merge_conflict_detected_on_dirty_state(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 102
-        mock_pr.mergeable = True
-        mock_pr.mergeable_state = "dirty"
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.get_review_comments.return_value = []
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
-        results = evaluator.evaluate_open_prs()
-
-        assert len(results) == 1
-        assert results[0]["pr_number"] == 102
-        assert "merge_conflict_detected" in results[0]["actions"]
-
-    def test_merge_conflict_skipped_if_already_commented(self):
-        mock_gh = MagicMock()
-        mock_repo = mock_gh.get_repo.return_value
-        mock_pr = MagicMock()
-        mock_pr.number = 103
-        mock_pr.mergeable = False
-        mock_comment = MagicMock()
-        mock_comment.body = "Unable to automatically resolve merge conflicts for PR #103."
-        mock_pr.get_issue_comments.return_value = [mock_comment]
-        mock_pr.get_review_comments.return_value = []
-        mock_repo.get_pulls.return_value = [mock_pr]
-
-        evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
-        results = evaluator.evaluate_open_prs()
-
-        assert results == []
-
     def test_unreviewed_pr_does_not_dispatch_synthetic_events_or_llms(self):
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
@@ -151,14 +98,11 @@ class TestProactiveEvaluator:
         mock_pr.get_review_comments.return_value = []
         mock_repo.get_pulls.return_value = [mock_pr]
 
-        callback = MagicMock()
-        evaluator = ProactiveEvaluator(
-            mock_gh, "cgj8702-org/hannibal-hub", on_unreviewed_pr=callback
-        )
+        evaluator = ProactiveEvaluator(mock_gh, "cgj8702-org/hannibal-hub")
         results = evaluator.evaluate_open_prs()
 
         assert results == []
-        callback.assert_not_called()
+        mock_pr.create_issue_comment.assert_not_called()
 
     def test_concurrent_threads_reconciliation_claim_is_thread_safe(self):
         import concurrent.futures
