@@ -280,11 +280,15 @@ def repair_rendered_citations(
 ) -> str:
     """Repair citations in a rendered review body, logging every rewrite."""
     repaired_body, repairs = repair_line_citations(body, review_file_loader(pr), max_drift)
+    seen_repairs: set[tuple[str, int, int]] = set()
     for repair in repairs:
-        logger.info(
-            "🔧 Citation repaired: %s:%d → %d",
-            repair.path,
-            repair.original_line,
-            repair.repaired_line,
-        )
+        key = (repair.path, repair.original_line, repair.repaired_line)
+        if key not in seen_repairs:
+            seen_repairs.add(key)
+            logger.info(
+                "🔧 Citation repaired: %s:%d → %d",
+                repair.path,
+                repair.original_line,
+                repair.repaired_line,
+            )
     return repaired_body
