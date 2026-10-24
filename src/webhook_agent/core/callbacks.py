@@ -311,7 +311,7 @@ async def after_model_callback(
         callback_context.state["candidates_tokens"] = candidates_tokens
     if cached_tokens > 0:
         callback_context.state["cached_content_tokens"] = cached_tokens
-        logger.info(
+        logger.debug(
             "💎 [Gemini Context Cache HIT] %d cached tokens reused for model %s",
             cached_tokens,
             target_model,
@@ -328,7 +328,7 @@ async def after_model_callback(
         )
     elif active_cache_name:
         callback_context.state["active_cache_name"] = active_cache_name
-        logger.info(
+        logger.debug(
             "💎 [Gemini Context Cache Reused] Active cache %s attached for model %s",
             active_cache_name,
             target_model,

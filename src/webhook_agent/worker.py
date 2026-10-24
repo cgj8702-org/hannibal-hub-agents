@@ -25,6 +25,7 @@ import signal
 import sys
 import threading
 import time
+import warnings
 from typing import Any
 
 import google.cloud.pubsub_v1 as pubsub_v1
@@ -63,6 +64,8 @@ logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 # traceback on every transient error; our execution.py already logs the same
 # error with structured context at the retry boundary.
 logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
+# Silence repetitive ADK experimental feature warnings
+warnings.filterwarnings("ignore", category=UserWarning, module=r"google\.adk")
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +179,7 @@ def setup_cloud_logging() -> None:
         # 'Root node failed' traceback (our orchestrator logs it once instead).
         logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
         logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
+        warnings.filterwarnings("ignore", category=UserWarning, module=r"google\.adk")
 
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
