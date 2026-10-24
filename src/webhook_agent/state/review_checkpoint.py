@@ -84,7 +84,9 @@ class ReviewCheckpointManager:
                         or DEFAULT_FIRESTORE_PROJECT
                     )
                     self._db = firestore.Client(project=project_id)
-                    logger.info("Initialized ReviewCheckpointManager in Firestore [%s]", project_id)
+                    logger.debug(
+                        "Initialized ReviewCheckpointManager in Firestore [%s]", project_id
+                    )
                 except Exception as exc:
                     logger.warning("Could not initialize Firestore client for checkpoints: %s", exc)
             elif _HAS_FIRESTORE:

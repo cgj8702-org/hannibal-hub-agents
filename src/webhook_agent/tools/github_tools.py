@@ -601,7 +601,7 @@ def review(
                 changed_paths=list(grounding_patches),
             )
             if grounding_issues:
-                logger.info(
+                logger.debug(
                     "🔎 [Grounding] %s#%s: %d ungrounded citation(s) %s",
                     repo_name,
                     pr_number,
