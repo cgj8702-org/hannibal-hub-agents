@@ -6,10 +6,8 @@ to ground the auditor and prevent hallucinations regarding valid resolver bumps.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
-
-
+from dataclasses import dataclass, field
 
 @dataclass
 class LockfilePackage:
