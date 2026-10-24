@@ -11,15 +11,12 @@ in response to any webhook event.
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from webhook_agent.github.bot_identity import is_hannibal_bot_login
-
-logger = logging.getLogger("webhook_agent.core.policy")
 
 # Bot logins that are never actionable (own bot loop avoidance or automated reviewers)
 SUPPRESSED_BOT_LOGINS: frozenset[str] = frozenset(

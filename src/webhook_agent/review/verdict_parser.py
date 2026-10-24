@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
-
-logger = logging.getLogger("webhook_agent.review.verdict_parser")
 
 
 def calculate_verdict(

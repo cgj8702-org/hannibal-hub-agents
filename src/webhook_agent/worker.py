@@ -163,17 +163,8 @@ def setup_cloud_logging() -> None:
         client = google.cloud.logging.Client(project=project_id)
         client.setup_logging(log_level=log_level)
 
-        # Ensure third-party transport loggers remain quiet under cloud logging
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("urllib3").setLevel(logging.WARNING)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("google.auth").setLevel(logging.WARNING)
-        logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)
-        logging.getLogger("google_genai.models").setLevel(logging.ERROR)
-        logging.getLogger("google_adk").setLevel(logging.ERROR)
-        logging.getLogger("google.adk").setLevel(logging.ERROR)
-        # Duplicate of the module-level clamp: drop ADK Runner's per-attempt
-        # 'Root node failed' traceback (our orchestrator logs it once instead).
+        # Drop ADK Runner's per-attempt 'Root node failed' traceback
+        # (our orchestrator logs it once instead).
         logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
         logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
 
