@@ -130,15 +130,27 @@ def _handle_strict_grounding_gate(
 def _diff_touches_python(diff_text: str) -> bool:
     """Return True when a unified diff modifies a Python file.
 
-    Deliberately narrow: Contract Integrity is a symbol-level scan of ``src/`` and
-    ``tests/``, so a docs-only or config-only diff has nothing for it to verify and
-    must not be reported as unverified.
+    Deliberately narrow: the deterministic audit dimensions are symbol/probe scans of
+    ``src/`` and ``tests/``, so a docs-only or config-only diff has nothing for them to
+    verify and must not be reported as unverified.
     """
     for line in diff_text.splitlines():
         if line.startswith("+++ b/"):
             if line[len("+++ b/") :].strip().endswith((".py", ".pyi")):
                 return True
     return False
+
+
+def _unverified_item(dimension: str) -> ScorecardItem:
+    """Return an UNKNOWN item for a dimension whose deterministic analysis never ran."""
+    return ScorecardItem(
+        dimension=dimension,
+        status="UNKNOWN",
+        notes=(
+            f"UNVERIFIED: deterministic analysis for '{dimension}' did not run for this "
+            "review (no PR workspace was built), so it could not be checked."
+        ),
+    )
 
 
 def apply_scorecard_floor(
@@ -468,30 +480,35 @@ def _enforce_verdict(
     critic_engine = CriticEngine()
     hunter_engine = HunterEngine()
 
-    # Fail closed on Contract Integrity when the deterministic scan never ran.
+    # Fail closed on the deterministic dimensions when their analysis never ran.
     #
-    # evaluate_contract_integrity() walks the checked-out tree (symbol_graph.py:559 scans
-    # repo_root/src and repo_root/tests), so a review that skipped the PR workspace produces
-    # no deterministic item — and apply_scorecard_floor() is a no-op when the item is None,
+    # Every deterministic scorecard item is produced inside a block that needs a checked-out
+    # tree: contract via SymbolImpactAnalyzer(repo_root=active_env.root), test via
+    # run_diff_coverage(repo_root=active_env.root), security via SecurityScanner(repo_root=...)
+    # (core/prompts.py:420, :459, :495). A review that skipped the PR workspace therefore
+    # produces none of them — and apply_scorecard_floor() is a no-op when an item is None,
     # letting the model's PASS stand unverified. See #443: a comment-triggered sync review
     # reported PASS on Contract Integrity for a head SHA that had never been fully reviewed.
     #
-    # Only the demonstrated dimension is guarded here. Security and test coverage read from
-    # the same analysis and have the same exposure; widening this should be deliberate.
-    if det_contract_item is None and _diff_touches_python(diff_text):
-        logger.warning(
-            "Contract Integrity floor missing for code diff (head=%s); marking UNKNOWN "
-            "instead of trusting the model's status",
-            head_sha[:7] or "unknown",
-        )
-        det_contract_item = ScorecardItem(
-            dimension="Contract Integrity",
-            status="UNKNOWN",
-            notes=(
-                "UNVERIFIED: deterministic contract analysis did not run for this review "
-                "(no PR workspace was built), so contract integrity could not be checked."
-            ),
-        )
+    # UNKNOWN is honest where PASS was an unverified claim, and the existing floor branch
+    # already downgrades PASS/NA to it. Items that were produced are left untouched.
+    if _diff_touches_python(diff_text):
+        missing: list[str] = []
+        if det_contract_item is None:
+            det_contract_item = _unverified_item("Contract Integrity")
+            missing.append("Contract Integrity")
+        if det_security_item is None:
+            det_security_item = _unverified_item("Security & Secrets")
+            missing.append("Security & Secrets")
+        if det_test_item is None:
+            det_test_item = _unverified_item("Test Coverage & Regressions")
+            missing.append("Test Coverage & Regressions")
+        if missing:
+            logger.warning(
+                "Deterministic analysis missing for code diff (head=%s); marking %s UNKNOWN",
+                head_sha[:7] or "unknown",
+                ", ".join(missing),
+            )
 
     for data in data_candidates:
         try:

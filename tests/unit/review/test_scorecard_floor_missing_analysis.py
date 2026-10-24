@@ -1,4 +1,4 @@
-"""Tests for fail-closed Contract Integrity when deterministic analysis did not run (#443)."""
+"""Tests for fail-closed deterministic dimensions when analysis did not run (#443)."""
 
 from __future__ import annotations
 
@@ -65,7 +65,9 @@ def test_missing_contract_floor_on_code_diff_fails_closed() -> None:
     )
 
     assert "`❓ UNKNOWN`" in rendered_body
-    assert "deterministic contract analysis did not run" in rendered_body
+    assert "did not run for this review" in rendered_body
+    for dim in ("Contract Integrity", "Security & Secrets", "Test Coverage & Regressions"):
+        assert dim in rendered_body
 
 
 def test_missing_contract_floor_on_docs_diff_is_not_flagged() -> None:
@@ -96,4 +98,4 @@ def test_missing_contract_floor_on_docs_diff_is_not_flagged() -> None:
         json.dumps(sync_dict), "APPROVE", review_mode="sync", state=state
     )
 
-    assert "deterministic contract analysis did not run" not in rendered_body
+    assert "did not run for this review" not in rendered_body
