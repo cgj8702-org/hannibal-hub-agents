@@ -40,6 +40,7 @@ flowchart TD
 ├── .github/workflows/       # GitHub Actions CI PR gate & VM deployment workflows
 │   ├── ci.yml               # Automated lint, formatting, typecheck, and test gate
 │   └── deploy.yml           # Automated CI/CD deployment to VM via IAP SSH
+├── .githooks/pre-commit     # Tracked commit gate (lint, format, typecheck on staged Python)
 ├── assets/                  # Static assets and model registries
 │   └── registries/          # Gemini model specs and capabilities
 ├── dev/                     # Developer tools (model sync, rate limits, fixture recording)
@@ -50,19 +51,21 @@ flowchart TD
 │   ├── setup_vm_user_service.sh   # VM user-space systemd service setup script
 │   ├── hannibal-webhook-agent.service # User-space systemd unit file template
 │   ├── publish_test_message.py    # Test webhook payload publisher
+│   ├── ruff-all.sh                # Lint, format, and type-check runner shared with the hook
 │   └── install-git-hooks.sh       # Pre-commit hook installer for lint & type validation
 ├── src/
 │   ├── webhook_agent/       # Core Webhook Orchestrator Package
-│       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter)
-│       ├── core/            # Core ADK WebhookAgent definition, prompts, execution runner, callbacks, & plugins
+│       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter, lockfile, security scan)
+│       ├── core/            # ADK WebhookAgent, prompts, execution engine, event policy, callbacks, & plugins
 │       ├── environment/     # Local & ephemeral PR workspace execution contexts
-│       ├── github/          # GitHub App authentication, bot identity, and PR context enrichment
+│       ├── github/          # GitHub App auth, bot identity, PR context, thread resolver, & Jules API/proxy
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
-│       ├── review/          # Code review verdict parser, scorecard enforcement, schemas, & formatter
+│       ├── review/          # Verdict parsing, grounding enforcement, AST/CI gates, duplicate detection, proactive sweeps, schemas & formatting
 │       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
-│       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff tools)
+│       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff, search)
 │       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
 │       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
+│       ├── constants.py     # Non-sensitive infra constants and static env-var defaults
 │       └── webhook_types.py # Common dataclasses and ActionResult definitions
 ├── router/                  # Serverless webhook ingress (Cloud Functions entry point)
 │   ├── main.py              # HMAC verify, event classify, normalize, Pub/Sub publish
@@ -70,7 +73,7 @@ flowchart TD
 ├── tests/
 │   ├── eval/                # Continuous quality evaluation datasets & configs
 │   ├── fixtures/            # Sample webhook payloads & review event fixtures
-│   └── unit/                # Domain-mirrored unit test suite (analysis, core, github, models, review, state, tools)
+│   └── unit/                # Domain-mirrored unit test suite (analysis, core, environment, github, models, review, router, state, tools)
 ├── main.py                  # Distributed process manager entry point
 ├── pyproject.toml           # Dependency & pytest specification (uv-compatible)
 └── README.md                # Repository documentation
@@ -98,10 +101,10 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
 4. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
-   - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through Flash-Lite and Gemma tiers.
+   - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through the Flash-Lite and Flash tiers. Gemma models are appended **only on the free tier**, and only when the payload is within their 14k-token ceiling.
    - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
 5. **Resolution Tracking & Re-Review Templates**:
-   - Tracks **`[RESOLVED]`** vs **`[UNRESOLVED]`** items across commits using structured schema validation.
+   - Tracks each prior finding's `status` field (`RESOLVED` vs `UNRESOLVED`, rendered ✅ / 🔴) across commits using structured schema validation.
 6. **Guarded Programmatic 👀 Reaction**:
    - Adds an `eyes` reaction to user comments and valid PR events once closed/merged PR checks and deduplication locks pass.
 7. **Dual-Engine Architecture (Automated Reviews + Conversational Pair Programming)**:
@@ -121,7 +124,14 @@ Key environment variables configuring orchestrator operation:
 | `ENABLE_PR_WORKSPACE` | `1` | Clone PR head into an ephemeral sandbox workspace for accurate AST, symbol, and diff analysis (`1` = enabled, `0` = disabled). |
 | `LOG_LEVEL` | `INFO` | Application logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `ALLOW_AUTOMATED_MUTATIONS` | `1` | Master policy gate for automated writeback actions (comments, formal reviews). |
+| `REVIEW_WAIT_FOR_CI` | `1` | Hold automatic reviews until every check on the PR head commit is green. CI still running ➔ defer silently; CI failed ➔ skip silently. Set `0` to review immediately. See `review/ci_gate.py`. |
+| `ENABLE_AUTOMATIC_PR_REVIEWS` | `1` | Review opened/synchronized PRs automatically once CI is green. Set `0` to require manual `/review` triggers. |
 | `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute background sweep ticker for stale review threads and merge conflicts. |
+| `TARGET_REPOSITORIES` | `cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents` | Comma-separated repositories scanned by the proactive sweep. |
+| `ENABLE_REVIEW_RESUME` | `0` | Enable the periodic sweep that resumes paused review checkpoints (see `docs/CHECKPOINT_RESUME.md`). |
+| `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Seconds between checkpoint resume sweeps, when `ENABLE_REVIEW_RESUME=1`. |
+| `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |
+| `ENABLE_JULES_PR_PROXY` | `0` | Re-open Jules-authored PRs as `cgj8702-agents` so third-party review tools accept them (see `github/jules_proxy.py`). |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1` (default), reject or downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
 
