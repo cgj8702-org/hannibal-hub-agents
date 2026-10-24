@@ -6,10 +6,7 @@ Resolution order:
 
 from __future__ import annotations
 
-import logging
 import os
-
-logger = logging.getLogger("webhook_agent.models.secret_manager")
 
 
 def resolve_secret(secret_id: str, default: str = "") -> str:

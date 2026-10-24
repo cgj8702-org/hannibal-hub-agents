@@ -8,13 +8,10 @@ binary extension skipping, file size limits, regex pattern matching, and snippet
 from __future__ import annotations
 
 import json
-import logging
 import shlex
 from typing import Any
 
 from webhook_agent.environment.context import active_environment
-
-logger = logging.getLogger(__name__)
 
 _SEARCH_DELIMITER = "__HANNIBAL_SEARCH_RESULT__"
 _SEARCH_ERROR_KEY = "__search_error__"

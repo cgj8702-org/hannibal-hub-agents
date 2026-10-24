@@ -6,11 +6,8 @@ to ground the auditor and prevent hallucinations regarding valid resolver bumps.
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
-
-logger = logging.getLogger("webhook_agent.dependency_tree")
 
 
 @dataclass
