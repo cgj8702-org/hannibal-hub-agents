@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -83,11 +82,9 @@ class ProactiveEvaluator:
         self,
         gh: Github,
         repo_name: str,
-        on_unreviewed_pr: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.gh = gh
         self.repo_name = repo_name
-        self.on_unreviewed_pr = on_unreviewed_pr
 
     def evaluate_open_prs(self) -> list[dict[str, Any]]:
         """Scans open pull requests and performs proactive maintenance actions."""
@@ -121,13 +118,26 @@ class ProactiveEvaluator:
         is_dirty = getattr(pr, "mergeable_state", None) == "dirty"
         if getattr(pr, "mergeable", None) is False or is_dirty:
             if not self._has_recent_comment_with_text(
-                pr, "Unable to automatically resolve merge conflicts"
+                pr, "Proactive Notice: Merge Conflicts Detected"
             ):
-                logger.info(
-                    "Proactive Action: Detected merge conflict on PR #%d",
-                    pr_number,
-                )
-                actions_taken.append("merge_conflict_detected")
+                try:
+                    pr.create_issue_comment(
+                        "## ⚠️ Proactive Notice: Merge Conflicts Detected\n\n"
+                        "This PR currently has merge conflicts that prevent automatic merging. "
+                        "Please rebase or resolve conflicts with the base branch when ready! 🚀\n\n"
+                        "*Posted automatically by Hannibal Hub Proactive Agent*"
+                    )
+                    logger.info(
+                        "Proactive Action: Posted merge conflict notice on PR #%d",
+                        pr_number,
+                    )
+                    actions_taken.append("merge_conflict_notice_posted")
+                except GithubException as exc:
+                    logger.warning(
+                        "Failed to post merge conflict notice on PR #%d: %s",
+                        pr_number,
+                        exc,
+                    )
 
         # 2. Check Stale Unresolved Threads (>24h)
         if self._has_stale_unresolved_thread(pr) and not self._has_recent_comment_with_text(

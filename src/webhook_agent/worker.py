@@ -258,7 +258,13 @@ def main() -> int:
                         for repo_name in repos:
                             try:
                                 evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                                evaluator.evaluate_open_prs()
+                                sweep_results = evaluator.evaluate_open_prs()
+                                if sweep_results:
+                                    logger.info(
+                                        "Proactive sweep for %s performed actions on %d PR(s)",
+                                        repo_name,
+                                        len(sweep_results),
+                                    )
                             except GithubException as sweep_err:
                                 if sweep_err.status != 401:
                                     logger.warning(
@@ -274,7 +280,13 @@ def main() -> int:
                                 processor.invalidate_github_client()
                                 try:
                                     evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                                    evaluator.evaluate_open_prs()
+                                    sweep_results = evaluator.evaluate_open_prs()
+                                    if sweep_results:
+                                        logger.info(
+                                            "Proactive sweep for %s performed actions on %d PR(s)",
+                                            repo_name,
+                                            len(sweep_results),
+                                        )
                                 except Exception as retry_err:
                                     logger.warning(
                                         "Proactive sweep retry failed for %s: %s",
