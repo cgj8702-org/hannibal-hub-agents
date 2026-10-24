@@ -254,11 +254,11 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
                 "Scorecard dimension has unverified status (%s): %s", sc_status, sc.dimension
             )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
-        logger.info("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
+        logger.debug("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
-    logger.info("Mechanical verdict: APPROVE (0 critical issues)")
+    logger.debug("Mechanical verdict: APPROVE (0 critical issues)")
     return "APPROVE"
 
 
@@ -270,7 +270,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
         if r.status == "UNRESOLVED" and getattr(r, "category", "CRITICAL") == "CRITICAL"
     ]
     if unresolved_critical or len(review.critical_issues) > 0:
-        logger.info(
+        logger.debug(
             "Sync verdict: REQUEST_CHANGES (unresolved_critical=%d, critical=%d)",
             len(unresolved_critical),
             len(review.critical_issues),
@@ -279,7 +279,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
     for sc in getattr(review, "scorecard", []):
         sc_status = getattr(sc, "status", "")
         if sc_status == "FAIL":
-            logger.info(
+            logger.debug(
                 "Sync verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
             )
             return "REQUEST_CHANGES"
@@ -288,11 +288,11 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
                 "Sync scorecard dimension has unverified status (%s): %s", sc_status, sc.dimension
             )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
-        logger.info("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
+        logger.debug("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
-    logger.info(
+    logger.debug(
         "Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",
         len(review.minor_suggestions),
     )
