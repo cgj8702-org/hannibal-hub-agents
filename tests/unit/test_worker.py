@@ -609,7 +609,7 @@ class TestShouldProcessEvent:
             ),
             patch("webhook_agent.processor.Github"),
             patch("webhook_agent.processor.AgentCore") as mock_core_cls,
-            caplog.at_level(logging.INFO),
+            caplog.at_level(logging.DEBUG),
         ):
             mock_agent = MagicMock()
             mock_agent.run.return_value = [mock_result]
@@ -1025,7 +1025,7 @@ class TestBaseBranchMergeSync:
             ),
             patch("webhook_agent.processor.AgentCore") as mock_core_cls,
             patch("webhook_agent.processor._add_eyes_reaction") as mock_eyes,
-            caplog.at_level(logging.INFO),
+            caplog.at_level(logging.DEBUG),
         ):
             mock_agent = MagicMock()
             mock_core_cls.return_value = mock_agent

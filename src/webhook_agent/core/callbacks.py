@@ -495,7 +495,7 @@ async def on_tool_error_callback(
     tool: BaseTool, args: dict[str, Any], tool_context: ToolContext, error: Exception
 ) -> dict[str, Any] | None:
     """Self-healing error recovery callback."""
-    logger.warning("on_tool_error_callback: tool '%s' raised error: %s", tool.name, error)
+    logger.debug("on_tool_error_callback: tool '%s' raised error: %s", tool.name, error)
     err_str = str(error).lower()
     if "429" in err_str or "resource_exhausted" in err_str:
         return {

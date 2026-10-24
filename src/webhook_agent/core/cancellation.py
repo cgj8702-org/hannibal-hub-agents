@@ -36,7 +36,7 @@ class PRClosedRegistry:
         key = self._key(repo_full_name, pr_number)
         with self._lock:
             self._closed[key] = time.time()
-        logger.info("🔒 Registered PR %s as CLOSED for short-circuiting", key)
+        logger.debug("🔒 Registered PR %s as CLOSED for short-circuiting", key)
 
     def is_closed(self, repo_full_name: str, pr_number: int) -> bool:
         key = self._key(repo_full_name, pr_number)
