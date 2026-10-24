@@ -67,7 +67,7 @@ class FirestoreDepletedModelRegistry:
                 try:
                     project_id = os.getenv("GCP_PROJECT_ID") or os.getenv("PUBSUB_PROJECT")
                     self._db = firestore.Client(project=project_id)
-                    logger.info(
+                    logger.debug(
                         "🔥 Firestore Depleted Model Registry initialized for project [%s]",
                         project_id,
                     )

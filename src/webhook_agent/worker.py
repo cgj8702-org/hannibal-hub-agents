@@ -59,6 +59,10 @@ logging.getLogger("google.adk").setLevel(logging.ERROR)
 # boundary. Suppress the per-attempt duplicate traceback while keeping other
 # ADK ERROR records visible.
 logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
+# ADK's _node_runner logs 'Node execution failed with exception' + full
+# traceback on every transient error; our execution.py already logs the same
+# error with structured context at the retry boundary.
+logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +175,7 @@ def setup_cloud_logging() -> None:
         # Duplicate of the module-level clamp: drop ADK Runner's per-attempt
         # 'Root node failed' traceback (our orchestrator logs it once instead).
         logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
+        logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
 
         logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
     except Exception as exc:
@@ -207,6 +212,8 @@ def main() -> int:
 
     def _signal_handler(signum: int, frame: Any) -> None:
         nonlocal keep_running
+        if not keep_running:
+            return  # Already shutting down; ignore repeated signals
         logger.info("🛑 Signal %s received, shutting down...", signum)
         keep_running = False
 

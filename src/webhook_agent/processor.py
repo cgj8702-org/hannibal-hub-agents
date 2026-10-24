@@ -1083,6 +1083,7 @@ class WebhookProcessor:
                 release_reconciliation_claim(audit_cache_key)
             raise
         if results:
+            tool_summary: dict[str, int] = {}
             for r in results:
                 msg = getattr(r, "detail", None) or getattr(r, "message", str(r))
                 status_symbol = "OK" if r.success else "FAIL"
@@ -1111,7 +1112,9 @@ class WebhookProcessor:
                     "tier": ctx["tier"],
                     "delivery_id": ctx["delivery_id"],
                 }
-                logger.info(
+                # Individual tool results at DEBUG to reduce log volume;
+                # a single aggregated summary is emitted at INFO below.
+                logger.debug(
                     "Agent action [%s]%s: %s [repo=%s, item_id=%s]",
                     status_symbol,
                     tool_label,
@@ -1120,13 +1123,20 @@ class WebhookProcessor:
                     ctx["item_id"],
                     extra={"json_fields": json_fields},
                 )
+                tool_key = f"{tool_name}:{status_symbol}"
+                tool_summary[tool_key] = tool_summary.get(tool_key, 0) + 1
+
+            summary_str = ", ".join(
+                f"{name}x{count}" if count > 1 else name for name, count in tool_summary.items()
+            )
             logger.info(
-                "✅ Webhook processing completed [repo=%s, event=%s, tier=%s, item_id=%s, actions=%d]",
+                "✅ Webhook processing completed [repo=%s, event=%s, tier=%s, item_id=%s, actions=%d, tools=%s]",
                 ctx["repo"],
                 ctx["event"],
                 ctx["tier"],
                 ctx["item_id"],
                 len(results),
+                summary_str,
                 extra={
                     "json_fields": {
                         "repo": ctx["repo"],

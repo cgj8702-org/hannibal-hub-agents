@@ -189,7 +189,7 @@ def evaluate_writeback_policy(
         else False
     )
     if pr_state == "closed" or is_merged or is_registry_closed:
-        logger.info(
+        logger.debug(
             "🔒 PR is closed or merged (state=%s, merged=%s, registry=%s); short-circuiting execution",
             pr_state,
             is_merged,
