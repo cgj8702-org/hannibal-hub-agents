@@ -16,7 +16,9 @@ def test_diff_touches_python() -> None:
     """Only Python diffs are in scope for the Contract Integrity scan."""
     from webhook_agent.review.review_enforcer import _diff_touches_python
 
-    py_diff = "diff --git a/src/api.py b/src/api.py\n+++ b/src/api.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+    py_diff = (
+        "diff --git a/src/api.py b/src/api.py\n+++ b/src/api.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+    )
     assert _diff_touches_python(py_diff) is True
 
     pyi_diff = "diff --git a/src/api.pyi b/src/api.pyi\n+++ b/src/api.pyi\n"
