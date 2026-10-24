@@ -127,6 +127,20 @@ def _handle_strict_grounding_gate(
     return enforced_verdict
 
 
+def _diff_touches_python(diff_text: str) -> bool:
+    """Return True when a unified diff modifies a Python file.
+
+    Deliberately narrow: Contract Integrity is a symbol-level scan of ``src/`` and
+    ``tests/``, so a docs-only or config-only diff has nothing for it to verify and
+    must not be reported as unverified.
+    """
+    for line in diff_text.splitlines():
+        if line.startswith("+++ b/"):
+            if line[len("+++ b/") :].strip().endswith((".py", ".pyi")):
+                return True
+    return False
+
+
 def apply_scorecard_floor(
     scorecard: list[ScorecardItem],
     deterministic_item: ScorecardItem,
@@ -453,6 +467,31 @@ def _enforce_verdict(
 
     critic_engine = CriticEngine()
     hunter_engine = HunterEngine()
+
+    # Fail closed on Contract Integrity when the deterministic scan never ran.
+    #
+    # evaluate_contract_integrity() walks the checked-out tree (symbol_graph.py:559 scans
+    # repo_root/src and repo_root/tests), so a review that skipped the PR workspace produces
+    # no deterministic item — and apply_scorecard_floor() is a no-op when the item is None,
+    # letting the model's PASS stand unverified. See #443: a comment-triggered sync review
+    # reported PASS on Contract Integrity for a head SHA that had never been fully reviewed.
+    #
+    # Only the demonstrated dimension is guarded here. Security and test coverage read from
+    # the same analysis and have the same exposure; widening this should be deliberate.
+    if det_contract_item is None and _diff_touches_python(diff_text):
+        logger.warning(
+            "Contract Integrity floor missing for code diff (head=%s); marking UNKNOWN "
+            "instead of trusting the model's status",
+            head_sha[:7] or "unknown",
+        )
+        det_contract_item = ScorecardItem(
+            dimension="Contract Integrity",
+            status="UNKNOWN",
+            notes=(
+                "UNVERIFIED: deterministic contract analysis did not run for this review "
+                "(no PR workspace was built), so contract integrity could not be checked."
+            ),
+        )
 
     for data in data_candidates:
         try:
