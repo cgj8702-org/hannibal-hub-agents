@@ -201,8 +201,13 @@ def resolve_event_policy(
             reason=f"review intent: {canonical}",
         )
 
-    # 3. Non-PR bot activity (comments/reviews) is ignored unless review intent was requested
-    if sender_login_lower.endswith("[bot]") or sender_login_lower in PARTNER_BOT_LOGINS:
+    # 3. Non-PR bot activity (comments/reviews) is ignored unless review intent was requested.
+    # Partner bots are exempt for ISSUE events only: issues filed by Cline/Jules were otherwise
+    # never triaged (see #441). Triage cannot start a ping-pong loop, because any comment the
+    # agent posts emits issue_comment — which this same rule still suppresses for bot senders.
+    is_partner_bot = sender_login_lower in PARTNER_BOT_LOGINS
+    partner_issue_event = is_partner_bot and canonical.startswith("issues.")
+    if (sender_login_lower.endswith("[bot]") or is_partner_bot) and not partner_issue_event:
         return EventPolicy(
             mode=Mode.IGNORE,
             reason=f"unprompted bot comment/activity from {sender_login or 'unknown'}",
