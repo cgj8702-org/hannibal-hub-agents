@@ -95,7 +95,7 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Runs a 5-minute background ticker in the worker process (disabled by default unless `ENABLE_PROACTIVE_SWEEP=1`).
    - Pure deterministic PR hygiene: it never invokes an LLM. It acts on exactly two signals:
      - **Stale Review Threads**: Inline review comments idle >24h ➔ posts a `Proactive Reminder: Unresolved Feedback` issue comment.
-     - **Merge Conflicts**: `mergeable is False` or `mergeable_state == "dirty"` ➔ reports `merge_conflict_detected` in the sweep result (no comment is posted).
+     - **Merge Conflicts**: `mergeable is False` or `mergeable_state == "dirty"` ➔ recorded as `merge_conflict_detected` in the returned result. No comment is posted, and `worker.py` currently discards that return value, so nothing is surfaced today (see #435).
    - CI status is handled separately by the pre-review gate in `review/ci_gate.py`, not by this sweep.
 3. **Universal String Normalizer (`clean_field_string`), applied via Pydantic `field_validator`s**:
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
