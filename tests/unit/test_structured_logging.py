@@ -46,7 +46,7 @@ def test_agent_action_logging_populates_json_fields(
         patch("webhook_agent.processor.AgentCore") as mock_core_cls,
         patch("webhook_agent.processor.evaluate_ci", return_value=MagicMock(value="pass")),
         patch("webhook_agent.processor.last_bot_review_sha", return_value=(False, None)),
-        caplog.at_level(logging.INFO),
+        caplog.at_level(logging.DEBUG),
     ):
         mock_agent = MagicMock()
         mock_agent.run.return_value = [mock_result]
@@ -97,7 +97,7 @@ def test_webhook_processing_started_and_completed_json_fields(
         patch("webhook_agent.processor.AgentCore") as mock_core_cls,
         patch("webhook_agent.processor.evaluate_ci", return_value=MagicMock(value="pass")),
         patch("webhook_agent.processor.last_bot_review_sha", return_value=(False, None)),
-        caplog.at_level(logging.INFO),
+        caplog.at_level(logging.DEBUG),
     ):
         mock_agent = MagicMock()
         mock_agent.run.return_value = []
