@@ -376,8 +376,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
 
                 active_env = get_active_environment()
                 repo_full_name = (event_data.get("repository") or {}).get("full_name", "")
-                is_self_repo = repo_full_name.endswith("/hannibal-hub-agents") or not repo_full_name
-                if active_env is not None and is_self_repo:
+                if active_env is not None:
                     base_sha = str(
                         (raw.get("pull_request") or {}).get("base", {}).get("sha")
                         or event_data.get("base_sha")
@@ -471,9 +470,21 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                             f"**Notes**: {test_item.notes}\n"
                         )
             except Exception as ast_err:
-                logger.debug(
-                    "Could not build deterministic pre-audit compiler dossier: %s", ast_err
+                logger.warning(
+                    "Deterministic symbol/test impact pre-audit failed with error: %s", ast_err
                 )
+                from webhook_agent.review.schemas import ScorecardItem
+
+                event_data["deterministic_contract_scorecard_item"] = ScorecardItem(
+                    dimension="Contract Integrity",
+                    status="UNKNOWN",
+                    notes=f"UNVERIFIED: deterministic contract analysis error: {ast_err}",
+                ).model_dump()
+                event_data["deterministic_test_scorecard_item"] = ScorecardItem(
+                    dimension="Test Coverage & Regressions",
+                    status="UNKNOWN",
+                    notes=f"UNVERIFIED: deterministic test impact analysis error: {ast_err}",
+                ).model_dump()
 
         # Option 4: Deterministic Security Tooling (detect-secrets & bandit)
         try:
@@ -504,7 +515,14 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                     f"Proven defects mechanically prevent approval."
                 )
         except Exception as sec_err:
-            logger.debug("Could not run deterministic security scanner: %s", sec_err)
+            logger.warning("Deterministic security scanner failed with error: %s", sec_err)
+            from webhook_agent.review.schemas import ScorecardItem
+
+            event_data["deterministic_security_scorecard_item"] = ScorecardItem(
+                dimension="Security & Secrets",
+                status="UNKNOWN",
+                notes=f"UNVERIFIED: deterministic security scan error: {sec_err}",
+            ).model_dump()
 
     # Include pre-fetched inline comment code context if available
     if "inline_code_context" in raw:
