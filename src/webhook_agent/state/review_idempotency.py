@@ -84,12 +84,13 @@ class ReviewClaimRegistry:
         now: datetime.datetime,
         lease_until: datetime.datetime,
         github_review_exists: bool,
+        force: bool = False,
     ) -> ReviewClaim | None:
         with self._local_lock:
             existing = self._local_claims.get(key)
-            if existing and existing[0] == "submitted":
+            if not force and existing and existing[0] == "submitted":
                 return None
-            if github_review_exists:
+            if not force and github_review_exists:
                 self._local_claims[key] = ("submitted", 0.0, token)
                 return None
             if existing and existing[0] == "processing" and existing[1] > now.timestamp():
@@ -103,8 +104,13 @@ class ReviewClaimRegistry:
         pr_number: int,
         head_sha: str,
         github_review_exists: bool,
+        force: bool = False,
     ) -> ReviewClaim | None:
-        """Claim a review unless this head is already submitted or in progress."""
+        """Claim a review unless this head is already submitted or in progress.
+
+        If force=True, allows re-claiming even if a prior review was already submitted,
+        provided there is no active concurrent lease in progress.
+        """
         key = self._key(repo_name, pr_number, head_sha)
         token = uuid.uuid4().hex
         now = datetime.datetime.now(datetime.UTC)
@@ -112,7 +118,9 @@ class ReviewClaimRegistry:
         db = self._get_db()
 
         if db is None:
-            return self._claim_local(key, token, now, lease_until, github_review_exists)
+            return self._claim_local(
+                key, token, now, lease_until, github_review_exists, force=force
+            )
 
         document = db.collection(self.collection_name).document(key)
         transaction = db.transaction()
@@ -121,7 +129,7 @@ class ReviewClaimRegistry:
         def transaction_claim(tx: Any) -> bool:
             snapshot = document.get(transaction=tx)
             data = snapshot.to_dict() if snapshot.exists else {}
-            if github_review_exists or data.get("status") == "submitted":
+            if not force and (github_review_exists or data.get("status") == "submitted"):
                 tx.set(document, {"status": "submitted", "updated_at": now}, merge=True)
                 return False
             existing_lease = data.get("lease_until")

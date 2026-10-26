@@ -112,6 +112,60 @@ def test_duplicate_at_same_commit_is_skipped() -> None:
     pr.create_review.assert_not_called()
 
 
+def test_duplicate_at_same_commit_submits_when_force() -> None:
+    """When force=True is passed, duplicate check is bypassed and review submits."""
+    pr = _pr(ANALYSED, reviews=[_bot_review(ANALYSED)])
+
+    with (
+        patch(
+            "webhook_agent.review.review_enforcer._enforce_verdict",
+            return_value=("Rendered body", "COMMENT", []),
+        ),
+        patch("webhook_agent.review.review_enforcer.review_claim_registry") as registry,
+    ):
+        registry.claim.return_value = object()
+        message, submitted = _submit_formal_review(
+            pr, "{}", "COMMENT", "owner/repo#415", analyzed_sha=ANALYSED, force=True
+        )
+
+    assert submitted is True
+    assert message.startswith("Submitted review")
+    registry.claim.assert_called_once_with(
+        "owner/repo", 415, ANALYSED, github_review_exists=False, force=True
+    )
+    pr.create_review.assert_called_once()
+
+
+@pytest.mark.parametrize("comment", ["/review", "/re-review", "please re-review this"])
+def test_duplicate_at_same_commit_submits_when_explicit_comment_in_state(comment: str) -> None:
+    """When user requests review via comment in state, duplicate check is bypassed."""
+    pr = _pr(ANALYSED, reviews=[_bot_review(ANALYSED)])
+
+    with (
+        patch(
+            "webhook_agent.review.review_enforcer._enforce_verdict",
+            return_value=("Rendered body", "COMMENT", []),
+        ),
+        patch("webhook_agent.review.review_enforcer.review_claim_registry") as registry,
+    ):
+        registry.claim.return_value = object()
+        message, submitted = _submit_formal_review(
+            pr,
+            "{}",
+            "COMMENT",
+            "owner/repo#415",
+            state={"comment_body": comment},
+            analyzed_sha=ANALYSED,
+        )
+
+    assert submitted is True
+    assert message.startswith("Submitted review")
+    registry.claim.assert_called_once_with(
+        "owner/repo", 415, ANALYSED, github_review_exists=False, force=True
+    )
+    pr.create_review.assert_called_once()
+
+
 def test_stamp_review_metadata_merges_existing_fields() -> None:
     """Stamping preserves the schema's metadata and replaces the comment in place."""
     body = '## Review\n\n<!-- hannibal-review-metadata: {"version":1,"verdict":"APPROVE"} -->\n'

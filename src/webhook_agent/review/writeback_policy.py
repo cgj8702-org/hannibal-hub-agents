@@ -49,12 +49,19 @@ _REVIEW_LOCKS_GUARD = threading.Lock()
 
 REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
     "/review",
-    "please review",
+    "/re-review",
+    "/rereview",
     "re-review",
+    "rereview",
+    "please review",
     "review this",
+    "re-review this",
     "request review",
     "run review",
     "audit this",
+    "/audit",
+    "/force-review",
+    "/force_review",
     "code review",
 )
 
