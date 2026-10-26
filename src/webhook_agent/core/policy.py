@@ -40,15 +40,21 @@ PARTNER_BOT_LOGINS: frozenset[str] = frozenset(
     }
 )
 
-# Review-intent keywords, synchronized with review/writeback_policy.py
 REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
     "/review",
-    "please review",
+    "/re-review",
+    "/rereview",
     "re-review",
+    "rereview",
+    "please review",
     "review this",
+    "re-review this",
     "request review",
     "run review",
     "audit this",
+    "/audit",
+    "/force-review",
+    "/force_review",
     "code review",
 )
 
@@ -116,6 +122,7 @@ class EventPolicy:
     thinking_budget: int = 1024
     session_key: str = ""
     reason: str = ""
+    is_explicit_request: bool = False
 
 
 def resolve_event_policy(
@@ -196,6 +203,7 @@ def resolve_event_policy(
             thinking_budget=auditor_budget,
             session_key=session_key,
             reason=f"review intent: {canonical}",
+            is_explicit_request=True,
         )
 
     # 3. Non-PR bot activity (comments/reviews) is ignored unless review intent was requested.

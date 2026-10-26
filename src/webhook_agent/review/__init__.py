@@ -9,11 +9,13 @@ from .ast_gate import (
 )
 from .comment_poster import (
     _add_eyes_reaction,
+    _remove_eyes_reaction,
     build_github_review_comments,
     filter_echo_suggestions,
     format_suggestion_body,
     is_echo_description,
     is_echo_suggestion,
+    remove_eyes_reaction,
 )
 from .critic import CriticEngine
 from .duplicate_detector import already_raised, build_exclusions, group_repeated_findings
@@ -110,6 +112,7 @@ __all__ = [
     "_enforce_verdict",
     "_is_formal_review_eligible",
     "_parse_scorecard_scores",
+    "_remove_eyes_reaction",
     "_review_lock",
     "_submit_formal_review",
     "already_raised",
@@ -151,6 +154,7 @@ __all__ = [
     "parse_legacy_review_findings",
     "parse_text_review_to_dict",
     "release_reconciliation_claim",
+    "remove_eyes_reaction",
     "render_code_review_markdown",
     "render_sync_review_markdown",
     "serialize_review_metadata",

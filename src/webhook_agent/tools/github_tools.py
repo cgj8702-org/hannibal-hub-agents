@@ -638,6 +638,21 @@ def review(
                 "Please re-examine the diff and call review() again with precise file paths, line numbers, and actionable replacement code in suggested_fix."
             )
 
+        is_forced = bool(
+            state_dict.get("force_review")
+            or state_dict.get("user:force_review")
+            or state_dict.get("is_explicit_review")
+            or state_dict.get("user:is_explicit_review")
+        )
+        if not is_forced:
+            from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+            cb = str(
+                state_dict.get("comment_body") or state_dict.get("user:comment_body") or ""
+            ).lower()
+            if cb and any(kw in cb for kw in REVIEW_INTENT_KEYWORDS):
+                is_forced = True
+
         result, _submitted = _submit_formal_review(
             pr,
             body,
@@ -645,6 +660,7 @@ def review(
             target_key,
             getattr(ctx, "state", None),
             analyzed_sha=str(state_dict.get("head_sha") or state_dict.get("user:head_sha") or ""),
+            force=is_forced,
         )
         if _submitted:
             inv = getattr(ctx, "_invocation_context", None)

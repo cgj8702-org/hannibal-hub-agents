@@ -25,6 +25,10 @@ def test_local_claim_suppresses_duplicate_and_records_submission() -> None:
 
     registry.mark_submitted(claim, "review-1", "https://example.test/review-1")
     assert registry.claim("owner/repo", 42, "head-a", github_review_exists=False) is None
+    # With force=True, re-claim is allowed after submission
+    re_claim = registry.claim("owner/repo", 42, "head-a", github_review_exists=False, force=True)
+    assert re_claim is not None
+    assert re_claim.token != claim.token
 
 
 def test_failed_claim_can_be_released_and_retried() -> None:

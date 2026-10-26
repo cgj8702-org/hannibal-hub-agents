@@ -270,6 +270,9 @@ def _submit_deterministic_review(
     final_session: Any,
     emitted_texts: list[str],
     results: list[ActionResult],
+    *,
+    force: bool = False,
+    comment_body: str = "",
 ) -> None:
     """Submit formal code review extracted from session state or emitted texts."""
     review_payload = ""
@@ -316,8 +319,16 @@ def _submit_deterministic_review(
                 review_payload,
                 "COMMENT",
                 f"{repo_full_name}#{pr_number}",
-                {"review_mode": ("sync" if canonical == "pull_request.synchronize" else "initial")},
+                {
+                    "review_mode": (
+                        "sync" if canonical == "pull_request.synchronize" else "initial"
+                    ),
+                    "is_explicit_review": force,
+                    "force_review": force,
+                    "comment_body": comment_body,
+                },
                 analyzed_sha=head_sha,
+                force=force,
             )
             results.append(
                 ActionResult(
@@ -775,6 +786,15 @@ def execute_agent_event(
                                 user_message.parts[0].text or ""
                             ) + critique_notice
 
+                from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+                has_review_intent = any(kw in comment_body.lower() for kw in REVIEW_INTENT_KEYWORDS)
+                is_explicit_review = bool(
+                    policy.is_explicit_request
+                    or has_review_intent
+                    or canonical == "pull_request_review_requested"
+                )
+
                 # Set user_state values
                 user_state_map = agent._session_service.user_state.setdefault(
                     active_app_name, {}
@@ -789,6 +809,9 @@ def execute_agent_event(
                 # Pin the analysed commit so writeback cannot stamp a review onto
                 # a commit that landed while the audit was running.
                 user_state_map["head_sha"] = head_sha
+                user_state_map["comment_body"] = comment_body
+                user_state_map["is_explicit_review"] = is_explicit_review
+                user_state_map["force_review"] = is_explicit_review
 
                 if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")
@@ -968,6 +991,14 @@ def execute_agent_event(
                     trace_id[-4:],
                 )
             else:
+                from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+                has_review_intent = any(kw in comment_body.lower() for kw in REVIEW_INTENT_KEYWORDS)
+                is_explicit_review = bool(
+                    policy.is_explicit_request
+                    or has_review_intent
+                    or canonical == "pull_request_review_requested"
+                )
                 _submit_deterministic_review(
                     gh_client=gh_client,
                     repo_full_name=repo_full_name,
@@ -977,6 +1008,8 @@ def execute_agent_event(
                     final_session=final_session,
                     emitted_texts=emitted_texts,
                     results=results,
+                    force=is_explicit_review,
+                    comment_body=comment_body,
                 )
         elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
             _post_conversational_reply(
