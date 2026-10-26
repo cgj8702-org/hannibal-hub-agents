@@ -565,8 +565,12 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 "- If not fixed: include an entry with status='UNRESOLVED' and evidence explaining why the issue persists."
             )
 
-    if canonical in ("pull_request.opened", "pull_request.synchronize") or (
-        canonical.startswith("issue_comment.") and "/review" in comment_body
+    from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+    has_comment_review_intent = any(kw in comment_body.lower() for kw in REVIEW_INTENT_KEYWORDS)
+    if (
+        canonical in ("pull_request.opened", "pull_request.synchronize")
+        or has_comment_review_intent
     ):
         parts.append(
             "\n### 🚀 ACTION DIRECTIVE: ADAPTIVE FORMAL AUDIT\n"

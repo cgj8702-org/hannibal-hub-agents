@@ -782,6 +782,48 @@ class TestAddEyesReaction:
         _add_eyes_reaction(mock_gh, "owner/repo", payload)
         mock_gh.get_repo.assert_not_called()
 
+    def test_remove_eyes_reaction_via_reaction_object(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.processor import _remove_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_rx = MagicMock()
+        payload = {"canonical": "issue_comment.created", "raw_payload": {}}
+
+        removed = _remove_eyes_reaction(mock_gh, "owner/repo", payload, reaction=mock_rx)
+        assert removed is True
+        mock_rx.delete.assert_called_once()
+
+    def test_remove_eyes_reaction_via_target_lookup(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.processor import _remove_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = mock_issue.get_comment.return_value
+
+        bot_reaction = MagicMock()
+        bot_reaction.content = "eyes"
+        bot_reaction.id = 555
+        bot_reaction.user.login = "hannibal-hub-agents[bot]"
+
+        mock_comment.get_reactions.return_value = [bot_reaction]
+
+        payload = {
+            "canonical": "issue_comment.created",
+            "raw_payload": {
+                "issue": {"number": 42},
+                "comment": {"id": 101},
+            },
+        }
+
+        removed = _remove_eyes_reaction(mock_gh, "owner/repo", payload)
+        assert removed is True
+        mock_comment.delete_reaction.assert_called_once_with(555)
+
 
 class TestPreworkPipelines:
     def test_prefetch_inline_comment_context(self):

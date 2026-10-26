@@ -1020,6 +1020,7 @@ def _submit_formal_review(
     state: Any = None,
     *,
     analyzed_sha: str = "",
+    force: bool = False,
 ) -> tuple[str, bool]:
     """Submit one guarded review, shared by the tool and deterministic fallback.
 
@@ -1032,6 +1033,7 @@ def _submit_formal_review(
         analyzed_sha: Commit the caller actually analysed. When the live head has
             moved past it, the review is deferred rather than stamped onto a
             commit it never saw.
+        force: Whether to bypass duplicate bot review checks and allow re-review.
 
     Returns:
         ``(status_message, submitted)``.
@@ -1054,6 +1056,29 @@ def _submit_formal_review(
                 False,
             )
 
+        state_dict = (
+            state.to_dict()
+            if hasattr(state, "to_dict")
+            else (state if isinstance(state, dict) else {})
+        )
+        from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+        cb = str(
+            state_dict.get("comment_body") or state_dict.get("user:comment_body") or ""
+        ).lower()
+        has_comment_intent = any(kw in cb for kw in REVIEW_INTENT_KEYWORDS) if cb else False
+        is_forced = (
+            force
+            or bool(state_dict.get("force_review") or state_dict.get("user:force_review"))
+            or bool(
+                state_dict.get("is_explicit_review") or state_dict.get("user:is_explicit_review")
+            )
+            or bool(
+                state_dict.get("is_explicit_request") or state_dict.get("user:is_explicit_request")
+            )
+            or has_comment_intent
+        )
+
         from webhook_agent.github.bot_identity import is_hannibal_bot_login
 
         reviews = list(pr.get_reviews())
@@ -1063,8 +1088,10 @@ def _submit_formal_review(
             if is_hannibal_bot_login(login):
                 bot_reviews.append(rv)
 
-        if reviewed_sha and any(
-            str(getattr(rv, "commit_id", "") or "") == reviewed_sha for rv in bot_reviews
+        if (
+            not is_forced
+            and reviewed_sha
+            and any(str(getattr(rv, "commit_id", "") or "") == reviewed_sha for rv in bot_reviews)
         ):
             logger.info("Skipping duplicate bot review for %s at head %s", target_key, reviewed_sha)
             return f"Skipped: bot review already exists for current head {reviewed_sha}.", False
@@ -1077,18 +1104,13 @@ def _submit_formal_review(
                 int(number_text),
                 reviewed_sha,
                 github_review_exists=False,
+                force=is_forced,
             )
             if claim is None:
                 return (
                     f"Skipped: review claim already exists for current head {reviewed_sha}.",
                     False,
                 )
-
-        state_dict = (
-            state.to_dict()
-            if hasattr(state, "to_dict")
-            else (state if isinstance(state, dict) else {})
-        )
         review_mode = state_dict.get("review_mode")
         if review_mode not in ("initial", "sync"):
             review_mode = "sync" if bot_reviews else "initial"

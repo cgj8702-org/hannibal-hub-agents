@@ -74,9 +74,32 @@ from webhook_agent.review.formatter import (
 from webhook_agent.review.writeback_policy import is_automatic_pr_review_enabled
 
 from .core.agent_definition import WebhookAgent
-from .review.comment_poster import _add_eyes_reaction
+from .review.comment_poster import _add_eyes_reaction, _remove_eyes_reaction
 from .state.review_checkpoint import review_checkpoint_manager
 from .webhook_types import ActionResult
+
+
+def _has_meaningful_writeback(results: list[ActionResult] | None) -> bool:
+    """Return True if at least one public writeback action succeeded on GitHub."""
+    if not results:
+        return False
+    writeback_tools = {
+        "review",
+        "add_comment",
+        "create_issue",
+        "resolve_review_thread",
+        "proactive_reconciliation_summary",
+    }
+    for r in results:
+        tool = getattr(r, "tool", "")
+        success = getattr(r, "success", False)
+        detail = str(getattr(r, "detail", "") or "")
+        if tool in writeback_tools and success:
+            if tool == "review" and detail.startswith(("Skipped:", "Error:", "Deferred:")):
+                continue
+            return True
+    return False
+
 
 logger = logging.getLogger("webhook_agent.processor")
 core_logger = logging.getLogger("webhook_agent.core")
@@ -154,6 +177,7 @@ __all__ = [
     "_prefetch_inline_comment_context",
     "_prefetch_pr_diff",
     "_prefetch_previous_bot_reviews",
+    "_remove_eyes_reaction",
     "_should_prefetch_diff",
     "evaluate_dependency_fast_path",
     "generate_trace_id",
@@ -1056,8 +1080,9 @@ class WebhookProcessor:
                     return
 
         # Guarded Eyes Reaction: only react once closed/merged PR and deduplication guardrails pass
+        eyes_reaction = None
         if not dry_run:
-            _add_eyes_reaction(gh, repo_name, payload)
+            eyes_reaction = _add_eyes_reaction(gh, repo_name, payload)
 
         # Deterministic Fast-Path for automated Dependabot / lockfile PRs
         if not dry_run and is_pr_event and pr_number is not None:
@@ -1081,7 +1106,16 @@ class WebhookProcessor:
                 )
 
                 release_reconciliation_claim(audit_cache_key)
+            if not dry_run and eyes_reaction is not None:
+                _remove_eyes_reaction(gh, repo_name, payload, reaction=eyes_reaction)
             raise
+
+        if not dry_run and eyes_reaction is not None and not _has_meaningful_writeback(results):
+            logger.info(
+                "👀 No external action taken for %s; removing eyes reaction",
+                payload.get("canonical", ""),
+            )
+            _remove_eyes_reaction(gh, repo_name, payload, reaction=eyes_reaction)
         if results:
             tool_summary: dict[str, int] = {}
             for r in results:
