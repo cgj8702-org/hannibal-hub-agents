@@ -495,20 +495,30 @@ def _enforce_verdict(
     # UNKNOWN is honest where PASS was an unverified claim, and the existing floor branch
     # already downgrades PASS/NA to it. Items that were produced are left untouched.
     if _diff_touches_python(diff_text):
+        from webhook_agent.environment.context import get_active_environment
+
+        ws_present = get_active_environment() is not None
+        missing_reason = (
+            "deterministic analysis not produced"
+            if ws_present
+            else "no active PR workspace environment"
+        )
+
         missing: list[str] = []
         if det_contract_item is None:
-            det_contract_item = _unverified_item("Contract Integrity")
+            det_contract_item = _unverified_item("Contract Integrity", reason=missing_reason)
             missing.append("Contract Integrity")
         if det_security_item is None:
-            det_security_item = _unverified_item("Security & Secrets")
+            det_security_item = _unverified_item("Security & Secrets", reason=missing_reason)
             missing.append("Security & Secrets")
         if det_test_item is None:
-            det_test_item = _unverified_item("Test Coverage & Regressions")
+            det_test_item = _unverified_item("Test Coverage & Regressions", reason=missing_reason)
             missing.append("Test Coverage & Regressions")
         if missing:
             logger.warning(
-                "Deterministic analysis missing for code diff (head=%s); marking %s UNKNOWN",
+                "Deterministic analysis missing for code diff (head=%s, ws_present=%s); marking %s UNKNOWN",
                 head_sha[:7] or "unknown",
+                ws_present,
                 ", ".join(missing),
             )
 
