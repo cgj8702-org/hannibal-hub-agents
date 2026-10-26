@@ -141,14 +141,16 @@ def _diff_touches_python(diff_text: str) -> bool:
     return False
 
 
-def _unverified_item(dimension: str) -> ScorecardItem:
+def _unverified_item(
+    dimension: str, reason: str = "deterministic analysis did not run"
+) -> ScorecardItem:
     """Return an UNKNOWN item for a dimension whose deterministic analysis never ran."""
     return ScorecardItem(
         dimension=dimension,
         status="UNKNOWN",
         notes=(
             f"UNVERIFIED: deterministic analysis for '{dimension}' did not run for this "
-            "review (no PR workspace was built), so it could not be checked."
+            f"review ({reason}), so it could not be checked."
         ),
     )
 

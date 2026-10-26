@@ -376,8 +376,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
 
                 active_env = get_active_environment()
                 repo_full_name = (event_data.get("repository") or {}).get("full_name", "")
-                is_self_repo = repo_full_name.endswith("/hannibal-hub-agents") or not repo_full_name
-                if active_env is not None and is_self_repo:
+                if active_env is not None:
                     base_sha = str(
                         (raw.get("pull_request") or {}).get("base", {}).get("sha")
                         or event_data.get("base_sha")
