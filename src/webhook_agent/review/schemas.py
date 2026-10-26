@@ -9,20 +9,24 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def clean_field_string(val: Any) -> Any:
-    """Universal string sanitizer that strips any leading Markdown keys, headers, badges, or bullet prefixes."""
+    """Universal string sanitizer that strips any leading Markdown keys, headers, badges, or bullet prefixes.
+
+    Safely preserves inline code backticks (e.g. `path/to/file.py`) without stripping opening backticks.
+    """
     if val is None:
         return ""
     if not isinstance(val, str):
         return val
     s = val.strip()
-    # Strips any leading bullets (* - • #), badges (🔴🟡✅), or key labels (**Any Key Name:**)
+    # Strips any leading bullets (* - • #), badges (🔴🟡✅), status tags ([RESOLVED]),
+    # or key labels (**Any Key Name:** or **Any Key Name**: )
     cleaned = re.sub(
-        r"^(?:(?:\*|-|•|#+|🔴|🟡|✅)\s*)*(?:\*\*)?[A-Za-z0-9 &\-_/]+:\*\*?\s*",
+        r"^(?:(?:\*|-|•|#+|🔴|🟡|✅|\[UNRESOLVED\]|\[RESOLVED\])\s*)*(?:(?:\*\*)?[A-Za-z0-9 &\-_/]+(?:\*\*:\s*|:\*\*\s*))?",
         "",
         s,
         flags=re.IGNORECASE,
     )
-    return cleaned.strip("* -•` ")
+    return cleaned.strip("* -•#\t\r\n ")
 
 
 class RiskItem(BaseModel):
