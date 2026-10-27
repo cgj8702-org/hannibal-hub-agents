@@ -47,6 +47,14 @@ logging.getLogger("google_genai._api_client").addFilter(_SuppressApiKeyWarningFi
 
 TARGET_REGISTRY = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
+    "src",
+    "webhook_agent",
+    "assets",
+    "registries",
+    "gemini_models.json",
+)
+MIRROR_REGISTRY = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
     "assets",
     "registries",
     "gemini_models.json",
@@ -153,7 +161,32 @@ async def fetch_model_registry() -> bool:
         except Exception as e:
             LOGGER.error(f"Error listing models for tier '{tier}': {e}")
 
-    models = sorted(models_by_name.values(), key=lambda m: m["name"])
+    try:
+        from dev.rate_limit_parser import sort_models_by_tpm
+    except ImportError:
+        try:
+            from rate_limit_parser import sort_models_by_tpm
+        except ImportError:
+
+            def sort_models_by_tpm(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                def _sort_key(m: dict[str, Any]) -> tuple[int, int, float, int, str]:
+                    rl = m.get("rate_limits") or {}
+                    paid = rl.get("paid") or {}
+                    free = rl.get("free") or {}
+                    paid_tpm = paid.get("tpm")
+                    free_tpm = free.get("tpm")
+                    paid_rpd = paid.get("rpd")
+                    paid_rpm = paid.get("rpm")
+                    pt = int(paid_tpm) if isinstance(paid_tpm, (int, float)) else 0
+                    ft = int(free_tpm) if isinstance(free_tpm, (int, float)) else 0
+                    prpd = float(paid_rpd) if isinstance(paid_rpd, (int, float)) else 0.0
+                    prpm = int(paid_rpm) if isinstance(paid_rpm, (int, float)) else 0
+                    name = str(m.get("name") or "")
+                    return (-pt, -ft, -prpd, -prpm, name)
+
+                return sorted(models, key=_sort_key)
+
+    models = sort_models_by_tpm(list(models_by_name.values()))
 
     # Ensure target directory exists
     target_dir = os.path.dirname(TARGET_REGISTRY)
@@ -188,6 +221,19 @@ async def fetch_model_registry() -> bool:
             os.fsync(tf.fileno())
             os.replace(tf.name, TARGET_REGISTRY)
         LOGGER.info(f"Synced {len(models)} models -> {TARGET_REGISTRY}")
+
+        # Sync mirror registry if path differs
+        if TARGET_REGISTRY != MIRROR_REGISTRY:
+            mirror_dir = os.path.dirname(MIRROR_REGISTRY)
+            os.makedirs(mirror_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", dir=mirror_dir, delete=False, encoding="utf-8"
+            ) as tf:
+                json.dump(payload, tf, indent=2)
+                tf.flush()
+                os.fsync(tf.fileno())
+                os.replace(tf.name, MIRROR_REGISTRY)
+            LOGGER.info(f"Synced registry mirror -> {MIRROR_REGISTRY}")
         return True
     except OSError as e:
         LOGGER.error(f"Failed to write registry: {e}")

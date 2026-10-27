@@ -1,0 +1,116 @@
+{
+  "Gemini 3.1 Flash Lite": {
+    "Category": "Text-out models",
+    "RPM": "15",
+    "TPM": "250K",
+    "RPD": "500"
+  },
+  "Gemini 3.5 Flash Lite": {
+    "Category": "Text-out models",
+    "RPM": "15",
+    "TPM": "250K",
+    "RPD": "500"
+  },
+  "Gemini 2.5 Flash Lite": {
+    "Category": "Text-out models",
+    "RPM": "10",
+    "TPM": "250K",
+    "RPD": "20"
+  },
+  "Gemini 2.5 Flash": {
+    "Category": "Text-out models",
+    "RPM": "5",
+    "TPM": "250K",
+    "RPD": "20"
+  },
+  "Gemini 3 Flash": {
+    "Category": "Text-out models",
+    "RPM": "5",
+    "TPM": "250K",
+    "RPD": "20"
+  },
+  "Gemini 3.6 Flash": {
+    "Category": "Text-out models",
+    "RPM": "5",
+    "TPM": "250K",
+    "RPD": "20"
+  },
+  "Gemini 3.8 Flash": {
+    "Category": "Text-out models",
+    "RPM": "5",
+    "TPM": "250K",
+    "RPD": "20"
+  },
+  "Gemini Robotics ER 2 Preview": {
+    "Category": "Other models",
+    "RPM": "5",
+    "TPM": "250K",
+    "RPD": "20"
+  },
+  "Gemini Embedding 1": {
+    "Category": "Other models",
+    "RPM": "100",
+    "TPM": "30K",
+    "RPD": "1K"
+  },
+  "Gemini Embedding 2": {
+    "Category": "Other models",
+    "RPM": "100",
+    "TPM": "30K",
+    "RPD": "1K"
+  },
+  "Gemma 4 26B": {
+    "Category": "Other models",
+    "RPM": "30",
+    "TPM": "16K",
+    "RPD": "14.4K"
+  },
+  "Gemma 4 31B": {
+    "Category": "Other models",
+    "RPM": "30",
+    "TPM": "16K",
+    "RPD": "14.4K"
+  },
+  "Gemini 2 Flash": {
+    "Category": "Text-out models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  },
+  "Gemini 2 Flash Lite": {
+    "Category": "Text-out models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  },
+  "Gemini 2.5 Pro": {
+    "Category": "Text-out models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  },
+  "Gemini 3.1 Pro": {
+    "Category": "Text-out models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  },
+  "Gemini 4 Argon": {
+    "Category": "Text-out models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  },
+  "Gemini Nano Banana 2.1": {
+    "Category": "Multi-modal generative models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  },
+  "Gemini Omni 1.1 Flash": {
+    "Category": "Multi-modal generative models",
+    "RPM": "0",
+    "TPM": "0",
+    "RPD": "0"
+  }
+}

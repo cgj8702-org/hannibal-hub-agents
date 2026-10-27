@@ -232,10 +232,11 @@ def _get_model_tpm_limit(model: str = "default", tier: str | None = None) -> int
         from pathlib import Path
 
         candidates = [
+            Path(__file__).resolve().parents[1] / "assets" / "registries" / "gemini_models.json",
             Path(__file__).resolve().parents[2] / "assets" / "registries" / "gemini_models.json",
             Path(__file__).resolve().parents[3] / "assets" / "registries" / "gemini_models.json",
         ]
-        registry_path = next((p for p in candidates if p.exists()), candidates[1])
+        registry_path = next((p for p in candidates if p.exists()), candidates[0])
         if registry_path.exists():
             data = json.loads(registry_path.read_text(encoding="utf-8"))
             full_key = (
