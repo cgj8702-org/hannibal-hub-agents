@@ -1,0 +1,548 @@
+{
+  "models": [
+    {
+      "name": "models/gemini-2.5-flash-lite",
+      "version": "001",
+      "display_name": "Gemini 2.5 Flash-Lite",
+      "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 10,
+          "tpm": 250000,
+          "rpd": 20.0
+        },
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.1-flash-lite",
+      "version": "3.1-flash-lite-05-2026",
+      "display_name": "Gemini 3.1 Flash Lite",
+      "description": "Gemini 3.1 Flash Lite",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 15,
+          "tpm": 250000,
+          "rpd": 500.0
+        },
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 150000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.5-flash-lite",
+      "version": "3.5-flash-lite-07-2026",
+      "display_name": "Gemini 3.5 Flash Lite",
+      "description": "Gemini 3.5 Flash Lite",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 15,
+          "tpm": 250000,
+          "rpd": 500.0
+        },
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 150000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-2.0-flash-lite",
+      "version": "001",
+      "display_name": "Gemini 2.0 Flash-Lite",
+      "description": "Gemini 2.0 Flash-Lite optimized for cost efficiency and low latency with 4M TPM paid limit.",
+      "input_token_limit": 1048576,
+      "output_token_limit": 8192,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 0,
+          "tpm": 0,
+          "rpd": 0.0
+        },
+        "paid": {
+          "rpm": 4000,
+          "tpm": 4000000,
+          "rpd": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-2.0-flash",
+      "version": "001",
+      "display_name": "Gemini 2.0 Flash",
+      "description": "Gemini 2.0 Flash offering high performance and speed with 4M TPM paid limit.",
+      "input_token_limit": 1048576,
+      "output_token_limit": 8192,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 0,
+          "tpm": 0,
+          "rpd": 0.0
+        },
+        "paid": {
+          "rpm": 2000,
+          "tpm": 4000000,
+          "rpd": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3-flash-preview",
+      "version": "3-flash-preview-12-2025",
+      "display_name": "Gemini 3 Flash Preview",
+      "description": "Gemini 3 Flash Preview",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        },
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.5-flash",
+      "version": "3.5-flash-05-2026",
+      "display_name": "Gemini 3.5 Flash",
+      "description": "Gemini 3.5 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.6-flash",
+      "version": "3.6-flash-07-2026",
+      "display_name": "Gemini 3.6 Flash",
+      "description": "Gemini 3.6 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        },
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.7-flash",
+      "version": "3.7-flash-08-2026",
+      "display_name": "Gemini 3.7 Flash",
+      "description": "Gemini 3.7 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        },
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.8-flash",
+      "version": "3.0",
+      "display_name": "Gemini 3.8 Flash",
+      "description": "Gemini 3.8 Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        },
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 10000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-4-argon",
+      "version": "001",
+      "display_name": "Gemini 4 Argon",
+      "description": "Advanced reasoning model with 2M TPM limit.",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 0,
+          "tpm": 0,
+          "rpd": 0.0
+        },
+        "paid": {
+          "rpm": 1000,
+          "tpm": 2000000,
+          "rpd": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-2.5-pro",
+      "version": "2.5",
+      "display_name": "Gemini 2.5 Pro",
+      "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 0,
+          "tpm": 0,
+          "rpd": 0.0
+        },
+        "paid": {
+          "rpm": 150,
+          "tpm": 2000000,
+          "rpd": 1000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.1-pro-preview",
+      "version": "3.1-pro-preview-01-2026",
+      "display_name": "Gemini 3.1 Pro Preview",
+      "description": "Gemini 3.1 Pro Preview",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 0,
+          "tpm": 0,
+          "rpd": 0.0
+        },
+        "paid": {
+          "rpm": 25,
+          "tpm": 2000000,
+          "rpd": 250.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-2.5-flash",
+      "version": "001",
+      "display_name": "Gemini 2.5 Flash",
+      "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025.",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 5,
+          "tpm": 250000,
+          "rpd": 20.0
+        },
+        "paid": {
+          "rpm": 1000,
+          "tpm": 1000000,
+          "rpd": 10000.0
+        }
+      }
+    },
+    {
+      "name": "models/gemma-4-26b-a4b-it",
+      "version": "001",
+      "display_name": "Gemma 4 26B A4B IT",
+      "description": "Gemma 4 26B A4B IT",
+      "input_token_limit": 262144,
+      "output_token_limit": 32768,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        },
+        "paid": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        }
+      }
+    },
+    {
+      "name": "models/gemma-4-31b-it",
+      "version": "001",
+      "display_name": "Gemma 4 31B IT",
+      "description": "Gemma 4 31B IT",
+      "input_token_limit": 262144,
+      "output_token_limit": 32768,
+      "supported_actions": [
+        "generateContent",
+        "countTokens"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ],
+      "rate_limits": {
+        "free": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        },
+        "paid": {
+          "rpm": 30,
+          "tpm": 16000,
+          "rpd": 14400.0
+        }
+      }
+    },
+    {
+      "name": "models/gemini-3.1-flash-lite-preview",
+      "version": "3.1-flash-lite-preview-03-2026",
+      "display_name": "Gemini 3.1 Flash Lite Preview",
+      "description": "Gemini 3.1 Flash Lite Preview",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-flash-latest",
+      "version": "Gemini Flash Latest",
+      "display_name": "Gemini Flash Latest",
+      "description": "Latest release of Gemini Flash",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-flash-lite-latest",
+      "version": "Gemini Flash-Lite Latest",
+      "display_name": "Gemini Flash-Lite Latest",
+      "description": "Latest release of Gemini Flash-Lite",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    },
+    {
+      "name": "models/gemini-pro-latest",
+      "version": "Gemini Pro Latest",
+      "display_name": "Gemini Pro Latest",
+      "description": "Latest release of Gemini Pro",
+      "input_token_limit": 1048576,
+      "output_token_limit": 65536,
+      "supported_actions": [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent"
+      ],
+      "accessible_tiers": [
+        "free",
+        "paid"
+      ]
+    }
+  ],
+  "updated_at": "2026-10-21T23:40:23.324750+00:00"
+}

@@ -1,6 +1,8 @@
 """Rate Limit PDF Parser & Dual-Tier Generator for Hannibal Hub Agents.
 
-Parses vendor PDFs into 'free' or 'paid' tier reports and outputs dual-tier JSON schemas.
+Parses vendor PDFs into 'free' or 'paid' tier reports, saves individual tier JSON files
+in data/, combines them into a unified model registry within src/**, sorts models by TPM,
+and injects zero synthetic fallbacks for missing models.
 """
 
 from __future__ import annotations
@@ -16,12 +18,12 @@ from typing import Any
 try:
     import pdfplumber
 except ImportError:
-    pdfplumber = None
+    pdfplumber: Any = None  # type: ignore[no-redef]
 
 try:
     import pypdf
 except ImportError:
-    pypdf = None
+    pypdf: Any = None  # type: ignore[no-redef]
 
 logger = logging.getLogger("rate_limit_parser")
 
@@ -44,6 +46,51 @@ MODEL_MAPPING = {
     "gemini 4 argon": "models/gemini-4-argon",
     "gemma 4 31b": "models/gemma-4-31b-it",
     "gemma 4 26b": "models/gemma-4-26b-a4b-it",
+}
+
+KNOWN_MODEL_METADATA: dict[str, dict[str, Any]] = {
+    "models/gemini-2.0-flash": {
+        "version": "001",
+        "display_name": "Gemini 2.0 Flash",
+        "description": "Gemini 2.0 Flash offering high performance and speed with 4M TPM paid limit.",
+        "input_token_limit": 1048576,
+        "output_token_limit": 8192,
+        "supported_actions": [
+            "generateContent",
+            "countTokens",
+            "createCachedContent",
+            "batchGenerateContent",
+        ],
+        "accessible_tiers": ["paid"],
+    },
+    "models/gemini-2.0-flash-lite": {
+        "version": "001",
+        "display_name": "Gemini 2.0 Flash-Lite",
+        "description": "Gemini 2.0 Flash-Lite optimized for cost efficiency and low latency with 4M TPM paid limit.",
+        "input_token_limit": 1048576,
+        "output_token_limit": 8192,
+        "supported_actions": [
+            "generateContent",
+            "countTokens",
+            "createCachedContent",
+            "batchGenerateContent",
+        ],
+        "accessible_tiers": ["paid"],
+    },
+    "models/gemini-4-argon": {
+        "version": "001",
+        "display_name": "Gemini 4 Argon",
+        "description": "Advanced reasoning model with 2M TPM limit.",
+        "input_token_limit": 1048576,
+        "output_token_limit": 65536,
+        "supported_actions": [
+            "generateContent",
+            "countTokens",
+            "createCachedContent",
+            "batchGenerateContent",
+        ],
+        "accessible_tiers": ["paid"],
+    },
 }
 
 
@@ -103,7 +150,7 @@ def is_webhook_project_pdf(raw_text: str) -> bool:
 
 
 def classify_pdf(raw_text: str, filename: str = "") -> str:
-    """Determine if PDF text/filename represents a 'paid' tier (Tier 1+) or 'free' tier document using envrc projects and keywords."""
+    """Determine if PDF text/filename represents a 'paid' tier (Tier 1+) or 'free' tier document."""
     free_proj = os.environ.get("WEBHOOK_FREE_PROJECT", "gen-lang-client-0615466973").lower()
     paid_proj = os.environ.get("WEBHOOK_PAID_PROJECT", "cgj8702-webhook-agent").lower()
 
@@ -149,10 +196,13 @@ def parse_scaled_value(val: Any) -> float:
         return 0.0
 
 
-def extract_tier_entry(entry_data: dict[str, Any] | None) -> dict[str, float | int]:
-    """Extract rpm, tpm, and rpd from raw parsed tier entry dictionary."""
+def extract_tier_entry(entry_data: dict[str, Any] | None) -> dict[str, float | int] | None:
+    """Extract numeric rpm, tpm, and rpd from raw parsed tier entry dictionary.
+
+    Returns None if entry_data is missing, strictly avoiding synthetic fallback injection.
+    """
     if not entry_data:
-        return {"rpm": 15, "tpm": 0, "rpd": 0.0}
+        return None
     return {
         "rpm": int(parse_scaled_value(entry_data.get("RPM", "0"))),
         "tpm": int(parse_scaled_value(entry_data.get("TPM", "0"))),
@@ -160,40 +210,72 @@ def extract_tier_entry(entry_data: dict[str, Any] | None) -> dict[str, float | i
     }
 
 
-def parse_pdf_file(pdf_path: Path) -> tuple[str, dict[str, Any]]:
+def extract_rate_limit_records(full_text: str) -> dict[str, dict[str, str]]:
+    """Parse raw text into structured rate limit dictionaries by model display name."""
+    pattern = re.compile(
+        r"(?:Spend\s+)?(Gemini[\w\.\s\-]+?|Gemma[\w\.\s\-]+?)\s+(Text-out models|Other models|Multi-modal generative models)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)",
+        re.IGNORECASE,
+    )
+    records: dict[str, dict[str, str]] = {}
+    for match in pattern.finditer(full_text):
+        raw_name, category, rpm_lim, tpm_lim, rpd_lim = match.groups()
+        name_clean = re.sub(
+            r"^(?:spend\s+|changelog[^\w\s]*\s*|\n)+", "", raw_name.strip(), flags=re.IGNORECASE
+        ).strip()
+        if category == "Multi-modal generative models" and "TTS" in name_clean:
+            continue
+        records[name_clean] = {
+            "Category": category,
+            "RPM": rpm_lim,
+            "TPM": tpm_lim,
+            "RPD": rpd_lim,
+        }
+    return records
+
+
+def parse_pdf_file(pdf_path: Path) -> tuple[str, dict[str, dict[str, str]]]:
     """Parse text and extract model rate limit records from a single PDF file."""
     full_text = parse_pdf_text(pdf_path)
     tier = classify_pdf(full_text, filename=pdf_path.name)
-    records: dict[str, Any] = {}
 
     if not is_webhook_project_pdf(full_text):
         logger.info("Skipping non-webhook PDF document: %s", pdf_path.name)
         return tier, {}
 
-    pattern = re.compile(
-        r"(?:Spend\s+)?(Gemini[\w\.\s\-]+?|Gemma[\w\.\s\-]+?)\s+(?:Text-out models|Other models)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)",
-        re.IGNORECASE,
-    )
-
-    for match in pattern.finditer(full_text):
-        raw_name, rpm_lim, tpm_lim, rpd_lim = match.groups()
-        name_clean = (
-            re.sub(
-                r"^(?:spend\s+|changelog[^\w\s]*\s*|\n)+", "", raw_name.strip(), flags=re.IGNORECASE
-            )
-            .strip()
-            .lower()
-        )
-        model_id = MODEL_MAPPING.get(name_clean, f"models/{name_clean.replace(' ', '-')}")
-        records[model_id] = extract_tier_entry(
-            {
-                "RPM": rpm_lim,
-                "TPM": tpm_lim,
-                "RPD": rpd_lim,
-            }
-        )
-
+    records = extract_rate_limit_records(full_text)
     return tier, records
+
+
+def sort_models_by_tpm(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort models descending by TPM (paid tier first, then free tier), then RPD, then RPM, then name."""
+
+    def _sort_key(m: dict[str, Any]) -> tuple[int, int, float, int, str]:
+        rl = m.get("rate_limits") or {}
+        paid = rl.get("paid") or {}
+        free = rl.get("free") or {}
+
+        paid_tpm = paid.get("tpm")
+        free_tpm = free.get("tpm")
+        paid_rpd = paid.get("rpd")
+        paid_rpm = paid.get("rpm")
+
+        pt = int(paid_tpm) if isinstance(paid_tpm, (int, float)) else 0
+        ft = int(free_tpm) if isinstance(free_tpm, (int, float)) else 0
+        prpd = float(paid_rpd) if isinstance(paid_rpd, (int, float)) else 0.0
+        prpm = int(paid_rpm) if isinstance(paid_rpm, (int, float)) else 0
+
+        name = str(m.get("name") or "")
+        return (-pt, -ft, -prpd, -prpm, name)
+
+    return sorted(models, key=_sort_key)
+
+
+def _tier_tpm_sort_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, float, str]:
+    name, limits = item
+    tpm = parse_scaled_value(limits.get("TPM", "-"))
+    rpd = parse_scaled_value(limits.get("RPD", "-"))
+    rpm = parse_scaled_value(limits.get("RPM", "-"))
+    return (-tpm, -rpd, -rpm, name)
 
 
 def main(args_list: list[str] | None = None) -> None:
@@ -203,75 +285,138 @@ def main(args_list: list[str] | None = None) -> None:
     )
     parser = argparse.ArgumentParser(description="Parse Webhook Rate Limit PDFs")
     parser.add_argument("pdf_files", nargs="*", help="Optional explicit PDF file paths")
-    parser.add_argument("--output", help="Output JSON path")
+    parser.add_argument("--output", help="Optional explicit output JSON path")
     args = parser.parse_args(args_list)
 
     root_dir = Path(__file__).resolve().parents[1]
-    output_path = (
-        Path(args.output)
-        if args.output
-        else root_dir / "assets" / "registries" / "gemini_models.json"
+    src_registry_path = (
+        root_dir / "src" / "webhook_agent" / "assets" / "registries" / "gemini_models.json"
     )
+    root_registry_path = root_dir / "assets" / "registries" / "gemini_models.json"
+
+    output_path = Path(args.output) if args.output else src_registry_path
 
     candidates: list[Path] = []
     if args.pdf_files:
         candidates = [Path(p) for p in args.pdf_files if Path(p).exists()]
     else:
-        # Auto-discover PDFs recursively anywhere in project tree
         ignore_dirs = {".git", ".venv", "node_modules", "_archive", "adk-samples"}
         for p in root_dir.rglob("*.pdf"):
             if any(part in ignore_dirs or part.startswith(".") for part in p.parts):
                 continue
             candidates.append(p)
 
-    dual_tier_registry: dict[str, dict[str, Any]] = {}
-    free_found = False
-    paid_found = False
+    free_records: dict[str, dict[str, str]] = {}
+    paid_records: dict[str, dict[str, str]] = {}
 
     logger.info("Found %d rate limit PDF candidate(s) to process", len(candidates))
     for pdf_path in candidates:
         tier, records = parse_pdf_file(pdf_path)
         logger.info("Parsed %d model quota(s) from %s (%s tier)", len(records), pdf_path.name, tier)
         if tier == "free":
-            free_found = True
+            free_records.update(records)
         elif tier == "paid":
-            paid_found = True
-        for model, entry in records.items():
-            dual_tier_registry.setdefault(model, {})[tier] = entry
+            paid_records.update(records)
 
-    # Ensure baseline Gemma 4 limits are populated
-    for gemma_id in ("models/gemma-4-31b-it", "models/gemma-4-26b-a4b-it"):
-        if gemma_id not in dual_tier_registry:
-            dual_tier_registry[gemma_id] = {
-                "free": {"rpm": 30, "tpm": 16000, "rpd": 14400.0},
-                "paid": {"rpm": 30, "tpm": 16000, "rpd": 14400.0},
-            }
+    # 1. Feature 1: Writing 2 separate JSON files in data/
+    sorted_free = dict(sorted(free_records.items(), key=_tier_tpm_sort_key))
+    sorted_paid = dict(sorted(paid_records.items(), key=_tier_tpm_sort_key))
 
-    if dual_tier_registry:
-        if output_path.name == "gemini_models.json" and output_path.exists():
-            models_json = json.loads(output_path.read_text(encoding="utf-8"))
-            for m in models_json.get("models", []):
-                mid = m.get("name")
-                if mid in dual_tier_registry:
-                    m["rate_limits"] = dual_tier_registry[mid]
-            output_path.write_text(json.dumps(models_json, indent=2), encoding="utf-8")
-            logger.info(
-                "Updated unified model registry at %s (Free: %s, Paid: %s)",
-                output_path,
-                free_found,
-                paid_found,
-            )
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(json.dumps(dual_tier_registry, indent=4), encoding="utf-8")
-            logger.info(
-                "Saved rate limits registry to %s (Free: %s, Paid: %s)",
-                output_path,
-                free_found,
-                paid_found,
-            )
-    else:
+    data_dir = root_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    if sorted_free:
+        free_file = data_dir / "free_tier_rate_limits.json"
+        free_file.write_text(json.dumps(sorted_free, indent=2), encoding="utf-8")
+        logger.info("Saved %d free tier rate limits to %s", len(sorted_free), free_file)
+
+    if sorted_paid:
+        paid_file = data_dir / "paid_tier_rate_limits.json"
+        paid_file.write_text(json.dumps(sorted_paid, indent=2), encoding="utf-8")
+        logger.info("Saved %d paid tier rate limits to %s", len(sorted_paid), paid_file)
+
+    # 2. Build dual-tier system registry (NO fallback injection for missing models)
+    dual_tier_registry: dict[str, dict[str, Any]] = {}
+    all_names = sorted(set(sorted_free.keys()).union(sorted_paid.keys()))
+
+    for name in all_names:
+        clean_lower = name.strip().lower()
+        model_id = MODEL_MAPPING.get(clean_lower, f"models/{clean_lower.replace(' ', '-')}")
+        free_entry = extract_tier_entry(sorted_free.get(name))
+        paid_entry = extract_tier_entry(sorted_paid.get(name))
+
+        tier_entry: dict[str, Any] = {}
+        if free_entry is not None:
+            tier_entry["free"] = free_entry
+        if paid_entry is not None:
+            tier_entry["paid"] = paid_entry
+
+        if tier_entry:
+            dual_tier_registry[model_id] = tier_entry
+
+    if not dual_tier_registry:
         logger.warning("No webhook PDF rate limit data extracted.")
+        return
+
+    # 3. Feature 2: Combining them into 1 unified JSON within src/**
+    base_file = src_registry_path if src_registry_path.exists() else root_registry_path
+    models_json: dict[str, Any] = {"models": []}
+    if base_file.exists():
+        try:
+            models_json = json.loads(base_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("Failed to load existing registry %s: %s", base_file, e)
+
+    models_list = models_json.get("models", [])
+    existing_model_ids = {m.get("name") for m in models_list if isinstance(m, dict)}
+
+    # Update rate limits for existing models without injecting fallbacks
+    for m in models_list:
+        mid = m.get("name")
+        if mid in dual_tier_registry:
+            m["rate_limits"] = dual_tier_registry[mid]
+            # Update accessible tiers based on parsed non-zero quotas
+            accessible = list(m.get("accessible_tiers", []))
+            for tier in ("free", "paid"):
+                t_data = dual_tier_registry[mid].get(tier, {})
+                rpm = t_data.get("rpm", 0)
+                rpd = t_data.get("rpd", 0.0)
+                if (rpm > 0 and rpd > 0) and tier not in accessible:
+                    accessible.append(tier)
+                elif rpm == 0 and rpd == 0 and tier in accessible:
+                    accessible.remove(tier)
+            m["accessible_tiers"] = accessible
+
+    # Add any known models present in the parsed PDFs but not yet in the registry
+    for mid, meta in KNOWN_MODEL_METADATA.items():
+        if mid in dual_tier_registry and mid not in existing_model_ids:
+            new_entry = {
+                "name": mid,
+                "version": meta["version"],
+                "display_name": meta["display_name"],
+                "description": meta["description"],
+                "input_token_limit": meta["input_token_limit"],
+                "output_token_limit": meta["output_token_limit"],
+                "supported_actions": meta["supported_actions"],
+                "accessible_tiers": list(meta["accessible_tiers"]),
+                "rate_limits": dual_tier_registry[mid],
+            }
+            models_list.append(new_entry)
+            existing_model_ids.add(mid)
+
+    # 4. Feature 3: Sorting the models in the final src file by TPM
+    models_json["models"] = sort_models_by_tpm(models_list)
+
+    # Write to primary target (src/**)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(models_json, indent=2), encoding="utf-8")
+    logger.info("Saved unified model registry to %s", output_path)
+
+    # If output_path is src_registry_path, also keep root_registry_path in sync
+    if output_path == src_registry_path and root_registry_path != src_registry_path:
+        root_registry_path.parent.mkdir(parents=True, exist_ok=True)
+        root_registry_path.write_text(json.dumps(models_json, indent=2), encoding="utf-8")
+        logger.info("Synced registry mirror to %s", root_registry_path)
 
 
 if __name__ == "__main__":

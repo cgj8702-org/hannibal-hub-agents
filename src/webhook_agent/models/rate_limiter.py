@@ -48,15 +48,16 @@ class RateLimitExceededError(Exception):
 
 
 def _resolve_registry_path() -> Path:
-    """Resolve the path to gemini_models.json in either assets/registries or src/assets/registries."""
+    """Resolve the path to gemini_models.json in src/webhook_agent/assets, src/assets, or repo assets."""
     candidates = [
         Path(__file__).resolve().parents[1] / "assets" / "registries" / "gemini_models.json",
         Path(__file__).resolve().parents[2] / "assets" / "registries" / "gemini_models.json",
+        Path(__file__).resolve().parents[3] / "assets" / "registries" / "gemini_models.json",
     ]
     for p in candidates:
         if p.exists():
             return p
-    return candidates[1]
+    return candidates[0]
 
 
 def _load_rate_limits(registry_path: Path | None = None) -> dict[str, dict[str, Any]]:
