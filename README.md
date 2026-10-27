@@ -6,22 +6,24 @@ A unified, event-driven service that handles GitHub webhooks via a serverless ro
 
 ## 🏗️ System Architecture
 
-The orchestrator uses a decoupled, distributed architecture with a current ADK workflow runner and **Proactive PR Evaluator**:
+The orchestrator uses a decoupled, distributed architecture featuring asynchronous event processing, deterministic pre-audits, and an ADK review & collaboration engine:
 
 ```mermaid
 flowchart TD
-    GH["GitHub Webhook Event"] -->|"1. HTTPS POST"| Router["Cloud Functions Webhook Router"]
+    GH["GitHub Webhook Event"] -->|"1. HTTPS POST"| Router["Serverless Webhook Router (router/main.py)"]
     Router -->|"Verify HMAC Signature"| Auth["Signature Validator"]
     Router -->|"Quick ACK 202 Accepted"| GH
     Router -->|"Normalize & Enqueue"| Queue[("Google Cloud Pub/Sub")]
     
-    Queue -->|"Trigger Pull"| Worker["Background Worker Task"]
+    Queue -->|"Trigger Pull"| Worker["Background Worker Task (worker.py)"]
     Worker -->|"App Authentication"| Creds["GitHub App JWT / Installation Token"]
     Worker -->|"Instant 👀 Reaction (0-Token)"| GH_React["GitHub Comment Reaction"]
-    Worker -->|"ADK workflow evaluation"| StateGraph["ADK Workflow Runner (google.adk.workflow.Workflow)"]
-    Worker -->|"5m Ticker (ENABLE_PROACTIVE_SWEEP=1)"| Proactive["Proactive PR Evaluator (deterministic, no LLM)"]
-    Proactive -->|"Stale Thread Reminders"| GH_Write
+    Worker -->|"Stateless Pre-Review Check"| CIGate["CI Status Gate (review/ci_gate.py)"]
+    Worker -->|"Deterministic Pre-Audit"| PreAudit["AST, Symbol Graph & Test Impact (analysis/)"]
+    Worker -->|"Audit Claim Check"| Reconcile["Reconciliation & Idempotency (state/)"]
+    Worker -->|"Optional Checkpoint Resume"| Resume["Resume Sweep (ENABLE_REVIEW_RESUME=1)"]
     
+    Worker -->|"ADK Workflow Evaluation"| StateGraph["ADK Workflow Runner (google.adk.workflow.Workflow)"]
     StateGraph -->|"Policy Verification"| Policy{"Mutations Allowed?"}
     Policy -->|"Yes"| Exec["Execute Tool Actions"]
     Policy -->|"No / Dry Run"| Log["Log Planned Actions"]
@@ -60,8 +62,8 @@ flowchart TD
 │       ├── environment/     # Local & ephemeral PR workspace execution contexts
 │       ├── github/          # GitHub App auth, bot identity, PR context, thread resolver, & Jules API/proxy
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
-│       ├── review/          # Verdict parsing, grounding enforcement, AST/CI gates, duplicate detection, proactive sweeps, schemas & formatting
-│       ├── state/           # Review checkpoints (14d sliding TTL), circuit breaker, & idempotency
+│       ├── review/          # Verdict parsing, grounding enforcement, AST/CI gates, duplicate detection, schemas & formatting
+│       ├── state/           # Review checkpoints (14d sliding TTL), audit reconciliation, circuit breaker, & idempotency
 │       ├── tools/           # Model-callable tools (GitHub API, AST analysis, diff, search)
 │       ├── worker.py        # Pub/Sub subscriber entry point and sequential pull / sweep loop
 │       ├── processor.py     # Event routing, deduplication, fast-paths, prefetch, & agent delegation
@@ -91,11 +93,9 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Event scope is classified deterministically by `resolve_event_policy()` (`core/policy.py`), which assigns one of `FORMAL_AUDIT`, `THREAD_COLLAB`, `ISSUE_TRIAGE`, or `IGNORE` before any model call.
    - Pull-request context and diffs are hydrated before model evaluation.
    - Structured review output is normalized before writeback.
-2. **Proactive PR Evaluator (`ProactiveEvaluator`)**: currently **dormant** — read this before wiring it up.
-   - Runs a 5-minute background ticker in the worker process. The ticker requires `ENABLE_PROACTIVE_SWEEP=1`, which nothing in this repo or its deploy path currently sets.
-   - Pure deterministic PR hygiene: it never invokes an LLM. It has one signal — **Stale Review Threads**: *inline* review comments idle >24h ➔ posts a `Proactive Reminder: Unresolved Feedback` issue comment. Formal review bodies are deliberately excluded, so a PR with no inline review comments never triggers it.
-   - Its comment write is not routed through `evaluate_writeback_policy()`, so `ALLOW_AUTOMATED_MUTATIONS=0` would **not** suppress it if the sweep were enabled.
-   - CI status is handled separately by the pre-review gate in `review/ci_gate.py`, not by this sweep.
+2. **Deterministic Pre-Audits & Audit Reconciliation**:
+   - Executes AST parsing, symbol graph dependency tracking, and test impact analysis deterministically before any model call.
+   - Enforces in-flight audit reconciliation claims (`state/reconciliation.py`) and idempotency checks (`state/review_idempotency.py`) to prevent duplicate simultaneous review synthesis across concurrent webhook deliveries.
 3. **Universal String Normalizer (`clean_field_string`), applied via Pydantic `field_validator`s**:
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
 4. **Tier-Aware Model Chains & 503 Failover**:
@@ -129,6 +129,7 @@ Key environment variables configuring orchestrator operation:
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Seconds between checkpoint resume sweeps, when `ENABLE_REVIEW_RESUME=1`. |
 | `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |
 | `ENABLE_JULES_PR_PROXY` | `0` | Re-open Jules-authored PRs as `cgj8702-agents` so third-party review tools accept them (see `github/jules_proxy.py`). |
+| `JULES_AUTO_APPROVE_PLAN` | `1` | When `1`, auto-approves Jules plans that await approval. Set `0` to require manual approval via Jules API. |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1` (default), reject or downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
 | `NATIVE_STALE_REVIEW_DISMISSAL_REPOS` | `cgj8702-org/hannibal-hub-agents` | Comma-separated repositories where GitHub native branch protection auto-dismisses stale reviews on push, causing the bot to skip manual review dismissal. |

@@ -47,13 +47,15 @@ git checkout -b <type>/<topic>          # e.g. fix/auth-bug, chore/cleanup
 
 ### 2. Validate
 
-Run the test suite before committing:
+Run the validation gates before committing:
 
 ```bash
-uv run pytest                          # Full test suite
+./scripts/ruff-all.sh                  # Lint, format, and type-check (same as git hook)
+uv run pytest tests/unit               # Unit test suite
+uv run pytest --tb=short -q            # Full test suite matching CI
 ```
 
-All tests must pass with zero errors before proceeding.
+All checks must pass with zero errors before proceeding.
 
 ### 3. Commit & Push
 
