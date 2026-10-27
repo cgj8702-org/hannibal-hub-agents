@@ -6,8 +6,8 @@ suite never touches the network.
 
 Usage::
 
-    python3 dev/record_review_fixtures.py 258 --patches full
-    python3 dev/record_review_fixtures.py 241 --patches none
+    uv run python dev/record_review_fixtures.py 258 --patches full
+    uv run python dev/record_review_fixtures.py 241 --patches none
 
 Output: ``tests/fixtures/reviews/pr_<n>.json``. Record once, commit, then iterate offline
 forever. Re-recording is how you extend the golden set, not part of the normal test loop.

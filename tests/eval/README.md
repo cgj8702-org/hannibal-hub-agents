@@ -18,8 +18,9 @@ This directory houses the Agent Platform / ADK Quality Flywheel continuous evalu
 
 ## Execution
 
-The evaluation suite runs during model quality audits and pre-release benchmarking against Gemini models (`gemini-3.5-flash-lite`, `gemma-4-31b-it`) using the Agent Platform evaluation runner:
+The evaluation dataset and metrics specification are evaluated against Gemini models (`gemini-3.5-flash-lite`, `gemini-3.8-flash`, `gemma-4-31b-it`) during model quality benchmarking using the Google ADK / Agent Platform evaluation runner (`adk eval` / `agents-cli eval`).
 
-```bash
-uv run python -m pytest tests/eval/
-```
+> **Note:** These datasets and configuration files are evaluation assets, not unit test modules. Unit tests mirroring the codebase packages reside under `tests/unit/` and execute offline via:
+> ```bash
+> uv run pytest tests/unit
+> ```

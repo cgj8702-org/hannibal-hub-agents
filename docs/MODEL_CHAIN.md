@@ -9,7 +9,7 @@ This document details the model fallback chain and comparative rate limit quotas
 The active tier is resolved dynamically via `_resolve_tier()` in `src/webhook_agent/models/rate_limiter.py`:
 
 1. **Explicit Environment Variable**: `WEBHOOK_TIER` (`"free"` or `"paid"`).
-2. **GCE VM Instance Metadata**: `instance/attributes/WEBHOOK_TIER` (read with 60s cache).
+2. **GCE VM Instance Metadata**: `instance/attributes/WEBHOOK_TIER` (read with 30s cache).
 3. **Dynamic Firestore Configuration**: `system_config/runtime -> WEBHOOK_TIER` (read with 30s cache).
 4. **Strict Baseline Default**: `"free"`.
 

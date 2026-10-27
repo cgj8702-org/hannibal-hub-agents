@@ -5,7 +5,7 @@ by tests, and never executed in CI.
 
 Usage::
 
-    python3 dev/replay_review.py --live --pr 258
+    uv run python dev/replay_review.py --live --pr 258
 """
 
 from __future__ import annotations
