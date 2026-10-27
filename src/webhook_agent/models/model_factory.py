@@ -22,6 +22,14 @@ from webhook_agent.models.rate_limiter import (
 logger = logging.getLogger("webhook_agent.models.model_factory")
 
 
+class _SuppressApiKeyWarningFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Both GOOGLE_API_KEY and GEMINI_API_KEY are set" not in record.getMessage()
+
+
+logging.getLogger("google_genai._api_client").addFilter(_SuppressApiKeyWarningFilter())
+
+
 class RateLimitedGemini(Gemini):
     """Production-grade Rate-Limited Gemini wrapper for ADK agents."""
 
@@ -113,11 +121,9 @@ def get_adk_model(
     Returns:
         Configured Gemini model instance.
     """
-    active_tier = tier or _resolve_tier()
-
     if not model_name:
-        default_model = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
-        model_name = os.getenv("GEMMA_MODEL", default_model)
+        default_model = "gemini-3.5-flash-lite"
+        model_name = os.getenv("PRIMARY_MODEL", os.getenv("GEMMA_MODEL", default_model))
 
     resolved_api_key = api_key or get_active_api_key()
     final_client_kwargs = dict(client_kwargs or {})

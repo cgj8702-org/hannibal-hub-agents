@@ -216,15 +216,17 @@ class TestWebhookAgentModelChain:
         assert "gemma-4-31b-it" in free_chain
         assert "gemma-4-26b-a4b-it" in free_chain
 
-    def test_get_model_chain_paid_tier_orders_gemini_38_first(self, monkeypatch):
-        """get_model_chain on Paid Tier should place gemini-3.8-flash as primary."""
+    def test_get_model_chain_paid_tier_orders_gemini_35_first(self, monkeypatch):
+        """get_model_chain on Paid Tier should place gemini-3.5-flash-lite as cost-optimized primary."""
         from webhook_agent.models.model_chain import get_model_chain
 
         monkeypatch.setenv("WEBHOOK_TIER", "paid")
+        monkeypatch.delenv("PRIMARY_MODEL", raising=False)
         monkeypatch.delenv("GEMMA_MODEL", raising=False)
         paid_chain = get_model_chain()
         assert len(paid_chain) == len(set(paid_chain))
-        assert paid_chain[0] == "gemini-3.8-flash"
+        assert paid_chain[0] == "gemini-3.5-flash-lite"
+        assert "gemini-3.8-flash" in paid_chain
         assert "gemini-3.7-flash" in paid_chain
         assert "gemini-3.6-flash" in paid_chain
 

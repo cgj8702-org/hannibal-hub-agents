@@ -100,7 +100,7 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Strips leading Markdown bullets, emoji badges, or key label prefixes (`Update Summary:**`, `**Executive Summary:**`) across all Pydantic schemas (`CodeReviewResponse`, `SyncReviewResponse`, `IssueItem`, `RiskItem`, `SyncResolutionItem`) to eliminate redundant label echo in generated markdown.
 4. **Tier-Aware Model Chains & 503 Failover**:
    - Dynamically routes requests based on active environment tier (`WEBHOOK_TIER`).
-   - Cascades from primary models (`gemini-3.8-flash` on paid, `gemini-3.5-flash-lite` on free) through the Flash-Lite and Flash tiers. Gemma models are appended **only on the free tier**, and only when the payload is within their 14k-token ceiling.
+   - Cascades from cost-optimized primary model (`gemini-3.5-flash-lite` across tiers, with `gemini-3.8-flash` escalation for deep audits) through the Flash-Lite and Flash tiers. Gemma models are appended **only on the free tier**, and only when the payload is within their 14k-token ceiling.
    - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
 5. **Resolution Tracking & Re-Review Templates**:
    - Tracks each prior finding's `status` field (`RESOLVED` vs `UNRESOLVED`, rendered ✅ / 🔴) across commits using structured schema validation.

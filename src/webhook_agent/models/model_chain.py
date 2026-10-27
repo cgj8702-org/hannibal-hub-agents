@@ -48,18 +48,30 @@ FREE_TIER_DEFAULT_CHAIN: list[str] = [
 ]
 
 PAID_TIER_DEFAULT_CHAIN: list[str] = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
 ]
 
 # Gemma Free Tier input tokens ceiling (hard quota: 16k TPM; 14k gives a safety buffer)
 GEMMA_FREE_TIER_MAX_INPUT_TOKENS = 14000
+
+# Escalation keywords for deep reasoning / audit fallback
+DEEP_REASONING_KEYWORDS: tuple[str, ...] = (
+    "/deep",
+    "/audit",
+    "/reason",
+    "deep review",
+    "deep audit",
+    "thorough review",
+    "complex review",
+    "escalate",
+)
 
 
 def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
@@ -85,22 +97,21 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
         9. gemma-4-31b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
         10. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
 
-    Paid Tier Chain:
-        1. gemini-3.8-flash (10,000 RPD / 2M TPM)
-        2. gemini-3.7-flash (10,000 RPD / 2M TPM)
-        3. gemini-3.6-flash (10,000 RPD / 2M TPM)
-        4. gemini-3.5-flash (10,000 RPD / 2M TPM)
-        5. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
-        6. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
+    Paid Tier Chain (Cost-Optimized High-Bandwidth):
+        1. gemini-3.5-flash-lite (150,000 RPD / 4M TPM) - Default primary ($0.30/1M in)
+        2. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
+        3. gemini-3.8-flash (10,000 RPD / 2M TPM) - Escalation / reasoning fallback ($1.50/1M in)
+        4. gemini-3.7-flash (10,000 RPD / 2M TPM)
+        5. gemini-3.6-flash (10,000 RPD / 2M TPM)
+        6. gemini-3.5-flash (10,000 RPD / 2M TPM)
         7. gemini-2.5-flash (10,000 RPD / 1M TPM)
         8. gemini-2.5-flash-lite (1,000,000 RPD / 4M TPM)
     """
     active_tier = _resolve_tier()
+    default_primary = "gemini-3.5-flash-lite"
     if active_tier == "paid":
-        default_primary = "gemini-3.8-flash"
         default_chain = list(PAID_TIER_DEFAULT_CHAIN)
     else:
-        default_primary = "gemini-3.5-flash-lite"
         default_chain = list(FREE_TIER_DEFAULT_CHAIN)
         if estimated_tokens is None or estimated_tokens <= GEMMA_FREE_TIER_MAX_INPUT_TOKENS:
             default_chain.extend(
