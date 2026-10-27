@@ -206,6 +206,12 @@ class TestPerimeterFilter:
             "pull_request_review_thread",
             "workflow_run",
             "workflow_job",
+            "star",
+            "watch",
+            "fork",
+            "release",
+            "sponsorship",
+            "milestone",
         ],
     )
     def test_perimeter_filtered_events_are_dropped(
@@ -232,6 +238,12 @@ class TestPerimeterFilter:
                     "pull_request_review_thread",
                     "workflow_run",
                     "workflow_job",
+                    "star",
+                    "watch",
+                    "fork",
+                    "release",
+                    "sponsorship",
+                    "milestone",
                 }
             )
             == module.PERIMETER_FILTER_EVENTS
