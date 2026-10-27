@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
         ("* `foo`", "`foo`"),
         ("**Risk**: `foo`", "`foo`"),
         ("**Risk:** `foo`", "`foo`"),
-        ("Risk: `foo`", "`foo`"),
+        ("Risk: `foo`", "Risk: `foo`"),
         ("• **Evidence:** `line_of_code`", "`line_of_code`"),
         ("**Dimension**: Logic & Boundaries", "Logic & Boundaries"),
         ("🔴 [UNRESOLVED] **Risk:** High memory usage", "High memory usage"),

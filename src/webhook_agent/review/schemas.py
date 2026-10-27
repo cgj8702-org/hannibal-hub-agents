@@ -19,9 +19,9 @@ def clean_field_string(val: Any) -> Any:
         return val
     s = val.strip()
     # Strips any leading bullets (* - • #), badges (🔴🟡✅), status tags ([RESOLVED]),
-    # or key labels (**Any Key Name:**, **Any Key Name**: or Any Key Name:)
+    # or key labels (**Any Key Name:** or **Any Key Name**: )
     cleaned = re.sub(
-        r"^(?:(?:\*|-|•|#+|🔴|🟡|✅|\[UNRESOLVED\]|\[RESOLVED\])\s*)*(?:(?:\*\*)?[A-Za-z0-9 &\-_/]+(?:\*\*:\s*|:\*\*\s*|:\s*))?",
+        r"^(?:(?:\*|-|•|#+|🔴|🟡|✅|\[UNRESOLVED\]|\[RESOLVED\])\s*)*(?:(?:\*\*)?[A-Za-z0-9 &\-_/]+(?:\*\*:\s*|:\*\*\s*))?",
         "",
         s,
         flags=re.IGNORECASE,
