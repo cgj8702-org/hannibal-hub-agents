@@ -48,6 +48,48 @@ def test_post_conversational_reply_success() -> None:
         mock_record.assert_called_once_with("owner/repo#10")
         assert len(results) == 1
         assert results[0].tool == "add_comment"
+
+
+def test_post_conversational_reply_suppresses_system_notice() -> None:
+    """Test _post_conversational_reply suppresses internal system halt notices."""
+    mock_gh = MagicMock()
+    mock_repo = mock_gh.get_repo.return_value
+    mock_issue = mock_repo.get_issue.return_value
+
+    results: list[ActionResult] = []
+    with (
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.is_allowed", return_value=True),
+        patch("webhook_agent.core.execution._COMMENT_RATE_LIMITER.record") as mock_record,
+    ):
+        # 1. System notice alone -> suppressed entirely
+        _post_conversational_reply(
+            gh_client=mock_gh,
+            repo_full_name="owner/repo",
+            pr_number=10,
+            emitted_texts=[
+                "[⚠️ SYSTEM NOTICE: Execution halted due to 'turn_budget_exceeded:10'. Do NOT call any further tools. Output your final structured review verdict immediately.]"
+            ],
+            trace_id="trace-1234",
+            results=results,
+        )
+        mock_issue.create_comment.assert_not_called()
+        mock_record.assert_not_called()
+        assert len(results) == 0
+
+        # 2. System notice mixed with user content -> system notice stripped
+        _post_conversational_reply(
+            gh_client=mock_gh,
+            repo_full_name="owner/repo",
+            pr_number=10,
+            emitted_texts=[
+                "Here is my analysis of the problem.",
+                "[⚠️ SYSTEM NOTICE: Execution halted due to 'turn_budget_exceeded:10'. Do NOT call any further tools. Provide a concise summary.]",
+            ],
+            trace_id="trace-1234",
+            results=results,
+        )
+        mock_issue.create_comment.assert_called_once_with("Here is my analysis of the problem.")
+        assert len(results) == 1
         assert results[0].success is True
 
 

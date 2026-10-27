@@ -108,13 +108,23 @@ class IterationBudgetPlugin(BasePlugin):
         run["turns"] = run.get("turns", 0) + 1
         state["guardrail_run"] = run
 
-        if run["turns"] > self.max_turns and not run.get("halt_reason"):
-            run["halt_reason"] = f"turn_budget_exceeded:{self.max_turns}"
+        # Apply tighter turn budget for conversational / triage modes (default 5 turns)
+        # while preserving full max_turns (10) for formal audit reviews.
+        mode = state.get("agent_mode")
+        from webhook_agent.core.policy import Mode
+
+        effective_max_turns = (
+            self.max_turns if mode == Mode.FORMAL_AUDIT or mode is None else min(5, self.max_turns)
+        )
+
+        if run["turns"] > effective_max_turns and not run.get("halt_reason"):
+            run["halt_reason"] = f"turn_budget_exceeded:{effective_max_turns}"
             state["guardrail_run"] = run
             logger.warning(
-                "🛑 [IterationBudgetPlugin] Turn budget of %d exceeded on turn %d",
-                self.max_turns,
+                "🛑 [IterationBudgetPlugin] Turn budget of %d exceeded on turn %d (mode=%s)",
+                effective_max_turns,
                 run["turns"],
+                mode,
             )
 
         # If halt reason is set, perform graceful handoff: strip tools and request final summary
@@ -123,10 +133,19 @@ class IterationBudgetPlugin(BasePlugin):
             if hasattr(llm_request, "tools_dict") and isinstance(llm_request.tools_dict, dict):
                 llm_request.tools_dict.clear()
 
-            notice = (
-                f"\n\n[⚠️ SYSTEM NOTICE: Execution halted due to '{halt_reason}'. "
-                "Do NOT call any further tools. Output your final structured review verdict immediately.]"
-            )
+            mode = state.get("agent_mode")
+            from webhook_agent.core.policy import Mode
+
+            if mode == Mode.FORMAL_AUDIT:
+                notice = (
+                    f"\n\n[⚠️ SYSTEM NOTICE: Execution halted due to '{halt_reason}'. "
+                    "Do NOT call any further tools. Output your final structured review verdict immediately.]"
+                )
+            else:
+                notice = (
+                    f"\n\n[⚠️ SYSTEM NOTICE: Execution halted due to '{halt_reason}'. "
+                    "Do NOT call any further tools. Provide a concise, helpful summary response to the user immediately.]"
+                )
             if hasattr(llm_request, "append_instructions"):
                 llm_request.append_instructions([notice])
 

@@ -112,7 +112,7 @@ known-first-party = ["webhook_agent"]
 #   B101  assert_used            — skipped in security_scanner.py command line
 #   B310  urlopen                — GCE metadata endpoint (rate_limiter.py)
 #   B108  insecure temp file     — /tmp/keys for GitHub App private key (processor.py)
-#   B404/B603 subprocess         — gh CLI token resolution (jules_proxy.py)
+#   B404/B603 subprocess         — subprocess execution in CLI/tool wrappers
 #   B110  try/except/pass        — trial parsing of template wrappers (ast_gate.py)
 #   B105  hardcoded password     — "PASS" is a CI status enum (ci_gate.py, schemas.py)
 #   B311  pseudo-random          — non-cryptographic jitter for backoff (worker.py, circuit_breaker.py)

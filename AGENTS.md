@@ -125,7 +125,7 @@ When `WEBHOOK_TIER="paid"`, `WEBHOOK_PAID_KEY` and paid RPM/RPD rate limits are 
   - Never `@mention` `jules` (an unrelated human user exists on GitHub).
   - The agent creates task issues using the `.github/ISSUE_TEMPLATE/jules_task.yml` template. After the issue is filed, the human owner reviews and attaches the `jules` label to summon Jules.
   - Once Jules responds with a session/task ID (typically via a comment on the issue), the agent interacts with Jules programmatically through the Jules REST API (`GET /v1alpha/sessions/{id}`, `POST /v1alpha/sessions/{id}:approvePlan`, `POST /v1alpha/sessions/{id}:sendMessage`). The agent can approve or deny plans and send messages — it does **not** post progress comments to GitHub threads.
-  - Jules PRs undergo the same review and zero-bypass protocol. If Jules authors a PR, `jules_proxy.py` can re-open it under `cgj8702-agents` so CodeRabbit and other review tools can review it.
+  - Jules PRs undergo the same review and zero-bypass protocol. Jules PRs trigger CI and the formal audit pipeline directly without proxy re-opening.
 
 ---
 

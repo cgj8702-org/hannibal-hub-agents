@@ -47,7 +47,6 @@ from webhook_agent.github.jules_api import (
     extract_session_id,
     session_state,
 )
-from webhook_agent.github.jules_proxy import handle_jules_pr_opened
 from webhook_agent.github.pr_context import (
     _prefetch_inline_comment_context,
     _prefetch_pr_diff,
@@ -501,12 +500,25 @@ class WebhookProcessor:
 
         # Prevent bot-to-bot conversational ping-pong loops:
         # If a comment is authored by Jules (via login, substring, or performed_via_github_app),
-        # suppress it UNLESS it explicitly requests a review or explicitly mentions @hannibal-hub-agents.
+        # check if it contains a Jules session ID to manage programmatic session interactions,
+        # but suppress conversational agent execution unless it explicitly requests a review or mentions the bot.
         event_name = ev.get("event_name")
         if event_name in ("issue_comment", "pull_request_review_comment"):
             comment_user = comment.get("user") or {}
             sender = ev.get("sender") or {}
             if is_jules_sender(comment_user, raw) or is_jules_sender(sender, raw):
+                session_id = extract_session_id(comment_body)
+                if session_id:
+                    logger.info(
+                        "Discovered Jules session %s from comment; inspecting state", session_id
+                    )
+                    try:
+                        self._interact_with_jules_session(session_id)
+                    except Exception:
+                        logger.exception(
+                            "Failed to interact with Jules session %s from comment", session_id
+                        )
+
                 from .review.writeback_policy import REVIEW_INTENT_KEYWORDS
 
                 cb_lower = comment_body.lower()
@@ -720,12 +732,21 @@ class WebhookProcessor:
                 session_id = extract_session_id(comment.body or "")
                 if not session_id:
                     continue
-                return self._interact_with_jules_session(session_id)
+                self._interact_with_jules_session(session_id)
+                return True
+
+            logger.info(
+                "Owner attached 'jules' label to %s#%s; Jules summoned (awaiting Jules comment). Suppressing triage.",
+                repo_name,
+                item_number,
+            )
+            return True
 
         except Exception:
             logger.exception("Failed to handle jules label for %s#%s", repo_name, item_number)
 
-        return False
+        # Even on error inspecting comments, owner attached 'jules' label so Jules is handling it.
+        return True
 
     def _interact_with_jules_session(self, session_id: str) -> bool:
         """Inspect a Jules session and act on its current state.
@@ -848,10 +869,6 @@ class WebhookProcessor:
         ctx = _extract_log_context(payload)
 
         dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
-        if handle_jules_pr_opened(gh, repo_name, payload, dry_run=dry_run):
-            logger.info("Jules PR adoption proxy handled PR in %s; stopping processing.", repo_name)
-            return
-
         if self.handle_jules_label(payload):
             logger.info(
                 "Jules label event handled via Jules API in %s; stopping processing.", repo_name

@@ -128,7 +128,6 @@ Key environment variables configuring orchestrator operation:
 | `ENABLE_REVIEW_RESUME` | `0` | Enable the periodic sweep that resumes paused review checkpoints (see `docs/CHECKPOINT_RESUME.md`). |
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Seconds between checkpoint resume sweeps, when `ENABLE_REVIEW_RESUME=1`. |
 | `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |
-| `ENABLE_JULES_PR_PROXY` | `0` | Re-open Jules-authored PRs as `cgj8702-agents` so third-party review tools accept them (see `github/jules_proxy.py`). |
 | `JULES_AUTO_APPROVE_PLAN` | `1` | When `1`, auto-approves Jules plans that await approval. Set `0` to require manual approval via Jules API. |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1` (default), reject or downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |

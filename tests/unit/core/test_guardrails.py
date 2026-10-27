@@ -69,6 +69,48 @@ async def test_iteration_budget_turn_exceeded_clears_tools_and_appends_instructi
     req.append_instructions.assert_called_once()
     appended_text = req.append_instructions.call_args[0][0][0]
     assert "[⚠️ SYSTEM NOTICE: Execution halted" in appended_text
+    assert "concise, helpful summary response" in appended_text
+
+    # Verify that in FORMAL_AUDIT mode it asks for structured review verdict
+    from webhook_agent.core.policy import Mode
+
+    ctx.state["agent_mode"] = Mode.FORMAL_AUDIT
+    req.reset_mock()
+    res2 = await plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    assert res2 is None
+    req.append_instructions.assert_called_once()
+    appended_text2 = req.append_instructions.call_args[0][0][0]
+    assert "Output your final structured review verdict immediately" in appended_text2
+
+
+@pytest.mark.anyio
+async def test_iteration_budget_conversational_mode_effective_max_turns() -> None:
+    from webhook_agent.core.policy import Mode
+
+    # In conversational mode, even if plugin max_turns is 10, effective budget is 5
+    plugin = IterationBudgetPlugin(max_turns=10, max_tool_calls=25)
+    ctx = MagicMock()
+    ctx.invocation_id = "inv_conv"
+    ctx.state = {
+        "agent_mode": Mode.GENERAL_PAIR_PROGRAMMING,
+        "guardrail_run": {
+            "invocation_id": "inv_conv",
+            "turns": 5,
+            "tool_calls": 0,
+            "halt_reason": None,
+            "history": [],
+            "failures": {},
+        },
+    }
+    req = MagicMock()
+    req.tools_dict = {"search_files": MagicMock()}
+    req.append_instructions = MagicMock()
+
+    res = await plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    assert res is None
+    assert ctx.state["guardrail_run"]["turns"] == 6
+    assert ctx.state["guardrail_run"]["halt_reason"] == "turn_budget_exceeded:5"
+    assert len(req.tools_dict) == 0
 
 
 @pytest.mark.anyio
