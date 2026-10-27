@@ -12,13 +12,13 @@ from typing import Any
 from github import Github
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
+from webhook_agent.commands import has_review_slash_command
 from webhook_agent.core.cancellation import pr_closed_registry
 from webhook_agent.github.bot_identity import is_hannibal_bot_login
 from webhook_agent.review.metadata import (
     get_actionable_findings,
     has_actionable_findings,
 )
-from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
 
 logger = logging.getLogger("webhook_agent.github.pr_context")
 
@@ -39,14 +39,23 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
         return True
 
     if canonical.startswith(("issue_comment.", "pull_request_review_comment.")):
-        comment_body = (raw.get("comment", {}) or {}).get("body", "").lower()
-        if any(trigger in comment_body for trigger in REVIEW_INTENT_KEYWORDS):
+        comment_body = (raw.get("comment", {}) or {}).get("body", "")
+
+        # If explicitly on an issue without pull_request, do not prefetch PR diff
+        issue = raw.get("issue")
+        if (
+            isinstance(issue, dict)
+            and issue.get("pull_request") is None
+            and raw.get("pull_request") is None
+        ):
+            return False
+
+        if has_review_slash_command(comment_body):
             return True
+
         # Forward-fix: issue_comment on a PR (issue.pull_request set) that needs
         # reconciliation against prior bot reviews should also get diff context.
-        issue = raw.get("issue") or {}
-        if isinstance(issue, dict) and issue.get("pull_request") is not None:
-            return True
+        return bool(isinstance(issue, dict) and issue.get("pull_request") is not None)
 
     return False
 

@@ -11,6 +11,11 @@ import threading
 import time
 from typing import Any
 
+from webhook_agent.commands import (
+    REVIEW_INTENT_KEYWORDS,
+    REVIEW_SLASH_COMMANDS,
+    has_review_slash_command,
+)
 from webhook_agent.constants import (
     DEFAULT_ALLOW_AUTOMATED_MUTATIONS,
     DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS,
@@ -47,25 +52,6 @@ _REVIEW_LOCKS: dict[str, threading.Lock] = {}
 _REVIEW_LOCKS_GUARD = threading.Lock()
 
 
-REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
-    "/review",
-    "/re-review",
-    "/rereview",
-    "re-review",
-    "rereview",
-    "please review",
-    "review this",
-    "re-review this",
-    "request review",
-    "run review",
-    "audit this",
-    "/audit",
-    "/force-review",
-    "/force_review",
-    "code review",
-)
-
-
 def is_automatic_pr_review_enabled() -> bool:
     """Return whether automatic PR reviews on PR lifecycle events are enabled."""
     val = os.environ.get("ENABLE_AUTOMATIC_PR_REVIEWS", DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS)
@@ -86,7 +72,7 @@ def _is_formal_review_eligible(canonical: str, comment_body: str = "") -> bool:
     cb_lower = comment_body.lower()
     if any(bot in cb_lower for bot in ("@coderabbitai", "@coderabbitai[bot]", "@dependabot")):
         return False
-    return any(keyword in cb_lower for keyword in REVIEW_INTENT_KEYWORDS)
+    return has_review_slash_command(comment_body)
 
 
 def _review_lock(target_key: str) -> threading.Lock:
@@ -252,6 +238,7 @@ def evaluate_writeback_policy(
 
 __all__ = [
     "REVIEW_INTENT_KEYWORDS",
+    "REVIEW_SLASH_COMMANDS",
     "_COMMENT_RATE_LIMITER",
     "CommentRateLimiter",
     "_is_formal_review_eligible",

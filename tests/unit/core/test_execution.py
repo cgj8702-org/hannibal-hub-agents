@@ -1037,7 +1037,71 @@ class TestResolveEventPolicy:
         policy = resolve_event_policy(event_data)
         assert policy.mode == Mode.GENERAL_PAIR_PROGRAMMING
         assert policy.may_post_comment is True
+        assert policy.may_create_issue is True
         assert policy.may_submit_review is False
+
+    def test_issue_comment_with_quote_reply_stays_general_pair_programming(self) -> None:
+        """Quoted text in blockquotes (> or │) must not trigger review slash commands or audit mode."""
+        quote_body = (
+            "> If you'd like to pursue this refactoring, please review and attach the jules label\n\n"
+            "well, first i need you to create the issue w the jules spec for me dude lol"
+        )
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": None},
+                "comment": {"body": quote_body},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.GENERAL_PAIR_PROGRAMMING
+        assert policy.may_create_issue is True
+
+    def test_issue_comment_with_natural_language_review_stays_pair_programming(self) -> None:
+        """Natural language review phrases must not trigger formal audit (slash commands only)."""
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": {"url": "https://api.github.com/..."}},
+                "comment": {"body": "Can you please review the changes?"},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.GENERAL_PAIR_PROGRAMMING
+
+    def test_issue_comment_with_slash_command_on_issue_stays_pair_programming(self) -> None:
+        """Review slash commands on plain issues must not enter FORMAL_AUDIT."""
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": None},
+                "comment": {"body": "/review"},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.GENERAL_PAIR_PROGRAMMING
+        assert policy.may_create_issue is True
+
+    def test_issue_comment_with_slash_command_on_pr_is_formal_audit(self) -> None:
+        """Review slash commands on PRs must enter FORMAL_AUDIT."""
+        event_data = {
+            "canonical": "issue_comment.created",
+            "repository": {"full_name": "owner/repo"},
+            "sender": {"login": "cgj8702"},
+            "raw_payload": {
+                "issue": {"number": 42, "pull_request": {"url": "https://api.github.com/..."}},
+                "comment": {"body": "/review"},
+            },
+        }
+        policy = resolve_event_policy(event_data)
+        assert policy.mode == Mode.FORMAL_AUDIT
+        assert policy.may_submit_review is True
 
     def test_issue_comment_mentioning_coderabbit_is_ignored(self) -> None:
         for body in ("@coderabbitai review", "Hey @coderabbitai[bot] help", "@dependabot update"):

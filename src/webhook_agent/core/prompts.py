@@ -576,13 +576,19 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 "- If not fixed: include an entry with status='UNRESOLVED' and evidence explaining why the issue persists."
             )
 
-    from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+    from webhook_agent.core.commands import has_review_slash_command
 
-    has_comment_review_intent = any(kw in comment_body.lower() for kw in REVIEW_INTENT_KEYWORDS)
+    is_pr_context = bool(
+        raw.get("pull_request") is not None
+        or (raw.get("issue") or {}).get("pull_request") is not None
+        or canonical.startswith(
+            ("pull_request.", "pull_request_review.", "pull_request_review_comment.")
+        )
+    )
+    has_comment_review_intent = is_pr_context and has_review_slash_command(comment_body)
     if (
-        canonical in ("pull_request.opened", "pull_request.synchronize")
-        or has_comment_review_intent
-    ):
+        is_pr_context and canonical in ("pull_request.opened", "pull_request.synchronize")
+    ) or has_comment_review_intent:
         parts.append(
             "\n### 🚀 ACTION DIRECTIVE: ADAPTIVE FORMAL AUDIT\n"
             "Evaluate the pre-fetched PR diff, AST verification findings, symbol impact analysis, "

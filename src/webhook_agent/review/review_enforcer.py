@@ -1087,12 +1087,10 @@ def _submit_formal_review(
             if hasattr(state, "to_dict")
             else (state if isinstance(state, dict) else {})
         )
-        from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+        from webhook_agent.commands import has_review_slash_command
 
-        cb = str(
-            state_dict.get("comment_body") or state_dict.get("user:comment_body") or ""
-        ).lower()
-        has_comment_intent = any(kw in cb for kw in REVIEW_INTENT_KEYWORDS) if cb else False
+        cb = str(state_dict.get("comment_body") or state_dict.get("user:comment_body") or "")
+        has_comment_intent = has_review_slash_command(cb) if cb else False
         is_forced = (
             force
             or bool(state_dict.get("force_review") or state_dict.get("user:force_review"))

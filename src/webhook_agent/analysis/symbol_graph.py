@@ -563,8 +563,9 @@ class SymbolImpactAnalyzer:
                 py_files.extend(d.rglob("*.py"))
 
         for file_path in py_files:
-            rel_path = str(file_path.relative_to(self.repo_root))
-            if rel_path in exclude or any(part.startswith((".", "__")) for part in file_path.parts):
+            rel = file_path.relative_to(self.repo_root)
+            rel_path = str(rel)
+            if rel_path in exclude or any(part.startswith((".", "__")) for part in rel.parts):
                 continue
 
             try:

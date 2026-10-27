@@ -136,7 +136,7 @@ def test_duplicate_at_same_commit_submits_when_force() -> None:
     pr.create_review.assert_called_once()
 
 
-@pytest.mark.parametrize("comment", ["/review", "/re-review", "please re-review this"])
+@pytest.mark.parametrize("comment", ["/review", "/re-review", "/force-review"])
 def test_duplicate_at_same_commit_submits_when_explicit_comment_in_state(comment: str) -> None:
     """When user requests review via comment in state, duplicate check is bypassed."""
     pr = _pr(ANALYSED, reviews=[_bot_review(ANALYSED)])

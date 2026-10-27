@@ -66,11 +66,6 @@ DEEP_REASONING_KEYWORDS: tuple[str, ...] = (
     "/deep",
     "/audit",
     "/reason",
-    "deep review",
-    "deep audit",
-    "thorough review",
-    "complex review",
-    "escalate",
 )
 
 
@@ -188,13 +183,10 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
             if isinstance(raw.get("comment"), dict):
                 comment_body = raw["comment"].get("body") or ""
 
-            from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+            from webhook_agent.core.commands import has_review_slash_command
 
             cb_lower = comment_body.lower()
-            if (
-                any(cmd in cb_lower for cmd in REVIEW_INTENT_KEYWORDS)
-                or "@hannibal-hub-agents" in cb_lower
-            ):
+            if has_review_slash_command(comment_body) or "@hannibal-hub-agents" in cb_lower:
                 target = primary
             else:
                 target = lightweight
