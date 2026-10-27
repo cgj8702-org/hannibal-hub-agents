@@ -895,17 +895,26 @@ def execute_agent_event(
                 if _is_transient_error(e) and attempt < _MAX_RETRIES - 1:
                     rate_details = extract_rate_limit_details(e)
                     est_prompt_tokens = (len(base_prompt_text) // 4) if base_prompt_text else None
+                    model_before = agent._current_model_name
                     next_model = agent._advance_model_chain(
                         error=e, estimated_tokens=est_prompt_tokens
                     )
                     if next_model is None:
                         break
                     err_s = str(e).lower()
+                    quota_type = rate_details.get("quota_type")
+                    is_tpm = (
+                        quota_type == "TPM"
+                        or "token" in err_s
+                        or "tpm" in err_s
+                        or "token_count" in err_s
+                    )
                     is_instant_failover = (
-                        "503" in err_s
+                        (next_model != model_before)
+                        or "503" in err_s
                         or "unavailable" in err_s
                         or "high demand" in err_s
-                        or "tpm limit" in err_s
+                        or is_tpm
                     )
                     parsed_retry = rate_details.get("retry_after_seconds")
                     if is_instant_failover:

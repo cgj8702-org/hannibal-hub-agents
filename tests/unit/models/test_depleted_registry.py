@@ -139,3 +139,50 @@ def test_firestore_registry_init_failure_falls_back_to_local_memory(
         # Local memory fallback still functions
         registry.mark_depleted("gemini-3.5-flash-lite")
         assert registry.is_depleted("gemini-3.5-flash-lite") is True
+
+
+def test_firestore_registry_debounces_rapid_duplicate_calls() -> None:
+    from unittest.mock import MagicMock
+
+    registry = FirestoreDepletedModelRegistry()
+    mock_db = MagicMock()
+    registry._db = mock_db
+    registry._initialized = True
+
+    err = Exception("429 RESOURCE_EXHAUSTED: quota limit reached")
+
+    # First call: writes to local memory and Firestore
+    registry.mark_depleted("gemini-3.5-flash-lite", error=err)
+    assert mock_db.collection().document().set.call_count == 1
+    first_ts, first_cooldown = registry._local_depleted["free_gemini-3.5-flash-lite"]
+
+    # Second call immediately after: should be debounced
+    registry.mark_depleted("gemini-3.5-flash-lite", error=err)
+    assert mock_db.collection().document().set.call_count == 1
+    second_ts, second_cooldown = registry._local_depleted["free_gemini-3.5-flash-lite"]
+    assert first_ts == second_ts
+    assert first_cooldown == second_cooldown
+
+
+def test_firestore_registry_updates_when_cooldown_extended() -> None:
+    from unittest.mock import MagicMock
+
+    registry = FirestoreDepletedModelRegistry()
+    mock_db = MagicMock()
+    registry._db = mock_db
+    registry._initialized = True
+
+    tpm_err = Exception("429 RESOURCE_EXHAUSTED: quota limit reached")
+    rpd_err = Exception("Quota exceeded: RequestsPerDay exceeded")
+
+    # First call: TPM (60s)
+    registry.mark_depleted("gemini-3.5-flash-lite", error=tpm_err)
+    assert mock_db.collection().document().set.call_count == 1
+    _, cooldown1 = registry._local_depleted["free_gemini-3.5-flash-lite"]
+    assert cooldown1 == 60.0
+
+    # Second call: RPD (86400s) extends cooldown, must NOT be debounced
+    registry.mark_depleted("gemini-3.5-flash-lite", error=rpd_err)
+    assert mock_db.collection().document().set.call_count == 2
+    _, cooldown2 = registry._local_depleted["free_gemini-3.5-flash-lite"]
+    assert cooldown2 == 86400.0
