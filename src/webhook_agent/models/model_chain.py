@@ -48,15 +48,18 @@ FREE_TIER_DEFAULT_CHAIN: list[str] = [
 ]
 
 PAID_TIER_DEFAULT_CHAIN: list[str] = [
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
     "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
     "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
 ]
+
+# Heavy payload threshold for 4M TPM high-throughput routing
+PAYLOAD_HEAVY_THRESHOLD_TOKENS = 50000
 
 # Gemma Free Tier input tokens ceiling (hard quota: 16k TPM; 14k gives a safety buffer)
 GEMMA_FREE_TIER_MAX_INPUT_TOKENS = 14000
@@ -92,18 +95,18 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
         9. gemma-4-31b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
         10. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
 
-    Paid Tier Chain (Cost-Optimized High-Bandwidth):
-        1. gemini-3.5-flash-lite (150,000 RPD / 4M TPM) - Default primary ($0.30/1M in)
-        2. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
-        3. gemini-3.8-flash (10,000 RPD / 2M TPM) - Escalation / reasoning fallback ($1.50/1M in)
-        4. gemini-3.7-flash (10,000 RPD / 2M TPM)
-        5. gemini-3.6-flash (10,000 RPD / 2M TPM)
-        6. gemini-3.5-flash (10,000 RPD / 2M TPM)
-        7. gemini-2.5-flash (10,000 RPD / 1M TPM)
-        8. gemini-2.5-flash-lite (1,000,000 RPD / 4M TPM)
+    Paid Tier Chain (2.x High-Bandwidth & 4M TPM Optimized):
+        1. gemini-2.0-flash (Unlimited RPD / 4M TPM) - Default primary ($0.10/1M in)
+        2. gemini-2.5-flash-lite (Unlimited RPD / 4M TPM) - Ultra-low latency ($0.10/1M in)
+        3. gemini-2.0-flash-lite (Unlimited RPD / 4M TPM) - Low-cost backup ($0.075/1M in)
+        4. gemini-3.5-flash-lite (150,000 RPD / 4M TPM)
+        5. gemini-3.1-flash-lite (150,000 RPD / 4M TPM)
+        6. gemini-2.5-pro (1,000 RPD / 2M TPM) - High-end reasoning escalation ($1.25/1M in)
+        7. gemini-3.8-flash (10,000 RPD / 2M TPM) - Secondary reasoning fallback ($1.50/1M in)
+        8. gemini-2.5-flash (10,000 RPD / 1M TPM)
     """
     active_tier = _resolve_tier()
-    default_primary = "gemini-3.5-flash-lite"
+    default_primary = "gemini-2.0-flash" if active_tier == "paid" else "gemini-3.5-flash-lite"
     if active_tier == "paid":
         default_chain = list(PAID_TIER_DEFAULT_CHAIN)
     else:
@@ -137,6 +140,20 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
     ):
         deduped = [m for m in deduped if "gemma" not in m.lower()]
 
+    # On paid tier with heavy payloads, guarantee 4M TPM models lead the chain
+    if (
+        active_tier == "paid"
+        and estimated_tokens is not None
+        and estimated_tokens > PAYLOAD_HEAVY_THRESHOLD_TOKENS
+    ):
+        high_tpm_leaders = [
+            m
+            for m in deduped
+            if m in ("gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite")
+        ]
+        rest = [m for m in deduped if m not in high_tpm_leaders]
+        deduped = high_tpm_leaders + rest
+
     available = _DEPLETED_MODEL_REGISTRY.filter_chain(deduped)
     final_chain = available if available else deduped
     logger.debug(
@@ -152,18 +169,22 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
     """Select appropriate model based on event type, active tier, and content commands.
 
     On Free Tier, defaults primary to gemini-3.5-flash-lite (500 RPD) to protect gemini-3.8-flash (20 RPD).
+    On Paid Tier, defaults primary to gemini-2.0-flash (Unlimited RPD / 4M TPM) for maximum capacity.
     Routes heavy workloads (pull_request.opened, slash commands, @mentions)
     to the primary model, and routine lifecycle events to the lightweight model.
     """
     active_tier = _resolve_tier()
-    default_primary = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
+    default_primary = "gemini-2.0-flash" if active_tier == "paid" else "gemini-3.5-flash-lite"
+    default_lightweight = (
+        "gemini-2.5-flash-lite" if active_tier == "paid" else "gemini-3.5-flash-lite"
+    )
     primary = os.environ.get(
         "PRIMARY_MODEL",
         os.environ.get("GEMMA_MODEL", default_primary),
     )
     lightweight = os.environ.get(
         "LIGHTWEIGHT_MODEL",
-        os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", "gemini-3.5-flash-lite"),
+        os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", default_lightweight),
     )
 
     if os.environ.get("ENABLE_DYNAMIC_MODEL_ROUTING", "1") not in (
@@ -176,8 +197,14 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
         canonical = event_data.get("canonical", "")
         raw = event_data.get("raw_payload", {})
 
+        pr_diff_text = str(raw.get("pr_diff") or "")
+        est_diff_tokens = len(pr_diff_text) // 4 if pr_diff_text else 0
+
         if canonical in ("pull_request.opened", "pull_request.synchronize"):
-            target = primary
+            if active_tier == "paid" and est_diff_tokens > PAYLOAD_HEAVY_THRESHOLD_TOKENS:
+                target = "gemini-2.0-flash"
+            else:
+                target = primary
         elif canonical.startswith(("issue_comment.", "pull_request_review_comment.")):
             comment_body = ""
             if isinstance(raw.get("comment"), dict):
@@ -186,7 +213,10 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
             from webhook_agent.core.commands import has_review_slash_command
 
             cb_lower = comment_body.lower()
-            if has_review_slash_command(comment_body) or "@hannibal-hub-agents" in cb_lower:
+            if any(kw in cb_lower for kw in DEEP_REASONING_KEYWORDS):
+                deep_primary = "gemini-2.5-pro" if active_tier == "paid" else "gemini-3.8-flash"
+                target = os.environ.get("DEEP_REASONING_MODEL", deep_primary)
+            elif has_review_slash_command(comment_body) or "@hannibal-hub-agents" in cb_lower:
                 target = primary
             else:
                 target = lightweight
@@ -208,7 +238,7 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
     if chain:
         return chain[0]
     active_tier = _resolve_tier()
-    default_primary = "gemini-3.5-flash-lite" if active_tier == "free" else "gemini-3.8-flash"
+    default_primary = "gemini-2.0-flash" if active_tier == "paid" else "gemini-3.5-flash-lite"
     return os.environ.get(
         "PRIMARY_MODEL",
         os.environ.get("GEMMA_MODEL", default_primary),

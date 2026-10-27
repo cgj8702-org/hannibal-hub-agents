@@ -40,22 +40,26 @@ All Gemini models below provide **250,000 TPM**, allowing full multi-file PR rev
 | **8** | `gemma-4-31b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated fallback (payloads ≤ 14k tokens) |
 | **9** | `gemma-4-26b-a4b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated backup (payloads ≤ 14k tokens) |
 
-### 💳 Paid Tier Chain (Cost-Optimized High-Bandwidth)
+### 💳 Paid Tier Chain (2.x High-Bandwidth & 4M TPM Token Expansion)
 
-Default primary model: `gemini-3.5-flash-lite` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars, or escalated to `gemini-3.8-flash` via `/deep`, `/audit`, or `/model gemini-3.8-flash`).
+Default primary model: `gemini-2.0-flash` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars, or escalated to `gemini-2.5-pro` / `gemini-3.8-flash` via `/deep`, `/audit`, `/reason`, or `/model`).
 
-Optimized for 80% lower token cost ($0.30/1M input vs $1.50/1M for 3.8 Flash) with massive 4,000 RPM / 4M TPM headroom, preserving `gemini-3.8-flash` for complex reasoning audits and deep reviews.
+Optimized for 93% lower token cost ($0.10/1M input vs $1.50/1M for 3.8 Flash) with massive 4,000,000 TPM and **Unlimited RPD**, removing diff and payload truncation boundaries:
+- **Unshackled Context Window**: Up to 1,000,000 input tokens on paid tier.
+- **Uncapped Diff Ingestion**: 5MB diff byte budget (effectively uncapped) eliminating `[... remaining files truncated ...]` omissions.
+- **Full File Ingestion**: Ingests complete modified file contents alongside diffs for context-grounded verification.
+- **High-Throughput Parallel Audits**: Runs concurrent static analysis passes (symbol impact, test coverage, security scans) concurrently.
 
 | Step | Model | Paid Tier RPM | Paid Tier TPM | Paid Tier RPD | Role |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **0** | `gemini-3.5-flash-lite` | 4,000 | 4,000,000 | 150,000 | Default cost-optimized primary ($0.30/1M in) |
-| **1** | `gemini-3.1-flash-lite` | 4,000 | 4,000,000 | 150,000 | Secondary high-throughput Flash-Lite fallback |
-| **2** | `gemini-3.8-flash` | 1,000 | 2,000,000 | 10,000 | High-reasoning audit & deep review escalation ($1.50/1M in) |
-| **3** | `gemini-3.7-flash` | 1,000 | 2,000,000 | 10,000 | Secondary balanced reasoning fallback |
-| **4** | `gemini-3.6-flash` | 1,000 | 2,000,000 | 10,000 | Tertiary reasoning fallback |
-| **5** | `gemini-3.5-flash` | 1,000 | 2,000,000 | 10,000 | Quota backup fallback |
-| **6** | `gemini-2.5-flash` | 1,000 | 1,000,000 | 10,000 | Standard flash fallback |
-| **7** | `gemini-2.5-flash-lite` | 4,000 | 4,000,000 | 1,000,000 | Maximum daily request ceiling |
+| **0** | `gemini-2.0-flash` | 2,000 | 4,000,000 | **Unlimited** | Default primary workhorse ($0.10/1M in) - Deepest reasoning among 4M TPM models |
+| **1** | `gemini-2.5-flash-lite` | 4,000 | 4,000,000 | **Unlimited** | Secondary high-throughput Flash-Lite fallback ($0.10/1M in) |
+| **2** | `gemini-2.0-flash-lite` | 4,000 | 4,000,000 | **Unlimited** | Low-cost backup ($0.075/1M in) |
+| **3** | `gemini-3.5-flash-lite` | 4,000 | 4,000,000 | 150,000 | 3.x Flash-Lite fallback ($0.30/1M in) |
+| **4** | `gemini-3.1-flash-lite` | 4,000 | 4,000,000 | 150,000 | Secondary 3.x Flash-Lite fallback |
+| **5** | `gemini-2.5-pro` | 150 | 2,000,000 | 1,000 | High-end reasoning escalation & deep review ($1.25/1M in) |
+| **6** | `gemini-3.8-flash` | 1,000 | 2,000,000 | 10,000 | Secondary reasoning escalation fallback ($1.50/1M in) |
+| **7** | `gemini-2.5-flash` | 1,000 | 1,000,000 | 10,000 | Standard flash fallback |
 
 ---
 

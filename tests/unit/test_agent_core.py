@@ -216,8 +216,8 @@ class TestWebhookAgentModelChain:
         assert "gemma-4-31b-it" in free_chain
         assert "gemma-4-26b-a4b-it" in free_chain
 
-    def test_get_model_chain_paid_tier_orders_gemini_35_first(self, monkeypatch):
-        """get_model_chain on Paid Tier should place gemini-3.5-flash-lite as cost-optimized primary."""
+    def test_get_model_chain_paid_tier_orders_gemini_20_flash_first(self, monkeypatch):
+        """get_model_chain on Paid Tier should place gemini-2.0-flash as high-throughput primary."""
         from webhook_agent.models.model_chain import get_model_chain
 
         monkeypatch.setenv("WEBHOOK_TIER", "paid")
@@ -225,10 +225,10 @@ class TestWebhookAgentModelChain:
         monkeypatch.delenv("GEMMA_MODEL", raising=False)
         paid_chain = get_model_chain()
         assert len(paid_chain) == len(set(paid_chain))
-        assert paid_chain[0] == "gemini-3.5-flash-lite"
-        assert "gemini-3.8-flash" in paid_chain
-        assert "gemini-3.7-flash" in paid_chain
-        assert "gemini-3.6-flash" in paid_chain
+        assert paid_chain[0] == "gemini-2.0-flash"
+        assert "gemini-2.5-flash-lite" in paid_chain
+        assert "gemini-2.5-pro" in paid_chain
+        assert "gemini-3.5-flash-lite" in paid_chain
 
     def test_primary_model_env_override(self, monkeypatch):
         """get_model_chain respects PRIMARY_MODEL environment variable."""

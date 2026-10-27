@@ -209,7 +209,7 @@ def split_diff_into_sections(diff_text: str) -> list[DiffSection]:
 def filter_review_diff(
     diff_text: str,
     only_files: list[str] | set[str] | None = None,
-    max_bytes: int = 125000,
+    max_bytes: int | None = None,
 ) -> DiffFilterResult:
     """Filter out noise, vendored code, lockfiles, and non-PR changes from a diff.
 
@@ -217,10 +217,19 @@ def filter_review_diff(
         diff_text: Raw unified diff string.
         only_files: Optional allowlist of files belonging to this PR (e.g., from PR API).
         max_bytes: Maximum byte size for the filtered diff string.
+            If None, resolves dynamically: 5,000,000 bytes on paid tier, 125,000 bytes on free tier.
 
     Returns:
         DiffFilterResult with clean diff text, reviewable churn stats, and recommended comment budget.
     """
+    if max_bytes is None:
+        try:
+            from webhook_agent.models.rate_limiter import _resolve_tier
+
+            max_bytes = 5_000_000 if _resolve_tier() == "paid" else 125_000
+        except Exception:
+            max_bytes = 125_000
+
     if not diff_text or not diff_text.strip():
         return DiffFilterResult(
             filtered_diff="",
