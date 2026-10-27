@@ -181,7 +181,7 @@ async def fetch_model_registry() -> bool:
         from dev.rate_limit_parser import sort_models_by_tpm
     except ImportError:
         try:
-            from rate_limit_parser import sort_models_by_tpm
+            from rate_limit_parser import sort_models_by_tpm  # type: ignore[import-not-found, no-redef]
         except ImportError:
 
             def sort_models_by_tpm(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -269,7 +269,7 @@ async def run_pipeline():
         try:
             from dev.rate_limit_parser import main as parse_rate_limits
         except ImportError:
-            from rate_limit_parser import main as parse_rate_limits
+            from rate_limit_parser import main as parse_rate_limits  # type: ignore[no-redef]
 
         parse_rate_limits([])
     except Exception as e:
@@ -294,7 +294,7 @@ def main():
         try:
             from dev.rate_limit_parser import main as parse_rate_limits
         except ImportError:
-            from rate_limit_parser import main as parse_rate_limits
+            from rate_limit_parser import main as parse_rate_limits  # type: ignore[no-redef]
 
         parse_rate_limits([])
     elif args.cmd == "pipeline":

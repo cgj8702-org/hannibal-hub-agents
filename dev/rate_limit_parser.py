@@ -409,10 +409,10 @@ def main(args_list: list[str] | None = None) -> None:
         from dev.model_sync import is_eligible_registry_model
     except ImportError:
         try:
-            from model_sync import is_eligible_registry_model
+            from model_sync import is_eligible_registry_model  # type: ignore[import-not-found, no-redef]
         except ImportError:
 
-            def is_eligible_registry_model(m: dict[str, Any]) -> bool:
+            def is_eligible_registry_model(model_entry: dict[str, Any]) -> bool:
                 return True
 
     eligible_models = [m for m in models_list if is_eligible_registry_model(m)]
