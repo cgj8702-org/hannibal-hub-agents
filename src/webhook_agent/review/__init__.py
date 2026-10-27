@@ -69,6 +69,7 @@ from .review_enforcer import (
     _submit_formal_review,
     apply_scorecard_floor,
     is_contract_dimension,
+    is_repo_with_native_stale_review_dismissal,
 )
 from .schemas import (
     CandidateFinding,
@@ -147,6 +148,7 @@ __all__ = [
     "is_echo_description",
     "is_echo_suggestion",
     "is_reconciliation_claimed",
+    "is_repo_with_native_stale_review_dismissal",
     "is_unmitigated_breaking_risk",
     "load_fixture_file",
     "normalize_code_review_dict",

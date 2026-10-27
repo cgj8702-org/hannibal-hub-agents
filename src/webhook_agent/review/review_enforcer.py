@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -92,6 +93,31 @@ def has_grounding_bypass_label(pr: Any) -> bool:
                 for b in ("skip-grounding-gate", "skip-grounding", "bypass-grounding")
             )
     return False
+
+
+def is_repo_with_native_stale_review_dismissal(repo_name: str) -> bool:
+    """Check if repository has native GitHub branch protection auto-dismissing stale reviews.
+
+    When native stale review dismissal is enabled on GitHub, the bot skips manual
+    review dismissal to avoid redundant API calls and confusing timeline dismissal events.
+    """
+    from webhook_agent.constants import DEFAULT_NATIVE_STALE_REVIEW_DISMISSAL_REPOS
+
+    configured = os.getenv(
+        "NATIVE_STALE_REVIEW_DISMISSAL_REPOS",
+        DEFAULT_NATIVE_STALE_REVIEW_DISMISSAL_REPOS,
+    )
+    if not configured or not repo_name:
+        return False
+    exempt_repos: set[str] = set()
+    for r in configured.split(","):
+        entry = r.strip().lower()
+        if entry:
+            exempt_repos.add(entry)
+            exempt_repos.add(entry.rpartition("/")[-1])
+    repo_clean = repo_name.strip().lower()
+    simple_name = repo_clean.rpartition("/")[-1]
+    return repo_clean in exempt_repos or simple_name in exempt_repos
 
 
 def _handle_strict_grounding_gate(
@@ -1187,16 +1213,34 @@ def _submit_formal_review(
             )
 
         # Dismiss only after GitHub accepted the new review.
-        for prev_rv in bot_reviews:
-            if getattr(prev_rv, "state", "") in ("CHANGES_REQUESTED", "APPROVED") and getattr(
-                prev_rv, "id", None
-            ) != getattr(rv, "id", None):
-                try:
-                    prev_rv.dismiss("Superseded by fresh code review on latest commit.")
-                except Exception as dismiss_err:
-                    logger.warning(
-                        "Could not dismiss prior bot review %s: %s", prev_rv.id, dismiss_err
-                    )
+        # Repositories with native GitHub stale review dismissal (e.g. hannibal-hub-agents)
+        # do not require bot dismissal.
+        if not is_repo_with_native_stale_review_dismissal(repo_name):
+            for prev_rv in bot_reviews:
+                prev_id = getattr(prev_rv, "id", None)
+                if prev_id == getattr(rv, "id", None):
+                    continue
+                prev_state = getattr(prev_rv, "state", "")
+                prev_commit = str(getattr(prev_rv, "commit_id", "") or "").strip()
+
+                # 1. CHANGES_REQUESTED must always be dismissed once a newer review is accepted
+                #    to unblock PR mergeability.
+                # 2. APPROVED reviews should only be dismissed if genuinely stale (i.e. on an older commit).
+                is_stale_approval = (
+                    prev_state == "APPROVED"
+                    and bool(prev_commit)
+                    and bool(reviewed_sha)
+                    and prev_commit != reviewed_sha
+                )
+                should_dismiss = (prev_state == "CHANGES_REQUESTED") or is_stale_approval
+
+                if should_dismiss:
+                    try:
+                        prev_rv.dismiss("Superseded by fresh code review on latest commit.")
+                    except Exception as dismiss_err:
+                        logger.warning(
+                            "Could not dismiss prior bot review %s: %s", prev_rv.id, dismiss_err
+                        )
 
         _COMMENT_RATE_LIMITER.record(target_key)
         if isinstance(state, dict):
