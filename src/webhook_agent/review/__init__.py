@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from webhook_agent.state.reconciliation import (
+    build_reconciliation_cache_key,
+    clear_reconciliation_cache,
+    is_reconciliation_claimed,
+    release_reconciliation_claim,
+    try_claim_reconciliation,
+)
+
 from .ast_gate import (
     filter_invalid_ast_suggestions,
     validate_code_suggestion,
@@ -42,14 +50,6 @@ from .metadata import (
     has_actionable_findings,
     parse_legacy_review_findings,
     serialize_review_metadata,
-)
-from .proactive_service import (
-    ProactiveEvaluator,
-    build_reconciliation_cache_key,
-    clear_reconciliation_cache,
-    is_reconciliation_claimed,
-    release_reconciliation_claim,
-    try_claim_reconciliation,
 )
 from .replay import (
     BaselineReport,
@@ -102,7 +102,6 @@ __all__ = [
     "FixtureEvaluation",
     "HunterEngine",
     "IssueItem",
-    "ProactiveEvaluator",
     "ReviewEvaluation",
     "RiskItem",
     "SyncResolutionItem",

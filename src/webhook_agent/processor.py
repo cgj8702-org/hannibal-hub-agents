@@ -1050,7 +1050,7 @@ class WebhookProcessor:
                     )
                     return
 
-        # In-Flight Audit Deduplication: prevent concurrent runs across webhooks & proactive sweeps
+        # In-Flight Audit Deduplication: prevent concurrent webhook processing for the same PR commit
         audit_cache_key: str | None = None
         if is_pr_event and pr_number is not None and head_sha:
             if (
@@ -1063,7 +1063,7 @@ class WebhookProcessor:
                 )
                 and head_sha
             ):
-                from webhook_agent.review.proactive_service import (
+                from webhook_agent.state.reconciliation import (
                     build_reconciliation_cache_key,
                     try_claim_reconciliation,
                 )
@@ -1101,7 +1101,7 @@ class WebhookProcessor:
             results = agent.run(payload, repo_name, gh_client=gh)
         except Exception:
             if audit_cache_key:
-                from webhook_agent.review.proactive_service import (
+                from webhook_agent.state.reconciliation import (
                     release_reconciliation_claim,
                 )
 

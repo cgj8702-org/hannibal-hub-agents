@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 class TestTestImpactAnalyzer:
     def test_covered_symbol_detection(self):
         analyzer = TestImpactAnalyzer()
-        report = analyzer.analyze(["src/webhook_agent/review/proactive_service.py"])
+        report = analyzer.analyze(["src/webhook_agent/state/reconciliation.py"])
 
         claim_cov = next(
             (c for c in report.coverages if c.symbol_name == "try_claim_reconciliation"),
@@ -30,7 +30,7 @@ class TestTestImpactAnalyzer:
         assert claim_cov is not None
         assert claim_cov.status == TestCoverageStatus.COVERED
         assert len(claim_cov.covering_tests) > 0
-        assert any("test_proactive_service.py" in t for t in claim_cov.covering_tests)
+        assert any("test_reconciliation.py" in t for t in claim_cov.covering_tests)
 
     def test_uncovered_symbol_detection_and_stub_generation(self, tmp_path: Path):
         src_dir = tmp_path / "src" / "sample_pkg"
