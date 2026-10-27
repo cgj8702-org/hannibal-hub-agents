@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from dev.model_sync import is_eligible_registry_model
 from dev.rate_limit_parser import (
     extract_rate_limit_records,
     extract_tier_entry,
@@ -161,3 +162,29 @@ def test_resolve_registry_path_locates_src_registry() -> None:
     resolved = _resolve_registry_path()
     assert resolved.exists()
     assert "src/webhook_agent/assets/registries" in str(resolved)
+
+
+def test_is_eligible_registry_model_filtering() -> None:
+    """Verify is_eligible_registry_model filters non-text models and keyword exclusions."""
+    valid_model = {
+        "name": "models/gemini-2.5-flash",
+        "display_name": "Gemini 2.5 Flash",
+        "description": "Fast text model",
+        "supported_actions": ["generateContent"],
+    }
+    embedding_model = {
+        "name": "models/text-embedding-004",
+        "display_name": "Text Embedding 004",
+        "description": "Embedding model",
+        "supported_actions": ["embedContent"],
+    }
+    excluded_keyword_model = {
+        "name": "models/imagen-3.0-generate-002",
+        "display_name": "Imagen 3",
+        "description": "Image generation",
+        "supported_actions": ["generateContent"],
+    }
+
+    assert is_eligible_registry_model(valid_model) is True
+    assert is_eligible_registry_model(embedding_model) is False
+    assert is_eligible_registry_model(excluded_keyword_model) is False
