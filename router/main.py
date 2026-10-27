@@ -36,6 +36,12 @@ PERIMETER_FILTER_EVENTS: frozenset[str] = frozenset(
         "pull_request_review_thread",
         "workflow_run",
         "workflow_job",
+        "star",
+        "watch",
+        "fork",
+        "release",
+        "sponsorship",
+        "milestone",
     }
 )
 

@@ -24,6 +24,7 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any
 
 from github import Auth, Github
@@ -144,6 +145,12 @@ SUPPRESSED_EVENT_NAMES: frozenset[str] = frozenset(
         "pull_request_review_thread",
         "workflow_run",
         "workflow_job",
+        "star",
+        "watch",
+        "fork",
+        "release",
+        "sponsorship",
+        "milestone",
     }
 )
 
@@ -165,12 +172,20 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+class Tier1Status(Enum):
+    """Result status of Tier 1 deterministic programmatic handling."""
+
+    TERMINAL = "terminal"  # Handled programmatically or suppressed (0 LLM calls needed)
+    ADVANCE = "advance"  # Preconditions passed; advance to Tier 2 LLM delegation
+
+
 # Re-exported module helpers (extracted to pr_context.py, fast_path.py, and review/comment_poster.py)
 # Preserved for backwards compatibility with existing consumers and unit tests.
 __all__ = [
     "SUPPRESSED_EVENT_NAMES",
     "SUPPRESSED_PR_METADATA_ACTIONS",
     "AgentCore",
+    "Tier1Status",
     "WebhookProcessor",
     "_add_eyes_reaction",
     "_prefetch_inline_comment_context",
@@ -421,28 +436,63 @@ class WebhookProcessor:
             return f"{event_name}.{action}"
         return "unknown"
 
-    def should_process_event(self, ev: dict[str, Any]) -> bool:
-        """Apply loop‑avoidance, noise filtering, and duplication checks.
+    def _is_actionable_issue_opened(self, ev: dict[str, Any]) -> bool:
+        """Return True if an issues.opened event explicitly requests agent action.
 
-        * Duplicate deliveries are suppressed.
-        * Bot events originating from the app are suppressed.
-        * Comments mentioning @dependabot or @coderabbitai are suppressed.
-        * The ``edited`` action is filtered out.
-        * check_suite.completed is let through (it re-triggers reviews held back by the CI
-          gate); other automated CI noise events (check_run, status) are suppressed.
-        * Read-only PR lifecycle events (pull_request.closed) are suppressed.
-        * pull_request.synchronize is NOT suppressed — it is handled by the agent
-          for incremental reviews of newly pushed commits.
+        Treats untargeted issue openings as informative record-only events (Tier 0 drop),
+        preventing unprompted multi-turn tool loops on general bug reports or discussions.
+        """
+        if os.environ.get("AUTO_TRIAGE_NEW_ISSUES", "0").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            return True
+
+        raw = ev.get("raw_payload") or {}
+        sender = ev.get("sender") or raw.get("sender") or {}
+        sender_login = (sender.get("login") or "").strip().lower()
+
+        # Partner bots (e.g. Cline) that file issues to be triaged per #441
+        from webhook_agent.core.policy import PARTNER_BOT_LOGINS
+
+        if sender_login in PARTNER_BOT_LOGINS:
+            return True
+
+        issue = raw.get("issue") or {}
+        title = (issue.get("title") or "").lower()
+        body = (issue.get("body") or "").lower()
+        combined = f"{title}\n{body}"
+
+        # Explicit mention of bot
+        if "@hannibal-hub-agents" in combined or "hannibal-hub-agents" in combined:
+            return True
+
+        # Review or triage intent keywords / commands
+        from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+
+        if any(kw in combined for kw in REVIEW_INTENT_KEYWORDS):
+            return True
+
+        return any(cmd in combined for cmd in ("/triage", "/review", "/audit", "/help"))
+
+    def _filter_tier_0(self, ev: dict[str, Any]) -> tuple[bool, str]:
+        """Apply Tier 0 pure perimeter drops (0 compute, 0 API calls).
+
+        Returns:
+            tuple[bool, str]: (should_drop, reason). True if event should be dropped.
         """
         delivery_id = ev.get("delivery_id")
         if delivery_id in self._processed_deliveries:
-            return False
+            return True, "duplicate delivery"
         if ev.get("event_name") == "check_suite" and ev.get("action") == "completed":
-            # Finished CI drives deferred reviews (see review/ci_gate.py). Its sender is
-            # usually github-actions[bot], which the bot-sender filter below would drop.
-            return is_ci_gate_enabled()
+            # Finished CI drives deferred reviews (see review/ci_gate.py).
+            if not is_ci_gate_enabled():
+                return True, "ci gate disabled"
+            return False, "check_suite.completed (actionable)"
         if _is_bot_event(ev):
-            return False
+            return True, "bot event"
 
         raw = ev.get("raw_payload") or {}
         event_name = ev.get("event_name")
@@ -484,25 +534,24 @@ class WebhookProcessor:
                         association,
                         delivery_id,
                     )
-                    return False
+                    return True, f"unauthorized author_association={association}"
 
         comment = raw.get("comment") or raw.get("review_comment") or {}
         comment_body = comment.get("body") or ""
         cb_lower = comment_body.lower()
         if "@dependabot" in cb_lower:
-            return False
+            return True, "comment mentions @dependabot"
         if any(bot in cb_lower for bot in ("@coderabbitai", "@coderabbitai[bot]")):
             logger.debug(
                 "Suppressing comment mentioning CodeRabbit (delivery_id=%s)",
                 delivery_id,
             )
-            return False
+            return True, "comment mentions CodeRabbit"
 
         # Prevent bot-to-bot conversational ping-pong loops:
         # If a comment is authored by Jules (via login, substring, or performed_via_github_app),
         # check if it contains a Jules session ID to manage programmatic session interactions,
         # but suppress conversational agent execution unless it explicitly requests a review or mentions the bot.
-        event_name = ev.get("event_name")
         if event_name in ("issue_comment", "pull_request_review_comment"):
             comment_user = comment.get("user") or {}
             sender = ev.get("sender") or {}
@@ -528,18 +577,17 @@ class WebhookProcessor:
                     logger.debug(
                         "Suppressing conversational reply to Jules comment (no review intent / mention)"
                     )
-                    return False
+                    return True, "jules comment without review intent or mention"
 
         action = ev.get("action")
         if action == "deleted":
-            event_name = ev.get("event_name")
             if event_name in (
                 "issue_comment",
                 "pull_request_review_comment",
                 "pull_request",
                 "issue",
             ):
-                return False
+                return True, "deleted action"
 
         if action == "edited":
             sender_login = (ev.get("sender") or {}).get("login", "")
@@ -548,16 +596,15 @@ class WebhookProcessor:
             comment_author = comment_user.get("login", "")
             allowed_users = {"cgj8702", "cgj8702-agents"}
             if sender_login not in allowed_users and comment_author not in allowed_users:
-                return False
+                return True, "edited action from non-allowed user"
 
-        event_name = ev.get("event_name")
         canonical = self.route_event(ev)
         # Suppress review-submission events to prevent self-review feedback loops. A submitted
         # review says nothing about whether the PR is closed, so this arm must NOT register the
         # PR in the closed registry — doing so poisons every later event for the registry's TTL
         # window and silently skips the agent on an open PR (observed on #267).
         if canonical == "pull_request_review.submitted":
-            return False
+            return True, "pull_request_review.submitted (loop avoidance)"
 
         # Suppress genuinely closed PR events and register them so in-flight agent work short-circuits.
         # Accept both canonical spellings and the "pr" event-name alias: route_event's fallback yields
@@ -567,7 +614,6 @@ class WebhookProcessor:
         if canonical in ("pull_request.closed", "pr.closed") or (
             event_name in ("pull_request", "pr") and action == "closed"
         ):
-            raw = ev.get("raw_payload") or {}
             repo = raw.get("repository") or {}
             repo_full_name = repo.get("full_name", "")
             pr_data = raw.get("pull_request") or {}
@@ -584,16 +630,15 @@ class WebhookProcessor:
                         pr_number,
                         ex,
                     )
-            return False
+            return True, "closed PR event"
 
         if canonical.startswith("pull_request_review_thread."):
-            return False
+            return True, "review thread event"
 
         # Owner-attached ``jules`` label triggers Jules API interaction — never suppress.
         # Non-owner jules labels are ignored entirely (Google ignores them anyway).
         is_owner_jules_label = False
         if action in ("created", "labeled"):
-            raw = ev.get("raw_payload") or {}
             label = raw.get("label") or {}
             label_name = (label.get("name") or "").strip().lower()
             sender_login = (
@@ -604,7 +649,7 @@ class WebhookProcessor:
                     is_owner_jules_label = True
                 else:
                     logger.debug("Suppressing non-owner jules label from %s", sender_login)
-                    return False
+                    return True, "non-owner jules label"
 
         if not is_owner_jules_label:
             # Suppress non-code metadata noise (labels, assignees, milestones, locks)
@@ -624,11 +669,42 @@ class WebhookProcessor:
                     canonical,
                     action,
                 )
-                return False
+                return True, f"suppressed metadata action {action}"
+
+        # Tier 0 Drop Guard: untargeted issues.opened events.
+        # Unless the issue explicitly tags @hannibal-hub-agents, includes a review/triage directive,
+        # or originates from an authorized partner bot, drop as record-only to prevent unprompted loops.
+        if canonical == "issues.opened" or (
+            event_name in ("issues", "issue") and action == "opened"
+        ):
+            if not self._is_actionable_issue_opened(ev):
+                logger.debug(
+                    "Suppressing untargeted issues.opened event (delivery_id=%s): no explicit mention or triage directive",
+                    delivery_id,
+                )
+                return True, "untargeted issues.opened (record only)"
 
         # Ignore automated CI infrastructure noise, installation lifecycle events, and review
         # thread state changes. See SUPPRESSED_EVENT_NAMES.
-        return event_name not in SUPPRESSED_EVENT_NAMES
+        if event_name in SUPPRESSED_EVENT_NAMES:
+            return True, f"suppressed event name {event_name}"
+
+        return False, "actionable"
+
+    def should_process_event(self, ev: dict[str, Any]) -> bool:
+        """Apply Tier 0 loop‑avoidance, noise filtering, and duplication checks.
+
+        Returns True if event passed Tier 0 and is eligible for Tier 1 programmatic handling.
+        """
+        should_drop, reason = self._filter_tier_0(ev)
+        if should_drop:
+            logger.debug(
+                "Tier 0 dropped event: %s (delivery_id=%s)",
+                reason,
+                ev.get("delivery_id"),
+            )
+            return False
+        return True
 
     def _handle_ci_completed(self, payload: dict[str, Any]) -> None:
         """Start reviews that were held back while CI was running.
@@ -842,38 +918,41 @@ class WebhookProcessor:
                 self._processed_deliveries.pop(delivery_id, None)
             raise
 
-    def _dispatch_event(
+    def _handle_tier_1_programmatic(
         self,
         payload: dict[str, Any],
         event_key: str,
         delivery_id: str,
         *,
         ci_verified: bool = False,
-    ) -> None:
+    ) -> Tier1Status:
+        """Execute Tier 1 deterministic operations (0 LLM calls).
+
+        Returns:
+            Tier1Status.ADVANCE if preconditions are satisfied for LLM evaluation.
+            Tier1Status.TERMINAL if handled or suppressed programmatically.
+        """
         if event_key == "check_suite.completed":
             self._handle_ci_completed(payload)
-            return
+            return Tier1Status.TERMINAL
 
         gh = self.gh
-
-        agent = self._get_agent_core()
 
         raw_repo = payload.get("repository")
         if not isinstance(raw_repo, dict) and isinstance(payload.get("raw_payload"), dict):
             raw_repo = payload["raw_payload"].get("repository")
-        repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
-        if not repo_name:
+        raw_repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
+        if not raw_repo_name or not isinstance(raw_repo_name, str):
             logger.warning("No repository found in event payload")
-            return
-
-        ctx = _extract_log_context(payload)
+            return Tier1Status.TERMINAL
+        repo_name: str = raw_repo_name
 
         dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
         if self.handle_jules_label(payload):
             logger.info(
                 "Jules label event handled via Jules API in %s; stopping processing.", repo_name
             )
-            return
+            return Tier1Status.TERMINAL
 
         if event_key == "pull_request.synchronize" and is_base_branch_merge_sync(
             gh, repo_name, payload
@@ -889,7 +968,7 @@ class WebhookProcessor:
                 head_sha,
                 base_ref,
             )
-            return
+            return Tier1Status.TERMINAL
 
         # Short-circuit if target PR is closed or merged
         raw = payload.get("raw_payload") or {}
@@ -934,7 +1013,7 @@ class WebhookProcessor:
                     repo_name,
                     pr_number,
                 )
-                return
+                return Tier1Status.TERMINAL
 
         head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
 
@@ -949,7 +1028,7 @@ class WebhookProcessor:
                 repo_name,
                 pr_number,
             )
-            return
+            return Tier1Status.TERMINAL
 
         # CI gate: automatic reviews wait for fully green CI. Silent on pending or failed CI.
         # This runs before the in-flight dedup claim below so that a deferred event does not
@@ -970,7 +1049,7 @@ class WebhookProcessor:
                     head_sha[:7],
                     ci_state.value,
                 )
-                return
+                return Tier1Status.TERMINAL
 
         # Fast-push debouncing & duplicate review gate: abort if superseded or already reviewed
         if (
@@ -990,7 +1069,7 @@ class WebhookProcessor:
                         pr_number,
                         live_state,
                     )
-                    return
+                    return Tier1Status.TERMINAL
                 live_head_sha = getattr(getattr(live_pr, "head", None), "sha", None)
                 if isinstance(live_head_sha, str) and live_head_sha and live_head_sha != head_sha:
                     logger.info(
@@ -1000,7 +1079,7 @@ class WebhookProcessor:
                         head_sha[:7],
                         live_head_sha[:7],
                     )
-                    return
+                    return Tier1Status.TERMINAL
                 already_reviewed, _ = last_bot_review_sha(live_pr, head_sha)
                 if already_reviewed:
                     logger.info(
@@ -1009,7 +1088,7 @@ class WebhookProcessor:
                         pr_number,
                         head_sha[:7],
                     )
-                    return
+                    return Tier1Status.TERMINAL
             except Exception as live_err:
                 logger.warning(
                     "⚠️ Could not verify live PR head for %s#%s (commit %s): %s — "
@@ -1019,56 +1098,9 @@ class WebhookProcessor:
                     head_sha[:7] if head_sha else "unknown",
                     live_err,
                 )
-                return
-
-        resumed_checkpoint: dict[str, Any] | None = None
-        if is_pr_event and pr_num_int is not None and head_sha:
-            resumed_checkpoint = review_checkpoint_manager.get_resumable(
-                repo_name, pr_num_int, head_sha
-            )
-            if resumed_checkpoint:
-                logger.info(
-                    "🔁 PR %s#%s (commit %s) has resumable checkpoint; skipping diff and history prefetch.",
-                    repo_name,
-                    pr_number,
-                    head_sha[:7],
-                )
-                payload["resumed_checkpoint"] = resumed_checkpoint
-                if not raw.get("pr_diff") and resumed_checkpoint.get("pr_diff"):
-                    raw["pr_diff"] = resumed_checkpoint["pr_diff"]
-                if not raw.get("diff_sha") and resumed_checkpoint.get("diff_sha"):
-                    raw["diff_sha"] = resumed_checkpoint["diff_sha"]
-                if not payload.get("precompiled_dossier") and resumed_checkpoint.get(
-                    "precompiled_dossier"
-                ):
-                    payload["precompiled_dossier"] = resumed_checkpoint["precompiled_dossier"]
-                if not payload.get("changed_files") and resumed_checkpoint.get("changed_files"):
-                    payload["changed_files"] = resumed_checkpoint["changed_files"]
-
-        dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
-        if not dry_run and not resumed_checkpoint:
-            _prefetch_pr_diff(gh, repo_name, payload)
-            _prefetch_inline_comment_context(gh, repo_name, payload)
-            _prefetch_previous_bot_reviews(gh, repo_name, payload)
-
-            # Re-check closed/merged state if live prefetch discovered it was closed on GitHub
-            if is_pr_event and pr_num_int is not None:
-                updated_pr = (
-                    raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
-                )
-                updated_state = (
-                    (updated_pr.get("state") or "").lower() if isinstance(updated_pr, dict) else ""
-                )
-                if updated_state == "closed" or pr_closed_registry.is_closed(repo_name, pr_num_int):
-                    logger.debug(
-                        "🔒 PR %s#%s was closed or merged on GitHub; skipping agent execution.",
-                        repo_name,
-                        pr_number,
-                    )
-                    return
+                return Tier1Status.TERMINAL
 
         # In-Flight Audit Deduplication: prevent concurrent webhook processing for the same PR commit
-        audit_cache_key: str | None = None
         if is_pr_event and pr_number is not None and head_sha:
             if (
                 canonical
@@ -1094,14 +1126,9 @@ class WebhookProcessor:
                         pr_number,
                         head_sha[:7],
                     )
-                    return
+                    return Tier1Status.TERMINAL
 
-        # Guarded Eyes Reaction: only react once closed/merged PR and deduplication guardrails pass
-        eyes_reaction = None
-        if not dry_run:
-            eyes_reaction = _add_eyes_reaction(gh, repo_name, payload)
-
-        # Deterministic Fast-Path for automated Dependabot / lockfile PRs
+        # Deterministic Fast-Path for automated Dependabot / lockfile PRs (0 LLM calls)
         if not dry_run and is_pr_event and pr_number is not None:
             if evaluate_dependency_fast_path(
                 gh=gh,
@@ -1112,7 +1139,121 @@ class WebhookProcessor:
                 pr_number=pr_number,
                 dry_run=dry_run,
             ):
-                return
+                return Tier1Status.TERMINAL
+
+        return Tier1Status.ADVANCE
+
+    def _dispatch_tier_2_llm(
+        self,
+        payload: dict[str, Any],
+        event_key: str,
+        delivery_id: str,
+    ) -> None:
+        """Execute Tier 2 bounded LLM delegation."""
+        gh = self.gh
+        agent = self._get_agent_core()
+        raw_repo = payload.get("repository")
+        if not isinstance(raw_repo, dict) and isinstance(payload.get("raw_payload"), dict):
+            raw_repo = payload["raw_payload"].get("repository")
+        raw_repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
+        if not raw_repo_name or not isinstance(raw_repo_name, str):
+            logger.warning("No repository found in event payload for Tier 2 dispatch")
+            return
+        repo_name: str = raw_repo_name
+        ctx = _extract_log_context(payload)
+        dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
+
+        raw = payload.get("raw_payload") or {}
+        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+        canonical = payload.get("canonical", "")
+        is_pr_event = bool(pr_data) or canonical.startswith(
+            (
+                "pull_request.",
+                "pull_request_review",
+                "pull_request_review_comment.",
+            )
+        )
+        pr_number = (
+            pr_data.get("number")
+            if isinstance(pr_data, dict)
+            else (raw.get("issue") or {}).get("number")
+        )
+        pr_num_int: int | None = None
+        if pr_number is not None:
+            try:
+                pr_num_int = int(pr_number)
+            except (TypeError, ValueError):
+                pr_num_int = None
+        head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
+
+        resumed_checkpoint: dict[str, Any] | None = None
+        if is_pr_event and pr_num_int is not None and head_sha:
+            resumed_checkpoint = review_checkpoint_manager.get_resumable(
+                repo_name, pr_num_int, head_sha
+            )
+            if resumed_checkpoint:
+                logger.info(
+                    "🔁 PR %s#%s (commit %s) has resumable checkpoint; skipping diff and history prefetch.",
+                    repo_name,
+                    pr_number,
+                    head_sha[:7],
+                )
+                payload["resumed_checkpoint"] = resumed_checkpoint
+                if not raw.get("pr_diff") and resumed_checkpoint.get("pr_diff"):
+                    raw["pr_diff"] = resumed_checkpoint["pr_diff"]
+                if not raw.get("diff_sha") and resumed_checkpoint.get("diff_sha"):
+                    raw["diff_sha"] = resumed_checkpoint["diff_sha"]
+                if not payload.get("precompiled_dossier") and resumed_checkpoint.get(
+                    "precompiled_dossier"
+                ):
+                    payload["precompiled_dossier"] = resumed_checkpoint["precompiled_dossier"]
+                if not payload.get("changed_files") and resumed_checkpoint.get("changed_files"):
+                    payload["changed_files"] = resumed_checkpoint["changed_files"]
+
+        if not dry_run and not resumed_checkpoint:
+            _prefetch_pr_diff(gh, repo_name, payload)
+            _prefetch_inline_comment_context(gh, repo_name, payload)
+            _prefetch_previous_bot_reviews(gh, repo_name, payload)
+
+            # Re-check closed/merged state if live prefetch discovered it was closed on GitHub
+            if is_pr_event and pr_num_int is not None:
+                updated_pr = (
+                    raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+                )
+                updated_state = (
+                    (updated_pr.get("state") or "").lower() if isinstance(updated_pr, dict) else ""
+                )
+                if updated_state == "closed" or pr_closed_registry.is_closed(repo_name, pr_num_int):
+                    logger.debug(
+                        "🔒 PR %s#%s was closed or merged on GitHub; skipping agent execution.",
+                        repo_name,
+                        pr_number,
+                    )
+                    return
+
+        # In-Flight Audit Deduplication claim key for release on failure
+        audit_cache_key: str | None = None
+        if is_pr_event and pr_number is not None and head_sha:
+            if (
+                canonical
+                in (
+                    "pull_request.opened",
+                    "pull_request.synchronize",
+                    "pull_request.ready_for_review",
+                    "pull_request.reopened",
+                )
+                and head_sha
+            ):
+                from webhook_agent.state.reconciliation import (
+                    build_reconciliation_cache_key,
+                )
+
+                audit_cache_key = build_reconciliation_cache_key(repo_name, pr_number, head_sha)
+
+        # Guarded Eyes Reaction: only react once closed/merged PR and deduplication guardrails pass
+        eyes_reaction = None
+        if not dry_run:
+            eyes_reaction = _add_eyes_reaction(gh, repo_name, payload)
 
         try:
             results = agent.run(payload, repo_name, gh_client=gh)
@@ -1217,3 +1358,20 @@ class WebhookProcessor:
                     }
                 },
             )
+
+    def _dispatch_event(
+        self,
+        payload: dict[str, Any],
+        event_key: str,
+        delivery_id: str,
+        *,
+        ci_verified: bool = False,
+    ) -> None:
+        """Dispatch an event through Tier 1 (deterministic programmatic action) and Tier 2 (LLM delegation)."""
+        tier1_status = self._handle_tier_1_programmatic(
+            payload, event_key, delivery_id, ci_verified=ci_verified
+        )
+        if tier1_status != Tier1Status.ADVANCE:
+            return
+
+        self._dispatch_tier_2_llm(payload, event_key, delivery_id)
