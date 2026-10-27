@@ -164,25 +164,47 @@ class IterationBudgetPlugin(BasePlugin):
         run["tool_calls"] = run.get("tool_calls", 0) + 1
         state["guardrail_run"] = run
 
-        if run["tool_calls"] > self.max_tool_calls:
-            run["halt_reason"] = f"tool_budget_exceeded:{self.max_tool_calls}"
+        # Apply programmatic mode-aware tool call budgets:
+        # - FORMAL_AUDIT: retains full max_tool_calls (25) for multi-file AST/diff inspection.
+        # - ISSUE_TRIAGE: strictly capped at 2 tool calls.
+        # - GENERAL_PAIR_PROGRAMMING / THREAD_COLLAB: capped at 4 tool calls.
+        mode = state.get("agent_mode")
+        from webhook_agent.core.policy import Mode
+
+        if mode == Mode.ISSUE_TRIAGE:
+            effective_max_tools = min(2, self.max_tool_calls)
+        elif mode in (Mode.GENERAL_PAIR_PROGRAMMING, Mode.THREAD_COLLAB):
+            effective_max_tools = min(4, self.max_tool_calls)
+        else:
+            effective_max_tools = self.max_tool_calls
+
+        if run["tool_calls"] > effective_max_tools:
+            run["halt_reason"] = f"tool_budget_exceeded:{effective_max_tools}"
             state["guardrail_run"] = run
             logger.warning(
-                "🛑 [IterationBudgetPlugin] Tool call budget of %d exceeded on call %d for '%s'",
-                self.max_tool_calls,
+                "🛑 [IterationBudgetPlugin] Tool call budget of %d exceeded on call %d for '%s' (mode=%s)",
+                effective_max_tools,
                 run["tool_calls"],
                 getattr(tool, "name", "tool"),
+                mode,
             )
-            return {
-                "error": f"Tool execution halted: tool call budget of {self.max_tool_calls} exceeded. "
-                "Please output your formal review JSON immediately."
-            }
+            halt_msg = (
+                f"Tool execution halted: tool call budget of {effective_max_tools} exceeded. "
+                + (
+                    "Please output your formal review JSON immediately."
+                    if mode == Mode.FORMAL_AUDIT
+                    else "Please provide a concise, helpful summary response to the user immediately."
+                )
+            )
+            return {"error": halt_msg}
 
         if run.get("halt_reason"):
-            return {
-                "error": f"Tool execution halted: {run['halt_reason']}. "
+            halt_msg = f"Tool execution halted: {run['halt_reason']}. " + (
                 "Please output your formal review JSON immediately."
-            }
+                if mode == Mode.FORMAL_AUDIT
+                else "Please provide a concise, helpful summary response to the user immediately."
+            )
+            return {"error": halt_msg}
 
         return None
 
