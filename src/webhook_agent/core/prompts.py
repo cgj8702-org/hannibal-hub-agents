@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,15 +18,18 @@ logger = logging.getLogger("webhook_agent.core.prompts")
 MAX_INPUT_TOKENS = 3500  # Default 3.5k tokens cap for Free Tier / Gemma models
 
 
+PAID_TIER_MAX_INPUT_TOKENS = 1000000
+
+
 def get_max_input_tokens() -> int:
     """Return max token input budget based on active tier capability.
 
     Free Tier / Gemma models: 3,500 tokens.
-    Paid Tier Gemini Flash models: 35,000 tokens (10x context window).
+    Paid Tier Gemini 2.x models: 1,000,000 tokens (unshackled 4M TPM capacity).
     """
     tier = _resolve_tier()
     if tier == "paid":
-        return 35000
+        return int(os.environ.get("PAID_TIER_MAX_INPUT_TOKENS", str(PAID_TIER_MAX_INPUT_TOKENS)))
     return MAX_INPUT_TOKENS
 
 
@@ -360,180 +364,27 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             except Exception as grounding_err:
                 logger.debug("Could not build dependency grounding block: %s", grounding_err)
 
-        # Option 3: Deterministic Pre-Review Compiler Dossier
-        # Run AST integrity analysis on modified Python files
-        py_files = [f for f in changed_files if f.endswith(".py")]
-        if py_files:
-            try:
-                from webhook_agent.tools.ast_tools import verify_python_ast
-
-                dossier_items: list[str] = []
-                pr_diff_text = str(raw.get("pr_diff") or "")
-                for py_file in py_files[:5]:
-                    ast_res = verify_python_ast(file_path=py_file, diff_text=pr_diff_text)
-                    if not ast_res.startswith("Error: No code snippet provided and file"):
-                        dossier_items.append(ast_res)
-                if dossier_items:
-                    dossier_text = "\n\n".join(dossier_items)
-                    parts.append(
-                        f"\n### 🔍 Deterministic Pre-Audit Compiler Findings\n"
-                        f"The deterministic AST integrity engine pre-audited modified Python files:\n\n"
-                        f"{dossier_text}\n\n"
-                        f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
-                    )
-                event_data["deterministic_precompiled_ast"] = True
-
-                from webhook_agent.environment.context import get_active_environment
-
-                active_env = get_active_environment()
-                repo_full_name = (event_data.get("repository") or {}).get("full_name", "")
-                if active_env is not None:
-                    base_sha = str(
-                        (raw.get("pull_request") or {}).get("base", {}).get("sha")
-                        or event_data.get("base_sha")
-                        or ""
-                    )
-                    gh_client = event_data.get("gh_client")
-
-                    baseline_loader = None
-                    if gh_client and repo_full_name and base_sha:
-
-                        def _gh_baseline_loader(file_path: str) -> str | None:
-                            try:
-                                repo_obj = gh_client.get_repo(repo_full_name)
-                                content_file = repo_obj.get_contents(file_path, ref=base_sha)
-                                if hasattr(content_file, "decoded_content"):
-                                    return content_file.decoded_content.decode(
-                                        "utf-8", errors="replace"
-                                    )
-                                return None
-                            except Exception:
-                                return None
-
-                        baseline_loader = _gh_baseline_loader
-
-                    # Cross-File Symbol Dependency & Breaking Signature Graph
-                    from webhook_agent.analysis.symbol_graph import (
-                        SymbolImpactAnalyzer,
-                        evaluate_contract_integrity,
-                    )
-
-                    sym_analyzer = SymbolImpactAnalyzer(repo_root=active_env.root)
-                    impact_reports = sym_analyzer.analyze_modified_files(
-                        changed_files,
-                        baseline_loader=baseline_loader,
-                    )
-                    contract_item = evaluate_contract_integrity(
-                        impact_reports,
-                        parse_errors=sym_analyzer.parse_errors,
-                    )
-                    event_data["deterministic_contract_scorecard_item"] = contract_item.model_dump()
-
-                    impact_blocks = [
-                        r.to_markdown()
-                        for r in impact_reports
-                        if r.broken_call_sites or (r.sig_diff and r.sig_diff.is_breaking)
-                    ]
-                    if impact_blocks or contract_item.status in ("FAIL", "WARN", "ERROR"):
-                        impact_text = (
-                            "\n\n".join(impact_blocks)
-                            if impact_blocks
-                            else "No broken call sites detected."
-                        )
-                        parts.append(
-                            f"\n### 🕸️ Cross-File Contract & Symbol Impact Analysis\n"
-                            f"The static symbol dependency engine detected contract alterations and cross-file callers:\n\n"
-                            f"**Dimension 4 (Contract Integrity) Evaluated Status**: `{contract_item.status}`\n"
-                            f"**Notes**: {contract_item.notes}\n\n"
-                            f"{impact_text}\n\n"
-                            f"Verify whether external callers are broken and enforce Dimension 4 (Contract Integrity)."
-                        )
-
-                    # Test Impact & Coverage Verification
-                    from webhook_agent.analysis.test_impact import (
-                        TestImpactAnalyzer,
-                        evaluate_test_coverage_integrity,
-                        run_diff_coverage,
-                    )
-
-                    test_analyzer = TestImpactAnalyzer(repo_root=active_env.root)
-                    test_report = test_analyzer.analyze(changed_files)
-                    diff_pct, _ = run_diff_coverage(
-                        diff_text=str(raw.get("pr_diff") or ""),
-                        repo_root=active_env.root,
-                    )
-                    test_item = evaluate_test_coverage_integrity(
-                        test_report,
-                        diff_coverage_pct=diff_pct,
-                    )
-                    event_data["deterministic_test_scorecard_item"] = test_item.model_dump()
-
-                    if test_report.coverages or diff_pct is not None or test_item.status != "PASS":
-                        test_md = test_report.to_markdown()
-                        cov_note = (
-                            f"\n**Diff Test Coverage**: `{diff_pct:.1f}%`\n"
-                            if diff_pct is not None
-                            else ""
-                        )
-                        parts.append(
-                            f"\n{test_md}{cov_note}\n"
-                            f"**Dimension 5 (Test Coverage & Regressions) Evaluated Status**: `{test_item.status}`\n"
-                            f"**Notes**: {test_item.notes}\n"
-                        )
-            except Exception as ast_err:
-                logger.warning(
-                    "Deterministic symbol/test impact pre-audit failed with error: %s", ast_err
-                )
-                from webhook_agent.review.schemas import ScorecardItem
-
-                event_data["deterministic_contract_scorecard_item"] = ScorecardItem(
-                    dimension="Contract Integrity",
-                    status="UNKNOWN",
-                    notes=f"UNVERIFIED: deterministic contract analysis error: {ast_err}",
-                ).model_dump()
-                event_data["deterministic_test_scorecard_item"] = ScorecardItem(
-                    dimension="Test Coverage & Regressions",
-                    status="UNKNOWN",
-                    notes=f"UNVERIFIED: deterministic test impact analysis error: {ast_err}",
-                ).model_dump()
-
-        # Option 4: Deterministic Security Tooling (detect-secrets & bandit)
+        # Concurrent Multi-Perspective Pre-Audit Compiler & Dossier Assembly
         try:
-            from webhook_agent.analysis.security_scanner import (
-                SecurityScanner,
-                evaluate_security_integrity,
-            )
-            from webhook_agent.environment.context import get_active_environment
+            from webhook_agent.analysis.pre_audit_compiler import compile_pre_audit_dossier
 
-            sec_env = get_active_environment()
-            sec_root = sec_env.root if sec_env else None
-            sec_scanner = SecurityScanner(repo_root=sec_root)
-            sec_report = sec_scanner.scan(
-                diff_text=str(raw.get("pr_diff") or ""),
+            dossier = compile_pre_audit_dossier(
                 changed_files=changed_files,
-                repo_root=sec_root,
+                pr_diff_text=str(raw.get("pr_diff") or ""),
+                event_data=event_data,
             )
-            sec_item = evaluate_security_integrity(sec_report)
-            event_data["deterministic_security_scorecard_item"] = sec_item.model_dump()
-
-            if sec_report.active_findings() or sec_item.status in ("FAIL", "WARN"):
-                parts.append(
-                    f"\n### 🛡️ Deterministic Security Pre-Audit Findings\n"
-                    f"{sec_report.to_markdown()}\n\n"
-                    f"**Dimension 3 (Security & Secrets) Evaluated Status**: `{sec_item.status}`\n"
-                    f"**Notes**: {sec_item.notes}\n\n"
-                    f"Enforce Dimension 3 (Security & Secrets) in the review scorecard. "
-                    f"Proven defects mechanically prevent approval."
-                )
-        except Exception as sec_err:
-            logger.warning("Deterministic security scanner failed with error: %s", sec_err)
-            from webhook_agent.review.schemas import ScorecardItem
-
-            event_data["deterministic_security_scorecard_item"] = ScorecardItem(
-                dimension="Security & Secrets",
-                status="UNKNOWN",
-                notes=f"UNVERIFIED: deterministic security scan error: {sec_err}",
-            ).model_dump()
+            if dossier.dossier_markdown:
+                parts.append(f"\n{dossier.dossier_markdown}")
+            event_data["deterministic_precompiled_ast"] = dossier.ast_verified
+            event_data["deterministic_contract_scorecard_item"] = (
+                dossier.contract_scorecard.model_dump()
+            )
+            event_data["deterministic_test_scorecard_item"] = dossier.test_scorecard.model_dump()
+            event_data["deterministic_security_scorecard_item"] = (
+                dossier.security_scorecard.model_dump()
+            )
+        except Exception as pre_audit_err:
+            logger.warning("Concurrent pre-audit compiler encountered error: %s", pre_audit_err)
 
     # Include pre-fetched inline comment code context if available
     if "inline_code_context" in raw:

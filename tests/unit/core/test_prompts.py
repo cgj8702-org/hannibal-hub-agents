@@ -28,7 +28,7 @@ def test_max_input_tokens_tier_resolution() -> None:
         assert get_max_input_tokens() == 3500
 
     with patch("webhook_agent.core.prompts._resolve_tier", return_value="paid"):
-        assert get_max_input_tokens() == 35000
+        assert get_max_input_tokens() == 1000000
 
 
 def test_truncation_helpers_preserve_text() -> None:
@@ -352,3 +352,35 @@ def test_conversational_instruction_includes_system_mode_awareness() -> None:
     assert "conversational_agent" in CONVERSATIONAL_INSTRUCTION
     assert "code_auditor" in CONVERSATIONAL_INSTRUCTION
     assert "review" in CONVERSATIONAL_INSTRUCTION
+
+
+def test_build_user_message_injects_full_file_context_on_paid_tier(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Paid Tier, full contents of modified Python files are injected for whole-file context."""
+    from webhook_agent.environment import LocalEnvironment, use_environment
+
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    service_code = "class PaymentService:\n    def process(self):\n        return True\n"
+    (src_dir / "service.py").write_text(service_code)
+
+    env = LocalEnvironment(tmp_path)
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/hannibal-hub-agents"},
+        "sender": {"login": "developer"},
+        "raw_payload": {
+            "pull_request": {"number": 42},
+            "changed_files": ["src/service.py"],
+            "pr_diff": "diff --git a/src/service.py b/src/service.py\n+        return True",
+        },
+    }
+
+    with use_environment(env):
+        content = build_user_message(event_data)
+
+    text = content.parts[0].text or ""
+    assert "Full Source File Context (Paid Tier High-Capacity Mode)" in text
+    assert "class PaymentService:" in text

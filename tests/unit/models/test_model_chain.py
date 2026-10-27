@@ -61,10 +61,11 @@ def test_get_model_chain_paid_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GEMMA_MODEL", raising=False)
 
     chain = get_model_chain()
-    assert chain[0] == "gemini-3.5-flash-lite"
-    assert "gemini-3.8-flash" in chain
-    assert "gemini-3.7-flash" in chain
-    assert "gemini-3.1-flash-lite" in chain
+    assert chain[0] == "gemini-2.0-flash"
+    assert "gemini-2.5-flash-lite" in chain
+    assert "gemini-2.0-flash-lite" in chain
+    assert "gemini-3.5-flash-lite" in chain
+    assert "gemini-2.5-pro" in chain
 
 
 def test_get_model_chain_custom_primary_with_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,3 +268,49 @@ def test_is_gemini_3_plus() -> None:
     assert is_gemini_3_plus("gemini-2.5-flash") is False
     assert is_gemini_3_plus("gemini-2.5-flash-lite") is False
     assert is_gemini_3_plus("gemini-invalid-version") is False
+
+
+def test_select_model_for_event_deep_reasoning_escalation_paid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify comment with deep reasoning directive escalates to gemini-2.5-pro on paid tier."""
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
+    monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
+    monkeypatch.delenv("PRIMARY_MODEL", raising=False)
+    monkeypatch.delenv("DEEP_REASONING_MODEL", raising=False)
+
+    event = {
+        "canonical": "issue_comment.created",
+        "raw_payload": {"comment": {"body": "Please perform a /deep audit of the AST changes."}},
+    }
+    assert _select_model_for_event(event) == "gemini-2.5-pro"
+
+
+def test_select_model_for_event_heavy_diff_payload_paid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify massive PR diff payloads (>50k tokens) route to gemini-2.0-flash on paid tier."""
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
+    monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
+    monkeypatch.delenv("PRIMARY_MODEL", raising=False)
+
+    huge_diff = "diff --git a/test.py b/test.py\n+line\n" * 25000  # ~100k+ tokens
+    event = {
+        "canonical": "pull_request.opened",
+        "raw_payload": {"pr_diff": huge_diff},
+    }
+    assert _select_model_for_event(event) == "gemini-2.0-flash"
+
+
+def test_get_model_chain_heavy_payload_paid_tpm_priority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify heavy payload on paid tier guarantees 4M TPM models lead the fallback chain."""
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
+    monkeypatch.delenv("PRIMARY_MODEL", raising=False)
+
+    chain = get_model_chain(estimated_tokens=80000)
+    # The first 3 models must be the 4M TPM leaders
+    assert chain[0] in ("gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite")
+    assert chain[1] in ("gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite")
+    assert chain[2] in ("gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite")

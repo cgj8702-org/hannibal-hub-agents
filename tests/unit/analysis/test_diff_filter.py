@@ -81,3 +81,29 @@ def test_filter_review_diff_computes_ast_risk():
     assert "src/logic.py" in res.kept_files
     assert res.ast_risk_score > 0.0
     assert "BREAKING_SIGNATURE" in res.ast_impact_counts
+
+
+def test_filter_review_diff_tier_byte_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify free tier caps diff at 125KB while paid tier allows up to 5MB."""
+    # Construct large multi-file diff
+    large_sections = []
+    for i in range(20):
+        large_sections.append(
+            f"diff --git a/src/module_{i}.py b/src/module_{i}.py\n"
+            f"--- a/src/module_{i}.py\n"
+            f"+++ b/src/module_{i}.py\n"
+            f"@@ -1,5 +1,100 @@\n" + ("+x = 1\n" * 1500)  # ~10KB per section -> ~200KB total
+        )
+    huge_diff = "\n".join(large_sections)
+
+    # Free tier -> truncated at 125,000 bytes
+    monkeypatch.setenv("WEBHOOK_TIER", "free")
+    res_free = filter_review_diff(huge_diff)
+    assert "[... remaining files truncated to fit 125000 byte budget ...]" in res_free.filtered_diff
+    assert len(res_free.filtered_diff.encode("utf-8")) <= 135000
+
+    # Paid tier -> 5MB budget, no truncation
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
+    res_paid = filter_review_diff(huge_diff)
+    assert "remaining files truncated" not in res_paid.filtered_diff
+    assert len(res_paid.filtered_diff.encode("utf-8")) > 150000
