@@ -126,6 +126,11 @@ def test_scan_python_bandit_subprocess(tmp_path: Path) -> None:
     with patch("subprocess.run", return_value=mock_res) as mock_run:
         findings, errors = scanner.scan_python_bandit(["src/insecure.py"])
         assert mock_run.called
+        cmd = mock_run.call_args[0][0]
+        assert "-s" in cmd
+        s_idx = cmd.index("-s")
+        assert cmd[s_idx + 1] == "B101,B110"
+
         assert len(errors) == 0
         assert len(findings) == 1
 
@@ -137,6 +142,25 @@ def test_scan_python_bandit_subprocess(tmp_path: Path) -> None:
         assert finding.severity == "CRITICAL"
         assert finding.confidence == "PROVEN"
         assert finding.is_exempt is False
+
+
+def test_scan_python_bandit_skips_b110_without_pyproject(tmp_path: Path) -> None:
+    scanner = SecurityScanner(repo_root=tmp_path)
+
+    test_file = tmp_path / "src" / "sample.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("pass\n")
+
+    mock_res = MagicMock()
+    mock_res.stdout = json.dumps({"results": []})
+
+    with patch("subprocess.run", return_value=mock_res) as mock_run:
+        _findings, _errors = scanner.scan_python_bandit(["src/sample.py"])
+        assert mock_run.called
+        cmd = mock_run.call_args[0][0]
+        assert "-s" in cmd
+        s_idx = cmd.index("-s")
+        assert cmd[s_idx + 1] == "B101,B110"
 
 
 def test_scan_python_bandit_skips_exempt_paths() -> None:
