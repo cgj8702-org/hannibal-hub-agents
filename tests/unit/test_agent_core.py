@@ -1183,9 +1183,12 @@ class TestConversationalAgent:
 
         assert isinstance(REVIEW_INTENT_KEYWORDS, tuple)
         assert "/review" in REVIEW_INTENT_KEYWORDS
-        assert "please review" in REVIEW_INTENT_KEYWORDS
-        assert "re-review" in REVIEW_INTENT_KEYWORDS
-        assert "audit this" in REVIEW_INTENT_KEYWORDS
+        assert "/audit" in REVIEW_INTENT_KEYWORDS
+        assert "/force-review" in REVIEW_INTENT_KEYWORDS
+        # Natural language phrases must be completely removed in favor of explicit slash commands
+        assert "please review" not in REVIEW_INTENT_KEYWORDS
+        assert "re-review" not in REVIEW_INTENT_KEYWORDS
+        assert "audit this" not in REVIEW_INTENT_KEYWORDS
 
     def test_is_formal_review_eligible(self, monkeypatch: pytest.MonkeyPatch):
         from webhook_agent.review.writeback_policy import _is_formal_review_eligible
@@ -1204,20 +1207,43 @@ class TestConversationalAgent:
         assert _is_formal_review_eligible("pull_request.ready_for_review") is False
         assert _is_formal_review_eligible("pull_request.reopened") is False
         assert _is_formal_review_eligible("pull_request_review_requested") is False
-        # Comments with review intent are ALWAYS review eligible even when auto reviews disabled
+
+        # Slash commands with review intent are ALWAYS review eligible even when auto reviews disabled
         assert _is_formal_review_eligible("issue_comment.created", "Please /review this") is True
+        assert (
+            _is_formal_review_eligible("pull_request_review_comment.created", "/re-review") is True
+        )
+        assert _is_formal_review_eligible("issue_comment.created", "/audit this PR") is True
+
+        # Natural language phrases are NOT review eligible (slash commands only)
         assert (
             _is_formal_review_eligible(
                 "issue_comment.created", "Can you please review the changes?"
             )
-            is True
+            is False
         )
         assert (
             _is_formal_review_eligible("pull_request_review_comment.created", "please re-review")
-            is True
+            is False
         )
-        assert _is_formal_review_eligible("issue_comment.created", "audit this PR") is True
-        assert _is_formal_review_eligible("issue_comment.created", "PLEASE REVIEW THIS PR") is True
+        assert _is_formal_review_eligible("issue_comment.created", "audit this PR") is False
+        assert _is_formal_review_eligible("issue_comment.created", "PLEASE REVIEW THIS PR") is False
+
+        # Blockquoted slash commands and URLs must NOT trigger review intent
+        assert (
+            _is_formal_review_eligible(
+                "issue_comment.created",
+                "> please /review this PR\nI disagree, hold off for now.",
+            )
+            is False
+        )
+        assert (
+            _is_formal_review_eligible(
+                "issue_comment.created",
+                "See https://github.com/org/repo/review for details",
+            )
+            is False
+        )
 
         # Conversational chit-chat / routine comments are NOT review eligible
         assert (

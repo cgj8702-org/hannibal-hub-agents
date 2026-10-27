@@ -273,8 +273,17 @@ def _submit_deterministic_review(
     *,
     force: bool = False,
     comment_body: str = "",
+    is_pr: bool = True,
 ) -> None:
     """Submit formal code review extracted from session state or emitted texts."""
+    if not is_pr:
+        logger.debug(
+            "Deterministic review skipped for %s#%s: target is an issue, not a pull request",
+            repo_full_name,
+            pr_number,
+        )
+        return
+
     review_payload = ""
     if final_session and final_session.state:
         raw_analysis = final_session.state.get("code_review_analysis")
@@ -806,9 +815,9 @@ def execute_agent_event(
                                 user_message.parts[0].text or ""
                             ) + critique_notice
 
-                from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+                from webhook_agent.core.commands import has_review_slash_command
 
-                has_review_intent = any(kw in comment_body.lower() for kw in REVIEW_INTENT_KEYWORDS)
+                has_review_intent = is_pr_context and has_review_slash_command(comment_body)
                 is_explicit_review = bool(
                     policy.is_explicit_request
                     or has_review_intent
@@ -1020,9 +1029,9 @@ def execute_agent_event(
                     trace_id[-4:],
                 )
             else:
-                from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+                from webhook_agent.core.commands import has_review_slash_command
 
-                has_review_intent = any(kw in comment_body.lower() for kw in REVIEW_INTENT_KEYWORDS)
+                has_review_intent = is_pr_context and has_review_slash_command(comment_body)
                 is_explicit_review = bool(
                     policy.is_explicit_request
                     or has_review_intent
@@ -1039,6 +1048,7 @@ def execute_agent_event(
                     results=results,
                     force=is_explicit_review,
                     comment_body=comment_body,
+                    is_pr=is_pr_context,
                 )
         elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
             _post_conversational_reply(

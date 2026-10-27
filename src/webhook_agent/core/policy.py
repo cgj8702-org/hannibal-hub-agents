@@ -16,6 +16,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from webhook_agent.core.commands import (
+    has_review_slash_command,
+)
 from webhook_agent.github.bot_identity import is_hannibal_bot_login
 
 # Bot logins that are never actionable (own bot loop avoidance or automated reviewers)
@@ -40,23 +43,6 @@ PARTNER_BOT_LOGINS: frozenset[str] = frozenset(
     }
 )
 
-REVIEW_INTENT_KEYWORDS: tuple[str, ...] = (
-    "/review",
-    "/re-review",
-    "/rereview",
-    "re-review",
-    "rereview",
-    "please review",
-    "review this",
-    "re-review this",
-    "request review",
-    "run review",
-    "audit this",
-    "/audit",
-    "/force-review",
-    "/force_review",
-    "code review",
-)
 
 DEFAULT_AUDITOR_THINKING_BUDGET = 4096
 
@@ -190,9 +176,17 @@ def resolve_event_policy(
             reason=f"formal review event: {canonical}",
         )
 
-    # --- Review-intent comments on PRs/issues -> FORMAL_AUDIT ---
-    comment_text = comment_body.lower()
-    if any(kw in comment_text for kw in REVIEW_INTENT_KEYWORDS):
+    is_pr = bool(
+        raw.get("pull_request") is not None
+        or (raw.get("issue") or {}).get("pull_request") is not None
+        or canonical.startswith(
+            ("pull_request.", "pull_request_review.", "pull_request_review_comment.")
+        )
+    )
+
+    # --- Review-intent slash commands on PRs -> FORMAL_AUDIT ---
+    # Only PRs can enter formal audit; review commands on issues remain in triage/discussion
+    if is_pr and has_review_slash_command(comment_body):
         session_key = _derive_session_key(event_data, raw, canonical)
         auditor_budget = get_auditor_thinking_budget()
         return EventPolicy(
@@ -249,6 +243,7 @@ def resolve_event_policy(
         return EventPolicy(
             mode=Mode.GENERAL_PAIR_PROGRAMMING,
             may_post_comment=True,
+            may_create_issue=True,
             thinking_budget=512,
             session_key=session_key,
             reason=f"general discussion: {canonical}",

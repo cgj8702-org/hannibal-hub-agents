@@ -136,7 +136,7 @@ def test_processor_allows_jules_comments_with_review_intent_or_mention():
         "raw_payload": {
             "comment": {
                 "user": {"login": "google-jules[bot]"},
-                "body": "Work complete, please review PR #42",
+                "body": "Work complete, /review PR #42",
             },
             "issue": {"number": 42, "pull_request": {"url": "http://example.com"}},
         },

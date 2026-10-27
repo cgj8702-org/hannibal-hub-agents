@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
 def _make_comment_event(
-    body: str = "please review",
+    body: str = "/review",
     author_association: str | None = None,
     sender_login: str = "random-user",
     author_login: str | None = None,
@@ -95,9 +95,9 @@ class TestTriggerAuthorization:
         self.processor = WebhookProcessor()
 
     def test_reproduce_unauthorized_none_commenter_ignored(self) -> None:
-        """A NONE-association commenter saying 'please review' must be ignored."""
+        """A NONE-association commenter saying '/review' must be ignored."""
         ev = _make_comment_event(
-            body="please review",
+            body="/review",
             author_association="NONE",
             sender_login="stranger",
             delivery_id="del-none-01",
@@ -105,9 +105,9 @@ class TestTriggerAuthorization:
         assert self.processor.should_process_event(ev) is False
 
     def test_owner_commenter_allowed(self) -> None:
-        """An OWNER commenter saying 'please review' must be allowed."""
+        """An OWNER commenter saying '/review' must be allowed."""
         ev = _make_comment_event(
-            body="please review",
+            body="/review",
             author_association="OWNER",
             sender_login="repo-owner",
         )
@@ -128,7 +128,7 @@ class TestTriggerAuthorization:
         """FIRST_TIMER and FIRST_TIME_CONTRIBUTOR must be ignored by default."""
         for role in ("FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"):
             ev = _make_comment_event(
-                body="please review my PR",
+                body="/review my PR",
                 author_association=role,
                 sender_login="external-contributor",
                 delivery_id=f"del-{role}",
@@ -177,7 +177,7 @@ class TestTriggerAuthorization:
         for login in exempt_logins:
             # Comment event with NONE association but exempt sender
             ev_comment = _make_comment_event(
-                body="please review",
+                body="/review",
                 author_association="NONE",
                 sender_login=login,
                 delivery_id=f"del-exempt-{login}",

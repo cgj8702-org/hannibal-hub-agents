@@ -12,11 +12,14 @@ from webhook_agent.core.policy import Mode, resolve_event_policy
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
-def _event(canonical: str, login: str, comment_body: str = "") -> dict:
+def _event(canonical: str, login: str, comment_body: str = "", is_pr: bool = False) -> dict:
     """Build a minimally valid normalized event (session key derivation needs repo + number)."""
+    issue_dict: dict = {"number": 441}
+    if is_pr:
+        issue_dict["pull_request"] = {"url": "https://api.github.com/repos/owner/repo/pulls/441"}
     raw: dict = {
         "sender": {"login": login},
-        "issue": {"number": 441},
+        "issue": issue_dict,
     }
     if comment_body:
         raw["comment"] = {"body": comment_body, "user": {"login": login}}
@@ -50,7 +53,7 @@ def test_partner_bot_issue_comment_without_intent_stays_ignored(login: str) -> N
 
 def test_partner_bot_comment_with_review_intent_is_audited() -> None:
     policy = resolve_event_policy(
-        _event("issue_comment.created", "cline-cloud[bot]", "please re-review")
+        _event("issue_comment.created", "cline-cloud[bot]", "/re-review", is_pr=True)
     )
     assert policy.mode == Mode.FORMAL_AUDIT
 

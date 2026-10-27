@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -469,13 +470,15 @@ class WebhookProcessor:
         if "@hannibal-hub-agents" in combined or "hannibal-hub-agents" in combined:
             return True
 
-        # Review or triage intent keywords / commands
-        from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
+        # Slash commands: review or triage directives
+        from webhook_agent.core.commands import has_review_slash_command
 
-        if any(kw in combined for kw in REVIEW_INTENT_KEYWORDS):
+        if has_review_slash_command(combined):
             return True
 
-        return any(cmd in combined for cmd in ("/triage", "/review", "/audit", "/help"))
+        return any(
+            bool(re.search(rf"(?<!\S){re.escape(cmd)}\b", combined)) for cmd in ("/triage", "/help")
+        )
 
     def _filter_tier_0(self, ev: dict[str, Any]) -> tuple[bool, str]:
         """Apply Tier 0 pure perimeter drops (0 compute, 0 API calls).
@@ -568,11 +571,10 @@ class WebhookProcessor:
                             "Failed to interact with Jules session %s from comment", session_id
                         )
 
-                from .review.writeback_policy import REVIEW_INTENT_KEYWORDS
+                from webhook_agent.core.commands import has_review_slash_command
 
-                cb_lower = comment_body.lower()
-                has_review_intent = any(cmd in cb_lower for cmd in REVIEW_INTENT_KEYWORDS)
-                is_explicitly_mentioned = "@hannibal-hub-agents" in cb_lower
+                has_review_intent = has_review_slash_command(comment_body)
+                is_explicitly_mentioned = "@hannibal-hub-agents" in comment_body.lower()
                 if not (has_review_intent or is_explicitly_mentioned):
                     logger.debug(
                         "Suppressing conversational reply to Jules comment (no review intent / mention)"

@@ -25,8 +25,17 @@ def test_should_prefetch_diff_canonical() -> None:
 
 
 def test_should_prefetch_diff_comment_intent() -> None:
-    raw_with_intent = {"comment": {"body": "please review this PR"}}
+    raw_with_intent = {
+        "comment": {"body": "/review this PR"},
+        "issue": {"pull_request": {"url": "pr_url"}},
+    }
     assert _should_prefetch_diff("issue_comment.created", raw_with_intent) is True
+
+    raw_issue_without_pr = {
+        "comment": {"body": "/review this issue"},
+        "issue": {"number": 42},
+    }
+    assert _should_prefetch_diff("issue_comment.created", raw_issue_without_pr) is False
 
     raw_no_intent = {"comment": {"body": "just saying hi"}}
     assert _should_prefetch_diff("issue_comment.created", raw_no_intent) is False
