@@ -268,10 +268,10 @@ class SecurityScanner:
                 "-c",
                 str(pyproject_path),  # read [tool.bandit] skips from pyproject.toml
                 "-s",
-                "B101",  # Skip assert_used (also in [tool.bandit] skips)
+                "B101,B110",  # Skip assert_used and try_except_pass
             ]
         else:
-            config_arg = ["-s", "B101"]
+            config_arg = ["-s", "B101,B110"]
 
         cmd = [
             "bandit",
