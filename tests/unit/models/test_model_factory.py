@@ -29,11 +29,12 @@ def test_get_adk_model_standard_gemini() -> None:
 
 
 def test_get_adk_model_paid_tier_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify get_adk_model on paid tier defaults to gemini-3.8-flash."""
+    """Verify get_adk_model on paid tier defaults to gemini-3.5-flash-lite."""
+    monkeypatch.delenv("PRIMARY_MODEL", raising=False)
     monkeypatch.delenv("GEMMA_MODEL", raising=False)
     model = get_adk_model(tier="paid", api_key="test_key")
     assert isinstance(model, RateLimitedGemini)
-    assert model.model == "gemini-3.8-flash"
+    assert model.model == "gemini-3.5-flash-lite"
 
 
 @pytest.mark.anyio

@@ -61,9 +61,10 @@ def test_get_model_chain_paid_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GEMMA_MODEL", raising=False)
 
     chain = get_model_chain()
-    assert chain[0] == "gemini-3.8-flash"
+    assert chain[0] == "gemini-3.5-flash-lite"
+    assert "gemini-3.8-flash" in chain
     assert "gemini-3.7-flash" in chain
-    assert "gemini-3.5-flash-lite" in chain
+    assert "gemini-3.1-flash-lite" in chain
 
 
 def test_get_model_chain_custom_primary_with_prefix(monkeypatch: pytest.MonkeyPatch) -> None:

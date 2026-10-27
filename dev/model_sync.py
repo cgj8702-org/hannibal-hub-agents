@@ -11,7 +11,18 @@ import json
 import logging
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
+# Auto-load local environment configuration (.envrc or .env)
+envrc_path = Path(__file__).resolve().parents[1] / ".envrc"
+if envrc_path.exists():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(envrc_path, override=False)
+    except ImportError:
+        pass
 
 try:
     from google import genai
@@ -24,6 +35,14 @@ ch = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s")
 ch.setFormatter(formatter)
 LOGGER.addHandler(ch)
+
+
+class _SuppressApiKeyWarningFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Both GOOGLE_API_KEY and GEMINI_API_KEY are set" not in record.getMessage()
+
+
+logging.getLogger("google_genai._api_client").addFilter(_SuppressApiKeyWarningFilter())
 
 
 TARGET_REGISTRY = os.path.join(
@@ -177,8 +196,23 @@ async def fetch_model_registry() -> bool:
 
 async def run_pipeline():
     LOGGER.info("Starting agents model sync pipeline")
-    # Future steps (changelog scraping, docs rebuild) omitted for simplicity
+    # Step 1: Fetch Gemini models from API
+    LOGGER.info("Step 1: Synchronizing Gemini models from API...")
     await fetch_model_registry()
+
+    # Step 2: Auto-discover and parse Rate Limit PDFs
+    LOGGER.info("Step 2: Ingesting vendor Rate Limit PDFs...")
+    try:
+        try:
+            from dev.rate_limit_parser import main as parse_rate_limits
+        except ImportError:
+            from rate_limit_parser import main as parse_rate_limits
+
+        parse_rate_limits([])
+    except Exception as e:
+        LOGGER.warning(f"Rate limit PDF auto-parse failed or skipped: {e}")
+
+    LOGGER.info("Agents model sync pipeline complete.")
 
 
 def main():
@@ -187,11 +221,19 @@ def main():
     parser = argparse.ArgumentParser(description="Agents Model Synchronization Utility")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("fetch", help="Fetch and update local gemini_models.json")
-    sub.add_parser("pipeline", help="Run sync pipeline (fetch) for now")
+    sub.add_parser("parse", help="Parse vendor rate limit PDFs into gemini_models.json")
+    sub.add_parser("pipeline", help="Run sync pipeline (fetch + parse PDFs)")
 
     args = parser.parse_args()
     if args.cmd == "fetch":
         asyncio.run(fetch_model_registry())
+    elif args.cmd == "parse":
+        try:
+            from dev.rate_limit_parser import main as parse_rate_limits
+        except ImportError:
+            from rate_limit_parser import main as parse_rate_limits
+
+        parse_rate_limits([])
     elif args.cmd == "pipeline":
         asyncio.run(run_pipeline())
     else:

@@ -40,18 +40,20 @@ All Gemini models below provide **250,000 TPM**, allowing full multi-file PR rev
 | **8** | `gemma-4-31b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated fallback (payloads ≤ 14k tokens) |
 | **9** | `gemma-4-26b-a4b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated backup (payloads ≤ 14k tokens) |
 
-### 💳 Paid Tier Chain (Maximum Reasoning & Bandwidth)
+### 💳 Paid Tier Chain (Cost-Optimized High-Bandwidth)
 
-Default primary model: `gemini-3.8-flash` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars).
+Default primary model: `gemini-3.5-flash-lite` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars, or escalated to `gemini-3.8-flash` via `/deep`, `/audit`, or `/model gemini-3.8-flash`).
+
+Optimized for 80% lower token cost ($0.30/1M input vs $1.50/1M for 3.8 Flash) with massive 4,000 RPM / 4M TPM headroom, preserving `gemini-3.8-flash` for complex reasoning audits and deep reviews.
 
 | Step | Model | Paid Tier RPM | Paid Tier TPM | Paid Tier RPD | Role |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **0** | `gemini-3.8-flash` | 1,000 | 2,000,000 | 10,000 | High-speed intelligent reasoning & AST diff analysis |
-| **1** | `gemini-3.7-flash` | 1,000 | 2,000,000 | 10,000 | Secondary audit fallback |
-| **2** | `gemini-3.6-flash` | 1,000 | 2,000,000 | 10,000 | Tertiary balanced reasoning fallback |
-| **3** | `gemini-3.5-flash` | 1,000 | 2,000,000 | 10,000 | Quota backup fallback |
-| **4** | `gemini-3.5-flash-lite` | 4,000 | 4,000,000 | 150,000 | High-throughput quota fallback |
-| **5** | `gemini-3.1-flash-lite` | 4,000 | 4,000,000 | 150,000 | Secondary high-throughput fallback |
+| **0** | `gemini-3.5-flash-lite` | 4,000 | 4,000,000 | 150,000 | Default cost-optimized primary ($0.30/1M in) |
+| **1** | `gemini-3.1-flash-lite` | 4,000 | 4,000,000 | 150,000 | Secondary high-throughput Flash-Lite fallback |
+| **2** | `gemini-3.8-flash` | 1,000 | 2,000,000 | 10,000 | High-reasoning audit & deep review escalation ($1.50/1M in) |
+| **3** | `gemini-3.7-flash` | 1,000 | 2,000,000 | 10,000 | Secondary balanced reasoning fallback |
+| **4** | `gemini-3.6-flash` | 1,000 | 2,000,000 | 10,000 | Tertiary reasoning fallback |
+| **5** | `gemini-3.5-flash` | 1,000 | 2,000,000 | 10,000 | Quota backup fallback |
 | **6** | `gemini-2.5-flash` | 1,000 | 1,000,000 | 10,000 | Standard flash fallback |
 | **7** | `gemini-2.5-flash-lite` | 4,000 | 4,000,000 | 1,000,000 | Maximum daily request ceiling |
 

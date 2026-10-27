@@ -32,8 +32,8 @@ MODEL_MAPPING = {
     "gemini 3.5 flash": "models/gemini-3.5-flash",
     "gemini 3.5 flash lite": "models/gemini-3.5-flash-lite",
     "gemini 3.1 flash lite": "models/gemini-3.1-flash-lite",
-    "gemini 3.1 pro": "models/gemini-3.1-pro",
-    "gemini 3 flash": "models/gemini-3-flash",
+    "gemini 3.1 pro": "models/gemini-3.1-pro-preview",
+    "gemini 3 flash": "models/gemini-3-flash-preview",
     "gemini 2.5 flash": "models/gemini-2.5-flash",
     "gemini 2.5 flash lite": "models/gemini-2.5-flash-lite",
     "gemini 2.5 pro": "models/gemini-2.5-pro",
@@ -41,6 +41,7 @@ MODEL_MAPPING = {
     "gemini 2.0 flash": "models/gemini-2.0-flash",
     "gemini 2 flash lite": "models/gemini-2.0-flash-lite",
     "gemini 2.0 flash lite": "models/gemini-2.0-flash-lite",
+    "gemini 4 argon": "models/gemini-4-argon",
     "gemma 4 31b": "models/gemma-4-31b-it",
     "gemma 4 26b": "models/gemma-4-26b-a4b-it",
 }
@@ -48,6 +49,8 @@ MODEL_MAPPING = {
 
 def parse_pdf_text(pdf_path: Path) -> str:
     """Extract raw text from PDF file using pdfplumber or pypdf."""
+    logging.getLogger("pdfminer").setLevel(logging.ERROR)
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
     text = ""
     if pdfplumber:
         try:
@@ -168,13 +171,19 @@ def parse_pdf_file(pdf_path: Path) -> tuple[str, dict[str, Any]]:
         return tier, {}
 
     pattern = re.compile(
-        r"(Gemini[\w\.\s\-]+?|Gemma[\w\.\s\-]+?)\s+(Text-out models)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)",
+        r"(?:Spend\s+)?(Gemini[\w\.\s\-]+?|Gemma[\w\.\s\-]+?)\s+(?:Text-out models|Other models)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)\s+[\d\.\,KMB]+\s*/\s*([\d\.\,KMB]+|Unlimited|-)",
         re.IGNORECASE,
     )
 
     for match in pattern.finditer(full_text):
-        raw_name, _cat, rpm_lim, tpm_lim, rpd_lim = match.groups()
-        name_clean = raw_name.strip().lower()
+        raw_name, rpm_lim, tpm_lim, rpd_lim = match.groups()
+        name_clean = (
+            re.sub(
+                r"^(?:spend\s+|changelog[^\w\s]*\s*|\n)+", "", raw_name.strip(), flags=re.IGNORECASE
+            )
+            .strip()
+            .lower()
+        )
         model_id = MODEL_MAPPING.get(name_clean, f"models/{name_clean.replace(' ', '-')}")
         records[model_id] = extract_tier_entry(
             {
@@ -189,6 +198,9 @@ def parse_pdf_file(pdf_path: Path) -> tuple[str, dict[str, Any]]:
 
 def main(args_list: list[str] | None = None) -> None:
     """CLI entrypoint for processing rate limit PDFs."""
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+    )
     parser = argparse.ArgumentParser(description="Parse Webhook Rate Limit PDFs")
     parser.add_argument("pdf_files", nargs="*", help="Optional explicit PDF file paths")
     parser.add_argument("--output", help="Output JSON path")
@@ -216,8 +228,10 @@ def main(args_list: list[str] | None = None) -> None:
     free_found = False
     paid_found = False
 
+    logger.info("Found %d rate limit PDF candidate(s) to process", len(candidates))
     for pdf_path in candidates:
         tier, records = parse_pdf_file(pdf_path)
+        logger.info("Parsed %d model quota(s) from %s (%s tier)", len(records), pdf_path.name, tier)
         if tier == "free":
             free_found = True
         elif tier == "paid":
