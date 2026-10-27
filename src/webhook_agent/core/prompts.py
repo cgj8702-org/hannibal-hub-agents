@@ -257,6 +257,16 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         parts.append(f"Issue Number: {issue_num}")
         parts.append(f"Issue Title: {issue.get('title', 'N/A')}")
         parts.append(f"Issue Body: {issue.get('body') or ''}")
+
+        if canonical == "issues.opened":
+            parts.append(
+                "\n### 🎯 ISSUE TRIAGE DIRECTIVE:\n"
+                "A new issue was filed. Analyze the reported problem or feature request concisely.\n"
+                "- If enough context is provided, summarize your assessment and potential approach in 1-2 paragraphs.\n"
+                "- If code changes will be required, advise that the human repository owner may review and attach the `jules` label to summon Jules.\n"
+                "- Limit tool calls strictly (<= 2 calls) to check basic facts if needed. Do NOT perform exhaustive repo-wide scans."
+            )
+
         # Label add/remove events: surface which label changed and whether the
         # acting user is the repository owner. The owner's label action is an
         # explicit manual override that the agent must respect and never reverse.
