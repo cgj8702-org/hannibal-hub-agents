@@ -154,6 +154,18 @@ class FirestoreDepletedModelRegistry:
 
         doc_id = _doc_id(model_name, key_alias)
         now = time.time()
+
+        # Debounce rapid duplicate depletion calls for the same model/key
+        if doc_id in self._local_depleted:
+            prev_ts, prev_cooldown = self._local_depleted[doc_id]
+            if (now - prev_ts < 5.0) and (cooldown <= prev_cooldown):
+                logger.debug(
+                    "Model '%s' already marked depleted within %.2fs; skipping duplicate write",
+                    doc_id,
+                    now - prev_ts,
+                )
+                return
+
         self._local_depleted[doc_id] = (now, cooldown)
         logger.warning("🔴 Model '%s' marked DEPLETED [%s]", doc_id, metric_type)
 

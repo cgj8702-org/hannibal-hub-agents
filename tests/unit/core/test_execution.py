@@ -308,6 +308,66 @@ def test_execute_agent_event_transient_failover_success_does_not_mark_rate_limit
         mock_mark_rl.assert_not_called()
 
 
+def test_execute_agent_event_cascades_instantly_on_model_switch() -> None:
+    """Test execute_agent_event sleeps 0.5s instead of failed model's cooldown when switching models."""
+    mock_agent = MagicMock()
+    mock_agent._derive_session_id.return_value = "owner/repo/42"
+    mock_agent._build_user_message.return_value = MagicMock(parts=[MagicMock(text="Audit request")])
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._normalize_model_name.return_value = "gemini-3.5-flash-lite"
+    mock_agent._advance_model_chain.return_value = "gemini-3.8-flash"
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {
+            "pull_request": {"number": 42, "head": {"sha": "sha-abc"}},
+            "changed_files": ["src/app.py"],
+        },
+    }
+
+    mock_gh = MagicMock()
+    call_count = 0
+
+    async def _mock_runner(*args: Any, **kwargs: Any) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception(
+                "429 RESOURCE_EXHAUSTED: Generate content input tokens per minute limit exceeded."
+            )
+        # second call succeeds
+
+    with (
+        patch(
+            "webhook_agent.core.execution.review_checkpoint_manager.get_checkpoint",
+            return_value=None,
+        ),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+        patch(
+            "webhook_agent.core.execution.extract_rate_limit_details",
+            return_value={"quota_type": "TPM", "retry_after_seconds": 47.0},
+        ),
+        patch("webhook_agent.core.execution._execute_adk_runner", side_effect=_mock_runner),
+        patch("webhook_agent.core.execution.asyncio.sleep") as mock_sleep,
+    ):
+        execute_agent_event(
+            agent=mock_agent,
+            event_data=event_data,
+            gh_client=mock_gh,
+            trace_id="trace-instant-failover",
+        )
+
+        mock_sleep.assert_called_once_with(0.5)
+
+
 def test_execute_agent_event_resumes_with_precompiled_dossier() -> None:
     """Test execute_agent_event uses precompiled dossier and skips _build_user_message on resume."""
     mock_agent = MagicMock()
