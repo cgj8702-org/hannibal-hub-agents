@@ -82,7 +82,7 @@ When `WEBHOOK_TIER="paid"`, `WEBHOOK_PAID_KEY` and paid RPM/RPD rate limits are 
 * **Zero-Bypass Architecture:** No agent or human may commit directly to `main`. Every change goes through a Pull Request and must pass the pre-commit gate, CI, and peer review.
 * **PR Lifecycle Verification:** Before pushing commits or targeting a PR branch, verify live state with `gh pr view`. Never push follow-up commits to merged or closed PR branches. Branch fresh off updated `main` for new work.
 * **Pre-Commit Hook:** Run `./scripts/install-git-hooks.sh` to install `.githooks/pre-commit`. Never use `--no-verify` or `-n`.
-* **Commit Messages:** Conventional Commits with scope and issue/PR reference, e.g. `fix(models): scope depleted model registry (#68)`.
+* **Commit Messages & PR Titles:** Conventional Commits with scope, e.g. `fix(models): scope depleted model registry`. Never guess or append speculative issue or PR number suffixes (e.g. `(#123)`) to PR titles or commit headlines—GitHub and squash merges append the actual PR number automatically upon merge. Reference related issues in the PR body instead (`Closes #123`, `Refs #123`).
 * **Git Commit Author Identity:** Interactive pair-programming commits **MUST** be authored as machine user:
   ```text
   cgj8702-agents <cgj8702-agents@users.noreply.github.com>

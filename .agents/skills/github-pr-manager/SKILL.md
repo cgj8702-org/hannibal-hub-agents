@@ -78,6 +78,9 @@ gh pr create \
   --body-file /tmp/pr-body.md
 ```
 
+> [!IMPORTANT]
+> **No Speculative PR/Issue Numbers in Titles**: Never append speculative numbers like `(#123)` to PR titles or commit headlines. GitHub automatically appends the actual PR number upon squash merge. Reference related issues in the PR body (`Closes #123`).
+
 The PR body should follow the template sections:
 1. **Description** — What, Why, How
 2. **Testing** — Commands run + results
