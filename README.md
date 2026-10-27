@@ -133,6 +133,7 @@ Key environment variables configuring orchestrator operation:
 | `ENABLE_JULES_PR_PROXY` | `0` | Re-open Jules-authored PRs as `cgj8702-agents` so third-party review tools accept them (see `github/jules_proxy.py`). |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1` (default), reject or downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
+| `NATIVE_STALE_REVIEW_DISMISSAL_REPOS` | `cgj8702-org/hannibal-hub-agents` | Comma-separated repositories where GitHub native branch protection auto-dismisses stale reviews on push, causing the bot to skip manual review dismissal. |
 
 ---
 
