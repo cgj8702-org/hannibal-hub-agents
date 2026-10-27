@@ -84,6 +84,36 @@ async def test_iteration_budget_turn_exceeded_clears_tools_and_appends_instructi
 
 
 @pytest.mark.anyio
+async def test_iteration_budget_conversational_mode_effective_max_turns() -> None:
+    from webhook_agent.core.policy import Mode
+
+    # In conversational mode, even if plugin max_turns is 10, effective budget is 5
+    plugin = IterationBudgetPlugin(max_turns=10, max_tool_calls=25)
+    ctx = MagicMock()
+    ctx.invocation_id = "inv_conv"
+    ctx.state = {
+        "agent_mode": Mode.GENERAL_PAIR_PROGRAMMING,
+        "guardrail_run": {
+            "invocation_id": "inv_conv",
+            "turns": 5,
+            "tool_calls": 0,
+            "halt_reason": None,
+            "history": [],
+            "failures": {},
+        },
+    }
+    req = MagicMock()
+    req.tools_dict = {"search_files": MagicMock()}
+    req.append_instructions = MagicMock()
+
+    res = await plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    assert res is None
+    assert ctx.state["guardrail_run"]["turns"] == 6
+    assert ctx.state["guardrail_run"]["halt_reason"] == "turn_budget_exceeded:5"
+    assert len(req.tools_dict) == 0
+
+
+@pytest.mark.anyio
 async def test_iteration_budget_tool_call_budget_exceeded() -> None:
     plugin = IterationBudgetPlugin(max_turns=5, max_tool_calls=2)
     ctx = MagicMock()
