@@ -426,6 +426,26 @@ def _post_conversational_reply(
     if not full_reply:
         return
 
+    # Internal system notice leak prevention:
+    # If the reply contains internal execution halt notices, strip them or suppress the reply entirely
+    # to prevent leaking internal framework errors to public GitHub discussions.
+    if "[⚠️ SYSTEM NOTICE: Execution halted" in full_reply:
+        # Strip system notice lines if there is substantive user text, otherwise suppress completely
+        cleaned_lines = [
+            line
+            for line in full_reply.splitlines()
+            if "[⚠️ SYSTEM NOTICE: Execution halted" not in line
+        ]
+        full_reply = "\n".join(cleaned_lines).strip()
+        if not full_reply:
+            logger.warning(
+                "⚠️ Suppressed conversational reply on %s#%s containing only internal system notice (%s)",
+                repo_full_name,
+                pr_number,
+                trace_id[-4:],
+            )
+            return
+
     source = "session_state" if (state_reply or "").strip() else "emitted_texts"
     logger.debug(
         "💬 Reply source: %s (trace: %s, %d chars)",

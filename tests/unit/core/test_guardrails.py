@@ -69,6 +69,18 @@ async def test_iteration_budget_turn_exceeded_clears_tools_and_appends_instructi
     req.append_instructions.assert_called_once()
     appended_text = req.append_instructions.call_args[0][0][0]
     assert "[⚠️ SYSTEM NOTICE: Execution halted" in appended_text
+    assert "concise, helpful summary response" in appended_text
+
+    # Verify that in FORMAL_AUDIT mode it asks for structured review verdict
+    from webhook_agent.core.policy import Mode
+
+    ctx.state["agent_mode"] = Mode.FORMAL_AUDIT
+    req.reset_mock()
+    res2 = await plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    assert res2 is None
+    req.append_instructions.assert_called_once()
+    appended_text2 = req.append_instructions.call_args[0][0][0]
+    assert "Output your final structured review verdict immediately" in appended_text2
 
 
 @pytest.mark.anyio

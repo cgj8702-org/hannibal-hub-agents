@@ -105,3 +105,74 @@ class TestJulesApiClient:
         from webhook_agent.github.jules_api import _request
 
         assert _request("GET", "/sessions/abc123") is None
+
+
+class TestHandleJulesLabel:
+    def test_handle_jules_label_with_existing_jules_comment(self):
+        from webhook_agent.processor import WebhookProcessor
+
+        processor = WebhookProcessor.__new__(WebhookProcessor)
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = MagicMock()
+        mock_comment.user.raw_data = {"login": "google-labs-jules[bot]"}
+        mock_comment.body = "Jules is on it https://jules.google.com/task/12345678"
+        mock_issue.get_comments.return_value = [mock_comment]
+        processor._gh = mock_gh
+        processor._gh_token_expires_at = None
+
+        payload = {
+            "raw_payload": {
+                "label": {"name": "jules"},
+                "sender": {"login": "cgj8702"},
+                "issue": {"number": 456},
+                "repository": {"full_name": "owner/repo"},
+            }
+        }
+
+        with patch.object(
+            processor, "_interact_with_jules_session", return_value=True
+        ) as mock_interact:
+            handled = processor.handle_jules_label(payload)
+            assert handled is True
+            mock_interact.assert_called_once_with("12345678")
+
+    def test_handle_jules_label_before_jules_comments_suppresses_triage(self):
+        from webhook_agent.processor import WebhookProcessor
+
+        processor = WebhookProcessor.__new__(WebhookProcessor)
+        mock_gh = MagicMock()
+        mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_issue.get_comments.return_value = []
+        processor._gh = mock_gh
+        processor._gh_token_expires_at = None
+
+        payload = {
+            "raw_payload": {
+                "label": {"name": "jules"},
+                "sender": {"login": "cgj8702"},
+                "issue": {"number": 456},
+                "repository": {"full_name": "owner/repo"},
+            }
+        }
+
+        with patch.object(processor, "_interact_with_jules_session") as mock_interact:
+            handled = processor.handle_jules_label(payload)
+            assert handled is True
+            mock_interact.assert_not_called()
+
+    def test_handle_jules_label_ignores_non_owner(self):
+        from webhook_agent.processor import WebhookProcessor
+
+        processor = WebhookProcessor.__new__(WebhookProcessor)
+        payload = {
+            "raw_payload": {
+                "label": {"name": "jules"},
+                "sender": {"login": "random-user"},
+                "issue": {"number": 456},
+                "repository": {"full_name": "owner/repo"},
+            }
+        }
+        assert processor.handle_jules_label(payload) is False

@@ -123,10 +123,19 @@ class IterationBudgetPlugin(BasePlugin):
             if hasattr(llm_request, "tools_dict") and isinstance(llm_request.tools_dict, dict):
                 llm_request.tools_dict.clear()
 
-            notice = (
-                f"\n\n[⚠️ SYSTEM NOTICE: Execution halted due to '{halt_reason}'. "
-                "Do NOT call any further tools. Output your final structured review verdict immediately.]"
-            )
+            mode = state.get("agent_mode")
+            from webhook_agent.core.policy import Mode
+
+            if mode == Mode.FORMAL_AUDIT:
+                notice = (
+                    f"\n\n[⚠️ SYSTEM NOTICE: Execution halted due to '{halt_reason}'. "
+                    "Do NOT call any further tools. Output your final structured review verdict immediately.]"
+                )
+            else:
+                notice = (
+                    f"\n\n[⚠️ SYSTEM NOTICE: Execution halted due to '{halt_reason}'. "
+                    "Do NOT call any further tools. Provide a concise, helpful summary response to the user immediately.]"
+                )
             if hasattr(llm_request, "append_instructions"):
                 llm_request.append_instructions([notice])
 
