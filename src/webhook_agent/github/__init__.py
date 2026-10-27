@@ -27,12 +27,6 @@ from .jules_api import (
     send_message,
     session_state,
 )
-from .jules_proxy import (
-    get_agents_github_client,
-    get_agents_github_token,
-    handle_jules_pr_opened,
-    reopen_jules_pr_as_agent,
-)
 from .pr_context import (
     _prefetch_inline_comment_context,
     _prefetch_pr_diff,
@@ -66,18 +60,14 @@ __all__ = [
     "extract_session_id",
     "fetch_pr_review_threads",
     "generate_jwt",
-    "get_agents_github_client",
-    "get_agents_github_token",
     "get_installation_token",
     "get_session",
-    "handle_jules_pr_opened",
     "is_coderabbit_auto_resolve_enabled",
     "is_hannibal_bot_login",
     "is_jules_sender",
     "list_activities",
     "load_cached_token",
     "load_private_key",
-    "reopen_jules_pr_as_agent",
     "resolve_review_thread",
     "save_cached_token",
     "send_message",

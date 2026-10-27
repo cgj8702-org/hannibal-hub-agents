@@ -47,7 +47,6 @@ from webhook_agent.github.jules_api import (
     extract_session_id,
     session_state,
 )
-from webhook_agent.github.jules_proxy import handle_jules_pr_opened
 from webhook_agent.github.pr_context import (
     _prefetch_inline_comment_context,
     _prefetch_pr_diff,
@@ -870,10 +869,6 @@ class WebhookProcessor:
         ctx = _extract_log_context(payload)
 
         dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
-        if handle_jules_pr_opened(gh, repo_name, payload, dry_run=dry_run):
-            logger.info("Jules PR adoption proxy handled PR in %s; stopping processing.", repo_name)
-            return
-
         if self.handle_jules_label(payload):
             logger.info(
                 "Jules label event handled via Jules API in %s; stopping processing.", repo_name

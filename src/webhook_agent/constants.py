@@ -37,8 +37,6 @@ DEFAULT_REVIEW_WAIT_FOR_CI = "1"
 # Primary autonomous PR reviewer: automatically review opened/synchronized PRs once CI is green.
 # Set ENABLE_AUTOMATIC_PR_REVIEWS=0 to require manual /review triggers.
 DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"
-# Legacy CodeRabbit workaround proxy disabled by default; Hannibal reviews Jules PRs natively.
-DEFAULT_ENABLE_JULES_PR_PROXY = "0"
 DEFAULT_WEBHOOK_TIER = "free"
 # Author associations allowed to trigger agent runs (comma-separated).
 DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS = "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR"

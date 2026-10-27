@@ -4,7 +4,6 @@ import pytest
 
 from webhook_agent.constants import (
     DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS,
-    DEFAULT_ENABLE_JULES_PR_PROXY,
     DEFAULT_GITHUB_APP_ID,
     DEFAULT_GITHUB_INSTALLATION_ID,
     DEFAULT_GITHUB_REPOSITORY,
@@ -25,7 +24,6 @@ def test_constants_defaults() -> None:
     assert DEFAULT_WEBHOOK_PAID_PROJECT == "cgj8702-webhook-agent"
     assert DEFAULT_WEBHOOK_FREE_PROJECT == "gen-lang-client-0615466973"
     assert DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS == "1"
-    assert DEFAULT_ENABLE_JULES_PR_PROXY == "0"
 
 
 def test_resolve_secret_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
