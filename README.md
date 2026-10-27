@@ -125,8 +125,6 @@ Key environment variables configuring orchestrator operation:
 | `ALLOW_AUTOMATED_MUTATIONS` | `1` | Master policy gate for automated writeback actions (comments, formal reviews). |
 | `REVIEW_WAIT_FOR_CI` | `1` | Hold automatic reviews until every check on the PR head commit is green. CI still running ➔ defer silently; CI failed ➔ skip silently. Set `0` to review immediately. See `review/ci_gate.py`. |
 | `ENABLE_AUTOMATIC_PR_REVIEWS` | `1` | Review opened/synchronized PRs automatically once CI is green. Set `0` to require manual `/review` triggers. |
-| `ENABLE_PROACTIVE_SWEEP` | `0` | Enable the 5-minute sweep ticker for stale review threads. Nothing in this repo sets it, so the sweep is dormant. |
-| `TARGET_REPOSITORIES` | `cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents` | Comma-separated repositories scanned by the proactive sweep. |
 | `ENABLE_REVIEW_RESUME` | `0` | Enable the periodic sweep that resumes paused review checkpoints (see `docs/CHECKPOINT_RESUME.md`). |
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Seconds between checkpoint resume sweeps, when `ENABLE_REVIEW_RESUME=1`. |
 | `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |

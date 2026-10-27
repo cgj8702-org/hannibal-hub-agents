@@ -20,7 +20,7 @@ from webhook_agent.review.ci_gate import (
     last_bot_review_sha,
     pr_numbers_for_suite,
 )
-from webhook_agent.review.proactive_service import (
+from webhook_agent.state.reconciliation import (
     build_reconciliation_cache_key,
     clear_reconciliation_cache,
     is_reconciliation_claimed,

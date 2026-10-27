@@ -215,17 +215,6 @@ def main() -> int:
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    PROACTIVE_SWEEP_INTERVAL_SECONDS = 300  # 5 minutes
-    last_proactive_sweep = 0.0
-    active_sweep_thread: threading.Thread | None = None
-    # Kill-switch: proactive sweeps disabled by default. Set
-    # ENABLE_PROACTIVE_SWEEP=1 to re-enable the 5-minute ticker.
-    proactive_sweep_enabled = os.environ.get("ENABLE_PROACTIVE_SWEEP", "0") in (
-        "1",
-        "true",
-        "True",
-    )
-
     REVIEW_RESUME_INTERVAL_SECONDS = int(os.environ.get("REVIEW_RESUME_INTERVAL_SECONDS", "60"))
     last_review_resume_sweep = 0.0
     review_resume_enabled = os.environ.get("ENABLE_REVIEW_RESUME", "0") in (
@@ -237,68 +226,6 @@ def main() -> int:
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
         now = time.time()
-        if (
-            proactive_sweep_enabled
-            and now - last_proactive_sweep >= PROACTIVE_SWEEP_INTERVAL_SECONDS
-        ):
-            last_proactive_sweep = now
-            if active_sweep_thread is not None and active_sweep_thread.is_alive():
-                logger.warning("Proactive background sweep skipped: previous sweep still alive")
-            else:
-                try:
-                    import threading
-
-                    from webhook_agent.review.proactive_service import ProactiveEvaluator
-
-                    repos_env = os.environ.get(
-                        "TARGET_REPOSITORIES",
-                        "cgj8702-org/hannibal-hub,cgj8702-org/hannibal-hub-agents",
-                    )
-                    target_repos = [r.strip() for r in repos_env.split(",") if r.strip()]
-
-                    def _run_sweeps(repos: list[str]) -> None:
-                        for repo_name in repos:
-                            try:
-                                evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                                evaluator.evaluate_open_prs()
-                            except GithubException as sweep_err:
-                                if sweep_err.status != 401:
-                                    logger.warning(
-                                        "Proactive sweep error for %s: %s",
-                                        repo_name,
-                                        sweep_err,
-                                    )
-                                    continue
-                                logger.warning(
-                                    "Refreshing GitHub installation token after 401 for %s",
-                                    repo_name,
-                                )
-                                processor.invalidate_github_client()
-                                try:
-                                    evaluator = ProactiveEvaluator(processor.gh, repo_name)
-                                    evaluator.evaluate_open_prs()
-                                except Exception as retry_err:
-                                    logger.warning(
-                                        "Proactive sweep retry failed for %s: %s",
-                                        repo_name,
-                                        retry_err,
-                                    )
-                            except Exception as sweep_err:
-                                logger.warning(
-                                    "Proactive sweep error for %s: %s",
-                                    repo_name,
-                                    sweep_err,
-                                )
-
-                    active_sweep_thread = threading.Thread(
-                        target=_run_sweeps,
-                        args=(target_repos,),
-                        name="ProactiveSweepWorker",
-                        daemon=True,
-                    )
-                    active_sweep_thread.start()
-                except Exception as exc:
-                    logger.warning("Proactive background sweep skipped/failed: %s", exc)
 
         # Periodic Review Checkpoint Resume Sweep (Every 60s when ENABLE_REVIEW_RESUME=1)
         if (

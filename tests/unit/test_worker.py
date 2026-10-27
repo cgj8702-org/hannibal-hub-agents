@@ -1220,7 +1220,7 @@ class TestBaseBranchMergeSync:
     def test_process_event_in_flight_deduplication_skips_duplicate_webhook(self, monkeypatch):
         from unittest.mock import MagicMock
 
-        from webhook_agent.review.proactive_service import clear_reconciliation_cache
+        from webhook_agent.state.reconciliation import clear_reconciliation_cache
 
         monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
         clear_reconciliation_cache()
@@ -1279,7 +1279,7 @@ class TestBaseBranchMergeSync:
     def test_process_event_proactive_reconciliation_is_not_self_suppressed(self, monkeypatch):
         from unittest.mock import MagicMock
 
-        from webhook_agent.review.proactive_service import (
+        from webhook_agent.state.reconciliation import (
             build_reconciliation_cache_key,
             clear_reconciliation_cache,
             try_claim_reconciliation,
@@ -1324,7 +1324,7 @@ class TestBaseBranchMergeSync:
 
         import pytest
 
-        from webhook_agent.review.proactive_service import (
+        from webhook_agent.state.reconciliation import (
             build_reconciliation_cache_key,
             clear_reconciliation_cache,
             is_reconciliation_claimed,
@@ -1980,52 +1980,6 @@ class TestWorkerReliability:
         assert mock_processor.process_event.call_count == 1
         mock_publisher.publish.assert_called_once_with("projects/test/topics/dlq", mock_msg.data)
         mock_subscriber.acknowledge.assert_called_once()
-
-    def test_worker_proactive_sweep_overlapping_skipped(self, monkeypatch, caplog):
-        import logging
-        import threading
-        from unittest.mock import MagicMock, patch
-
-        from webhook_agent.worker import main as worker_main
-
-        monkeypatch.setenv("ENABLE_PROACTIVE_SWEEP", "1")
-
-        mock_processor = MagicMock()
-        mock_subscriber = MagicMock()
-
-        alive_thread = MagicMock(spec=threading.Thread)
-        alive_thread.is_alive.return_value = True
-
-        current_time = [500.0]
-
-        def fake_pull(*args, **kwargs):
-            if current_time[0] < 900.0:
-                current_time[0] = 900.0
-                raise gcp_exceptions.DeadlineExceeded("deadline")
-            raise KeyboardInterrupt()
-
-        mock_subscriber.pull.side_effect = fake_pull
-
-        with (
-            patch("webhook_agent.worker.setup_cloud_logging"),
-            patch("webhook_agent.worker.WebhookProcessor", return_value=mock_processor),
-            patch("webhook_agent.worker.pubsub_v1.SubscriberClient", return_value=mock_subscriber),
-            patch("webhook_agent.worker.pubsub_v1.PublisherClient"),
-            patch("time.time", side_effect=lambda: current_time[0]),
-            patch("threading.Thread", return_value=alive_thread) as mock_thread_cls,
-            caplog.at_level(logging.WARNING),
-        ):
-            with contextlib.suppress(KeyboardInterrupt):
-                worker_main()
-
-            # Filter calls for ProactiveSweepWorker
-            sweep_thread_calls = [
-                c
-                for c in mock_thread_cls.call_args_list
-                if c.kwargs.get("name") == "ProactiveSweepWorker"
-            ]
-            assert len(sweep_thread_calls) == 1
-            assert any("previous sweep still alive" in rec.message for rec in caplog.records)
 
     def test_processor_exception_unmarks_delivery_id(self):
         from unittest.mock import patch
