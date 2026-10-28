@@ -1,6 +1,6 @@
 """Tests for AgentCore delegation and trace ID generation (inlined into processor)."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -104,21 +104,22 @@ class TestAgentCoreRun:
 
     def test_mutations_disabled_by_policy(self, monkeypatch):
         """When ALLOW_AUTOMATED_MUTATIONS is 0 and not dry-run, mutations are blocked."""
-        monkeypatch.setenv("ALLOW_AUTOMATED_MUTATIONS", "0")
-        core = AgentCore(gh_client=MagicMock(), dry_run=False)
-        ev = {
-            "delivery_id": "test-004",
-            "event_name": "pull_request",
-            "action": "opened",
-            "canonical": "pull_request.opened",
-            "sender": {"login": "human"},
-            "repository": {"full_name": "owner/repo"},
-            "raw_payload": {"pull_request": {"number": 1}, "action": "opened"},
-        }
-        results = core.run(ev, "owner/repo")
-        assert len(results) == 1
-        assert results[0].success is False
-        assert "mutations are disabled" in results[0].detail
+        # We use patch for the static constant since monkeypatch.setenv no longer works
+        with patch("webhook_agent.constants.ALLOW_AUTOMATED_MUTATIONS", "0"):
+            core = AgentCore(gh_client=MagicMock(), dry_run=False)
+            ev = {
+                "delivery_id": "test-004",
+                "event_name": "pull_request",
+                "action": "opened",
+                "canonical": "pull_request.opened",
+                "sender": {"login": "human"},
+                "repository": {"full_name": "owner/repo"},
+                "raw_payload": {"pull_request": {"number": 1}, "action": "opened"},
+            }
+            results = core.run(ev, "owner/repo")
+            assert len(results) == 1
+            assert results[0].success is False
+            assert "mutations are disabled" in results[0].detail
 
     def test_infer_canonical_from_event_data(self):
         """AgentCore still works when canonical is not explicitly set."""
@@ -1496,5 +1497,7 @@ class TestConversationalAgent:
                 "pleasure to meet you",
                 "collaborative partner",
                 "assist you today",
+                "pleasure to be here",
+                "ready to assist",
             ]
         )
