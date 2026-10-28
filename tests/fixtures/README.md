@@ -45,38 +45,3 @@ uv run python dev/record_webhook_fixtures.py pull_request.opened issue_comment.c
 ```
 
 The deliveries API returns the payload as *parsed JSON*, so the original signed bytes are not recoverable. These fixtures are for routing, normalization, and suppression tests — **not** for signature verification. Construct synthetic bodies and a test secret for that.
-
----
-
-## Review Replay Fixtures (`tests/fixtures/reviews/`)
-
-Recorded bot reviews and PR metadata used by the offline replay harness (`tests/unit/review/test_replay_harness.py`) and baseline evaluator (`dev/replay_baseline.py`). These are **evidence**, not hand-written data: do not edit the review bodies.
-
-| Fixture File | Type | Description |
-|---|---|---|
-| `reviews/pr_241.json` | PR metadata + changed paths + bot reviews | The prior-decision case: bot approved removing `merge_pr` as a Zero-Bypass violation. |
-| `reviews/pr_258.json` | PR metadata + full per-file patches + bot reviews | The known-bad case: two bot reviews of PR #258 with patch grounding tests. |
-| `reviews/pr_260.json` | PR metadata + diffs + bot reviews | Clean approval replay with metadata parity assertions. |
-| `reviews/pr_360.json` | PR metadata + diffs + bot reviews | AST import tracking and test boundary verification. |
-| `reviews/pr_361.json` | PR metadata + diffs + bot reviews | Soft issue citation evaluation on diff context lines. |
-| `reviews/pr_364.json` | PR metadata + diffs + bot reviews | Large multi-file diff grounding validation. |
-| `reviews/pr_365.json` | PR metadata + diffs + bot reviews | Multi-turn review comment claim validation. |
-| `reviews/pr_368.json` | PR metadata + diffs + bot reviews | Complex patch citation overlap checks. |
-| `reviews/pr_369.json` | PR metadata + diffs + bot reviews | Re-review verdict resolution tracking. |
-
-### Running Replay Evaluation
-
-```bash
-# Run baseline evaluation across all recorded review fixtures
-uv run python dev/replay_baseline.py
-
-# Run offline replay unit test harness
-uv run pytest tests/unit/review/test_replay_harness.py
-```
-
-Regenerate (network required; never from a test):
-
-```bash
-uv run python dev/record_review_fixtures.py 258 --patches full
-uv run python dev/record_review_fixtures.py 241 --patches none
-```
