@@ -13,6 +13,8 @@ import pytest
 
 from webhook_agent.review.grounding import (
     Finding,
+    check_body_metadata_parity,
+    check_test_count_claims,
     citation_overlap,
     diff_text_from_patches,
     extract_bare_symbols,
@@ -843,3 +845,47 @@ def test_extract_scorecard_invariants() -> None:
     recovered = extract_scorecard_invariants(scorecard, diff, changed_paths=["src/core.py"])
     assert len(recovered) == 1
     assert "src/core.py:15: Logic & Boundaries check verified in PR diff." in recovered[0]
+
+
+def test_check_test_count_claims_matching_count() -> None:
+    diff_text = """--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -10,1 +10,5 @@
++def test_feature_alpha():
++    pass
++
++def test_feature_beta():
++    pass
+"""
+    body = "Review findings: verified 2 tests added for feature coverage."
+    issues = check_test_count_claims(body, diff_text)
+    assert issues == []
+
+
+def test_check_test_count_claims_mismatch_flagged() -> None:
+    diff_text = """--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -10,1 +10,3 @@
++def test_only_one():
++    pass
+"""
+    body = "Review claims 5 tests covering all edge scenarios."
+    issues = check_test_count_claims(body, diff_text)
+    assert len(issues) == 1
+    assert issues[0].code == "test_count_mismatch"
+    assert "Review claims 5 tests" in issues[0].reason
+
+
+def test_check_body_metadata_parity_valid() -> None:
+    body = "## Summary\n### Verified Invariants\n- test invariant verified in diff."
+    metadata = {"verified_invariants": ["test invariant verified in diff."]}
+    issues = check_body_metadata_parity(body, metadata)
+    assert issues == []
+
+
+def test_check_body_metadata_parity_missing_footer() -> None:
+    body = "## Summary\n### Verified Invariants\n- test invariant rendered."
+    metadata: dict[str, list[str]] = {}
+    issues = check_body_metadata_parity(body, metadata)
+    assert len(issues) == 1
+    assert issues[0].code == "body_metadata_parity_mismatch"

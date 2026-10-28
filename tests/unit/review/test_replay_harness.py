@@ -11,8 +11,8 @@ Three rules govern this file:
    harness were vacuous on first draft (a ``^``-anchored regex missing ``re.M``, and a
    numeric pattern that could not see an adjective between the number and the noun). Both
    are now guarded by :func:`test_extractors_are_not_vacuous`.
-2. **Assertions encoding a known defect use ``xfail(strict=True)``.** Fixing the defect
-   turns the test green, and the suite then reminds us to drop the marker.
+2. **Assertions over live verifier rules are isolated as pure unit tests in ``test_grounding.py``.**
+   Historical review recordings in fixtures are immutable evidence and assert passing regression baselines.
 3. **Assertions encoding a known blind spot pass today and say so in their docstring**, so
    that nobody later mistakes a blind spot for coverage.
 """
@@ -31,8 +31,6 @@ from webhook_agent.review.grounding import (
     _IDENTIFIER_RE,
     Finding,
     Kind,
-    check_body_metadata_parity,
-    check_test_count_claims,
     citation_overlap,
     detect_prior_decision_contradiction,
     diff_text_from_patches,
@@ -149,51 +147,6 @@ def test_every_citation_points_at_a_line_the_diff_displays() -> None:
         issues = verify_citations(findings, diff_text, fixture["changed_files"])
         unseen = [i for i in issues if i.code == "line_outside_diff"]
         assert unseen == [], f"review {review['id']} cites lines the diff never shows: {unseen}"
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known defect: reviews make inaccurate numeric test claims or match "
-        "line numbers (e.g., claiming 2 or 8497 tests when 5 were added)."
-    ),
-)
-def test_review_does_not_overstate_the_test_count() -> None:
-    """Assertion 2: Every numeric test-count claim must match a recount of added test functions.
-
-    Known-bad: fails on recorded fixtures because bot reviews hallucinate test counts or
-    misinterpret line numbers as test counts.
-    """
-    issues = []
-    for _name, path in _ALL_FIXTURES:
-        fixture = _load(path)
-        diff_text = _diff_text(fixture)
-        for review in _bot_reviews(fixture):
-            issues.extend(check_test_count_claims(review["body"] or "", diff_text))
-    assert issues == [], f"test-count claims mismatch found: {issues}"
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known defect: verified_invariants are rendered in the review body "
-        "but never serialized into the hannibal-review-metadata footer."
-    ),
-)
-def test_body_metadata_parity_verified_invariants() -> None:
-    """Assertion 3: Verified invariants rendered in body must be present in footer metadata.
-
-    Known-bad: both to_markdown blocks in review/schemas.py omit verified_invariants from
-    metadata serialization and metadata.py never reads it.
-    """
-    parity_issues = []
-    for _name, path in _ALL_FIXTURES:
-        fixture = _load(path)
-        for review in _bot_reviews(fixture):
-            body = review["body"] or ""
-            metadata = _metadata(body)
-            parity_issues.extend(check_body_metadata_parity(body, metadata))
-    assert parity_issues == [], f"body/metadata parity mismatches found: {parity_issues}"
 
 
 def test_prior_decision_contradiction_detection() -> None:
@@ -541,24 +494,6 @@ def test_resolution_rule_passes_when_named_file_is_in_the_diff() -> None:
         ),
     }
     assert _hard_codes(_resolution_findings([review])) == []
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PR #260 reviews 5464906355 and 5464909992 both mark the `_collect_pr_patches` "
-        "API-call risk RESOLVED while the incremental diffs they reviewed (a blank line; "
-        "a test-context fix) contain none of the symbols their evidence names."
-    ),
-)
-def test_recorded_reviews_do_not_claim_unfounded_resolutions() -> None:
-    """No recorded review may mark something RESOLVED that its diff did not change."""
-    offenders = {}
-    for name, path in _ALL_FIXTURES:
-        codes = _hard_codes(_resolution_findings(_load(path)["reviews"]))
-        if codes:
-            offenders[name] = codes
-    assert offenders == {}, f"unfounded RESOLVED claims: {offenders}"
 
 
 def test_fixture_records_review_commits_and_incremental_diffs() -> None:

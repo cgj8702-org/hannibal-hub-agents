@@ -885,7 +885,6 @@ class TestGetIssue:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.regression
 class TestConversationalAgentTools:
     def test_conversational_agent_equipped_with_create_issue(self):
         from webhook_agent.core.agent_definition import WebhookAgent
@@ -1270,7 +1269,6 @@ class TestConversationalAgent:
         )
         assert _is_formal_review_eligible("issues.opened", "Bug in parser") is False
 
-    @pytest.mark.regression
     def test_conversational_agent_tools_and_instruction(self):
         from webhook_agent.core.agent_definition import WebhookAgent
         from webhook_agent.core.prompts import CONVERSATIONAL_INSTRUCTION

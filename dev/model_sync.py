@@ -14,15 +14,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# Auto-load local environment configuration (.envrc or .env)
-envrc_path = Path(__file__).resolve().parents[1] / ".envrc"
-if envrc_path.exists():
-    try:
-        from dotenv import load_dotenv
 
-        load_dotenv(envrc_path, override=False)
-    except ImportError:
-        pass
+def _load_env_if_present() -> None:
+    """Auto-load local environment configuration (.envrc or .env) when run as CLI."""
+    envrc_path = Path(__file__).resolve().parents[1] / ".envrc"
+    if envrc_path.exists():
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv(envrc_path, override=False)
+        except ImportError:
+            pass
+
 
 try:
     from google import genai
@@ -119,6 +122,7 @@ async def fetch_model_registry() -> bool:
 
     Returns True on success, False on failure.
     """
+    _load_env_if_present()
     if not genai:
         LOGGER.error("Google Generative AI library (genai) not installed.")
         return False
@@ -280,6 +284,8 @@ async def run_pipeline():
 
 def main():
     import argparse
+
+    _load_env_if_present()
 
     parser = argparse.ArgumentParser(description="Agents Model Synchronization Utility")
     sub = parser.add_subparsers(dest="cmd")
