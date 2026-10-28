@@ -61,8 +61,8 @@ PAID_TIER_DEFAULT_CHAIN: list[str] = [
 # Heavy payload threshold for 4M TPM high-throughput routing
 PAYLOAD_HEAVY_THRESHOLD_TOKENS = 50000
 
-# Gemma Free Tier input tokens ceiling (hard quota: 16k TPM; 14k gives a safety buffer)
-GEMMA_FREE_TIER_MAX_INPUT_TOKENS = 14000
+# Gemma Free Tier input tokens ceiling (hard quota: 16k TPM; 10k gives a safety buffer)
+GEMMA_FREE_TIER_MAX_INPUT_TOKENS = 10000
 
 # Escalation keywords for deep reasoning / audit fallback
 DEEP_REASONING_KEYWORDS: tuple[str, ...] = (
@@ -80,7 +80,7 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
 
     Args:
         estimated_tokens: Optional token estimate of the prompt/payload.
-            If provided and > GEMMA_FREE_TIER_MAX_INPUT_TOKENS (14k tokens),
+            If provided and > GEMMA_FREE_TIER_MAX_INPUT_TOKENS (10k tokens),
             Gemma models are excluded to prevent 429 RESOURCE_EXHAUSTED TPM blocks.
 
     Free Tier Chain (250k TPM High-Bandwidth):
@@ -92,8 +92,8 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
         6. gemini-3.5-flash (20 RPD / 250k TPM)
         7. gemini-2.5-flash-lite (20 RPD / 250k TPM)
         8. gemini-2.5-flash (20 RPD / 250k TPM)
-        9. gemma-4-31b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
-        10. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM, token-gated <= 14k)
+        9. gemma-4-31b-it (14,400 RPD / 16k TPM, token-gated <= 10k)
+        10. gemma-4-26b-a4b-it (14,400 RPD / 16k TPM, token-gated <= 10k)
 
     Paid Tier Chain (2.x High-Bandwidth & 4M TPM Optimized):
         1. gemini-2.0-flash (Unlimited RPD / 4M TPM) - Default primary ($0.10/1M in)
@@ -132,7 +132,7 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
     chain = [primary] + [m for m in default_chain if m != primary]
     deduped = list(dict.fromkeys(chain))
 
-    # Strict token-aware filter: if on free tier and payload > 14k tokens, never include Gemma
+    # Strict token-aware filter: if on free tier and payload > 10k tokens, never include Gemma
     if (
         active_tier == "free"
         and estimated_tokens is not None
