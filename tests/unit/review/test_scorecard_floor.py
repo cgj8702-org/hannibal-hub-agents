@@ -799,3 +799,44 @@ def test_enforce_verdict_recovers_scorecard_invariants() -> None:
     assert meta["verified_invariants"] == [
         "src/app.py:10: Logic & Boundaries check verified in PR diff."
     ]
+
+
+def test_enforce_verdict_resolves_namespaced_scorecard_items_from_user_state() -> None:
+    """Verify _enforce_verdict resolves user: or session: namespaced deterministic scorecard items."""
+    diff_text = """--- a/src/app.py
++++ b/src/app.py
+@@ -10,3 +10,3 @@
+-def old():
++def new_feature():
+"""
+    review_dict = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation clean.",
+        "scorecard": [
+            {
+                "dimension": "Contract Integrity",
+                "status": "PASS",
+                "notes": "Verified.",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": ["src/app.py:10: new feature verified"],
+    }
+    json_body = json.dumps(review_dict)
+
+    # Supply namespaced user:deterministic_contract_scorecard_item with FAIL
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/app.py"],
+        "user:deterministic_contract_scorecard_item": {
+            "dimension": "Contract Integrity",
+            "status": "FAIL",
+            "notes": "Breaking contract detected by AST analysis.",
+        },
+    }
+
+    rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert verdict == "REQUEST_CHANGES"
+    assert "FAIL" in rendered_body
+    assert "Breaking contract detected by AST analysis." in rendered_body

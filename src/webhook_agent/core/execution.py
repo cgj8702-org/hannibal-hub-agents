@@ -216,8 +216,16 @@ async def _execute_adk_runner(
 
         if is_code_audit:
             has_investigated = any(r.tool in investigative_tools for r in results)
+            has_submitted_review = any(r.tool == "review" and r.success for r in results)
+            if has_submitted_review:
+                logger.info(
+                    "🏁 [Investigation Gate] Review already submitted successfully (trace: %s); skipping exploration loop.",
+                    trace_id[-4:],
+                )
             turn = 1
-            while not has_investigated and turn < max_investigation_turns:
+            while (
+                not has_investigated and not has_submitted_review and turn < max_investigation_turns
+            ):
                 turn += 1
                 logger.info(
                     "🔍 [Investigation Gate] Model attempted review on code changes without "
@@ -241,6 +249,7 @@ async def _execute_adk_runner(
                 )
                 await _run_single_turn(followup_directive)
                 has_investigated = any(r.tool in investigative_tools for r in results)
+                has_submitted_review = any(r.tool == "review" and r.success for r in results)
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
             logger.warning(
@@ -324,20 +333,30 @@ def _submit_deterministic_review(
         try:
             repo = gh_client.get_repo(repo_full_name)
             pr = repo.get_pull(pr_number)
+            review_state = {
+                "review_mode": ("sync" if canonical == "pull_request.synchronize" else "initial"),
+                "is_explicit_review": force,
+                "force_review": force,
+                "comment_body": comment_body,
+                "model_name": model_name,
+            }
+            if final_session and final_session.state:
+                for k in (
+                    "deterministic_contract_scorecard_item",
+                    "deterministic_security_scorecard_item",
+                    "deterministic_test_scorecard_item",
+                ):
+                    if k in final_session.state:
+                        review_state[k] = final_session.state[k]
+                    elif f"user:{k}" in final_session.state:
+                        review_state[k] = final_session.state[f"user:{k}"]
+
             detail, submitted = _submit_formal_review(
                 pr,
                 review_payload,
                 "COMMENT",
                 f"{repo_full_name}#{pr_number}",
-                {
-                    "review_mode": (
-                        "sync" if canonical == "pull_request.synchronize" else "initial"
-                    ),
-                    "is_explicit_review": force,
-                    "force_review": force,
-                    "comment_body": comment_body,
-                    "model_name": model_name,
-                },
+                review_state,
                 analyzed_sha=head_sha,
                 force=force,
                 model_name=model_name,
@@ -731,6 +750,17 @@ def execute_agent_event(
         if user_message is None:
             raise RuntimeError("Failed to build user message for execution")
 
+        deterministic_state["deterministic_precompiled_ast"] = bool(
+            event_data.get("deterministic_precompiled_ast")
+        )
+        for sc_key in (
+            "deterministic_contract_scorecard_item",
+            "deterministic_security_scorecard_item",
+            "deterministic_test_scorecard_item",
+        ):
+            if sc_key in event_data:
+                deterministic_state[sc_key] = event_data[sc_key]
+
         active_runner = (
             agent._runner if policy.mode == Mode.FORMAL_AUDIT else agent._conversational_runner
         )
@@ -857,6 +887,13 @@ def execute_agent_event(
                 user_state_map["comment_body"] = comment_body
                 user_state_map["is_explicit_review"] = is_explicit_review
                 user_state_map["force_review"] = is_explicit_review
+                for sc_key in (
+                    "deterministic_contract_scorecard_item",
+                    "deterministic_security_scorecard_item",
+                    "deterministic_test_scorecard_item",
+                ):
+                    if sc_key in event_data:
+                        user_state_map[sc_key] = event_data[sc_key]
 
                 if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")

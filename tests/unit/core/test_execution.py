@@ -1552,10 +1552,10 @@ async def test_execute_adk_runner_multi_turn_when_model_attempts_premature_revie
             nonlocal calls
             calls += 1
             if calls == 1:
-                # Turn 1: Model calls review prematurely without investigating
+                # Turn 1: Model calls review prematurely without investigating (rejected by gate)
                 fn_resp = MagicMock()
                 fn_resp.name = "review"
-                fn_resp.response = "premature review output"
+                fn_resp.response = "Error: Mandatory Investigation Gate: premature review rejected"
                 yield MagicMock(
                     usage_metadata=None,
                     get_function_responses=lambda: [fn_resp],
@@ -1599,6 +1599,47 @@ async def test_execute_adk_runner_multi_turn_when_model_attempts_premature_revie
     assert calls == 2
     assert any(r.tool == "read_file" for r in results)
     assert emitted_texts == ["Final researched review"]
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_terminates_loop_when_review_already_submitted() -> None:
+    """Verify _execute_adk_runner terminates immediately if review was already successfully submitted."""
+    from google.genai import types as genai_types
+
+    calls = 0
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            fn_resp = MagicMock()
+            fn_resp.name = "review"
+            fn_resp.response = "Submitted formal review"
+            yield MagicMock(
+                usage_metadata=None,
+                get_function_responses=lambda: [fn_resp],
+                content=None,
+            )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test-submitted",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=True,
+    )
+
+    assert calls == 1
+    assert any(r.tool == "review" and r.success for r in results)
 
 
 def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
