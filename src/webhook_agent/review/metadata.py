@@ -71,7 +71,13 @@ def stamp_review_metadata(body: str, **fields: Any) -> str:
         return body
 
     metadata = extract_review_metadata(body) or {}
-    metadata.update(fields)
+    for k, v in fields.items():
+        if v is not None and type(v).__name__ != "MagicMock":
+            if isinstance(v, (str, int, float, bool, list, dict)):
+                metadata[k] = v
+            else:
+                with contextlib.suppress(Exception):
+                    metadata[k] = str(v)
     comment = serialize_review_metadata(metadata)
 
     match = METADATA_COMMENT_PATTERN.search(body)

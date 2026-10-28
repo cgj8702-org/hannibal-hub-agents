@@ -69,6 +69,7 @@ def test_agent_action_logging_populates_json_fields(
     assert json_fields["item_id"] == "424"
     assert json_fields["action_result"] == {"result": "Submitted review (APPROVE)"}
     assert json_fields["delivery_id"] == "del-12345"
+    assert "model" in json_fields
 
 
 def test_webhook_processing_started_and_completed_json_fields(
@@ -107,18 +108,44 @@ def test_webhook_processing_started_and_completed_json_fields(
 
     started_records = [r for r in caplog.records if "Webhook processing started" in r.getMessage()]
     assert len(started_records) == 1
+    assert "model=" in started_records[0].getMessage()
     started_fields = getattr(started_records[0], "json_fields", None)
     assert started_fields is not None
     assert started_fields["repo"] == "test-org/test-repo"
     assert started_fields["item_id"] == "99"
     assert started_fields["delivery_id"] == "del-start-complete"
+    assert "model" in started_fields
 
     completed_records = [
         r for r in caplog.records if "Webhook processing completed" in r.getMessage()
     ]
     assert len(completed_records) == 1
+    assert "model=" in completed_records[0].getMessage()
     completed_fields = getattr(completed_records[0], "json_fields", None)
     assert completed_fields is not None
     assert completed_fields["repo"] == "test-org/test-repo"
     assert completed_fields["item_id"] == "99"
     assert completed_fields["action_count"] == 0
+    assert "model" in completed_fields
+
+
+def test_extract_log_context_populates_model() -> None:
+    """Ensure _extract_log_context includes the active model in its returned dict."""
+    from webhook_agent.processor import _extract_log_context
+
+    payload = {
+        "event_name": "pull_request",
+        "canonical": "pull_request.opened",
+        "delivery_id": "del-test-model",
+        "repository": {"full_name": "owner/repo"},
+        "raw_payload": {
+            "pull_request": {"number": 123},
+        },
+    }
+    ctx = _extract_log_context(payload)
+    assert ctx["repo"] == "owner/repo"
+    assert ctx["item_id"] == "123"
+    assert ctx["event"] == "pull_request.opened"
+    assert "model" in ctx
+    assert isinstance(ctx["model"], str)
+    assert len(ctx["model"]) > 0

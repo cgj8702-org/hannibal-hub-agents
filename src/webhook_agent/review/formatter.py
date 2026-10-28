@@ -221,6 +221,8 @@ def normalize_code_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     res = CodeReviewResponse.model_validate(data).model_dump()
     if "verdict" not in data:
         res.pop("verdict", None)
+    if "model" not in data:
+        res.pop("model", None)
     return res
 
 
@@ -231,6 +233,8 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     res = SyncReviewResponse.model_validate(data).model_dump()
     if "verdict" not in data:
         res.pop("verdict", None)
+    if "model" not in data:
+        res.pop("model", None)
     return res
 
 

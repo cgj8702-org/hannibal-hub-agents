@@ -154,6 +154,7 @@ def evaluate_dependency_fast_path(
                     event="APPROVE",
                     target_key=target_key,
                     analyzed_sha=str((pr_data.get("head") or {}).get("sha") or ""),
+                    model_name="deterministic",
                 )
                 logger.info(
                     "⚡ Fast-Path: Deterministically approved dependency PR %s#%s: %s (submitted=%s)",

@@ -398,6 +398,10 @@ class CodeReviewResponse(BaseModel):
         default_factory=list,
         description="Missing context or empty list if fully understood",
     )
+    model: str | None = Field(
+        default=None,
+        description="Name of the model that conducted the review, for audit and provenance",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -962,6 +966,8 @@ class CodeReviewResponse(BaseModel):
             meta["verified_invariants"] = list(self.verified_invariants)
         if self.semantic_invariants:
             meta["semantic_invariants"] = list(self.semantic_invariants)
+        if self.model:
+            meta["model"] = self.model
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
 
@@ -1003,6 +1009,10 @@ class SyncReviewResponse(BaseModel):
     unverified_claims: list[str] = Field(
         default_factory=list,
         description="Claims, residual uncertainty, or hypotheses that could not be fully verified against the diff.",
+    )
+    model: str | None = Field(
+        default=None,
+        description="Name of the model that conducted the sync review, for audit and provenance",
     )
 
     @model_validator(mode="before")
@@ -1420,6 +1430,7 @@ class SyncReviewResponse(BaseModel):
                 "verified_invariants": list(self.verified_invariants),
                 "semantic_invariants": list(self.semantic_invariants),
                 "unverified_claims": list(self.unverified_claims),
+                "model": self.model,
             }
             cr_obj = CodeReviewResponse.model_validate(cr_data)
             return cr_obj.to_markdown(verdict)
@@ -1629,6 +1640,8 @@ class SyncReviewResponse(BaseModel):
             meta["verified_invariants"] = list(self.verified_invariants)
         if self.semantic_invariants:
             meta["semantic_invariants"] = list(self.semantic_invariants)
+        if self.model:
+            meta["model"] = self.model
         metadata_comment = serialize_review_metadata(meta)
         markdown_parts.append(f"\n{metadata_comment}")
 

@@ -651,6 +651,22 @@ def review(
             if cb and has_review_slash_command(cb):
                 is_forced = True
 
+        active_model: str | None = None
+        raw_agent = getattr(ctx, "agent", None)
+        if raw_agent is not None and hasattr(raw_agent, "_current_model_name"):
+            cand = getattr(raw_agent, "_current_model_name", None)
+            if isinstance(cand, str) and cand.strip():
+                active_model = cand.strip()
+        if not active_model:
+            cand = (
+                state_dict.get("model_name")
+                or state_dict.get("user:model_name")
+                or state_dict.get("model")
+                or state_dict.get("user:model")
+            )
+            if isinstance(cand, str) and cand.strip():
+                active_model = cand.strip()
+
         result, _submitted = _submit_formal_review(
             pr,
             body,
@@ -659,6 +675,7 @@ def review(
             getattr(ctx, "state", None),
             analyzed_sha=str(state_dict.get("head_sha") or state_dict.get("user:head_sha") or ""),
             force=is_forced,
+            model_name=active_model,
         )
         if _submitted:
             inv = getattr(ctx, "_invocation_context", None)

@@ -230,14 +230,17 @@ def _extract_log_context(payload: dict[str, Any]) -> dict[str, str]:
         item_id = raw["issue"].get("number")
     item_str = str(item_id) if item_id is not None else "N/A"
 
+    from webhook_agent.models.model_chain import get_active_model
     from webhook_agent.models.rate_limiter import _resolve_tier
 
     tier = _resolve_tier()
+    model = get_active_model(payload)
 
     return {
         "repo": repo,
         "event": event,
         "tier": tier,
+        "model": model,
         "item_id": item_str,
         "delivery_id": str(payload.get("delivery_id", "unknown")),
     }
@@ -893,10 +896,11 @@ class WebhookProcessor:
                 del self._processed_deliveries[oldest_delivery_id]
 
         logger.info(
-            "🚀 Webhook processing started [repo=%s, event=%s, tier=%s, item_id=%s, delivery_id=%s]",
+            "🚀 Webhook processing started [repo=%s, event=%s, tier=%s, model=%s, item_id=%s, delivery_id=%s]",
             ctx["repo"],
             event_key,
             ctx["tier"],
+            ctx.get("model", "unknown"),
             ctx["item_id"],
             ctx["delivery_id"],
             extra={
@@ -904,6 +908,7 @@ class WebhookProcessor:
                     "repo": ctx["repo"],
                     "event": event_key,
                     "tier": ctx["tier"],
+                    "model": ctx.get("model", "unknown"),
                     "item_id": ctx["item_id"],
                     "delivery_id": ctx["delivery_id"],
                 }
@@ -1304,6 +1309,7 @@ class WebhookProcessor:
                     "item_id": ctx["item_id"],
                     "event": ctx["event"],
                     "tier": ctx["tier"],
+                    "model": ctx.get("model", "unknown"),
                     "delivery_id": ctx["delivery_id"],
                 }
                 # Individual tool results at DEBUG to reduce log volume;
@@ -1324,10 +1330,11 @@ class WebhookProcessor:
                 f"{name}x{count}" if count > 1 else name for name, count in tool_summary.items()
             )
             logger.info(
-                "✅ Webhook processing completed [repo=%s, event=%s, tier=%s, item_id=%s, actions=%d, tools=%s]",
+                "✅ Webhook processing completed [repo=%s, event=%s, tier=%s, model=%s, item_id=%s, actions=%d, tools=%s]",
                 ctx["repo"],
                 ctx["event"],
                 ctx["tier"],
+                ctx.get("model", "unknown"),
                 ctx["item_id"],
                 len(results),
                 summary_str,
@@ -1336,6 +1343,7 @@ class WebhookProcessor:
                         "repo": ctx["repo"],
                         "event": ctx["event"],
                         "tier": ctx["tier"],
+                        "model": ctx.get("model", "unknown"),
                         "item_id": ctx["item_id"],
                         "delivery_id": ctx["delivery_id"],
                         "action_count": len(results),
@@ -1344,16 +1352,18 @@ class WebhookProcessor:
             )
         else:
             logger.info(
-                "✅ Webhook processing completed with no actions taken [repo=%s, event=%s, tier=%s, item_id=%s]",
+                "✅ Webhook processing completed with no actions taken [repo=%s, event=%s, tier=%s, model=%s, item_id=%s]",
                 ctx["repo"],
                 ctx["event"],
                 ctx["tier"],
+                ctx.get("model", "unknown"),
                 ctx["item_id"],
                 extra={
                     "json_fields": {
                         "repo": ctx["repo"],
                         "event": ctx["event"],
                         "tier": ctx["tier"],
+                        "model": ctx.get("model", "unknown"),
                         "item_id": ctx["item_id"],
                         "delivery_id": ctx["delivery_id"],
                         "action_count": 0,
