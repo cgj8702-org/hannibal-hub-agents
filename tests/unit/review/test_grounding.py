@@ -889,3 +889,12 @@ def test_check_body_metadata_parity_missing_footer() -> None:
     issues = check_body_metadata_parity(body, metadata)
     assert len(issues) == 1
     assert issues[0].code == "body_metadata_parity_mismatch"
+
+
+def test_replay_harness_subsystem_is_purged() -> None:
+    """Ensure obsolete replay modules and review exports cannot be imported."""
+    import webhook_agent.review as review_module
+
+    assert not hasattr(review_module, "BaselineReport")
+    assert not hasattr(review_module, "ReviewEvaluation")
+    assert not hasattr(review_module, "evaluate_fixture")
