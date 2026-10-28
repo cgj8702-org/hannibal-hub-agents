@@ -23,6 +23,7 @@ _BG_LOOP: asyncio.AbstractEventLoop | None = None
 _BG_LOOP_THREAD: threading.Thread | None = None
 _BG_LOOP_LOCK = threading.RLock()
 _GENAI_CLIENT: Any = None
+_GENAI_CLIENT_KEY: str | None = None
 
 
 def _ensure_bg_loop() -> asyncio.AbstractEventLoop:
@@ -88,14 +89,14 @@ def run_in_bg_loop(coro: Coroutine[Any, Any, Any]) -> Any:
 
 def get_shared_genai_client() -> Any:
     """Return a process-wide cached google.genai Client. Returns None if no API key is configured."""
-    global _GENAI_CLIENT
-    if _GENAI_CLIENT is not None:
-        return _GENAI_CLIENT
-
+    global _GENAI_CLIENT, _GENAI_CLIENT_KEY
     try:
         api_key = get_active_api_key()
     except Exception:
         api_key = None
+
+    if _GENAI_CLIENT is not None and api_key == _GENAI_CLIENT_KEY:
+        return _GENAI_CLIENT
 
     if not api_key:
         logger.debug("No active GenAI API key available to construct shared client")
@@ -105,6 +106,7 @@ def get_shared_genai_client() -> Any:
         from google.genai import Client
 
         _GENAI_CLIENT = Client(api_key=api_key)
+        _GENAI_CLIENT_KEY = api_key
         logger.debug("Shared GenAI client created and cached successfully")
         return _GENAI_CLIENT
     except Exception as exc:

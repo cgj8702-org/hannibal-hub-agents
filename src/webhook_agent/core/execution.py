@@ -660,13 +660,19 @@ def execute_agent_event(
                 return results
             event_data["resumed_checkpoint"] = resumable
 
-    # Dynamic model routing
+    # Dynamic model routing & tier sync
     selected_model = _select_model_for_event(event_data)
-    if agent._current_model_name != selected_model:
+    current_tier = getattr(agent, "_current_tier", None)
+    active_tier = event_data.get("tier") or _resolve_tier()
+    tier_changed = current_tier != active_tier
+
+    if agent._current_model_name != selected_model or tier_changed:
+        agent._current_tier = active_tier
         logger.info(
-            "🔀 Dynamic Model Router: assigned model %s for event '%s' (trace: %s)",
+            "🔀 Dynamic Model Router: assigned model %s for event '%s' (tier: %s, trace: %s)",
             selected_model,
             canonical,
+            active_tier,
             trace_id[-4:],
         )
         if hasattr(agent, "_switch_model"):

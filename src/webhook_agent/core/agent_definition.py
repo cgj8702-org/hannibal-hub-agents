@@ -61,6 +61,7 @@ from webhook_agent.models.model_chain import (
 )
 from webhook_agent.models.model_factory import get_adk_model
 from webhook_agent.models.rate_limiter import (
+    _resolve_tier,
     get_active_api_key,
 )
 from webhook_agent.review.verdict_parser import calculate_verdict
@@ -160,6 +161,7 @@ class WebhookAgent:
 
         # Ensure API key is resolved and propagated to env vars before model init
         get_active_api_key()
+        self._current_tier: str = _resolve_tier()
 
         # Model instance for pipeline sub-agents
         model_instance = get_adk_model(
