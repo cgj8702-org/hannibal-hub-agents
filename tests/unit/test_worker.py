@@ -320,7 +320,6 @@ class TestShouldProcessEvent:
         )
         assert self.processor.should_process_event(ev) is False
 
-    @pytest.mark.regression
     def test_review_submitted_does_not_mark_open_pr_closed(self):
         """A review submission must NOT register an open PR in the closed registry.
 
@@ -359,7 +358,6 @@ class TestShouldProcessEvent:
         # Clean up the singleton so it cannot leak into other tests.
         pr_closed_registry._closed.pop("owner/repo#42", None)
 
-    @pytest.mark.regression
     def test_pr_alias_closed_event_still_marks_registry(self):
         """The `pr` event-name alias with action=closed must still register as closed.
 
@@ -621,7 +619,6 @@ class TestShouldProcessEvent:
             assert "modified files" not in caplog.text
 
 
-@pytest.mark.regression
 class TestAgentCoreSingleton:
     """Regression test: AgentCore/WebhookAgent must be constructed once per
     WebhookProcessor and reused across events, not rebuilt per event — otherwise

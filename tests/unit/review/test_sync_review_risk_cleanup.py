@@ -10,7 +10,7 @@ from webhook_agent.review.schemas import (
     SyncReviewResponse,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent, pytest.mark.regression]
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 
 
 def test_sync_review_response_positive_summary_no_synthetic_critical() -> None:

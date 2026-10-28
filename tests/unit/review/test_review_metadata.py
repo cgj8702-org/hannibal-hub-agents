@@ -200,7 +200,6 @@ def test_sync_review_response_embeds_metadata() -> None:
     assert meta["resolutions"][0]["item_description"] == "Fixed memory leak in worker"
 
 
-@pytest.mark.regression
 def test_parse_legacy_review_findings_pr_229_autopsy() -> None:
     """Ensure legacy markdown parser finds critical findings even when other sections are None found."""
     # This was the exact structure of PR #229 Review 1 that broke naive substring checks
@@ -296,7 +295,6 @@ def test_format_findings_for_agent() -> None:
     assert "🛡️" not in formatted
 
 
-@pytest.mark.regression
 def test_enforce_verdict_preserves_resolutions_on_dismissed_prior_review_with_findings() -> None:
     """End-to-end regression: Verify that _enforce_verdict preserves resolutions
 
