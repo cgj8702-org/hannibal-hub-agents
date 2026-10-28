@@ -92,6 +92,28 @@ def _get_exclusion_keywords() -> list[str]:
     return list(set(DEFAULT_EXCLUSION_KEYWORDS + custom))
 
 
+def is_eligible_registry_model(model_entry: dict[str, Any]) -> bool:
+    """Evaluates whether a model entry meets criteria for synthesis into the target model registry.
+
+    Checks:
+    - Must support text generation actions (generateContent or bidiGenerateContent) if supported_actions is present.
+    - Must not match any exclusion keywords in its name, display_name, or description.
+    """
+    actions = model_entry.get("supported_actions")
+    if actions is not None:
+        is_text_gen = any(a in actions for a in ("generateContent", "bidiGenerateContent"))
+        if not is_text_gen:
+            return False
+
+    excluded_keywords = _get_exclusion_keywords()
+    name = str(model_entry.get("name") or "")
+    display_name = str(model_entry.get("display_name") or "")
+    description = str(model_entry.get("description") or "")
+    search_corpus = f"{name} {display_name} {description}".lower()
+
+    return not any(kw in search_corpus for kw in excluded_keywords)
+
+
 async def fetch_model_registry() -> bool:
     """Fetches the latest model list from the Google Generative AI API across free and paid project keys.
 
@@ -115,7 +137,6 @@ async def fetch_model_registry() -> bool:
         return False
 
     models_by_name: dict[str, dict[str, Any]] = {}
-    excluded_keywords = _get_exclusion_keywords()
 
     existing_limits: dict[str, Any] = {}
     if os.path.exists(TARGET_REGISTRY):
@@ -133,30 +154,25 @@ async def fetch_model_registry() -> bool:
         try:
             client = genai.Client(api_key=api_key)
             for model in client.models.list():
+                name = getattr(model, "name", None)
+                if not name:
+                    continue
                 actions = getattr(model, "supported_actions", None) or []
-                is_text_gen = any(a in actions for a in ("generateContent", "bidiGenerateContent"))
-
-                search_corpus = f"{getattr(model, 'name', '')} {getattr(model, 'display_name', '')} {getattr(model, 'description', '')}".lower()
-                is_excluded = any(kw in search_corpus for kw in excluded_keywords)
-
-                if is_text_gen and not is_excluded:
-                    name = getattr(model, "name", None)
-                    if not name:
-                        continue
-                    if name not in models_by_name:
-                        entry = {
-                            "name": name,
-                            "version": getattr(model, "version", None),
-                            "display_name": getattr(model, "display_name", None),
-                            "description": getattr(model, "description", None),
-                            "input_token_limit": getattr(model, "input_token_limit", None),
-                            "output_token_limit": getattr(model, "output_token_limit", None),
-                            "supported_actions": actions,
-                            "accessible_tiers": [],
-                        }
-                        if name in existing_limits:
-                            entry["rate_limits"] = existing_limits[name]
-                        models_by_name[name] = entry
+                if name not in models_by_name:
+                    entry = {
+                        "name": name,
+                        "version": getattr(model, "version", None),
+                        "display_name": getattr(model, "display_name", None),
+                        "description": getattr(model, "description", None),
+                        "input_token_limit": getattr(model, "input_token_limit", None),
+                        "output_token_limit": getattr(model, "output_token_limit", None),
+                        "supported_actions": actions,
+                        "accessible_tiers": [],
+                    }
+                    if name in existing_limits:
+                        entry["rate_limits"] = existing_limits[name]
+                    models_by_name[name] = entry
+                if tier not in models_by_name[name]["accessible_tiers"]:
                     models_by_name[name]["accessible_tiers"].append(tier)
         except Exception as e:
             LOGGER.error(f"Error listing models for tier '{tier}': {e}")
@@ -165,7 +181,7 @@ async def fetch_model_registry() -> bool:
         from dev.rate_limit_parser import sort_models_by_tpm
     except ImportError:
         try:
-            from rate_limit_parser import sort_models_by_tpm
+            from rate_limit_parser import sort_models_by_tpm  # type: ignore[import-not-found, no-redef]
         except ImportError:
 
             def sort_models_by_tpm(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -186,7 +202,8 @@ async def fetch_model_registry() -> bool:
 
                 return sorted(models, key=_sort_key)
 
-    models = sort_models_by_tpm(list(models_by_name.values()))
+    synthesized_models = [m for m in models_by_name.values() if is_eligible_registry_model(m)]
+    models = sort_models_by_tpm(synthesized_models)
 
     # Ensure target directory exists
     target_dir = os.path.dirname(TARGET_REGISTRY)
@@ -252,7 +269,7 @@ async def run_pipeline():
         try:
             from dev.rate_limit_parser import main as parse_rate_limits
         except ImportError:
-            from rate_limit_parser import main as parse_rate_limits
+            from rate_limit_parser import main as parse_rate_limits  # type: ignore[no-redef]
 
         parse_rate_limits([])
     except Exception as e:
@@ -277,7 +294,7 @@ def main():
         try:
             from dev.rate_limit_parser import main as parse_rate_limits
         except ImportError:
-            from rate_limit_parser import main as parse_rate_limits
+            from rate_limit_parser import main as parse_rate_limits  # type: ignore[no-redef]
 
         parse_rate_limits([])
     elif args.cmd == "pipeline":

@@ -404,8 +404,21 @@ def main(args_list: list[str] | None = None) -> None:
             models_list.append(new_entry)
             existing_model_ids.add(mid)
 
+    # Filter models list during synthesis using eligibility rules
+    try:
+        from dev.model_sync import is_eligible_registry_model
+    except ImportError:
+        try:
+            from model_sync import is_eligible_registry_model  # type: ignore[import-not-found, no-redef]
+        except ImportError:
+
+            def is_eligible_registry_model(model_entry: dict[str, Any]) -> bool:
+                return True
+
+    eligible_models = [m for m in models_list if is_eligible_registry_model(m)]
+
     # 4. Feature 3: Sorting the models in the final src file by TPM
-    models_json["models"] = sort_models_by_tpm(models_list)
+    models_json["models"] = sort_models_by_tpm(eligible_models)
 
     # Write to primary target (src/**)
     output_path.parent.mkdir(parents=True, exist_ok=True)
