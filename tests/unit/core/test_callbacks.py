@@ -126,6 +126,93 @@ async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.anyio
+async def test_after_model_callback_with_explicit_thoughts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from webhook_agent.models.rate_limiter import rpm_waiter
+
+    ctx = MagicMock()
+    ctx.state = {
+        "user:active_model": "gemini-3.5-flash-lite",
+        "user:repo_full_name": "test-org/test-repo",
+        "user:pr_number": 474,
+        "user:active_tier": "paid",
+    }
+
+    resp = MagicMock()
+    resp.usage_metadata.total_token_count = 175
+    resp.usage_metadata.prompt_token_count = 100
+    resp.usage_metadata.candidates_token_count = 25
+    resp.usage_metadata.thoughts_token_count = 50
+
+    mock_record = AsyncMock()
+    monkeypatch.setattr(rpm_waiter, "record_actual_tokens", mock_record)
+
+    res = await after_model_callback(ctx, resp)
+    assert res is None
+    assert ctx.state.get("total_tokens") == 175
+    assert ctx.state.get("prompt_tokens") == 100
+    assert ctx.state.get("candidates_tokens") == 25
+    assert ctx.state.get("thoughts_tokens") == 50
+    mock_record.assert_awaited_once_with(
+        model="gemini-3.5-flash-lite",
+        actual_tokens=175,
+    )
+
+
+@pytest.mark.anyio
+async def test_after_model_callback_reconciles_missing_thoughts(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    from unittest.mock import AsyncMock
+
+    from webhook_agent.models.rate_limiter import rpm_waiter
+
+    ctx = MagicMock()
+    ctx.state = {
+        "active_model": "gemini-3.5-flash-lite",
+        "repo_full_name": "test-org/test-repo",
+        "pr_number": 474,
+        "active_tier": "paid",
+    }
+
+    # usage_metadata where total (195) exceeds prompt (100) + candidates (25) by 70, but thoughts is not set
+    resp = MagicMock()
+    resp.usage_metadata.total_token_count = 195
+    resp.usage_metadata.prompt_token_count = 100
+    resp.usage_metadata.candidates_token_count = 25
+    resp.usage_metadata.thoughts_token_count = 0
+    resp.usage_metadata.thought_tokens = 0
+    resp.usage_metadata.reasoning_tokens = 0
+
+    mock_record = AsyncMock()
+    monkeypatch.setattr(rpm_waiter, "record_actual_tokens", mock_record)
+
+    with caplog.at_level(logging.INFO):
+        res = await after_model_callback(ctx, resp)
+
+    assert res is None
+    assert ctx.state.get("total_tokens") == 195
+    assert ctx.state.get("prompt_tokens") == 100
+    assert ctx.state.get("candidates_tokens") == 25
+    # Automatically reconciled to 70
+    assert ctx.state.get("thoughts_tokens") == 70
+
+    # Verify structured log
+    token_records = [r for r in caplog.records if "[LLM Token Usage]" in r.getMessage()]
+    assert len(token_records) == 1
+    fields = getattr(token_records[0], "json_fields", {})
+    assert fields.get("total_tokens") == 195
+    assert fields.get("prompt_tokens") == 100
+    assert fields.get("candidates_tokens") == 25
+    assert fields.get("thoughts_tokens") == 70
+    assert fields.get("repo") == "test-org/test-repo"
+    assert fields.get("item_id") == 474
+    assert fields.get("tier") == "paid"
+
+
+@pytest.mark.anyio
 async def test_before_tool_callback_sanitization() -> None:
     tool = MagicMock()
     args = {"pr_number": "42"}

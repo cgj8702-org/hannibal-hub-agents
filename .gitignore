@@ -227,6 +227,8 @@ webhook-router.yaml
 
 # Local diagnostic logs
 logs/
+logs_*.json
+*.log.json
 
 
 

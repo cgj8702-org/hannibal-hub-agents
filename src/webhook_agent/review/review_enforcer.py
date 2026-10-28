@@ -1323,6 +1323,7 @@ def _submit_formal_review(
                 "json_fields": {
                     "event": "review_submitted",
                     "repo": repo_name,
+                    "item_id": number_text,
                     "pull_number": number_text,
                     "verdict": enforced_event,
                     "model": resolved_model or "unknown",

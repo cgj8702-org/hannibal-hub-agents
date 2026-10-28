@@ -26,9 +26,9 @@ from webhook_agent.models.model_chain import (
 )
 from webhook_agent.models.model_factory import get_adk_model
 from webhook_agent.models.rate_limiter import (
+    _resolve_tier,
     extract_rate_limit_details,
     get_active_api_key,
-    rpm_waiter,
 )
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import (
@@ -150,16 +150,8 @@ async def _execute_adk_runner(
             new_message=msg,
             run_config=run_config,
         ):
-            # Handle token recording if usage metadata is available
-            if hasattr(event, "usage_metadata") and event.usage_metadata:
-                total_tok = getattr(event.usage_metadata, "total_token_count", 0) or getattr(
-                    event.usage_metadata, "total_tokens", 0
-                )
-                if total_tok > 0:
-                    await rpm_waiter.record_actual_tokens(
-                        model=current_model_name,
-                        actual_tokens=total_tok,
-                    )
+            # Note: LLM token recording is handled by after_model_callback
+            # to capture prompt, candidate, and thinking tokens accurately without double-counting.
 
             # Handle function response events — these are tool results from ADK
             if hasattr(event, "get_function_responses"):
@@ -709,9 +701,15 @@ def execute_agent_event(
     is_code_audit = policy.mode == Mode.FORMAL_AUDIT and any(
         not f.lower().endswith(doc_extensions) for f in changed_files_list
     )
+    active_tier = event_data.get("tier") or _resolve_tier()
     deterministic_state = {
         "is_code_audit": is_code_audit,
         "model_name": agent._current_model_name,
+        "active_model": agent._current_model_name,
+        "repo_full_name": repo_full_name,
+        "pr_number": pr_number,
+        "issue_number": pr_number,
+        "active_tier": active_tier,
         "deterministic_changed_files": changed_files_list,
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
         "formal_review_eligible": policy.mode == Mode.FORMAL_AUDIT,
@@ -876,6 +874,10 @@ def execute_agent_event(
                 ).setdefault(user_id, {})
                 user_state_map["gh_client"] = gh_client
                 user_state_map["repo_full_name"] = repo_full_name
+                user_state_map["pr_number"] = pr_number
+                user_state_map["issue_number"] = pr_number
+                user_state_map["active_tier"] = active_tier
+                user_state_map["active_model"] = agent._current_model_name
                 user_state_map["sender"] = sender_login
                 user_state_map["review_mode"] = (
                     "sync" if canonical == "pull_request.synchronize" else "initial"

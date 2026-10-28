@@ -210,6 +210,92 @@ def generate_trace_id() -> str:
     return uuid.uuid4().hex
 
 
+_MERGE_PR_RE = re.compile(
+    r"Merge pull request #(\d+)|\(#(\d+)\)|(?:pull request|PR)\s*#?(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _extract_item_id(raw: dict[str, Any]) -> int | None:
+    """Extract PR or issue number from any GitHub webhook payload variant."""
+    if not isinstance(raw, dict):
+        return None
+
+    # 1. Direct pull_request or issue objects
+    pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request")
+    if isinstance(pr_data, dict) and pr_data.get("number") is not None:
+        try:
+            return int(pr_data["number"])
+        except (TypeError, ValueError):
+            pass
+
+    issue_data = raw.get("issue")
+    if isinstance(issue_data, dict) and issue_data.get("number") is not None:
+        try:
+            return int(issue_data["number"])
+        except (TypeError, ValueError):
+            pass
+
+    # 2. Top-level number
+    if raw.get("number") is not None:
+        try:
+            return int(raw["number"])
+        except (TypeError, ValueError):
+            pass
+
+    # 3. Check suite pull_requests list or head_commit merge message (e.g. merge commits into main)
+    check_suite = raw.get("check_suite")
+    if isinstance(check_suite, dict):
+        suite_prs = check_suite.get("pull_requests") or []
+        for p in suite_prs:
+            if isinstance(p, dict) and p.get("number") is not None:
+                try:
+                    return int(p["number"])
+                except (TypeError, ValueError):
+                    pass
+
+        head_commit = check_suite.get("head_commit")
+        if isinstance(head_commit, dict):
+            msg = str(head_commit.get("message") or "")
+            m = _MERGE_PR_RE.search(msg)
+            if m:
+                cand = next((g for g in m.groups() if g is not None), None)
+                if cand is not None:
+                    try:
+                        return int(cand)
+                    except (TypeError, ValueError):
+                        pass
+
+    # 4. Push event head_commit or commits list
+    head_commit = raw.get("head_commit")
+    if isinstance(head_commit, dict):
+        msg = str(head_commit.get("message") or "")
+        m = _MERGE_PR_RE.search(msg)
+        if m:
+            cand = next((g for g in m.groups() if g is not None), None)
+            if cand is not None:
+                try:
+                    return int(cand)
+                except (TypeError, ValueError):
+                    pass
+
+    commits = raw.get("commits")
+    if isinstance(commits, list):
+        for c in commits:
+            if isinstance(c, dict):
+                msg = str(c.get("message") or "")
+                m = _MERGE_PR_RE.search(msg)
+                if m:
+                    cand = next((g for g in m.groups() if g is not None), None)
+                    if cand is not None:
+                        try:
+                            return int(cand)
+                        except (TypeError, ValueError):
+                            pass
+
+    return None
+
+
 def _extract_log_context(payload: dict[str, Any]) -> dict[str, str]:
     """Extract standardized structured context fields for logging."""
     raw = payload.get("raw_payload") or {}
@@ -220,14 +306,7 @@ def _extract_log_context(payload: dict[str, Any]) -> dict[str, str]:
 
     event = str(payload.get("canonical") or payload.get("event_name") or "unknown")
 
-    pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
-    item_id = (
-        pr_data.get("number")
-        if isinstance(pr_data, dict)
-        else (raw.get("issue") or {}).get("number")
-    )
-    if item_id is None and isinstance(raw.get("issue"), dict):
-        item_id = raw["issue"].get("number")
+    item_id = _extract_item_id(raw)
     item_str = str(item_id) if item_id is not None else "N/A"
 
     from webhook_agent.models.model_chain import get_active_model
@@ -415,6 +494,8 @@ class WebhookProcessor:
         action = ev.get("action")
         if event_name == "ping":
             return "ping"
+        if event_name == "push":
+            return "push"
         mapping = {
             ("pull_request", "opened"): "pull_request.opened",
             ("pull_request", "synchronize"): "pull_request.synchronize",
@@ -497,6 +578,8 @@ class WebhookProcessor:
             if not is_ci_gate_enabled():
                 return True, "ci gate disabled"
             return False, "check_suite.completed (actionable)"
+        if ev.get("event_name") == "push" or ev.get("canonical") == "push":
+            return True, "push event"
         if _is_bot_event(ev):
             return True, "bot event"
 

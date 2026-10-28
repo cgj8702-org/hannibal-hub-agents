@@ -441,6 +441,15 @@ class RPMWaiter:
                 unfinalized[1] = actual_tokens
                 unfinalized[2] = True
             else:
+                # Deduplicate: if the most recent entry was already finalized recently (within 5 seconds)
+                # with the exact same token count, ignore duplicate callback for the same turn.
+                if (
+                    token_history
+                    and token_history[-1][2]
+                    and abs(now - token_history[-1][0]) <= 5.0
+                    and token_history[-1][1] == actual_tokens
+                ):
+                    return
                 token_history.append([now, actual_tokens, True])
 
 

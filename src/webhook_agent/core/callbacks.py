@@ -228,6 +228,28 @@ def _extract_total_tokens(llm_response: LlmResponse) -> int:
     return 0
 
 
+def _extract_thoughts_tokens(llm_response: LlmResponse) -> int:
+    """Extract reasoning/thoughts token count from Gemini response."""
+    usage = getattr(llm_response, "usage_metadata", None)
+    if not usage:
+        return 0
+
+    # 1. Attribute access
+    for attr in ("thoughts_token_count", "thought_tokens", "reasoning_tokens"):
+        val = getattr(usage, attr, None)
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+
+    # 2. Dictionary access
+    if isinstance(usage, dict):
+        for key in ("thoughts_token_count", "thought_tokens", "reasoning_tokens"):
+            val = usage.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                return int(val)
+
+    return 0
+
+
 def _extract_cached_tokens(llm_response: LlmResponse) -> int:
     """Extract cached token count resiliently across all Google GenAI / Vertex AI SDK variants."""
     usage = getattr(llm_response, "usage_metadata", None)
@@ -270,23 +292,48 @@ async def after_model_callback(
     candidates_tokens = _extract_candidates_tokens(llm_response)
     total_tokens = _extract_total_tokens(llm_response)
     cached_tokens = _extract_cached_tokens(llm_response)
+    thoughts_tokens = _extract_thoughts_tokens(llm_response)
+
+    # Reconcile token math: ensure prompt + candidates + thoughts add up to total_tokens
+    if total_tokens > 0:
+        if thoughts_tokens == 0 and total_tokens > (prompt_tokens + candidates_tokens):
+            thoughts_tokens = total_tokens - (prompt_tokens + candidates_tokens)
+    elif prompt_tokens > 0 or candidates_tokens > 0 or thoughts_tokens > 0:
+        total_tokens = prompt_tokens + candidates_tokens + thoughts_tokens
 
     # Track cache utilization from either token metrics or active CacheMetadata
     cache_meta = getattr(llm_response, "cache_metadata", None)
     active_cache_name = getattr(cache_meta, "cache_name", None) if cache_meta else None
 
-    target_model = callback_context.state.get("active_model", "gemini-3")
-    repo = callback_context.state.get("repo_full_name", "")
-    item_id = callback_context.state.get("pr_number") or callback_context.state.get(
-        "issue_number", ""
+    target_model = (
+        callback_context.state.get("active_model")
+        or callback_context.state.get("user:active_model")
+        or "gemini-3"
     )
-    tier = callback_context.state.get("active_tier", "")
+    repo = (
+        callback_context.state.get("repo_full_name")
+        or callback_context.state.get("user:repo_full_name")
+        or ""
+    )
+    item_id = (
+        callback_context.state.get("pr_number")
+        or callback_context.state.get("user:pr_number")
+        or callback_context.state.get("issue_number")
+        or callback_context.state.get("user:issue_number")
+        or ""
+    )
+    tier = (
+        callback_context.state.get("active_tier")
+        or callback_context.state.get("user:active_tier")
+        or ""
+    )
     logger.info(
-        "📊 [LLM Token Usage] model=%s, total=%d, prompt=%d, candidates=%d, cached=%d",
+        "📊 [LLM Token Usage] model=%s, total=%d, prompt=%d, candidates=%d, thoughts=%d, cached=%d",
         target_model,
         total_tokens,
         prompt_tokens,
         candidates_tokens,
+        thoughts_tokens,
         cached_tokens,
         extra={
             "json_fields": {
@@ -295,6 +342,7 @@ async def after_model_callback(
                 "total_tokens": total_tokens,
                 "prompt_tokens": prompt_tokens,
                 "candidates_tokens": candidates_tokens,
+                "thoughts_tokens": thoughts_tokens,
                 "cached_tokens": cached_tokens,
                 "repo": repo,
                 "item_id": item_id,
@@ -309,6 +357,8 @@ async def after_model_callback(
         callback_context.state["prompt_tokens"] = prompt_tokens
     if candidates_tokens > 0:
         callback_context.state["candidates_tokens"] = candidates_tokens
+    if thoughts_tokens > 0:
+        callback_context.state["thoughts_tokens"] = thoughts_tokens
     if cached_tokens > 0:
         callback_context.state["cached_content_tokens"] = cached_tokens
         logger.debug(
@@ -430,14 +480,28 @@ async def before_tool_callback(
         }
 
     # Mandatory Investigation Gate: block review tool if code audit has not used investigative tools yet
-    if tool.name == "review" and tool_context.state.get("is_code_audit"):
+    if tool.name == "review" and (
+        tool_context.state.get("is_code_audit") or tool_context.state.get("user:is_code_audit")
+    ):
         investigative_tools = {"read_file", "search_files", "list_dir"}
-        tools_executed = tool_context.state.get("tools_executed") or []
+        tools_executed = (
+            tool_context.state.get("tools_executed")
+            or tool_context.state.get("user:tools_executed")
+            or []
+        )
         has_investigated = any(t in investigative_tools for t in tools_executed)
         if not has_investigated:
-            repo = tool_context.state.get("repo_full_name", "")
-            item_id = tool_context.state.get("pr_number") or tool_context.state.get(
-                "issue_number", ""
+            repo = (
+                tool_context.state.get("repo_full_name")
+                or tool_context.state.get("user:repo_full_name")
+                or ""
+            )
+            item_id = (
+                tool_context.state.get("pr_number")
+                or tool_context.state.get("user:pr_number")
+                or tool_context.state.get("issue_number")
+                or tool_context.state.get("user:issue_number")
+                or ""
             )
             logger.info(
                 "🛑 [Investigation Gate] Blocked premature review() tool call on code PR without prior investigation.",
