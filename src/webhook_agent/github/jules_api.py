@@ -31,13 +31,16 @@ logger = logging.getLogger("webhook_agent.github.jules_api")
 JULES_BASE_URL = os.environ.get("JULES_BASE_URL", "https://jules.googleapis.com/v1alpha")
 
 # Regex to extract a Jules session ID from a comment or URL.
-# Matches URLs like https://jules.google.com/session/abc123
-# or bare session IDs like sessions/abc123 or just abc123.
-# Requires at least one digit so words like "Session" don't match.
+# Matches:
+# - Full URLs: https://jules.google.com/session/abc123 or https://jules.google.com/task/abc123
+# - Explicit paths: sessions/31415926535897932384 or task/31415926535897932384
+# - Prefixed identifiers: Session: sessions/abc123 or Session ID: xyz789
+# - Standalone UUIDs: 12345678-1234-1234-1234-123456789abc
+# Strictly avoids matching arbitrary repo org/user names like 'cgj8702-org' by requiring
+# a dedicated Jules URL/session prefix or a canonical UUID format.
 _SESSION_ID_RE = re.compile(
-    r"(?:https?://jules\.google\.com/session/|sessions/)?"
-    r"(?=[a-zA-Z0-9_-]*\d)"
-    r"([a-zA-Z0-9_-]{6,})"
+    r"(?:https?://jules\.google\.com/(?:session|task)/|(?:session|task)\s*(?:id)?\s*[:=]\s*sessions/|sessions/|\b(?:session|task)\s*(?:id)?\s*[:=]\s*)([a-zA-Z0-9_-]{6,})|\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+    re.IGNORECASE,
 )
 
 
@@ -122,5 +125,5 @@ def extract_session_id(text: str) -> str | None:
         return None
     match = _SESSION_ID_RE.search(text)
     if match:
-        return match.group(1)
+        return match.group(1) or match.group(2)
     return None

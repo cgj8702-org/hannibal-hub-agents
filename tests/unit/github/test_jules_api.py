@@ -31,6 +31,22 @@ class TestExtractSessionId:
     def test_extracts_bare_id(self):
         assert extract_session_id("Session ID: xyz789") == "xyz789"
 
+    def test_extracts_from_task_url(self):
+        assert (
+            extract_session_id("Task URL: https://jules.google.com/task/task-abc123")
+            == "task-abc123"
+        )
+
+    def test_extracts_uuid_session(self):
+        assert (
+            extract_session_id("UUID session: 12345678-1234-1234-1234-123456789abc")
+            == "12345678-1234-1234-1234-123456789abc"
+        )
+
+    def test_rejects_repo_and_org_names(self):
+        assert extract_session_id("Reviewing PR for cgj8702-org/hannibal-hub-agents...") is None
+        assert extract_session_id("https://github.com/cgj8702-org/repo") is None
+
     def test_returns_none_when_no_match(self):
         assert extract_session_id("No session here") is None
         assert extract_session_id("") is None
