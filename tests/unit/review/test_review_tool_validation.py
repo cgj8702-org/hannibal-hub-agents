@@ -461,35 +461,40 @@ def _critical_payload(path, line):
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_grounding_does_not_reject_when_not_strict(mock_submit, monkeypatch):
     """A hard grounding failure is logged but not enforced when strict grounding is disabled."""
-    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
-    mock_submit.return_value = ("Review submitted", True)
-    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
-    res = review(ctx, 8101, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
-    assert res == "Review submitted"
-    assert mock_submit.called
+    # Use patch for static constant since monkeypatch.setenv no longer works
+    with patch("webhook_agent.review.grounding.STRICT_REVIEW_GROUNDING", "0"):
+        mock_submit.return_value = ("Review submitted", True)
+        ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+        res = review(ctx, 8101, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+        assert res == "Review submitted"
+        assert mock_submit.called
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_grounding_rejects_hard_failure_when_strict(mock_submit, monkeypatch):
     """With STRICT_REVIEW_GROUNDING set, an unciteable path rejects the review."""
-    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
-    mock_submit.return_value = ("Review submitted", True)
-    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
-    res = review(ctx, 8102, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
-    assert res.startswith("Error: Review submission rejected")
-    assert "src/beta.py" in res
-    assert not mock_submit.called
+    # Use patch for static constant
+    with patch("webhook_agent.review.grounding.STRICT_REVIEW_GROUNDING", "1"):
+        mock_submit.return_value = ("Review submitted", True)
+        ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+        res = review(ctx, 8102, json.dumps(_critical_payload("src/beta.py", 12)), "REQUEST_CHANGES")
+        assert res.startswith("Error: Review submission rejected")
+        assert "src/beta.py" in res
+        assert not mock_submit.called
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_grounding_soft_issues_never_reject_even_when_strict(mock_submit, monkeypatch):
     """A line the diff does not display is unverifiable, not wrong: do not reject."""
-    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "1")
-    mock_submit.return_value = ("Review submitted", True)
-    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
-    res = review(ctx, 8103, json.dumps(_critical_payload("src/alpha.py", 99)), "REQUEST_CHANGES")
-    assert res == "Review submitted"
-    assert mock_submit.called
+    # Use patch for static constant
+    with patch("webhook_agent.review.grounding.STRICT_REVIEW_GROUNDING", "1"):
+        mock_submit.return_value = ("Review submitted", True)
+        ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+        res = review(
+            ctx, 8103, json.dumps(_critical_payload("src/alpha.py", 99)), "REQUEST_CHANGES"
+        )
+        assert res == "Review submitted"
+        assert mock_submit.called
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")

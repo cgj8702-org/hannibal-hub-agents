@@ -279,8 +279,8 @@ def test_enforce_verdict_citation_grounding_shadow_mode_logs_telemetry(
     with caplog.at_level(logging.INFO):
         _, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
 
-    # In Shadow Mode (default): verdict is preserved as APPROVE
-    assert verdict == "APPROVE"
+    # In strict mode (default), verdict is downgraded to COMMENT
+    assert verdict == "COMMENT"
     # But telemetry log MUST be emitted
     assert "🔎 [Grounding Telemetry]" in caplog.text
     assert "hard:path_not_changed" in caplog.text

@@ -155,7 +155,7 @@ async def test_after_model_callback_with_explicit_thoughts(monkeypatch: pytest.M
     assert ctx.state.get("candidates_tokens") == 25
     assert ctx.state.get("thoughts_tokens") == 50
     mock_record.assert_awaited_once_with(
-        model="gemini-3.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         actual_tokens=175,
     )
 

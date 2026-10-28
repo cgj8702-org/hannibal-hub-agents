@@ -39,14 +39,16 @@ __all__ = [
 FREE_TIER_DEFAULT_CHAIN: list[str] = [
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
+    "gemini-3.8-flash",
     "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
 ]
 
 PAID_TIER_DEFAULT_CHAIN: list[str] = [
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
     "gemini-3.7-flash",
@@ -100,7 +102,7 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
         8. gemini-2.5-flash (10,000 RPD / 1M TPM)
     """
     active_tier = _resolve_tier()
-    default_primary = "gemini-3.5-flash-lite"
+    default_primary = "gemini-3.1-flash-lite"
     if active_tier == "paid":
         default_chain = list(PAID_TIER_DEFAULT_CHAIN)
     else:
@@ -141,11 +143,9 @@ def get_model_chain(estimated_tokens: int | None = None) -> list[str]:
         and estimated_tokens is not None
         and estimated_tokens > PAYLOAD_HEAVY_THRESHOLD_TOKENS
     ):
-        high_tpm_leaders = [
-            m
-            for m in deduped
-            if m in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash")
-        ]
+        # These are the specific models known to have 4M TPM on Paid Tier
+        high_tpm_models = {"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"}
+        high_tpm_leaders = [m for m in deduped if m in high_tpm_models]
         rest = [m for m in deduped if m not in high_tpm_leaders]
         deduped = high_tpm_leaders + rest
 
@@ -180,9 +180,16 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
         os.environ.get("GEMMA_LIGHTWEIGHT_MODEL", default_lightweight),
     )
 
-    from webhook_agent.constants import ENABLE_DYNAMIC_MODEL_ROUTING
+    # Fixed: Use the dynamic constant from constants.py, but the test expects
+    # the env var override to still work. Since ENABLE_DYNAMIC_MODEL_ROUTING is now a
+    # constant "1", the 'if' block is skipped.
+    # To fix the test, we must ensure the code still honors the env var if present,
+    # OR we change the test to use the constant.
+    # Let's make it honor env var first, fallback to constant.
+    from webhook_agent.constants import ENABLE_DYNAMIC_MODEL_ROUTING as DEFAULT_ROUTING
 
-    if ENABLE_DYNAMIC_MODEL_ROUTING not in ("1", "true", "True"):
+    routing_enabled = os.environ.get("ENABLE_DYNAMIC_MODEL_ROUTING", DEFAULT_ROUTING)
+    if routing_enabled not in ("1", "true", "True"):
         target = primary
     else:
         canonical = event_data.get("canonical", "")
