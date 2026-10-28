@@ -200,6 +200,45 @@ def test_sync_review_response_embeds_metadata() -> None:
     assert meta["resolutions"][0]["item_description"] == "Fixed memory leak in worker"
 
 
+def test_code_review_response_embeds_model_in_metadata() -> None:
+    """Ensure CodeReviewResponse.to_markdown() embeds model name when provided."""
+    cr = CodeReviewResponse(
+        executive_summary="Review with model tracking.",
+        verdict="APPROVE",
+        model="gemini-2.5-flash",
+    )
+    md = cr.to_markdown(verdict="APPROVE")
+    meta = extract_review_metadata(md)
+    assert meta is not None
+    assert meta["model"] == "gemini-2.5-flash"
+
+
+def test_sync_review_response_embeds_model_in_metadata() -> None:
+    """Ensure SyncReviewResponse.to_markdown() embeds model name when provided."""
+    sync = SyncReviewResponse(
+        summary="Sync review with model tracking.",
+        verdict="APPROVE",
+        model="gemini-2.5-pro",
+    )
+    md = sync.to_markdown(verdict="APPROVE")
+    meta = extract_review_metadata(md)
+    assert meta is not None
+    assert meta["model"] == "gemini-2.5-pro"
+
+
+def test_stamp_review_metadata_embeds_model() -> None:
+    """Ensure stamp_review_metadata stamps model name into review metadata."""
+    from webhook_agent.review.metadata import stamp_review_metadata
+
+    stamped = stamp_review_metadata(
+        "Initial review body", sha="1234567", model="gemini-3.5-flash-lite"
+    )
+    meta = extract_review_metadata(stamped)
+    assert meta is not None
+    assert meta["sha"] == "1234567"
+    assert meta["model"] == "gemini-3.5-flash-lite"
+
+
 def test_parse_legacy_review_findings_pr_229_autopsy() -> None:
     """Ensure legacy markdown parser finds critical findings even when other sections are None found."""
     # This was the exact structure of PR #229 Review 1 that broke naive substring checks

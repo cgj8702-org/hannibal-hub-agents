@@ -79,6 +79,62 @@ def test_submits_pinned_to_analysed_commit_with_metadata() -> None:
     assert extract_review_metadata(kwargs["body"])["sha"] == ANALYSED
 
 
+def test_submits_pinned_with_explicit_model_name() -> None:
+    """When model_name is provided, it is stamped into the review metadata."""
+    pr = _pr(ANALYSED)
+
+    with (
+        patch(
+            "webhook_agent.review.review_enforcer._enforce_verdict",
+            return_value=("Rendered body", "COMMENT", []),
+        ),
+        patch("webhook_agent.review.review_enforcer.review_claim_registry") as registry,
+    ):
+        registry.claim.return_value = object()
+        _message, submitted = _submit_formal_review(
+            pr,
+            "{}",
+            "COMMENT",
+            "owner/repo#415",
+            analyzed_sha=ANALYSED,
+            model_name="gemini-2.5-flash",
+        )
+
+    assert submitted is True
+    kwargs = pr.create_review.call_args.kwargs
+    meta = extract_review_metadata(kwargs["body"])
+    assert meta["sha"] == ANALYSED
+    assert meta["model"] == "gemini-2.5-flash"
+
+
+def test_submits_pinned_with_state_model_name() -> None:
+    """When model_name is carried in state dict, it is stamped into review metadata."""
+    pr = _pr(ANALYSED)
+
+    with (
+        patch(
+            "webhook_agent.review.review_enforcer._enforce_verdict",
+            return_value=("Rendered body", "COMMENT", []),
+        ),
+        patch("webhook_agent.review.review_enforcer.review_claim_registry") as registry,
+    ):
+        registry.claim.return_value = object()
+        _message, submitted = _submit_formal_review(
+            pr,
+            "{}",
+            "COMMENT",
+            "owner/repo#415",
+            analyzed_sha=ANALYSED,
+            state={"model_name": "gemini-2.5-pro"},
+        )
+
+    assert submitted is True
+    kwargs = pr.create_review.call_args.kwargs
+    meta = extract_review_metadata(kwargs["body"])
+    assert meta["sha"] == ANALYSED
+    assert meta["model"] == "gemini-2.5-pro"
+
+
 def test_duplicate_check_is_keyed_to_analysed_commit() -> None:
     """An existing bot review at another commit must not block this commit's review."""
     pr = _pr(ANALYSED, reviews=[_bot_review(MOVED_TO)])

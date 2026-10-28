@@ -1047,6 +1047,7 @@ def _submit_formal_review(
     *,
     analyzed_sha: str = "",
     force: bool = False,
+    model_name: str | None = None,
 ) -> tuple[str, bool]:
     """Submit one guarded review, shared by the tool and deterministic fallback.
 
@@ -1060,6 +1061,7 @@ def _submit_formal_review(
             moved past it, the review is deferred rather than stamped onto a
             commit it never saw.
         force: Whether to bypass duplicate bot review checks and allow re-review.
+        model_name: Optional name of the model that conducted the review.
 
     Returns:
         ``(status_message, submitted)``.
@@ -1087,6 +1089,24 @@ def _submit_formal_review(
             if hasattr(state, "to_dict")
             else (state if isinstance(state, dict) else {})
         )
+        resolved_model: str | None = None
+        cand_model = (
+            model_name
+            or state_dict.get("model_name")
+            or state_dict.get("user:model_name")
+            or state_dict.get("model")
+            or state_dict.get("user:model")
+        )
+        if isinstance(cand_model, str) and cand_model.strip():
+            resolved_model = cand_model.strip()
+        else:
+            with contextlib.suppress(Exception):
+                from webhook_agent.models.model_chain import get_active_model
+
+                fallback_model = get_active_model()
+                if isinstance(fallback_model, str) and fallback_model.strip():
+                    resolved_model = fallback_model.strip()
+
         from webhook_agent.commands import has_review_slash_command
 
         cb = str(state_dict.get("comment_body") or state_dict.get("user:comment_body") or "")
@@ -1159,12 +1179,17 @@ def _submit_formal_review(
 
         rendered_body = repair_rendered_citations(rendered_body, pr=pr)
 
-        # Record the analysed commit in the review metadata so the body is
+        # Record the analysed commit and model in the review metadata so the body is
         # self-describing even after the PR moves on.
+        stamp_fields: dict[str, Any] = {}
         if reviewed_sha:
+            stamp_fields["sha"] = reviewed_sha
+        if resolved_model:
+            stamp_fields["model"] = resolved_model
+        if stamp_fields:
             from webhook_agent.review.metadata import stamp_review_metadata
 
-            rendered_body = stamp_review_metadata(rendered_body, sha=reviewed_sha)
+            rendered_body = stamp_review_metadata(rendered_body, **stamp_fields)
 
         review_kwargs: dict[str, Any] = {"body": rendered_body, "event": enforced_event}
         if reviewed_sha:
@@ -1272,5 +1297,26 @@ def _submit_formal_review(
                     auto_res_err,
                 )
 
+        repo_name, _, number_text = target_key.rpartition("#")
         detail = getattr(rv, "html_url", str(rv))
+        logger.info(
+            "Submitted formal review [repo=%s, item_id=%s, verdict=%s, model=%s, sha=%s, url=%s]",
+            repo_name,
+            number_text,
+            enforced_event,
+            resolved_model or "unknown",
+            reviewed_sha,
+            detail,
+            extra={
+                "json_fields": {
+                    "event": "review_submitted",
+                    "repo": repo_name,
+                    "pull_number": number_text,
+                    "verdict": enforced_event,
+                    "model": resolved_model or "unknown",
+                    "sha": reviewed_sha,
+                    "url": detail,
+                }
+            },
+        )
         return f"Submitted review ({enforced_event}): {detail}", True

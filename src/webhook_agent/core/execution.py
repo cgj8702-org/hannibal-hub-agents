@@ -274,6 +274,7 @@ def _submit_deterministic_review(
     force: bool = False,
     comment_body: str = "",
     is_pr: bool = True,
+    model_name: str | None = None,
 ) -> None:
     """Submit formal code review extracted from session state or emitted texts."""
     if not is_pr:
@@ -335,9 +336,11 @@ def _submit_deterministic_review(
                     "is_explicit_review": force,
                     "force_review": force,
                     "comment_body": comment_body,
+                    "model_name": model_name,
                 },
                 analyzed_sha=head_sha,
                 force=force,
+                model_name=model_name,
             )
             results.append(
                 ActionResult(
@@ -422,6 +425,7 @@ def _post_conversational_reply(
     results: list[ActionResult],
     *,
     state_reply: str | None = None,
+    model_name: str | None = None,
 ) -> None:
     """Post conversational reply comment to issue or PR thread.
 
@@ -478,10 +482,21 @@ def _post_conversational_reply(
                 )
             )
             logger.info(
-                "💬 Posted conversational comment [repo=%s, item_id=%s, trace_id=%s]",
+                "💬 Posted conversational comment [repo=%s, item_id=%s, model=%s, trace_id=%s]",
                 repo_full_name,
                 pr_number,
+                model_name or "unknown",
                 trace_id[-4:],
+                extra={
+                    "json_fields": {
+                        "event": "conversational_comment_posted",
+                        "repo": repo_full_name,
+                        "item_id": pr_number,
+                        "model": model_name or "unknown",
+                        "trace_id": trace_id,
+                        "url": getattr(comment_obj, "html_url", ""),
+                    }
+                },
             )
         except Exception as comment_err:
             logger.warning(
@@ -677,6 +692,7 @@ def execute_agent_event(
     )
     deterministic_state = {
         "is_code_audit": is_code_audit,
+        "model_name": agent._current_model_name,
         "deterministic_changed_files": changed_files_list,
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
         "formal_review_eligible": policy.mode == Mode.FORMAL_AUDIT,
@@ -1049,6 +1065,7 @@ def execute_agent_event(
                     force=is_explicit_review,
                     comment_body=comment_body,
                     is_pr=is_pr_context,
+                    model_name=agent._current_model_name,
                 )
         elif policy.mode != Mode.FORMAL_AUDIT and not is_comment_reconciliation:
             _post_conversational_reply(
@@ -1059,6 +1076,7 @@ def execute_agent_event(
                 trace_id=trace_id,
                 results=results,
                 state_reply=_fresh_session_reply(final_session, prior_state),
+                model_name=agent._current_model_name,
             )
 
     async def _execute_with_workspace() -> None:
