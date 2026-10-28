@@ -37,7 +37,7 @@ def test_get_model_chain_free_tier(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_model_chain_free_tier_token_gating(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify Gemma is omitted for large payloads (>14k tokens) and kept for small ones."""
+    """Verify Gemma is omitted for large payloads (>10k tokens) and kept for payloads <= 10k."""
     monkeypatch.setenv("WEBHOOK_TIER", "free")
     monkeypatch.delenv("PRIMARY_MODEL", raising=False)
     monkeypatch.delenv("GEMMA_MODEL", raising=False)
@@ -47,6 +47,16 @@ def test_get_model_chain_free_tier_token_gating(monkeypatch: pytest.MonkeyPatch)
     assert "gemini-3.8-flash" in large_payload_chain
     assert "gemma-4-31b-it" not in large_payload_chain
     assert "gemma-4-26b-a4b-it" not in large_payload_chain
+
+    # Boundary check: just over 10k
+    boundary_over = get_model_chain(estimated_tokens=10001)
+    assert "gemma-4-31b-it" not in boundary_over
+    assert "gemma-4-26b-a4b-it" not in boundary_over
+
+    # Boundary check: exactly 10k
+    boundary_at = get_model_chain(estimated_tokens=10000)
+    assert "gemma-4-31b-it" in boundary_at
+    assert "gemma-4-26b-a4b-it" in boundary_at
 
     small_payload_chain = get_model_chain(estimated_tokens=5000)
     assert "gemini-3.5-flash-lite" in small_payload_chain

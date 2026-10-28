@@ -25,7 +25,7 @@ When rate limit errors (`429 RESOURCE_EXHAUSTED`), quota depletion, single-reque
 
 Default primary model: `gemini-3.5-flash-lite` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars).
 
-All Gemini models below provide **250,000 TPM**, allowing full multi-file PR reviews and AST dossiers without token truncation. Gemma models provide massive daily request budgets (14,400 RPD) but are strictly token-gated to payloads ≤ 14,000 tokens due to their 16k TPM ceiling.
+All Gemini models below provide **250,000 TPM**, allowing full multi-file PR reviews and AST dossiers without token truncation. Gemma models provide massive daily request budgets (14,400 RPD) but are strictly token-gated to payloads ≤ 10,000 tokens due to their 16k TPM ceiling.
 
 | Step | Model | Free Tier RPM | Free Tier TPM | Free Tier RPD | Role |
 | :--- | :--- | :---: | :---: | :---: | :--- |
@@ -37,8 +37,8 @@ All Gemini models below provide **250,000 TPM**, allowing full multi-file PR rev
 | **5** | `gemini-3.5-flash` | 5 | 250,000 | 20 | Quota backup fallback |
 | **6** | `gemini-2.5-flash-lite` | 10 | 250,000 | 20 | High-efficiency lightweight fallback |
 | **7** | `gemini-2.5-flash` | 5 | 250,000 | 20 | Fast general-purpose fallback |
-| **8** | `gemma-4-31b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated fallback (payloads ≤ 14k tokens) |
-| **9** | `gemma-4-26b-a4b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated backup (payloads ≤ 14k tokens) |
+| **8** | `gemma-4-31b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated fallback (payloads ≤ 10k tokens) |
+| **9** | `gemma-4-26b-a4b-it` | 30 | ⚠️ 16,000 | 14,400 | Token-gated backup (payloads ≤ 10k tokens) |
 
 ### 💳 Paid Tier Chain (2.x High-Bandwidth & 4M TPM Token Expansion)
 
