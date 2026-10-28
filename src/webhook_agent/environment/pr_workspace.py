@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import tarfile
 import tempfile
 from collections.abc import AsyncIterator
@@ -17,6 +16,7 @@ from typing import Any
 
 import httpx
 
+from webhook_agent.constants import ENABLE_PR_WORKSPACE
 from webhook_agent.environment.base import BaseEnvironment
 from webhook_agent.environment.context import ephemeral_environment
 
@@ -45,7 +45,7 @@ async def pr_workspace(
     - Never raises on setup/download failure; logs warning and yields None.
     - Cleans up ephemeral files upon exit.
     """
-    enable = os.environ.get("ENABLE_PR_WORKSPACE", "1").strip().lower()
+    enable = ENABLE_PR_WORKSPACE.strip().lower()
     if enable in ("0", "false", "no", "off"):
         logger.info("PR workspace disabled via ENABLE_PR_WORKSPACE=0")
         yield None

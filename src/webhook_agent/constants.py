@@ -13,24 +13,29 @@ DEFAULT_GITHUB_INSTALLATION_ID = "150411146"
 DEFAULT_GITHUB_REPOSITORY = "cgj8702-org/hannibal-hub-agents"
 
 # --- GCP Multi-Project Identifiers ---
-DEFAULT_PUBSUB_PROJECT = "cgj8702-webhook-agent"
-DEFAULT_FIRESTORE_PROJECT = DEFAULT_PUBSUB_PROJECT
-DEFAULT_WEBHOOK_PAID_PROJECT = "cgj8702-webhook-agent"
-DEFAULT_WEBHOOK_FREE_PROJECT = "gen-lang-client-0615466973"
-DEFAULT_COMPUTE_HOST_PROJECT = "chatbot-project-hannibal"
+WEBHOOK_PAID_PROJECT = "cgj8702-webhook-agent"
+WEBHOOK_FREE_PROJECT = "gen-lang-client-0615466973"
+CHATBOT_PAID_PROJECT = "chatbot-project-hannibal"
+CHATBOT_FREE_PROJECT = "gen-lang-client-0035989819"
+DEFAULT_PUBSUB_PROJECT = WEBHOOK_PAID_PROJECT
+DEFAULT_FIRESTORE_PROJECT = WEBHOOK_PAID_PROJECT
+DEFAULT_COMPUTE_HOST_PROJECT = CHATBOT_PAID_PROJECT
 
 # --- PubSub Topic & Subscription Paths ---
-DEFAULT_PUBSUB_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks"
-DEFAULT_PUBSUB_SUBSCRIPTION = f"projects/{DEFAULT_PUBSUB_PROJECT}/subscriptions/webhooks-sub"
-DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = f"projects/{DEFAULT_PUBSUB_PROJECT}/topics/webhooks-dead-letter"
+PUBSUB_PROJECT = WEBHOOK_PAID_PROJECT
+PUBSUB_TOPIC = f"projects/{PUBSUB_PROJECT}/topics/webhooks"
+PUBSUB_SUBSCRIPTION = f"projects/{PUBSUB_PROJECT}/subscriptions/webhooks-sub"
+PUBSUB_DEAD_LETTER_TOPIC = f"projects/{PUBSUB_PROJECT}/topics/webhooks-dead-letter"
+DEFAULT_PUBSUB_TOPIC = PUBSUB_TOPIC
+DEFAULT_PUBSUB_SUBSCRIPTION = PUBSUB_SUBSCRIPTION
+DEFAULT_PUBSUB_DEAD_LETTER_TOPIC = PUBSUB_DEAD_LETTER_TOPIC
 
 # --- Operational Policy Defaults ---
-# Fail open / allowed by default: automated mutations enabled out of the box.
-DEFAULT_ALLOW_AUTOMATED_MUTATIONS = "1"
-# Grounding gating enabled by default: citation grounding is strictly enforced,
-# blocking ungrounded APPROVE verdicts unless bypassed via 'skip-grounding-gate'.
-# See review/grounding.py and review/review_enforcer.py.
-DEFAULT_STRICT_REVIEW_GROUNDING = "1"
+ENABLE_DYNAMIC_MODEL_ROUTING = "1"
+ENABLE_PR_WORKSPACE = "1"
+STRICT_REVIEW_GROUNDING = "1"
+ENABLE_CODERABBIT_AUTO_RESOLVE = "true"
+ALLOW_AUTOMATED_MUTATIONS = "1"
 # Hold automatic reviews until the PR head commit has fully green CI (silent skip on failure).
 # Set REVIEW_WAIT_FOR_CI=0 to restore review-immediately behaviour. See review/ci_gate.py.
 DEFAULT_REVIEW_WAIT_FOR_CI = "1"
@@ -40,7 +45,6 @@ DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"
 DEFAULT_WEBHOOK_TIER = "free"
 # Author associations allowed to trigger agent runs (comma-separated).
 DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS = "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR"
-# Exempt logins that bypass author association trigger gate (comma-separated).
 DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]"
 
 # Repositories with native GitHub branch protection that auto-dismisses stale reviews on push.
