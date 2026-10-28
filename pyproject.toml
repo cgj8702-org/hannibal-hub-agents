@@ -33,7 +33,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
-addopts = "--strict-markers -m 'not regression'"
+addopts = "--strict-markers"
 norecursedirs = ["_archive", ".*", "dev", "docs"]
 markers = [
     "unit: Fast isolated unit tests with mocked dependencies.",
@@ -44,7 +44,6 @@ markers = [
     "guardrails: Tests for safety plugins and security guardrails.",
     "firestore: Tests for Firestore checkpoint registries.",
     "pubsub: Tests for Pub/Sub push event handlers.",
-    "regression: Brittle historical PR regression tests (skipped by default).",
 ]
 filterwarnings = [
     "ignore:.*EventsCompactionConfig.*:UserWarning",

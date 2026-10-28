@@ -70,8 +70,8 @@ Recorded bot reviews and PR metadata used by the offline replay harness (`tests/
 # Run baseline evaluation across all recorded review fixtures
 uv run python dev/replay_baseline.py
 
-# Run offline replay unit test harness (marked as regression)
-uv run pytest tests/unit/review/test_replay_harness.py -m regression
+# Run offline replay unit test harness
+uv run pytest tests/unit/review/test_replay_harness.py
 ```
 
 Regenerate (network required; never from a test):
