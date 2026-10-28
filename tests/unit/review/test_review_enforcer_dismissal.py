@@ -11,6 +11,8 @@ from webhook_agent.review.review_enforcer import (
     is_repo_with_native_stale_review_dismissal,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+
 
 def _make_mock_pr(head_sha: str = "head-1", reviews: list[MagicMock] | None = None) -> MagicMock:
     pr = MagicMock()
