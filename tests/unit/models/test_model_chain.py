@@ -329,6 +329,14 @@ def test_get_model_chain_heavy_payload_paid_tpm_priority(
     # The first 3 models must be the 4M TPM leaders
     assert chain[0] in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash")
     assert chain[1] in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash")
-    assert chain[2] in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash")
-    # Correcting assertion to match the actual chain content (3.5-flash is 4th)
+    # 3.6-flash is one of the 4M TPM leaders in position 2 or 3
+    assert chain[2] in (
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+    )
+    # 3.5-flash is 4th in the chain (after the 3 4M TPM leaders)
     assert "gemini-3.5-flash" not in chain[:3]
+    # gemini-3.6-flash is in the paid-tier heavy-payload chain
+    assert "gemini-3.6-flash" in chain
