@@ -17,17 +17,23 @@ from webhook_agent.models.model_chain import (
     is_gemini_3_plus,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
 
 
 def test_get_model_chain_free_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify free tier fallback chain defaults."""
-    monkeypatch.setenv("WEBHOOK_TIER", "free")
-    monkeypatch.delenv("PRIMARY_MODEL", raising=False)
-    monkeypatch.delenv("GEMMA_MODEL", raising=False)
+    with patch("google.genai.Client") as mock_client:
+        # Mock the client to avoid real API calls
+        mock_client.return_value.models.list.return_value = type(
+            "obj", (object,), {"pages": [iter([])]}
+        )()
 
-    chain = get_model_chain()
-    assert chain[0] == "gemini-3.1-flash-lite"
+        monkeypatch.setenv("WEBHOOK_TIER", "free")
+        monkeypatch.delenv("PRIMARY_MODEL", raising=False)
+        monkeypatch.delenv("GEMMA_MODEL", raising=False)
+
+        chain = get_model_chain()
+        assert chain[0] == "gemini-3.1-flash-lite"
     assert "gemini-3.5-flash-lite" in chain
     assert "gemini-3.8-flash" not in chain
     assert "gemini-3.7-flash" in chain
