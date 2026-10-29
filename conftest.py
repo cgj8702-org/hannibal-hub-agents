@@ -50,3 +50,19 @@ def _isolate_cloud_logging(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             google.cloud.logging.Client, "setup_logging", lambda self, *a, **kw: None
         )
+
+
+@pytest.fixture(autouse=True)
+def _suppress_experimental_adk_warnings() -> None:
+    """Suppress noisy [EXPERIMENTAL] feature warnings from google-adk.
+
+    These warnings are triggered by @feature_decorator in the ADK library,
+    which often bypasses standard pytest.ini/pyproject.toml filterwarnings.
+    """
+    import warnings
+
+    warnings.filterwarnings("ignore", message=".*FeatureName.AGENT_CONFIG is enabled.*")
+    warnings.filterwarnings(
+        "ignore", message=".*FeatureName.JSON_SCHEMA_FOR_FUNC_DECL is enabled.*"
+    )
+    warnings.filterwarnings("ignore", message=".*GeminiContextCacheManager.*")
