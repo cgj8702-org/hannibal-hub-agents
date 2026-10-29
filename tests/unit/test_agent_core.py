@@ -1188,6 +1188,8 @@ class TestRunInBgLoop:
 
 
 class TestConversationalAgent:
+    pytestmark = (pytest.mark.integration,)
+
     def test_review_intent_keywords_defined(self):
         from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
 
