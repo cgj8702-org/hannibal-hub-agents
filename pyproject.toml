@@ -33,7 +33,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
-addopts = "--strict-markers --deselect pytest.mark.integration"
+addopts = "--strict-markers -m \"not integration\""
 norecursedirs = ["_archive", ".*", "dev", "docs"]
 markers = [
     "unit: Fast isolated unit tests with mocked dependencies.",

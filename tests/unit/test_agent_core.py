@@ -1511,5 +1511,7 @@ class TestConversationalAgent:
                 "assist you today",
                 "pleasure to be here",
                 "ready to assist",
+                "part of the team",
+                "support your current priorities",
             ]
         )
