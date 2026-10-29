@@ -480,12 +480,14 @@ class TestToolRegistration:
         tool_names = sorted(
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         )
-        expected = sorted([
-            "list_dir",
-            "read_file",
-            "review",
-            "search_files",
-        ])
+        expected = sorted(
+            [
+                "list_dir",
+                "read_file",
+                "review",
+                "search_files",
+            ]
+        )
         assert tool_names == expected
 
     def test_no_removed_tools_present(self):
