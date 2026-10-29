@@ -18,7 +18,7 @@ from webhook_agent.core.execution import (
 from webhook_agent.core.policy import Mode, resolve_event_policy
 from webhook_agent.webhook_types import ActionResult
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
 
 
 def test_post_conversational_reply_success() -> None:

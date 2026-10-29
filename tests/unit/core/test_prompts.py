@@ -18,7 +18,7 @@ from webhook_agent.core.prompts import (
     get_max_input_tokens,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
 
 
 def test_max_input_tokens_tier_resolution() -> None:
