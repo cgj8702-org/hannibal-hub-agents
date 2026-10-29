@@ -584,7 +584,7 @@ def evaluate_test_coverage_integrity(
         return ScorecardItem(
             dimension="Test Coverage & Regressions",
             status="WARN",
-            notes=f"Modified code contains {report.uncovered_count} symbol(s) ({names_str}) lacking direct test references. Recommended test stubs generated.",
+            notes=f"Modified code contains {report.uncovered_count} symbol(s) ({names_str}) lacking direct test references.",
         )
 
     if not report.coverages:
