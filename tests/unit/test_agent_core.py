@@ -480,14 +480,12 @@ class TestToolRegistration:
         tool_names = sorted(
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         )
-        expected = sorted(
-            [
-                "list_dir",
-                "read_file",
-                "review",
-                "search_files",
-            ]
-        )
+        expected = sorted([
+            "list_dir",
+            "read_file",
+            "review",
+            "search_files",
+        ])
         assert tool_names == expected
 
     def test_no_removed_tools_present(self):
@@ -1305,10 +1303,16 @@ class TestConversationalAgent:
 
     def test_conversational_comment_dispatch_posts_comment(self, monkeypatch):
         from types import SimpleNamespace
-        from unittest.mock import MagicMock
+        from unittest.mock import AsyncMock, MagicMock
 
         from webhook_agent.core.agent_definition import WebhookAgent
         from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
+
+        # Mock get_adk_model to prevent real API client instantiation
+        mock_model = MagicMock()
+        monkeypatch.setattr(
+            "webhook_agent.core.agent_definition.get_adk_model", lambda **kwargs: mock_model
+        )
 
         agent = WebhookAgent(dry_run=False)
         mock_gh = MagicMock()
