@@ -216,6 +216,8 @@ class TestIsTransientError:
 
 
 class TestWebhookAgentModelChain:
+    pytestmark = (pytest.mark.integration,)
+
     def test_get_model_chain_orders_tpm_descending(self):
         """get_model_chain should order models by capacity without duplicates and include high-bandwidth 250k TPM models on Free Tier."""
         from webhook_agent.models.model_chain import get_model_chain
@@ -1188,7 +1190,7 @@ class TestRunInBgLoop:
 
 
 class TestConversationalAgent:
-    pytestmark = (pytest.mark.integration,)
+    pytestmark = pytest.mark.integration
 
     def test_review_intent_keywords_defined(self):
         from webhook_agent.review.writeback_policy import REVIEW_INTENT_KEYWORDS
