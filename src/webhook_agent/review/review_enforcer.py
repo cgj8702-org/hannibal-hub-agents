@@ -347,7 +347,11 @@ def _enforce_verdict(
             else (state if isinstance(state, dict) else {})
         )
         if det_contract_item is None:
-            raw_det_sc = state_dict_val.get("deterministic_contract_scorecard_item")
+            raw_det_sc = (
+                state_dict_val.get("deterministic_contract_scorecard_item")
+                or state_dict_val.get("user:deterministic_contract_scorecard_item")
+                or state_dict_val.get("session:deterministic_contract_scorecard_item")
+            )
             if isinstance(raw_det_sc, dict):
                 with contextlib.suppress(Exception):
                     det_contract_item = ScorecardItem.model_validate(raw_det_sc)
@@ -355,7 +359,11 @@ def _enforce_verdict(
                 det_contract_item = raw_det_sc
 
         if det_security_item is None:
-            raw_sec_sc = state_dict_val.get("deterministic_security_scorecard_item")
+            raw_sec_sc = (
+                state_dict_val.get("deterministic_security_scorecard_item")
+                or state_dict_val.get("user:deterministic_security_scorecard_item")
+                or state_dict_val.get("session:deterministic_security_scorecard_item")
+            )
             if isinstance(raw_sec_sc, dict):
                 with contextlib.suppress(Exception):
                     det_security_item = ScorecardItem.model_validate(raw_sec_sc)
@@ -363,7 +371,11 @@ def _enforce_verdict(
                 det_security_item = raw_sec_sc
 
         if det_test_item is None:
-            raw_test_sc = state_dict_val.get("deterministic_test_scorecard_item")
+            raw_test_sc = (
+                state_dict_val.get("deterministic_test_scorecard_item")
+                or state_dict_val.get("user:deterministic_test_scorecard_item")
+                or state_dict_val.get("session:deterministic_test_scorecard_item")
+            )
             if isinstance(raw_test_sc, dict):
                 with contextlib.suppress(Exception):
                     det_test_item = ScorecardItem.model_validate(raw_test_sc)
@@ -1311,6 +1323,7 @@ def _submit_formal_review(
                 "json_fields": {
                     "event": "review_submitted",
                     "repo": repo_name,
+                    "item_id": number_text,
                     "pull_number": number_text,
                     "verdict": enforced_event,
                     "model": resolved_model or "unknown",

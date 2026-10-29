@@ -166,15 +166,15 @@ class IterationBudgetPlugin(BasePlugin):
 
         # Apply programmatic mode-aware tool call budgets:
         # - FORMAL_AUDIT: retains full max_tool_calls (25) for multi-file AST/diff inspection.
-        # - ISSUE_TRIAGE: strictly capped at 2 tool calls.
-        # - GENERAL_PAIR_PROGRAMMING / THREAD_COLLAB: capped at 4 tool calls.
+        # - ISSUE_TRIAGE: capped at 4 tool calls.
+        # - GENERAL_PAIR_PROGRAMMING / THREAD_COLLAB: capped at 6 tool calls.
         mode = state.get("agent_mode")
         from webhook_agent.core.policy import Mode
 
         if mode == Mode.ISSUE_TRIAGE:
-            effective_max_tools = min(2, self.max_tool_calls)
-        elif mode in (Mode.GENERAL_PAIR_PROGRAMMING, Mode.THREAD_COLLAB):
             effective_max_tools = min(4, self.max_tool_calls)
+        elif mode in (Mode.GENERAL_PAIR_PROGRAMMING, Mode.THREAD_COLLAB):
+            effective_max_tools = min(6, self.max_tool_calls)
         else:
             effective_max_tools = self.max_tool_calls
 

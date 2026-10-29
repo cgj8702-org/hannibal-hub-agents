@@ -147,14 +147,16 @@ async def test_iteration_budget_mode_aware_tool_budgets() -> None:
     from webhook_agent.core.policy import Mode
 
     plugin = IterationBudgetPlugin(max_turns=10, max_tool_calls=25)
+    tool = MagicMock()
+    tool.name = "search_files"
 
-    # 1. ISSUE_TRIAGE capped at 2 tool calls
-    ctx = MagicMock()
-    ctx.invocation_id = "inv_triage"
-    ctx.state = {
+    # 1. ISSUE_TRIAGE: 3 tool calls allowed, 5th exceeds capped budget of 4
+    ctx_allowed = MagicMock()
+    ctx_allowed.invocation_id = "inv_triage_ok"
+    ctx_allowed.state = {
         "agent_mode": Mode.ISSUE_TRIAGE,
         "guardrail_run": {
-            "invocation_id": "inv_triage",
+            "invocation_id": "inv_triage_ok",
             "turns": 1,
             "tool_calls": 2,
             "halt_reason": None,
@@ -162,22 +164,15 @@ async def test_iteration_budget_mode_aware_tool_budgets() -> None:
             "failures": {},
         },
     }
-    tool = MagicMock()
-    tool.name = "search_files"
+    res_ok = await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=ctx_allowed)
+    assert res_ok is None  # Allowed (call 3 of 4)
 
-    result = await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=ctx)
-    assert isinstance(result, dict)
-    assert "tool call budget of 2 exceeded" in result["error"]
-    assert "concise, helpful summary response" in result["error"]
-    assert ctx.state["guardrail_run"]["halt_reason"] == "tool_budget_exceeded:2"
-
-    # 2. GENERAL_PAIR_PROGRAMMING capped at 4 tool calls
-    ctx_chat = MagicMock()
-    ctx_chat.invocation_id = "inv_chat"
-    ctx_chat.state = {
-        "agent_mode": Mode.GENERAL_PAIR_PROGRAMMING,
+    ctx = MagicMock()
+    ctx.invocation_id = "inv_triage"
+    ctx.state = {
+        "agent_mode": Mode.ISSUE_TRIAGE,
         "guardrail_run": {
-            "invocation_id": "inv_chat",
+            "invocation_id": "inv_triage",
             "turns": 1,
             "tool_calls": 4,
             "halt_reason": None,
@@ -185,10 +180,48 @@ async def test_iteration_budget_mode_aware_tool_budgets() -> None:
             "failures": {},
         },
     }
+    result = await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=ctx)
+    assert isinstance(result, dict)
+    assert "tool call budget of 4 exceeded" in result["error"]
+    assert "concise, helpful summary response" in result["error"]
+    assert ctx.state["guardrail_run"]["halt_reason"] == "tool_budget_exceeded:4"
+
+    # 2. GENERAL_PAIR_PROGRAMMING: 5 tool calls allowed, 7th exceeds capped budget of 6
+    ctx_chat_ok = MagicMock()
+    ctx_chat_ok.invocation_id = "inv_chat_ok"
+    ctx_chat_ok.state = {
+        "agent_mode": Mode.GENERAL_PAIR_PROGRAMMING,
+        "guardrail_run": {
+            "invocation_id": "inv_chat_ok",
+            "turns": 1,
+            "tool_calls": 4,
+            "halt_reason": None,
+            "history": [],
+            "failures": {},
+        },
+    }
+    res_chat_ok = await plugin.before_tool_callback(
+        tool=tool, tool_args={}, tool_context=ctx_chat_ok
+    )
+    assert res_chat_ok is None  # Allowed (call 5 of 6)
+
+    ctx_chat = MagicMock()
+    ctx_chat.invocation_id = "inv_chat"
+    ctx_chat.state = {
+        "agent_mode": Mode.GENERAL_PAIR_PROGRAMMING,
+        "guardrail_run": {
+            "invocation_id": "inv_chat",
+            "turns": 1,
+            "tool_calls": 6,
+            "halt_reason": None,
+            "history": [],
+            "failures": {},
+        },
+    }
     result_chat = await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=ctx_chat)
     assert isinstance(result_chat, dict)
-    assert "tool call budget of 4 exceeded" in result_chat["error"]
-    assert ctx_chat.state["guardrail_run"]["halt_reason"] == "tool_budget_exceeded:4"
+    assert "tool call budget of 6 exceeded" in result_chat["error"]
+    assert ctx_chat.state["guardrail_run"]["halt_reason"] == "tool_budget_exceeded:6"
 
     # 3. FORMAL_AUDIT allows up to max_tool_calls (25)
     ctx_audit = MagicMock()
@@ -198,7 +231,7 @@ async def test_iteration_budget_mode_aware_tool_budgets() -> None:
         "guardrail_run": {
             "invocation_id": "inv_audit",
             "turns": 1,
-            "tool_calls": 4,
+            "tool_calls": 6,
             "halt_reason": None,
             "history": [],
             "failures": {},
@@ -207,7 +240,7 @@ async def test_iteration_budget_mode_aware_tool_budgets() -> None:
     result_audit = await plugin.before_tool_callback(
         tool=tool, tool_args={}, tool_context=ctx_audit
     )
-    assert result_audit is None  # Allowed! Call 5 is well within 25.
+    assert result_audit is None  # Allowed! Call 7 is well within 25.
 
 
 @pytest.mark.anyio

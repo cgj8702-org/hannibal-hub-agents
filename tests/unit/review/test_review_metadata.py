@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
+pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
 
 
 from webhook_agent.review.metadata import (
@@ -500,7 +500,11 @@ def test_string_only_invariant_gets_no_fabricated_citation(model: type) -> None:
     """A bare-string invariant produces no fabricated path/line and is recorded in verified_invariants."""
     key = "executive_summary" if model is CodeReviewResponse else "summary"
     resp = model.model_validate(
-        {key: "s", "verdict": "COMMENT", "verified_invariants": ["Retries are capped"]}
+        {
+            key: "s",
+            "verdict": "COMMENT",
+            "verified_invariants": ["Retries are capped"],
+        }
     )
     assert resp.verified_invariants == ["Retries are capped"]
 

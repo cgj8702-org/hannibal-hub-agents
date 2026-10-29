@@ -17,7 +17,7 @@ from webhook_agent.commands import (
     has_review_slash_command,
 )
 from webhook_agent.constants import (
-    DEFAULT_ALLOW_AUTOMATED_MUTATIONS,
+    ALLOW_AUTOMATED_MUTATIONS,
     DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS,
 )
 from webhook_agent.webhook_types import ActionResult
@@ -197,7 +197,7 @@ def evaluate_writeback_policy(
         ]
 
     # Check mutation policy
-    allow_auto = os.environ.get("ALLOW_AUTOMATED_MUTATIONS", DEFAULT_ALLOW_AUTOMATED_MUTATIONS) in (
+    allow_auto = ALLOW_AUTOMATED_MUTATIONS in (
         "1",
         "true",
         "True",
@@ -205,7 +205,7 @@ def evaluate_writeback_policy(
     if not allow_auto and not dry_run:
         logger.debug(
             "⛔ Mutations disabled (ALLOW_AUTOMATED_MUTATIONS=%s)",
-            os.environ.get("ALLOW_AUTOMATED_MUTATIONS", "1"),
+            ALLOW_AUTOMATED_MUTATIONS,
         )
         logger.info(
             "mutations disabled by policy (trace: %s)",

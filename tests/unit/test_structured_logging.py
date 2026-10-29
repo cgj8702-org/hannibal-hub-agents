@@ -149,3 +149,67 @@ def test_extract_log_context_populates_model() -> None:
     assert "model" in ctx
     assert isinstance(ctx["model"], str)
     assert len(ctx["model"]) > 0
+
+
+def test_extract_item_id_from_check_suite_merge_commit() -> None:
+    """Ensure _extract_item_id recovers the PR number from check_suite merge commits on main."""
+    from webhook_agent.processor import _extract_item_id
+
+    # Real-world payload matching check_suite.completed on main
+    raw = {
+        "check_suite": {
+            "head_branch": "main",
+            "head_sha": "04bf459a93dd3cb0a55eb1e428d08c69ee037e93",
+            "pull_requests": [],
+            "head_commit": {
+                "message": (
+                    "Merge pull request #474 from "
+                    "cgj8702-org/test/audit-clean-xfails-and-integration\n\n"
+                    "test: resolve xfails and enable production integration suite"
+                ),
+            },
+        }
+    }
+    assert _extract_item_id(raw) == 474
+
+
+def test_extract_item_id_variants() -> None:
+    """Ensure _extract_item_id handles diverse PR references across push and check_suite events."""
+    from webhook_agent.processor import _extract_item_id
+
+    # Squash merge (#480)
+    squash_raw = {
+        "check_suite": {
+            "head_commit": {"message": "fix(models): resolve cache invalidation (#480)"},
+            "pull_requests": [],
+        }
+    }
+    assert _extract_item_id(squash_raw) == 480
+
+    # Push commit with PR #450
+    push_raw = {
+        "commits": [{"message": "Merge PR #450 into main"}],
+    }
+    assert _extract_item_id(push_raw) == 450
+
+    # Direct pull_request
+    pr_raw = {"pull_request": {"number": 123}}
+    assert _extract_item_id(pr_raw) == 123
+
+    # Direct issue
+    issue_raw = {"issue": {"number": 42}}
+    assert _extract_item_id(issue_raw) == 42
+
+    # check_suite with populated pull_requests list
+    suite_pr_raw = {
+        "check_suite": {
+            "pull_requests": [{"number": 88}],
+        }
+    }
+    assert _extract_item_id(suite_pr_raw) == 88
+
+    # Non-PR commit
+    no_pr_raw = {
+        "head_commit": {"message": "routine chore update with no PR"},
+    }
+    assert _extract_item_id(no_pr_raw) is None

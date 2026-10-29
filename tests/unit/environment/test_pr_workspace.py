@@ -195,15 +195,16 @@ def test_pr_workspace_kill_switch(caplog, monkeypatch):
     """When ENABLE_PR_WORKSPACE=0, yields None without network calls and logs skip info."""
 
     async def _run():
-        monkeypatch.setenv("ENABLE_PR_WORKSPACE", "0")
-        mock_gh = MagicMock()
+        # Use patch for the static constant since monkeypatch.setenv no longer works
+        with patch("webhook_agent.environment.pr_workspace.ENABLE_PR_WORKSPACE", "0"):
+            mock_gh = MagicMock()
 
-        with caplog.at_level(logging.INFO):
-            async with pr_workspace(mock_gh, "owner/repo", "headsha123") as env:
-                assert env is None
+            with caplog.at_level(logging.INFO):
+                async with pr_workspace(mock_gh, "owner/repo", "headsha123") as env:
+                    assert env is None
 
-        mock_gh.get_repo.assert_not_called()
-        assert "PR workspace disabled via ENABLE_PR_WORKSPACE=0" in caplog.text
+            mock_gh.get_repo.assert_not_called()
+            assert "PR workspace disabled via ENABLE_PR_WORKSPACE=0" in caplog.text
 
     asyncio.run(_run())
 

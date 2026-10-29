@@ -26,9 +26,9 @@ from webhook_agent.models.model_chain import (
 )
 from webhook_agent.models.model_factory import get_adk_model
 from webhook_agent.models.rate_limiter import (
+    _resolve_tier,
     extract_rate_limit_details,
     get_active_api_key,
-    rpm_waiter,
 )
 from webhook_agent.review.review_enforcer import _submit_formal_review
 from webhook_agent.review.writeback_policy import (
@@ -150,16 +150,8 @@ async def _execute_adk_runner(
             new_message=msg,
             run_config=run_config,
         ):
-            # Handle token recording if usage metadata is available
-            if hasattr(event, "usage_metadata") and event.usage_metadata:
-                total_tok = getattr(event.usage_metadata, "total_token_count", 0) or getattr(
-                    event.usage_metadata, "total_tokens", 0
-                )
-                if total_tok > 0:
-                    await rpm_waiter.record_actual_tokens(
-                        model=current_model_name,
-                        actual_tokens=total_tok,
-                    )
+            # Note: LLM token recording is handled by after_model_callback
+            # to capture prompt, candidate, and thinking tokens accurately without double-counting.
 
             # Handle function response events — these are tool results from ADK
             if hasattr(event, "get_function_responses"):
@@ -216,8 +208,16 @@ async def _execute_adk_runner(
 
         if is_code_audit:
             has_investigated = any(r.tool in investigative_tools for r in results)
+            has_submitted_review = any(r.tool == "review" and r.success for r in results)
+            if has_submitted_review:
+                logger.info(
+                    "🏁 [Investigation Gate] Review already submitted successfully (trace: %s); skipping exploration loop.",
+                    trace_id[-4:],
+                )
             turn = 1
-            while not has_investigated and turn < max_investigation_turns:
+            while (
+                not has_investigated and not has_submitted_review and turn < max_investigation_turns
+            ):
                 turn += 1
                 logger.info(
                     "🔍 [Investigation Gate] Model attempted review on code changes without "
@@ -241,6 +241,7 @@ async def _execute_adk_runner(
                 )
                 await _run_single_turn(followup_directive)
                 has_investigated = any(r.tool in investigative_tools for r in results)
+                has_submitted_review = any(r.tool == "review" and r.success for r in results)
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
             logger.warning(
@@ -324,20 +325,30 @@ def _submit_deterministic_review(
         try:
             repo = gh_client.get_repo(repo_full_name)
             pr = repo.get_pull(pr_number)
+            review_state = {
+                "review_mode": ("sync" if canonical == "pull_request.synchronize" else "initial"),
+                "is_explicit_review": force,
+                "force_review": force,
+                "comment_body": comment_body,
+                "model_name": model_name,
+            }
+            if final_session and final_session.state:
+                for k in (
+                    "deterministic_contract_scorecard_item",
+                    "deterministic_security_scorecard_item",
+                    "deterministic_test_scorecard_item",
+                ):
+                    if k in final_session.state:
+                        review_state[k] = final_session.state[k]
+                    elif f"user:{k}" in final_session.state:
+                        review_state[k] = final_session.state[f"user:{k}"]
+
             detail, submitted = _submit_formal_review(
                 pr,
                 review_payload,
                 "COMMENT",
                 f"{repo_full_name}#{pr_number}",
-                {
-                    "review_mode": (
-                        "sync" if canonical == "pull_request.synchronize" else "initial"
-                    ),
-                    "is_explicit_review": force,
-                    "force_review": force,
-                    "comment_body": comment_body,
-                    "model_name": model_name,
-                },
+                review_state,
                 analyzed_sha=head_sha,
                 force=force,
                 model_name=model_name,
@@ -649,13 +660,19 @@ def execute_agent_event(
                 return results
             event_data["resumed_checkpoint"] = resumable
 
-    # Dynamic model routing
+    # Dynamic model routing & tier sync
     selected_model = _select_model_for_event(event_data)
-    if agent._current_model_name != selected_model:
+    current_tier = getattr(agent, "_current_tier", None)
+    active_tier = event_data.get("tier") or _resolve_tier()
+    tier_changed = current_tier != active_tier
+
+    if agent._current_model_name != selected_model or tier_changed:
+        agent._current_tier = active_tier
         logger.info(
-            "🔀 Dynamic Model Router: assigned model %s for event '%s' (trace: %s)",
+            "🔀 Dynamic Model Router: assigned model %s for event '%s' (tier: %s, trace: %s)",
             selected_model,
             canonical,
+            active_tier,
             trace_id[-4:],
         )
         if hasattr(agent, "_switch_model"):
@@ -690,9 +707,15 @@ def execute_agent_event(
     is_code_audit = policy.mode == Mode.FORMAL_AUDIT and any(
         not f.lower().endswith(doc_extensions) for f in changed_files_list
     )
+    active_tier = event_data.get("tier") or _resolve_tier()
     deterministic_state = {
         "is_code_audit": is_code_audit,
         "model_name": agent._current_model_name,
+        "active_model": agent._current_model_name,
+        "repo_full_name": repo_full_name,
+        "pr_number": pr_number,
+        "issue_number": pr_number,
+        "active_tier": active_tier,
         "deterministic_changed_files": changed_files_list,
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
         "formal_review_eligible": policy.mode == Mode.FORMAL_AUDIT,
@@ -730,6 +753,17 @@ def execute_agent_event(
             user_message = agent._build_user_message(event_data)
         if user_message is None:
             raise RuntimeError("Failed to build user message for execution")
+
+        deterministic_state["deterministic_precompiled_ast"] = bool(
+            event_data.get("deterministic_precompiled_ast")
+        )
+        for sc_key in (
+            "deterministic_contract_scorecard_item",
+            "deterministic_security_scorecard_item",
+            "deterministic_test_scorecard_item",
+        ):
+            if sc_key in event_data:
+                deterministic_state[sc_key] = event_data[sc_key]
 
         active_runner = (
             agent._runner if policy.mode == Mode.FORMAL_AUDIT else agent._conversational_runner
@@ -846,6 +880,10 @@ def execute_agent_event(
                 ).setdefault(user_id, {})
                 user_state_map["gh_client"] = gh_client
                 user_state_map["repo_full_name"] = repo_full_name
+                user_state_map["pr_number"] = pr_number
+                user_state_map["issue_number"] = pr_number
+                user_state_map["active_tier"] = active_tier
+                user_state_map["active_model"] = agent._current_model_name
                 user_state_map["sender"] = sender_login
                 user_state_map["review_mode"] = (
                     "sync" if canonical == "pull_request.synchronize" else "initial"
@@ -857,6 +895,13 @@ def execute_agent_event(
                 user_state_map["comment_body"] = comment_body
                 user_state_map["is_explicit_review"] = is_explicit_review
                 user_state_map["force_review"] = is_explicit_review
+                for sc_key in (
+                    "deterministic_contract_scorecard_item",
+                    "deterministic_security_scorecard_item",
+                    "deterministic_test_scorecard_item",
+                ):
+                    if sc_key in event_data:
+                        user_state_map[sc_key] = event_data[sc_key]
 
                 if policy.mode == Mode.FORMAL_AUDIT and pr_number and head_sha:
                     delivery_id = str(event_data.get("delivery_id") or "")

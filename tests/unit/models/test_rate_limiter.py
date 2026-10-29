@@ -87,6 +87,24 @@ async def test_record_actual_tokens(mock_registry: Path) -> None:
     assert waiter.token_histories["gemini-3.5-flash-lite"][0][2]
 
 
+@pytest.mark.anyio
+async def test_record_actual_tokens_deduplication(mock_registry: Path) -> None:
+    waiter = RPMWaiter(registry_path=mock_registry)
+    await waiter.check_and_wait(model="gemini-3.5-flash-lite", estimated_tokens=50, tier="free")
+    assert len(waiter.token_histories["gemini-3.5-flash-lite"]) == 1
+
+    # First call finalizes the reservation
+    await waiter.record_actual_tokens(model="gemini-3.5-flash-lite", actual_tokens=80)
+    assert len(waiter.token_histories["gemini-3.5-flash-lite"]) == 1
+    assert waiter.token_histories["gemini-3.5-flash-lite"][0][1] == 80
+    assert waiter.token_histories["gemini-3.5-flash-lite"][0][2] is True
+
+    # Immediate duplicate call with same token count must be dropped to prevent double counting
+    await waiter.record_actual_tokens(model="gemini-3.5-flash-lite", actual_tokens=80)
+    assert len(waiter.token_histories["gemini-3.5-flash-lite"]) == 1
+    assert waiter.token_histories["gemini-3.5-flash-lite"][0][1] == 80
+
+
 def test_extract_rate_limit_details_from_adk_error() -> None:
     from google.adk.models.google_llm import _ResourceExhaustedError
     from google.genai.errors import ClientError

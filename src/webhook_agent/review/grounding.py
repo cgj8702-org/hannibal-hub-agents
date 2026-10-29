@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from webhook_agent.constants import DEFAULT_STRICT_REVIEW_GROUNDING
+from webhook_agent.constants import STRICT_REVIEW_GROUNDING
 from webhook_agent.tools.diff_tools import walk_right_side
 
 logger = logging.getLogger("webhook_agent.review.grounding")
@@ -1438,11 +1438,7 @@ def extract_scorecard_invariants(
 
 def strict_grounding_enabled() -> bool:
     """Return True when ungrounded citations should reject or downgrade a review, not merely log."""
-    return os.environ.get("STRICT_REVIEW_GROUNDING", DEFAULT_STRICT_REVIEW_GROUNDING) in (
-        "1",
-        "true",
-        "True",
-    )
+    return STRICT_REVIEW_GROUNDING in ("1", "true", "True")
 
 
 __all__ = [
