@@ -214,7 +214,9 @@ async def _execute_adk_runner(
                     "🏁 [Investigation Gate] Review already submitted successfully (trace: %s); skipping exploration loop.",
                     trace_id[-4:],
                 )
-            turn = 1
+                turn = max_investigation_turns + 1  # Force exit of while loop
+            else:
+                turn = 1
             while (
                 not has_investigated and not has_submitted_review and turn < max_investigation_turns
             ):
@@ -1071,7 +1073,11 @@ def execute_agent_event(
             has_resolutions = '"resolutions"' in full_text
             has_verdict = '"verdict"' in full_text
             is_pr_comment = canonical.startswith(
-                ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
+                (
+                    "issue_comment.",
+                    "pull_request_review_comment.",
+                    "pull_request_review.",
+                )
             )
             if is_pr_comment and has_resolutions and has_verdict:
                 is_comment_reconciliation = True
