@@ -710,6 +710,25 @@ def execute_agent_event(
         not f.lower().endswith(doc_extensions) for f in changed_files_list
     )
     active_tier = event_data.get("tier") or _resolve_tier()
+
+    # Build user message first to populate event_data with scorecard items
+    user_message: genai_types.Content | None = None
+    resumed_dossier = event_data.get("precompiled_dossier") or (
+        event_data.get("resumed_checkpoint") or {}
+    ).get("precompiled_dossier")
+    if resumed_dossier:
+        logger.info(
+            "⚡ Fast-path: using stored precompiled dossier from review checkpoint (skipping AST/symbol pre-audit)"
+        )
+        user_message = genai_types.Content(
+            role="user",
+            parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
+        )
+        event_data["deterministic_precompiled_ast"] = True
+    else:
+        user_message = agent._build_user_message(event_data)
+
+    # Initialize deterministic_state with populated event_data values
     deterministic_state = {
         "is_code_audit": is_code_audit,
         "model_name": agent._current_model_name,
@@ -731,7 +750,6 @@ def execute_agent_event(
         "deterministic_test_scorecard_item": event_data.get("deterministic_test_scorecard_item"),
     }
 
-    user_message: genai_types.Content | None = None
     resumed_dossier = event_data.get("precompiled_dossier") or (
         event_data.get("resumed_checkpoint") or {}
     ).get("precompiled_dossier")
