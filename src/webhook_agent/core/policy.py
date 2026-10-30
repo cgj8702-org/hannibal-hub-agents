@@ -161,9 +161,23 @@ def resolve_event_policy(
             reason=f"comment targets third-party bot: {canonical}",
         )
 
+    # Determine if this event involves a PR
+    is_pr = bool(
+        raw.get("pull_request") is not None
+        or (raw.get("issue") or {}).get("pull_request") is not None
+        or canonical.startswith(
+            (
+                "pull_request.",
+                "pull_request_review.",
+                "pull_request_review_comment.",
+            )
+        )
+    )
+
     # --- FORMAL_AUDIT: PR lifecycle events ---
-    # Partner bots (Cline, Jules) and human contributors get zero-bypass formal audit on PR events
-    if canonical in FORMAL_REVIEW_EVENTS:
+    # Strict guard: only PR events can enter formal audit mode.
+    # Issue events must be triaged/discussed, never reviewed as PRs.
+    if is_pr and canonical in FORMAL_REVIEW_EVENTS:
         session_key = _derive_session_key(event_data, raw, canonical)
         auditor_budget = get_auditor_thinking_budget()
         return EventPolicy(
@@ -180,7 +194,11 @@ def resolve_event_policy(
         raw.get("pull_request") is not None
         or (raw.get("issue") or {}).get("pull_request") is not None
         or canonical.startswith(
-            ("pull_request.", "pull_request_review.", "pull_request_review_comment.")
+            (
+                "pull_request.",
+                "pull_request_review.",
+                "pull_request_review_comment.",
+            )
         )
     )
 
