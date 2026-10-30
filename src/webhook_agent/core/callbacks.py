@@ -116,7 +116,8 @@ async def before_model_callback(
         tier=active_tier,
     )
     with contextlib.suppress(Exception):
-        setattr(llm_request, "_rate_limit_checked", True)  # noqa: B010
+        # cast to Any to suppress MyPy attribute error for dynamic rate limit tracking
+        llm_request._rate_limit_checked = True  # type: ignore[attr-defined]
 
     # Context Caching Model Guard: Strictly only Gemini 3+ models support context caching.
     # Gemma models (e.g. gemma-4-31b-it) and pre-Gemini-3 models do NOT support caching.
@@ -328,7 +329,7 @@ async def after_model_callback(
         or ""
     )
     logger.info(
-        "📊 [LLM Token Usage] model=%s, total=%d, prompt=%d, candidates=%d, thoughts=%d, cached=%d",
+        "📊 [LLM Token Usage] model=%s, total=%d, prompt=%d, response=%d, thoughts=%d, cached=%d",
         target_model,
         total_tokens,
         prompt_tokens,
