@@ -1175,28 +1175,25 @@ def execute_agent_event(
         async with pr_workspace(gh_client, repo_full_name, head_sha) as ws_env:
             if ws_env is not None:
                 with use_environment(ws_env):
-                    if user_message is None:
-                        user_message = agent._build_user_message(event_data)
-                        deterministic_state["deterministic_precompiled_ast"] = bool(
-                            event_data.get("deterministic_precompiled_ast")
+                    # (Re)build the user message inside the active PR workspace so that
+                    # compile_pre_audit_dossier() can read get_active_environment() and
+                    # produce real deterministic scorecard items instead of UNKNOWN.
+                    user_message = agent._build_user_message(event_data)
+                    deterministic_state["deterministic_precompiled_ast"] = bool(
+                        event_data.get("deterministic_precompiled_ast")
+                    )
+                    for sc_key in (
+                        "deterministic_contract_scorecard_item",
+                        "deterministic_security_scorecard_item",
+                        "deterministic_test_scorecard_item",
+                    ):
+                        if sc_key in event_data:
+                            deterministic_state[sc_key] = event_data[sc_key]
+                    if user_message and user_message.parts:
+                        logger.debug(
+                            "📝 Built user message for agent (length: %d chars)",
+                            len(getattr(user_message.parts[0], "text", "") or ""),
                         )
-                        if "deterministic_contract_scorecard_item" in event_data:
-                            deterministic_state["deterministic_contract_scorecard_item"] = (
-                                event_data["deterministic_contract_scorecard_item"]
-                            )
-                        if "deterministic_security_scorecard_item" in event_data:
-                            deterministic_state["deterministic_security_scorecard_item"] = (
-                                event_data["deterministic_security_scorecard_item"]
-                            )
-                        if "deterministic_test_scorecard_item" in event_data:
-                            deterministic_state["deterministic_test_scorecard_item"] = event_data[
-                                "deterministic_test_scorecard_item"
-                            ]
-                        if user_message and user_message.parts:
-                            logger.debug(
-                                "📝 Built user message for agent (length: %d chars)",
-                                len(getattr(user_message.parts[0], "text", "") or ""),
-                            )
                     await _run()
                     _finalize_results()
             else:
