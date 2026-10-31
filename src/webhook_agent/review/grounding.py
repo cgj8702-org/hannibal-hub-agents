@@ -308,13 +308,14 @@ def verify_resolutions(
 def _is_deletion_refactor_pr(diff_text: str) -> bool:
     """Detect if a PR is a pure deletion/refactor with few added lines in code files.
 
-    Returns True if the PR has fewer than 2 added lines in code files (excluding
-    docs, configs, etc.), indicating a pure deletion or refactor.
+    Returns True if the PR has fewer than 50 added lines in code files AND
+    the ratio of added to removed lines is low (indicating deletion/refactor),
+    indicating a pure deletion or refactor.
     """
     if not diff_text:
         return False
 
-    # Count added lines in code files (excluding docs, configs, etc.)
+    # Count added and removed lines in code files (excluding docs, configs, etc.)
     code_extensions = {
         ".py",
         ".js",
@@ -369,17 +370,48 @@ def _is_deletion_refactor_pr(diff_text: str) -> bool:
     }
 
     added_lines_count = 0
+    removed_lines_count = 0
+    files_changed = set()
     current_file = ""
     for line in diff_text.splitlines():
         if line.startswith(("--- a/", "+++ b/")):
             current_file = line[6:].strip()
+            files_changed.add(current_file)
         elif line.startswith("+") and not line.startswith("+++"):
             # Check if this is a code file
             if any(current_file.endswith(ext) for ext in code_extensions):
                 added_lines_count += 1
-                if added_lines_count >= 2:
-                    return False
-    return added_lines_count < 2
+        elif line.startswith("-") and not line.startswith("---"):
+            # Check if this is a code file
+            if any(current_file.endswith(ext) for ext in code_extensions):
+                removed_lines_count += 1
+
+    # If no code files changed, not a deletion/refactor
+    if added_lines_count == 0 and removed_lines_count == 0:
+        return False
+
+    # Pure deletion: many removed, few/no added
+    # Refactor: roughly equal added and removed, but few total
+    # Normal PR: more added than removed, or significant added lines
+    total_changed = added_lines_count + removed_lines_count
+    if total_changed == 0:
+        return False
+
+    # If added lines >= 50, definitely not a deletion/refactor
+    if added_lines_count >= 50:
+        return False
+
+    # If removed lines significantly exceed added lines (deletion-heavy)
+    if removed_lines_count > added_lines_count * 3:
+        return True
+
+    # If total changes are small (< 10) and roughly balanced (refactor-like)
+    # BUT only if multiple files are changed (single file modifications are not refactors)
+    return bool(
+        total_changed < 10
+        and abs(added_lines_count - removed_lines_count) <= 2
+        and len(files_changed) > 1
+    )
 
 
 def verify_citations(
