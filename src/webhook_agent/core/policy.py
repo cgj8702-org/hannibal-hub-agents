@@ -34,10 +34,6 @@ SUPPRESSED_BOT_LOGINS: frozenset[str] = frozenset(
 # Autonomous partner coding bots whose PRs are subject to zero-bypass code review
 PARTNER_BOT_LOGINS: frozenset[str] = frozenset(
     {
-        "google-labs-jules[bot]",
-        "google-labs-jules",
-        "google-jules[bot]",
-        "google-jules",
         "cline-cloud[bot]",
         "cline-cloud",
     }
@@ -219,7 +215,7 @@ def resolve_event_policy(
         )
 
     # 3. Non-PR bot activity (comments/reviews) is ignored unless review intent was requested.
-    # Partner bots are exempt for ISSUE events only: issues filed by Cline/Jules were otherwise
+    # Partner bots are exempt for ISSUE events only: issues filed by Cline were otherwise
     # never triaged (see #441). Triage cannot start a ping-pong loop, because any comment the
     # agent posts emits issue_comment — which this same rule still suppresses for bot senders.
     is_partner_bot = sender_login_lower in PARTNER_BOT_LOGINS

@@ -183,22 +183,13 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - Verify facts using tools before making assertions about repository files.
 - Tool Call Convergence (Strict): Target completing your investigation and responding within 1 to 3 tool calls. Do NOT explore or scan repository files endlessly. Once you inspect the primary file or answer the question, formulate your response immediately.
 
-### Code Mutation & Jules Delegation Protocol
-- You do NOT directly edit source code files or push git commits to repositories; implementation changes are delegated to Jules or human peers.
-- Autonomous Issue Creation: When asked to open, spawn, or file an issue or Jules task specification, use the `create_issue` tool! Format the body using `.github/ISSUE_TEMPLATE/jules_task.yml` fields (Task, Overlap check, Files in scope, Out of scope, Risk tier, Acceptance criteria, Verification commands).
-- NEVER @mention or ping jules as a GitHub username (there is an unrelated human user named `jules` on GitHub!). Jules is Google's autonomous coding agent (username: `google-labs-jules[bot]`) triggered via GitHub issue labels (`jules`), NOT by @mentioning.
-- OWNER-ONLY SUMMONING & ZERO LABELING AUTHORITY: Jules' GitHub App only picks up the `jules` label when attached by the human repository owner (`cgj8702`). Label events from machine accounts (`cgj8702-agents`, bots) are ignored by Google. The agent has NO labeling capabilities on GitHub whatsoever (no label tools or label parameters exist on any tool). After you create the task issue with `create_issue`, advise the human repository owner (`cgj8702`) to review and attach the `jules` label to summon Jules.
-- Programmatic Jules API interaction: Once Jules responds with a session/task ID (typically via a comment on the issue), the agent can interact with Jules through the Jules REST API (`src/webhook_agent/github/jules_api.py`):
-  - `get_session(session_id)` — retrieve session state (`QUEUED`, `PLANNING`, `AWAITING_PLAN_APPROVAL`, `AWAITING_USER_FEEDBACK`, `IN_PROGRESS`, `PAUSED`, `COMPLETED`, `FAILED`)
-  - `approve_plan(session_id)` — approve a pending plan (auto-approved by default when `JULES_AUTO_APPROVE_PLAN=1`)
-  - `send_message(session_id, prompt)` — send a message if Jules requests user feedback
-  - `extract_session_id(text)` — extract a session ID from a comment body or URL
-  - `list_activities(session_id)` — list session activities for progress insight
-- The agent does **not** post progress comments to GitHub threads — all communication with Jules happens via the Jules REST API.
+### Code Mutation & Issue Delegation Protocol
+- You do NOT directly edit source code files or push git commits to repositories; implementation changes are delegated to human peers.
+- Autonomous Issue Creation: When asked to open, spawn, or file an issue or task specification, use the `create_issue` tool! Format the body using `.github/ISSUE_TEMPLATE/bug_report.yml` fields (Task, Overlap check, Files in scope, Out of scope, Risk tier, Acceptance criteria, Verification commands).
 - When a human engineer requests code changes, bug fixes, refactoring, or feature implementations:
   1. Analyze the context, inspect affected files via `read_file` or `search_files`, and identify the root cause, design approach, and invariants.
   2. Call `create_issue` to open the task issue directly (or output the specification if requested).
-  3. Advise that the human repository owner (`cgj8702`) must attach the `jules` label to summon Jules (`google-labs-jules[bot]`), and you will audit the resulting PR.
+  3. Advise that the human repository owner (`cgj8702`) will review and assign the issue for implementation.
 """
 
 
@@ -433,7 +424,11 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         raw.get("pull_request") is not None
         or (raw.get("issue") or {}).get("pull_request") is not None
         or canonical.startswith(
-            ("pull_request.", "pull_request_review.", "pull_request_review_comment.")
+            (
+                "pull_request.",
+                "pull_request_review.",
+                "pull_request_review_comment.",
+            )
         )
     )
     has_comment_review_intent = is_pr_context and has_review_slash_command(comment_body)
