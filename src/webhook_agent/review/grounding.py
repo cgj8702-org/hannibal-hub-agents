@@ -2,7 +2,7 @@
 
 This module answers exactly one question: *is a review's citation traceable to evidence
 that exists?* It is deliberately pure -- no I/O, no client objects, no clock -- so both
-the offline replay harness and ``review()`` can use it.
+unit tests and ``review()`` can use it.
 
 It reuses the hunk-walking primitives in :mod:`webhook_agent.tools.diff_tools`
 (``walk_right_side``) rather than maintaining a second diff parser. The dependency

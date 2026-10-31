@@ -11,7 +11,6 @@ The router is loaded **by path** rather than imported, for three reasons:
    dev environment, so it is stubbed.
 
 Loading by path keeps this suite offline and leaves ``pyproject.toml`` untouched.
-``tests/unit/review/test_replay_harness.py`` uses the same technique for a ``dev/`` script.
 """
 
 from __future__ import annotations
