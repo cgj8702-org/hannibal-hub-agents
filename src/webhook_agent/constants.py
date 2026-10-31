@@ -56,4 +56,4 @@ DEFAULT_NATIVE_STALE_REVIEW_DISMISSAL_REPOS = "cgj8702-org/hannibal-hub-agents"
 # --- Debug Logging ---
 # Enable debug logging for model thoughts and responses per turn.
 # Set LOG_MODEL_THOUGHTS=1 to capture prompt/response/thoughts in Cloud Logging at DEBUG level.
-DEFAULT_LOG_MODEL_THOUGHTS = "0"
+DEFAULT_LOG_MODEL_THOUGHTS = "1"
