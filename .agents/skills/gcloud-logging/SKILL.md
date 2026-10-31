@@ -47,59 +47,60 @@ Support both absolute ISO 8601 timestamps and relative offsets depending on diag
 Use relative offsets when inspecting recent activity via the `--freshness` flag. NOTE: relative offsets like `"-15m"` are NOT valid inside the timestamp filter expression — they cause `INVALID_ARGUMENT` errors. Use `--freshness` instead:
 ```bash
 # Query python logs from the past 15 minutes
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=asc --freshness='15m' --limit=100
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=desc --freshness='15m' --limit=100 > python_logs_15m.log
 
-# Query all python logs from the past hour, newest first
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=desc --freshness='1h' --limit=100
+# Query all python logs from the past hour
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=desc --freshness='1h' --limit=100 > python_logs_1h.log
 ```
 
 ### 2. Absolute Bounded Window Queries (Historical Traceability)
 For historical incident analysis, specify both a start (`timestamp >= ...`) and optional end bound (`timestamp <= ...`) to prevent pagination traps:
 ```bash
 # Bounded time window query
-gcloud logging read 'timestamp >= "2026-07-31T20:22:44Z" AND timestamp <= "2026-07-31T23:59:59Z"' --project=cgj8702-webhook-agent --order=asc --limit=500
+gcloud logging read 'timestamp >= "2026-07-31T20:22:44Z" AND timestamp <= "2026-07-31T23:59:59Z"' --project=cgj8702-webhook-agent --order=desc --limit=500 > historical_logs.log
 ```
 
 ---
 
 ## 📚 Core Command Catalog
 
-### 1. Python Application Logs (`worker` & `processor`)
+### Default: Python Application Logs (`worker` & `processor`)
+**Default behavior:** Unless explicitly requested otherwise, only Python application logs are downloaded.
 Inspect python logging streams produced by `setup_cloud_logging()`:
 ```bash
-# View all python logger messages in ascending order
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=asc --limit=200
+# View all python logger messages in descending order (default 24h window)
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python"' --project=cgj8702-webhook-agent --order=desc --freshness='24h' --limit=500 > python_logs_24h.log
 
 # Filter specifically by logger name (e.g. worker or processor)
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python" AND labels.python_logger="processor"' --project=cgj8702-webhook-agent --order=asc --limit=100
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/python" AND labels.python_logger="processor"' --project=cgj8702-webhook-agent --order=desc --freshness='24h' --limit=500 > python_logs_processor_24h.log
 ```
 
-### 2. Cloud Run HTTP Request Logs
+### 2. Cloud Run HTTP Request Logs (Explicit Request Required)
 Inspect inbound HTTP webhook deliveries arriving at `webhook-router`:
 ```bash
 # View HTTP POST request logs with status codes and latencies
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/run.googleapis.com%2Frequests"' --project=cgj8702-webhook-agent --order=asc --limit=100
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/run.googleapis.com%2Frequests"' --project=cgj8702-webhook-agent --order=desc --freshness='24h' --limit=500 > cloud_run_requests_24h.log
 ```
 
-### 3. Cloud Run Container & Probe System Logs
+### 3. Cloud Run Container & Probe System Logs (Explicit Request Required)
 Diagnose container autoscaling and readiness probe health:
 ```bash
 # View Cloud Run container startup and readiness probe output
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/run.googleapis.com%2Fvarlog%2Fsystem"' --project=cgj8702-webhook-agent --order=asc --limit=100
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/run.googleapis.com%2Fvarlog%2Fsystem"' --project=cgj8702-webhook-agent --order=desc --freshness='24h' --limit=500 > cloud_run_system_24h.log
 ```
 
-### 4. Cloud Audit Activity Logs
+### 4. Cloud Audit Activity Logs (Explicit Request Required)
 Inspect SecretManager version updates or IAM service account credentials:
 ```bash
 # View audit logs for SecretManager or IAM operations
-gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/cloudaudit.googleapis.com%2Factivity"' --project=cgj8702-webhook-agent --order=asc --limit=50
+gcloud logging read 'logName="projects/cgj8702-webhook-agent/logs/cloudaudit.googleapis.com%2Factivity"' --project=cgj8702-webhook-agent --order=desc --freshness='24h' --limit=500 > audit_logs_24h.log
 ```
 
-### 5. Severity-Filtered Queries
+### 5. Severity-Filtered Queries (Explicit Request Required)
 Isolate errors and warnings across all project log streams:
 ```bash
 # Isolate WARNING and ERROR severity logs
-gcloud logging read 'severity>=WARNING' --project=cgj8702-webhook-agent --limit=50
+gcloud logging read 'severity>=WARNING' --project=cgj8702-webhook-agent --order=desc --freshness='24h' --limit=500 > severity_warnings_24h.log
 ```
 
 ---
@@ -115,7 +116,7 @@ gcloud logging read 'severity>=WARNING' --project=cgj8702-webhook-agent --limit=
 * **Impact:** If `process_event()` only logs `"Event processed: ..."` without calling `AgentCore`, the worker will act as a stub and silently drop event execution.
 
 ### 3. Pagination & Unbounded Query Traps
-* **Gotcha:** Running `gcloud logging read 'timestamp >= ...'` with `--order=asc` and high limits over large date ranges can cause GCP API pagination to return earlier high-volume log streams instead of target entries.
+* **Gotcha:** Running `gcloud logging read 'timestamp >= ...'` with `--order=desc` and high limits over large date ranges can cause GCP API pagination to return earlier high-volume log streams instead of target entries.
 * **Remedy:** Combine `logName` filtering with bounded timestamp ranges (`timestamp >= ... AND timestamp <= ...`).
 
 ### 4. Relative Timestamps Rejected in Filter Expression
