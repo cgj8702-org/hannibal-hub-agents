@@ -43,7 +43,7 @@ def test_partner_bot_issue_closed_is_triaged() -> None:
 
 @pytest.mark.parametrize(
     "login",
-    ["cline-cloud[bot]", "cline-cloud", "google-labs-jules[bot]"],
+    ["cline-cloud[bot]", "cline-cloud"],
 )
 def test_partner_bot_issue_comment_without_intent_stays_ignored(login: str) -> None:
     """The exemption is issue events only; bot comments still need review intent."""

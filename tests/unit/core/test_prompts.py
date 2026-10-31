@@ -172,8 +172,8 @@ def test_build_user_message_issues_unlabeled_owner_override() -> None:
         "raw_payload": {
             "action": "unlabeled",
             "sender": {"login": "cgj8702"},
-            "issue": {"number": 271, "title": "Jules task", "body": "Do the thing."},
-            "label": {"name": "jules"},
+            "issue": {"number": 271, "title": "Task", "body": "Do the thing."},
+            "label": {"name": "task"},
         },
     }
 
@@ -183,7 +183,7 @@ def test_build_user_message_issues_unlabeled_owner_override() -> None:
 
     text = content.parts[0].text
     assert "Label Action: unlabeled" in text
-    assert "Label Name: jules" in text
+    assert "Label Name: task" in text
     assert "OWNER OVERRIDE" in text
     assert "cgj8702" in text
 
@@ -196,8 +196,8 @@ def test_build_user_message_issues_labeled_owner_override() -> None:
         "raw_payload": {
             "action": "labeled",
             "sender": {"login": "cgj8702"},
-            "issue": {"number": 272, "title": "Jules task", "body": "Do the thing."},
-            "label": {"name": "jules"},
+            "issue": {"number": 272, "title": "Task", "body": "Do the thing."},
+            "label": {"name": "task"},
         },
     }
 
@@ -205,7 +205,7 @@ def test_build_user_message_issues_labeled_owner_override() -> None:
     text = content.parts[0].text
     assert text is not None
     assert "Label Action: labeled" in text
-    assert "Label Name: jules" in text
+    assert "Label Name: task" in text
     assert "OWNER OVERRIDE" in text
 
 
@@ -217,8 +217,8 @@ def test_build_user_message_issues_unlabeled_non_owner_no_override() -> None:
         "raw_payload": {
             "action": "unlabeled",
             "sender": {"login": "octocat"},
-            "issue": {"number": 271, "title": "Jules task", "body": "Do the thing."},
-            "label": {"name": "jules"},
+            "issue": {"number": 271, "title": "Task", "body": "Do the thing."},
+            "label": {"name": "task"},
         },
     }
 
@@ -226,7 +226,7 @@ def test_build_user_message_issues_unlabeled_non_owner_no_override() -> None:
     text = content.parts[0].text
     assert text is not None
     assert "Label Action: unlabeled" in text
-    assert "Label Name: jules" in text
+    assert "Label Name: task" in text
     assert "OWNER OVERRIDE" not in text
 
 
