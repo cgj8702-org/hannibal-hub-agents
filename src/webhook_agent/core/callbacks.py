@@ -12,17 +12,60 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from typing import Any
 
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import BaseTool, ToolContext
+from google.genai import types as genai_types
 
+from webhook_agent.constants import DEFAULT_LOG_MODEL_THOUGHTS
 from webhook_agent.core.policy import Mode
 from webhook_agent.models.rate_limiter import _resolve_tier, rpm_waiter
 
 logger = logging.getLogger("webhook_agent.core.callbacks")
+
+
+def _is_model_thoughts_logging_enabled() -> bool:
+    """Check if model thoughts and responses debug logging is enabled."""
+    return os.environ.get("LOG_MODEL_THOUGHTS", DEFAULT_LOG_MODEL_THOUGHTS).lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _extract_thoughts_from_response(llm_response: LlmResponse) -> str:
+    """Extract thoughts/reasoning content from LLM response."""
+    thoughts_parts = []
+    if hasattr(llm_response, "content") and llm_response.content:
+        parts = getattr(llm_response.content, "parts", None) or []
+        for part in parts:
+            # Check for thought content in the part
+            thought = getattr(part, "thought", None)
+            if thought:
+                thoughts_parts.append(str(thought))
+            # Also check for text that might be thoughts
+            text = getattr(part, "text", None)
+            if text and hasattr(part, "thought_signature"):
+                # This is likely a thought block
+                thoughts_parts.append(str(text))
+    return "\n".join(thoughts_parts) if thoughts_parts else ""
+
+
+def _extract_response_text(llm_response: LlmResponse) -> str:
+    """Extract text content from LLM response."""
+    text_parts = []
+    if hasattr(llm_response, "content") and llm_response.content:
+        parts = getattr(llm_response.content, "parts", None) or []
+        for part in parts:
+            text = getattr(part, "text", None)
+            if text and not hasattr(part, "thought_signature"):
+                text_parts.append(str(text))
+    return "\n".join(text_parts) if text_parts else ""
 
 
 def _check_pr_closed_short_circuit(state: Any) -> None:
@@ -91,6 +134,22 @@ async def before_model_callback(
     if hasattr(llm_request, "contents") and llm_request.contents:
         input_text = str(llm_request.contents)
 
+    # Debug logging for model prompt (thoughts logging)
+    if _is_model_thoughts_logging_enabled():
+        logger.debug(
+            "🧠 [Model Prompt] model=%s, prompt_length=%d chars",
+            target_model,
+            len(input_text),
+            extra={
+                "json_fields": {
+                    "event_type": "model_prompt",
+                    "model": target_model,
+                    "prompt_preview": input_text[:500] + ("..." if len(input_text) > 500 else ""),
+                    "prompt_length": len(input_text),
+                }
+            },
+        )
+
     exact_tokens = len(input_text) // 4 + 500
     used_heuristic = True
     if exact_tokens > 0:
@@ -145,6 +204,15 @@ async def before_model_callback(
                     ttl_seconds=1800,
                     cache_intervals=10,
                 )
+
+        # Enable thinking for Gemini 3+ models
+        if getattr(llm_request, "config", None) is None:
+            llm_request.config = genai_types.GenerateContentConfig()
+        if getattr(llm_request.config, "thinking_config", None) is None:
+            llm_request.config.thinking_config = genai_types.ThinkingConfig(
+                include_thoughts=True,
+                thinking_budget=1024,
+            )
 
     callback_context.state["prompt_tokens"] = exact_tokens
     callback_context.state["active_model"] = target_model
@@ -351,6 +419,31 @@ async def after_model_callback(
             }
         },
     )
+
+    # Debug logging for model response and thoughts
+    if _is_model_thoughts_logging_enabled():
+        thoughts_content = _extract_thoughts_from_response(llm_response)
+        response_text = _extract_response_text(llm_response)
+        logger.debug(
+            "🧠 [Model Response] model=%s, thoughts_length=%d, response_length=%d",
+            target_model,
+            len(thoughts_content),
+            len(response_text),
+            extra={
+                "json_fields": {
+                    "event_type": "model_response",
+                    "model": target_model,
+                    "thoughts_preview": thoughts_content[:500]
+                    + ("..." if len(thoughts_content) > 500 else ""),
+                    "thoughts_length": len(thoughts_content),
+                    "response_preview": response_text[:500]
+                    + ("..." if len(response_text) > 500 else ""),
+                    "response_length": len(response_text),
+                    "thoughts_tokens": thoughts_tokens,
+                    "candidates_tokens": candidates_tokens,
+                }
+            },
+        )
 
     if total_tokens > 0:
         callback_context.state["total_tokens"] = total_tokens

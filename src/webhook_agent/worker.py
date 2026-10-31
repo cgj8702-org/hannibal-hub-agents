@@ -154,10 +154,19 @@ def _lease_extender(
 
 def setup_cloud_logging() -> None:
     """Initialize Google Cloud Logging handler if available."""
-    from webhook_agent.constants import DEFAULT_PUBSUB_PROJECT
+    from webhook_agent.constants import DEFAULT_LOG_MODEL_THOUGHTS, DEFAULT_PUBSUB_PROJECT
 
     try:
         import google.cloud.logging
+
+        # If model thoughts logging is enabled, ensure DEBUG level
+        if os.environ.get("LOG_MODEL_THOUGHTS", DEFAULT_LOG_MODEL_THOUGHTS).lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
         log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
         log_level = getattr(logging, log_level_name, logging.INFO)
@@ -172,7 +181,11 @@ def setup_cloud_logging() -> None:
         logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
         warnings.filterwarnings("ignore", category=UserWarning, module=r"google\.adk")
 
-        logger.info("☁️ Google Cloud Logging initialized for project [%s]", project_id)
+        logger.info(
+            "☁️ Google Cloud Logging initialized for project [%s] at level [%s]",
+            project_id,
+            log_level_name,
+        )
     except Exception as exc:
         logger.warning("Could not initialize Google Cloud Logging handler: %s", exc)
 
