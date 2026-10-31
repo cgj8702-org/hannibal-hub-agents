@@ -9,7 +9,6 @@ from typing import Any
 
 from google.genai import types as genai_types
 
-from webhook_agent.github.bot_identity import is_owner_sender
 from webhook_agent.models.rate_limiter import _resolve_tier
 
 logger = logging.getLogger("webhook_agent.core.prompts")
@@ -182,14 +181,6 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - You currently have access to tools: `read_file`, `search_files`, `list_dir`, `get_issue`, and `create_issue`.
 - Verify facts using tools before making assertions about repository files.
 - Tool Call Convergence (Strict): Target completing your investigation and responding within 1 to 3 tool calls. Do NOT explore or scan repository files endlessly. Once you inspect the primary file or answer the question, formulate your response immediately.
-
-### Code Mutation & Issue Delegation Protocol
-- You do NOT directly edit source code files or push git commits to repositories; implementation changes are delegated to human peers.
-- Autonomous Issue Creation: When asked to open, spawn, or file an issue or task specification, use the `create_issue` tool! Format the body using `.github/ISSUE_TEMPLATE/bug_report.yml` fields (Task, Overlap check, Files in scope, Out of scope, Risk tier, Acceptance criteria, Verification commands).
-- When a human engineer requests code changes, bug fixes, refactoring, or feature implementations:
-  1. Analyze the context, inspect affected files via `read_file` or `search_files`, and identify the root cause, design approach, and invariants.
-  2. Call `create_issue` to open the task issue directly (or output the specification if requested).
-  3. Advise that the human repository owner (`cgj8702`) will review and assign the issue for implementation.
 """
 
 
@@ -248,7 +239,6 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
     elif canonical.startswith("issues."):
         issue = raw.get("issue", {})
         issue_num = issue.get("number", "unknown")
-        action = raw.get("action")
         parts.append(f"Issue Number: {issue_num}")
         parts.append(f"Issue Title: {issue.get('title', 'N/A')}")
         parts.append(f"Issue Body: {issue.get('body') or ''}")
@@ -258,24 +248,8 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 "\n### 🎯 ISSUE TRIAGE DIRECTIVE:\n"
                 "A new issue was filed. Analyze the reported problem or feature request concisely.\n"
                 "- If enough context is provided, summarize your assessment and potential approach in 1-2 paragraphs.\n"
-                "- If code changes will be required, advise that the human repository owner may review and attach the `jules` label to summon Jules.\n"
                 "- Limit tool calls strictly (<= 2 calls) to check basic facts if needed. Do NOT perform exhaustive repo-wide scans."
             )
-
-        # Label add/remove events: surface which label changed and whether the
-        # acting user is the repository owner. The owner's label action is an
-        # explicit manual override that the agent must respect and never reverse.
-        if action in ("labeled", "unlabeled"):
-            label = raw.get("label") or {}
-            label_name = label.get("name", "unknown") if isinstance(label, dict) else "unknown"
-            parts.append(f"Label Action: {action}")
-            parts.append(f"Label Name: {label_name}")
-            if is_owner_sender(sender, raw):
-                parts.append(
-                    f"OWNER OVERRIDE: '{sender_login}' is the repository owner. This "
-                    f"'{action}' action on label '{label_name}' is an explicit manual "
-                    "override. Respect it and do not reverse or re-add the label."
-                )
     elif canonical.startswith("pull_request."):
         pr = raw.get("pull_request", {})
         pr_num = pr.get("number", "unknown")
