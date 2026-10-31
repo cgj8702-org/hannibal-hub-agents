@@ -204,13 +204,18 @@ def main() -> int:
 
     subscription_path = subscription
     keep_running = True
+    shutdown_initiated = False
+    shutdown_start_time = 0.0
+    GRACEFUL_SHUTDOWN_TIMEOUT = 60.0  # seconds
 
     def _signal_handler(signum: int, frame: Any) -> None:
-        nonlocal keep_running
+        nonlocal keep_running, shutdown_initiated, shutdown_start_time
         if not keep_running:
             return  # Already shutting down; ignore repeated signals
-        logger.info("🛑 Signal %s received, shutting down...", signum)
+        logger.info("🛑 Signal %s received, initiating graceful shutdown...", signum)
         keep_running = False
+        shutdown_initiated = True
+        shutdown_start_time = time.time()
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
@@ -226,6 +231,14 @@ def main() -> int:
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
         now = time.time()
+
+        # Check for graceful shutdown timeout
+        if shutdown_initiated and (now - shutdown_start_time) > GRACEFUL_SHUTDOWN_TIMEOUT:
+            logger.warning(
+                "⏰ Graceful shutdown timeout (%ds) exceeded, forcing exit...",
+                GRACEFUL_SHUTDOWN_TIMEOUT,
+            )
+            break
 
         # Periodic Review Checkpoint Resume Sweep (Every 60s when ENABLE_REVIEW_RESUME=1)
         if (
@@ -270,6 +283,13 @@ def main() -> int:
         if not response.received_messages:
             continue
 
+        # Don't start new work if shutdown has been initiated
+        if shutdown_initiated:
+            logger.info(
+                "🛑 Shutdown initiated, not processing new message, allowing Pub/Sub to redeliver"
+            )
+            continue
+
         message = response.received_messages[0].message
         ack_id = response.received_messages[0].ack_id
 
@@ -288,9 +308,7 @@ def main() -> int:
                     except Exception as exc:
                         if attempt + 1 < max_attempts and _is_transient(exc):
                             base_delay = _RETRY_DELAYS[attempt]
-                            jittered_delay = base_delay * random.uniform(  # noqa: S311 - pseudo-random jitter for network retry, non-cryptographic
-                                0.8, 1.2
-                            )
+                            jittered_delay = base_delay * random.uniform(0.8, 1.2)
                             logger.warning(
                                 "⚠️ Transient failure on attempt %d/%d for message %s: %s. Retrying in %.2fs...",
                                 attempt + 1,

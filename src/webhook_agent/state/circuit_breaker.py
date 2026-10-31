@@ -89,7 +89,7 @@ class CircuitBreaker:
     def compute_backoff(self, attempt: int) -> float:
         """Compute exponential backoff with randomized multiplicative jitter: base_delay * 2^attempt * uniform(0.8, 1.2)."""
         raw_delay = self.base_delay * (2**attempt)
-        jitter = random.uniform(0.8, 1.2)  # noqa: S311 - pseudo-random jitter for backoff delay, non-cryptographic
+        jitter = random.uniform(0.8, 1.2)
         return max(0.1, round(raw_delay * jitter, 3))
 
     async def call_async(self, func: Callable[..., Awaitable[T]], *args: Any, **kwargs: Any) -> T:

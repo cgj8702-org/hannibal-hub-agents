@@ -8,7 +8,8 @@ WorkingDirectory=/home/carly/hannibal-hub-agents
 Environment="PYTHONPATH=/home/carly/hannibal-hub-agents/src"
 ExecStart=/bin/bash -c 'source /home/carly/hannibal-hub-agents/scripts/load_secrets.sh && exec /home/carly/.local/bin/uv run python main.py'
 Restart=always
-RestartSec=5s
+RestartSec=10s
+TimeoutStopSec=70s
 
 [Install]
 WantedBy=default.target
