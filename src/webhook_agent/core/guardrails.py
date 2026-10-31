@@ -84,8 +84,8 @@ class IterationBudgetPlugin(BasePlugin):
 
     def __init__(
         self,
-        max_turns: int = 6,
-        max_tool_calls: int = 15,
+        max_turns: int = 8,
+        max_tool_calls: int = 30,
         name: str = "iteration_budget_plugin",
     ) -> None:
         super().__init__(name=name)
@@ -108,13 +108,13 @@ class IterationBudgetPlugin(BasePlugin):
         run["turns"] = run.get("turns", 0) + 1
         state["guardrail_run"] = run
 
-        # Apply tighter turn budget for conversational / triage modes (default 5 turns)
-        # while preserving full max_turns (10) for formal audit reviews.
+        # Apply tighter turn budget for conversational / triage modes (default 7 turns)
+        # while preserving full max_turns (8) for formal audit reviews.
         mode = state.get("agent_mode")
         from webhook_agent.core.policy import Mode
 
         effective_max_turns = (
-            self.max_turns if mode == Mode.FORMAL_AUDIT or mode is None else min(5, self.max_turns)
+            self.max_turns if mode == Mode.FORMAL_AUDIT or mode is None else min(7, self.max_turns)
         )
 
         if run["turns"] > effective_max_turns and not run.get("halt_reason"):
@@ -165,16 +165,16 @@ class IterationBudgetPlugin(BasePlugin):
         state["guardrail_run"] = run
 
         # Apply programmatic mode-aware tool call budgets:
-        # - FORMAL_AUDIT: retains full max_tool_calls (25) for multi-file AST/diff inspection.
-        # - ISSUE_TRIAGE: capped at 4 tool calls.
-        # - GENERAL_PAIR_PROGRAMMING / THREAD_COLLAB: capped at 6 tool calls.
+        # - FORMAL_AUDIT: retains full max_tool_calls (30) for multi-file AST/diff inspection.
+        # - ISSUE_TRIAGE: capped at 8 tool calls.
+        # - GENERAL_PAIR_PROGRAMMING / THREAD_COLLAB: capped at 10 tool calls.
         mode = state.get("agent_mode")
         from webhook_agent.core.policy import Mode
 
         if mode == Mode.ISSUE_TRIAGE:
-            effective_max_tools = min(4, self.max_tool_calls)
+            effective_max_tools = min(8, self.max_tool_calls)
         elif mode in (Mode.GENERAL_PAIR_PROGRAMMING, Mode.THREAD_COLLAB):
-            effective_max_tools = min(6, self.max_tool_calls)
+            effective_max_tools = min(10, self.max_tool_calls)
         else:
             effective_max_tools = self.max_tool_calls
 

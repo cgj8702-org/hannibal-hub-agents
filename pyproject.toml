@@ -96,6 +96,7 @@ ignore = [
     "SIM108",    # ternary operator enforcement (if-else statements are clearer)
     "SIM117",    # nested with-statements often more readable than combined
     "S108",      # hardcoded temp file path for GITHUB_PRIVATE_KEY_PATH (created with mode 0700 by load_secrets.sh)
+    "S311",      # random.uniform for retry jitter (non-cryptographic, pseudo-random is acceptable)
 ]
 
 [tool.ruff.lint.isort]
