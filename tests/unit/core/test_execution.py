@@ -899,6 +899,83 @@ def test_execute_agent_event_fast_fails_on_missing_pr_number() -> None:
         )
 
 
+def test_execute_agent_event_skips_initial_build_when_pr_workspace_available(
+    tmp_path: Path,
+) -> None:
+    """Verify execute_agent_event skips initial user message build when PR workspace will be used.
+
+    When is_pr_context and head_sha are both True, the initial build of the user message
+    (which calls compile_pre_audit_dossier) should be skipped because it will be rebuilt
+    inside the PR workspace context where get_active_environment() returns the workspace.
+    This ensures deterministic scorecard items are generated with an active environment.
+    """
+    from contextlib import asynccontextmanager
+
+    from webhook_agent.environment import LocalEnvironment, get_active_environment
+
+    mock_agent = MagicMock()
+    mock_agent._normalize_model_name.side_effect = lambda x: x
+    mock_agent._current_model_name = "gemini-3.5-flash-lite"
+    mock_agent._app_name = "test_app"
+
+    session_service = MagicMock()
+    mock_agent._session_service = session_service
+    created_session = MagicMock()
+    created_session.state = {}
+    session_service.get_session = AsyncMock(return_value=created_session)
+    session_service.append_event = AsyncMock()
+    session_service.user_state = {}
+
+    env = LocalEnvironment(tmp_path)
+    build_call_count = 0
+    active_env_during_build: Any = None
+
+    def fake_build_message(data: Any) -> Any:
+        nonlocal build_call_count, active_env_during_build
+        build_call_count += 1
+        active_env_during_build = get_active_environment()
+        part = MagicMock()
+        part.text = "prompt"
+        msg = MagicMock()
+        msg.parts = [part]
+        return msg
+
+    mock_agent._build_user_message.side_effect = fake_build_message
+
+    async def fake_execute(*args: Any, **kwargs: Any) -> list[Any]:
+        return []
+
+    @asynccontextmanager
+    async def fake_pr_workspace(gh: Any, repo: str, sha: str):
+        yield env
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request.opened",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "dev"},
+        "raw_payload": {"pull_request": {"number": 1, "head": {"sha": "sha_pr_head"}}},
+    }
+
+    with (
+        patch("webhook_agent.core.execution.pr_workspace", side_effect=fake_pr_workspace),
+        patch("webhook_agent.core.execution._execute_adk_runner", side_effect=fake_execute),
+        patch("webhook_agent.core.execution.review_checkpoint_manager.save_checkpoint"),
+    ):
+        execute_agent_event(
+            agent=mock_agent, event_data=event_data, gh_client=MagicMock(), trace_id="tr1"
+        )
+
+    # The initial build should be skipped (build_call_count should be 1, called inside workspace)
+    assert build_call_count == 1, (
+        "Expected _build_user_message to be called exactly once (inside workspace)"
+    )
+    # The build should happen inside the workspace context
+    assert active_env_during_build == env, (
+        "Expected _build_user_message to be called with active PR workspace environment"
+    )
+    assert get_active_environment() is None, "Environment should be cleaned up after execution"
+
+
 def test_execute_agent_event_fast_fails_on_missing_sender() -> None:
     """Verify execute_agent_event fast-fails with ValueError when sender login is missing."""
     event: dict[str, Any] = {
