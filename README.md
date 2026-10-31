@@ -60,7 +60,7 @@ flowchart TD
 │       ├── analysis/        # Deterministic pre-audits (AST, symbol graph, test impact, diff filter, lockfile, security scan)
 │       ├── core/            # ADK WebhookAgent, prompts, execution engine, event policy, callbacks, & plugins
 │       ├── environment/     # Local & ephemeral PR workspace execution contexts
-│       ├── github/          # GitHub App auth, bot identity, PR context, thread resolver, & Jules API/proxy
+│       ├── github/          # GitHub App auth, bot identity, PR context, thread resolver
 │       ├── models/          # Dynamic model chains, rate limiters, depleted-model registry, & factory
 │       ├── review/          # Verdict parsing, grounding enforcement, AST/CI gates, duplicate detection, schemas & formatting
 │       ├── state/           # Review checkpoints (14d sliding TTL), audit reconciliation, circuit breaker, & idempotency
@@ -119,7 +119,7 @@ Key environment variables configuring orchestrator operation:
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `TRIGGER_ALLOWED_ASSOCIATIONS` | `OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR` | Comma-separated list of permitted author associations for triggering actions. |
-| `TRIGGER_EXEMPT_LOGINS` | `cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]` | Comma-separated list of user or bot logins exempt from author association checks. |
+| `TRIGGER_EXEMPT_LOGINS` | `cgj8702,cgj8702-agents,dependabot[bot]` | Comma-separated list of user or bot logins exempt from author association checks. |
 | `ENABLE_PR_WORKSPACE` | `1` | Clone PR head into an ephemeral sandbox workspace for accurate AST, symbol, and diff analysis (`1` = enabled, `0` = disabled). |
 | `LOG_LEVEL` | `INFO` | Application logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `ALLOW_AUTOMATED_MUTATIONS` | `1` | Master policy gate for automated writeback actions (comments, formal reviews). |
@@ -128,7 +128,6 @@ Key environment variables configuring orchestrator operation:
 | `ENABLE_REVIEW_RESUME` | `0` | Enable the periodic sweep that resumes paused review checkpoints (see `docs/CHECKPOINT_RESUME.md`). |
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Seconds between checkpoint resume sweeps, when `ENABLE_REVIEW_RESUME=1`. |
 | `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |
-| `JULES_AUTO_APPROVE_PLAN` | `1` | When `1`, auto-approves Jules plans that await approval. Set `0` to require manual approval via Jules API. |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1` (default), reject or downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
 | `NATIVE_STALE_REVIEW_DISMISSAL_REPOS` | `cgj8702-org/hannibal-hub-agents` | Comma-separated repositories where GitHub native branch protection auto-dismisses stale reviews on push, causing the bot to skip manual review dismissal. |

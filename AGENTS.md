@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Instructions for every agent and human working in this repo: Antigravity, Jules, Claude, Gemini CLI, and maintainers alike. This file is the single source of truth for agent instructions. There is no separate `GEMINI.md`.
+Instructions for every agent and human working in this repo: Antigravity, Claude, Gemini CLI, and maintainers alike. This file is the single source of truth for agent instructions. There is no separate `GEMINI.md`.
 
 **Operating philosophy:** high-efficiency engineering with a supportive, warm, informal communication style. *Efficiency is elegant. Predictability is beautiful.*
 
@@ -117,15 +117,9 @@ When `WEBHOOK_TIER="paid"`, `WEBHOOK_PAID_KEY` and paid RPM/RPD rate limits are 
 
 ---
 
-## 8. GitHub Identity & Jules
+## 8. GitHub Identity
 
 * **GitHub App Identity:** Installation tokens represent the bot identity (`BOT_LOGIN = "hannibal-hub-agents[bot]"`).
-* **Jules Delegation:** Jules (`google-labs-jules[bot]`) is summoned by attaching the `jules` label to an issue or PR.
-  - Jules only answers the human repository owner (`cgj8702`). Labels added by machine accounts or bots are ignored by Google.
-  - Never `@mention` `jules` (an unrelated human user exists on GitHub).
-  - The agent creates task issues using the `.github/ISSUE_TEMPLATE/jules_task.yml` template. After the issue is filed, the human owner reviews and attaches the `jules` label to summon Jules.
-  - Once Jules responds with a session/task ID (typically via a comment on the issue), the agent interacts with Jules programmatically through the Jules REST API (`GET /v1alpha/sessions/{id}`, `POST /v1alpha/sessions/{id}:approvePlan`, `POST /v1alpha/sessions/{id}:sendMessage`). The agent can approve or deny plans and send messages — it does **not** post progress comments to GitHub threads.
-  - Jules PRs undergo the same review and zero-bypass protocol. Jules PRs trigger CI and the formal audit pipeline directly without proxy re-opening.
 
 ---
 

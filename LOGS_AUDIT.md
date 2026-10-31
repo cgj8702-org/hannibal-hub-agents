@@ -14,7 +14,7 @@ When a PR or Issue event arrives, multiple subsystems fight each other:
 1. **The Investigation Gate traps the agent in a zombie loop** even after a review has already been successfully published to GitHub, burning 400k+ tokens while idling in 54s sleep pauses.
 2. **Deterministic pre-audit findings are silently lost** due to a state initialization race condition in `execution.py`, causing `review_enforcer.py` to forcibly downgrade valid review scorecards to `UNKNOWN`.
 3. **The Grounding Verifier rejects 100% of initial PR reviews**, forcing adversarial retries that collide directly with the 250k free-tier TPM ceiling.
-4. **Jules session discovery crashes on every Jules event** with an HTTP 404 because the session extraction regex greedily captures the repository organization name (`cgj8702-org`).
+4. **Session discovery crashes on every relevant event** with an HTTP 404 because the session extraction regex greedily captures the repository organization name (`cgj8702-org`).
 5. **Issue events get misrouted into `formal_audit`**, attempting to submit Pull Request reviews against Issues and throwing 404s.
 6. **Continuous deployment restarts (SIGTERM)** kill in-flight workers mid-review, causing Pub/Sub message redelivery, duplicate reviews, and orphaned `/tmp/hannibal-sandbox-*` workspaces.
 
@@ -67,19 +67,19 @@ When a PR or Issue event arrives, multiple subsystems fight each other:
 
 ---
 
-### 🚨 Bug 3: Jules Session ID Greedy Regex Extraction (`cgj8702-org`)
+### 🚨 Bug 3: Session ID Greedy Regex Extraction (`cgj8702-org`)
 * **Log Evidence (Logs [218]–[220] & [392]–[394])**:
   ```text
-  [218] 22:32:10Z | webhook_agent.processor       | Discovered Jules session cgj8702-org from comment; inspecting state
-  [219] 22:32:10Z | webhook_agent.github.jules_api | [ERROR] Jules API request failed: GET /sessions/cgj8702-org
-  httpx.HTTPStatusError: Client error '404 Not Found' for url 'https://jules.googleapis.com/v1alpha/sessions/cgj8702-org'
-  [220] 22:32:11Z | webhook_agent.processor       | [WARNING] Could not resolve Jules session cgj8702-org state
+  [218] 22:32:10Z | webhook_agent.processor       | Discovered session cgj8702-org from comment; inspecting state
+  [219] 22:32:10Z | webhook_agent.session_api | [ERROR] Session API request failed: GET /sessions/cgj8702-org
+  httpx.HTTPStatusError: Client error '404 Not Found' for url 'https://session.googleapis.com/v1alpha/sessions/cgj8702-org'
+  [220] 22:32:11Z | webhook_agent.processor       | [WARNING] Could not resolve session cgj8702-org state
   ```
-* **Code Location**: `src/webhook_agent/github/jules_api.py:37-40`
+* **Code Location**: session ID extraction regex (lines 37-40)
 * **Mechanism**:
   ```python
   _SESSION_ID_RE = re.compile(
-      r"(?:https?://jules\.google\.com/session/|sessions/)?"
+      r"(?:https?://session\.google\.com/session/|sessions/)?"
       r"(?=[a-zA-Z0-9_-]*\d)"
       r"([a-zA-Z0-9_-]{6,})"
   )
@@ -88,7 +88,7 @@ When a PR or Issue event arrives, multiple subsystems fight each other:
   - The positive lookahead `(?=[a-zA-Z0-9_-]*\d)` matches any string containing at least one digit.
   - The capture group `([a-zA-Z0-9_-]{6,})` captures any alphanumeric string >= 6 chars.
   - The repository organization name `cgj8702-org` has 11 chars and contains digits (`8702`).
-  - Therefore, every PR and comment created by Jules containing the repository string `cgj8702-org/hannibal-hub-agents` causes `extract_session_id()` to extract `"cgj8702-org"`, immediately firing a bogus HTTP GET request to Google Jules API and failing with HTTP 404!
+  - Therefore, every PR and comment containing the repository string `cgj8702-org/hannibal-hub-agents` causes `extract_session_id()` to extract `"cgj8702-org"`, immediately firing a bogus HTTP GET request to the session API and failing with HTTP 404!
 
 ---
 
@@ -193,13 +193,13 @@ When a PR or Issue event arrives, multiple subsystems fight each other:
 | **#467** | PR | `pull_request.opened` | Approved after retry | Grounding rejected twice on `commands.py:23`. |
 | **#468** | Issue | `issues.opened`, `issues.labeled`, `issues.closed` | Handled | Owner opened issue; agent commented and closed cleanly. |
 | **#469** | PR | `pull_request.opened` | Approved after retry | Grounding rejected twice on 3 file citations; 45s TPM sleep. |
-| **#470** | PR (Jules) | `pull_request.opened`, `pull_request.synchronize` | Approved | Jules PR; triggered Jules regex 404 crash on `cgj8702-org`. |
+| **#470** | PR | `pull_request.opened`, `pull_request.synchronize` | Approved | PR; triggered regex 404 crash on `cgj8702-org`. |
 | **#471** | PR | `pull_request.opened` | Approved after retry | Grounding rejected once on `model_chain.py:139`. |
 | **#472** | Issue | `issues.typed`, `issue_comment.created`, `issues.closed` | Partially Blocked | Tool budget of 2 exceeded in `issue_triage` (`search_files:FAIL`). |
-| **#473** | Issue | `issues.labeled`, `issues.closed` | Handled | Jules summon labeled by owner; closed cleanly. |
+| **#473** | Issue | `issues.labeled`, `issues.closed` | Handled | Summon labeled by owner; closed cleanly. |
 | **#474** | PR | `pull_request.opened` | Approved after retry | Grounding rejected once on review submission. |
 | **#475** | PR | `pull_request.opened` | Approved after retry | Grounding rejected on `README.md` citation (unchanged file). |
-| **#476** | PR (Jules) | `pull_request.opened`, `issue_comment.created` | Approved | Triggered Jules regex 404 crash on `cgj8702-org`. |
+| **#476** | PR | `pull_request.opened`, `issue_comment.created` | Approved | Triggered regex 404 crash on `cgj8702-org`. |
 | **#477** | PR | `pull_request.opened` | Approved after retry | Grounding rejected on `schemas.py:401`. |
 | **#478** | PR | `pull_request.opened`, `pull_request.synchronize` | **Catastrophic Failure** | Killed by SIGTERM at 03:07; restarted at 03:09; failed grounding 4 times; Guardrails killswitch triggered; scorecards wiped to `UNKNOWN`; post-review zombie loop burned 400k+ tokens; manually dismissed by user with `"nah bro, chill"`. |
 
@@ -211,7 +211,7 @@ When a PR or Issue event arrives, multiple subsystems fight each other:
    - Immediately break the exploration while-loop if `any(r.tool == "review" and r.success for r in results)`. Once a review is published to GitHub, execution MUST terminate.
 2. **Fix `deterministic_state` Race Condition (`execution.py:684`)**:
    - Call `_build_user_message(event_data)` *before* initializing `deterministic_state`, or backfill `session.state` with `event_data["deterministic_*_scorecard_item"]` so `review_enforcer.py` stops wiping out PASS verdicts to `UNKNOWN`.
-3. **Fix Jules Session Regex (`jules_api.py:37`)**:
+3. **Fix Session ID Regex (lines 37-40)**:
    - Make the `session/` or `sessions/` prefix **mandatory**, or require standard UUID format `[0-9a-f-]{36}`, preventing repo strings like `cgj8702-org` from matching.
 4. **Relax Deletion / Refactor Invariant Grounding (`prompts.py:455`)**:
    - Explicitly instruct the model: *"For pure deletion or refactoring PRs with fewer than 2 added lines in code files, do not invent verified invariants; return empty `verified_invariants: []` and rely on `semantic_invariants`."*

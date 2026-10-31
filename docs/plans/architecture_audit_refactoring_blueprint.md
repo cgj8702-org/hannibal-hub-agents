@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary & Target Architecture
 
-By retiring CodeRabbit AI and promoting `hannibal-hub-agents` to your sole autonomous PR reviewer, you eliminate the `jules_proxy.py` PR-duplication workaround, fix five critical P0 bugs discovered in the codebase audit, and upgrade your review engine into a cutting-edge Google ADK long-horizon reviewer.
+By retiring CodeRabbit AI and promoting `hannibal-hub-agents` to your sole autonomous PR reviewer, you eliminate the legacy PR-duplication workaround, fix five critical P0 bugs discovered in the codebase audit, and upgrade your review engine into a cutting-edge Google ADK long-horizon reviewer.
 
 Lifting reference patterns from Google's [`adk-recipes/long-horizon-harness`](https://github.com/google/adk-recipes/tree/main/core/python/long-horizon-harness), Hannibal adopts:
 1. **Sandboxed Workspace Execution (`BaseEnvironment`):** Eliminating host VM disk bleed by isolating repo clones and analysis inside disposable, path-contained environments (`path_under_root`).
@@ -18,7 +18,7 @@ Lifting reference patterns from Google's [`adk-recipes/long-horizon-harness`](ht
          └── WebhookProcessor.process_event(payload)
                ├── Stage 1: Ingress & Strict Bot Identity Gate (bot_identity.py)
                │     ├── Suppress own bot events (`is_hannibal_bot_login`)
-               │     ├── Allow `google-labs-jules[bot]` PR lifecycle events natively (no proxy!)
+               │     ├── Allow partner bot PR lifecycle events natively (no proxy!)
                │     ├── Suppress third-party bot comments (dependabot, github-actions, etc.)
                │     └── Live PR state, superseded SHA check, & closed-PR short-circuit
                ├── Stage 2: Deterministic Pre-Flight Gates
@@ -69,12 +69,12 @@ Lifting reference patterns from Google's [`adk-recipes/long-horizon-harness`](ht
 
 ---
 
-## 3. Phase 1 (PR #310): Cut Over from CodeRabbit, Retire `jules_proxy`, & Fix Bot Identity Collisions [MERGED]
+## 3. Phase 1 (PR #310): Cut Over from CodeRabbit, Retire Legacy Proxy, & Fix Bot Identity Collisions [MERGED]
 
 **Branch:** `feat/native-hannibal-reviews` (Merged to `main` via PR #310)
 
 ### Step 1.1: Update Operational Defaults in `src/webhook_agent/constants.py`
-Enable automatic CI-gated PR reviews (`DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"`) and disable the legacy Jules proxy (`DEFAULT_ENABLE_JULES_PR_PROXY = "0"`).
+Enable automatic CI-gated PR reviews (`DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"`) and disable the legacy proxy (`DEFAULT_ENABLE_LEGACY_PROXY = "0"`).
 
 ```python
 # In src/webhook_agent/constants.py — replace the "--- Operational Policy Defaults ---" block (lines 25-39):
@@ -91,8 +91,8 @@ DEFAULT_REVIEW_WAIT_FOR_CI = "1"
 # Primary autonomous PR reviewer: automatically review opened/synchronized PRs once CI is green.
 # Set ENABLE_AUTOMATIC_PR_REVIEWS=0 to require manual /review triggers.
 DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"
-# Legacy CodeRabbit workaround proxy disabled by default; Hannibal reviews Jules PRs natively.
-DEFAULT_ENABLE_JULES_PR_PROXY = "0"
+# Legacy proxy disabled by default; Hannibal reviews partner PRs natively.
+DEFAULT_ENABLE_LEGACY_PROXY = "0"
 DEFAULT_WEBHOOK_TIER = "free"
 ```
 
@@ -124,8 +124,8 @@ def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
     login = (sender.get("login") or "").strip().lower()
     sender_type = (sender.get("type") or "").strip()
 
-    # Jules is an external mutation partner bot; its PR lifecycle events are reviewed natively
-    if is_jules_sender(sender):
+    # Partner bots are external mutation bots; their PR lifecycle events are reviewed natively
+    if is_partner_bot_sender(sender):
         return False
 
     if is_hannibal_bot_login(login):
@@ -145,32 +145,6 @@ def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
     return bool(sender_type == "Bot" and ("hannibal" in login or "agent" in login))
 ```
 Also export `is_hannibal_bot_login` in `src/webhook_agent/github/__init__.py` and `src/webhook_agent/bot_identity.py`.
-
-### Step 1.3: Gate `handle_jules_pr_opened()` in `src/webhook_agent/github/jules_proxy.py`
-Gate `handle_jules_pr_opened()` behind `ENABLE_JULES_PR_PROXY` (defaulting to `"0"`) and remove the `@coderabbitai full review` comment on line 246 so Jules PRs remain native.
-
-```python
-# In src/webhook_agent/github/jules_proxy.py — update handle_jules_pr_opened() (lines 253-270):
-from webhook_agent.constants import DEFAULT_ENABLE_JULES_PR_PROXY
-
-
-def is_jules_pr_proxy_enabled() -> bool:
-    """Return True only when ENABLE_JULES_PR_PROXY is explicitly enabled."""
-    val = os.environ.get("ENABLE_JULES_PR_PROXY", DEFAULT_ENABLE_JULES_PR_PROXY)
-    return val.strip().lower() in ("1", "true", "yes", "on")
-
-
-def handle_jules_pr_opened(
-    gh_app: Github,
-    repo_name: str,
-    payload: dict[str, Any],
-    dry_run: bool = False,
-) -> bool:
-    """Detect and process PR opened events authored by Jules when proxy mode is enabled."""
-    if not is_jules_pr_proxy_enabled():
-        return False
-    # ... existing implementation below (with `new_pr_obj.create_issue_comment("@coderabbitai full review")` removed) ...
-```
 
 ### Step 1.4: Fix Bot Review Filtering & Deduplicate Prefetch in `src/webhook_agent/github/pr_context.py` and `src/webhook_agent/processor.py`
 1. In `src/webhook_agent/github/pr_context.py`:
@@ -266,11 +240,10 @@ Fix **P0-1** and **P0-3** in `src/webhook_agent/review/review_enforcer.py`:
 
 ### Step 1.6: Update Unit Tests & Verify PR #1
 1. Update `tests/unit/test_constants_and_secrets.py` and `tests/unit/test_worker.py` to expect `DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS == "1"`.
-2. Add a test in `tests/unit/github/test_bot_identity_and_jules.py` verifying `is_hannibal_bot_login("coderabbitai[bot]") is False` and `is_hannibal_bot_login("hannibal-hub-agents[bot]") is True`.
-3. Run the verification gate:
+2. Run the verification gate:
    ```bash
    ./scripts/ruff-all.sh
-   uv run pytest tests/unit/github/test_bot_identity_and_jules.py tests/unit/github/test_pr_context.py
+   uv run pytest tests/unit/github/test_pr_context.py
    uv run pytest --tb=short -q
    ```
 
