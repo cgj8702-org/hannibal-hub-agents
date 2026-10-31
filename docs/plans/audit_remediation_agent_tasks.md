@@ -8,7 +8,6 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 
 - One task = one PR = one agent. Prompt: `Implement T-XX from docs/plans/audit_remediation_agent_tasks.md. Follow section 1 (Global rules) and section 2 (Decisions) exactly.`
 - Run tasks in the order of section 3. Tasks with no shared files may run in parallel.
-- Jules is summoned only when the human owner (`cgj8702`) attaches the `jules` label to the issue or PR. Never @mention `jules`.
 
 ## 1. Global rules (from AGENTS.md; apply to every task)
 
@@ -29,7 +28,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 
 ## 2. Decisions already made (override only by editing this file)
 
-- **D1.** Trigger authorization allows `author_association` in `OWNER,MEMBER,COLLABORATOR` (env `TRIGGER_ALLOWED_ASSOCIATIONS`). Exempt logins (env `TRIGGER_EXEMPT_LOGINS`): `cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]`.
+- **D1.** Trigger authorization allows `author_association` in `OWNER,MEMBER,COLLABORATOR` (env `TRIGGER_ALLOWED_ASSOCIATIONS`). Exempt logins (env `TRIGGER_EXEMPT_LOGINS`): `cgj8702,cgj8702-agents,dependabot[bot]`.
 - **D2.** Runtime defaults are NOT changed. `ALLOW_AUTOMATED_MUTATIONS` stays `1` and `STRICT_REVIEW_GROUNDING` stays `0`; documentation is corrected to match. Flipping them needs a human.
 - **D3.** `calculate_verdict` semantics are unchanged. Safety is added at the submission point (T-04).
 - **D4.** Deploy auth is preserved (token stays, but is scrubbed on failure). Removing the token needs a human.
@@ -89,10 +88,8 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
   2. In `should_process_event`, after the bot filter: read `raw.comment.author_association` for comment events, `raw.pull_request.author_association` for PR events. If a value is present and not in the allowed set, and neither the sender login nor the author login is exempt (case-insensitive), return `False` and log at INFO with delivery id and association (never the comment body).
   3. If no association field exists (synthetic events from the CI gate or checkpoint resume, `check_suite.completed`), allow, as today.
   4. Read env overrides at call time, not import time.
-- **tests:** each association value, exempt logins, synthetic events, env override, Jules and Dependabot paths still reach their existing handlers.
+- **tests:** each association value, exempt logins, synthetic events, env override, Dependabot paths still reach their existing handlers.
 - **done when:** a `NONE`-association commenter saying "please review" is ignored; an `OWNER` is not.
-- **do not:** touch the Jules adoption or dependency fast-path logic.
-
 ## T-04: Never APPROVE without verified patches [COMPLETED - PR #328]
 
 - **branch:** `fix/approve-requires-grounding` | **commit:** `fix(review): downgrade APPROVE when grounding is skipped`
@@ -250,8 +247,7 @@ Findings were produced by a code audit; items marked *reproduced* were demonstra
 
 1. Check whether an APPROVE from the app counts toward required reviews in branch protection. If it does, raise T-04 priority and consider disabling APPROVE entirely.
 2. Review and merge T-11 yourself; it deploys to the VM on merge.
-3. Attach the `jules` label yourself to dispatch to Jules.
-4. Commit a secrets-redacted copy of the Cloud Run router config so signature verification is auditable.
+3. Commit a secrets-redacted copy of the Cloud Run router config so signature verification is auditable.
 5. Decide whether to flip `ALLOW_AUTOMATED_MUTATIONS` and `STRICT_REVIEW_GROUNDING` defaults (D2) and whether `calculate_verdict` should default to something other than APPROVE (D3).
 6. Confirm whether the GitHub App is public. The worker uses one hard-wired installation id, so other installations' events would use the wrong token.
 7. Consider attaching the service account to the VM instead of storing a key file.
