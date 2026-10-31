@@ -712,6 +712,7 @@ def execute_agent_event(
     active_tier = event_data.get("tier") or _resolve_tier()
 
     # Build user message first to populate event_data with scorecard items
+    # Skip initial build if we'll have a PR workspace (rebuilt inside workspace context)
     user_message: genai_types.Content | None = None
     resumed_dossier = event_data.get("precompiled_dossier") or (
         event_data.get("resumed_checkpoint") or {}
@@ -725,8 +726,10 @@ def execute_agent_event(
             parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
         )
         event_data["deterministic_precompiled_ast"] = True
-    else:
+    elif not (is_pr_context and head_sha):
+        # Only build outside workspace if we won't have a workspace to rebuild in
         user_message = agent._build_user_message(event_data)
+    # If is_pr_context and head_sha, we'll build inside the workspace context below
 
     # Initialize deterministic_state with populated event_data values
     deterministic_state = {
