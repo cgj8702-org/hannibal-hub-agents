@@ -9,7 +9,6 @@ from typing import Any
 
 from google.genai import types as genai_types
 
-from webhook_agent.github.bot_identity import is_owner_sender
 from webhook_agent.models.rate_limiter import _resolve_tier
 
 logger = logging.getLogger("webhook_agent.core.prompts")
@@ -182,23 +181,6 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 - You currently have access to tools: `read_file`, `search_files`, `list_dir`, `get_issue`, and `create_issue`.
 - Verify facts using tools before making assertions about repository files.
 - Tool Call Convergence (Strict): Target completing your investigation and responding within 1 to 3 tool calls. Do NOT explore or scan repository files endlessly. Once you inspect the primary file or answer the question, formulate your response immediately.
-
-### Code Mutation & Jules Delegation Protocol
-- You do NOT directly edit source code files or push git commits to repositories; implementation changes are delegated to Jules or human peers.
-- Autonomous Issue Creation: When asked to open, spawn, or file an issue or Jules task specification, use the `create_issue` tool! Format the body using `.github/ISSUE_TEMPLATE/jules_task.yml` fields (Task, Overlap check, Files in scope, Out of scope, Risk tier, Acceptance criteria, Verification commands).
-- NEVER @mention or ping jules as a GitHub username (there is an unrelated human user named `jules` on GitHub!). Jules is Google's autonomous coding agent (username: `google-labs-jules[bot]`) triggered via GitHub issue labels (`jules`), NOT by @mentioning.
-- OWNER-ONLY SUMMONING & ZERO LABELING AUTHORITY: Jules' GitHub App only picks up the `jules` label when attached by the human repository owner (`cgj8702`). Label events from machine accounts (`cgj8702-agents`, bots) are ignored by Google. The agent has NO labeling capabilities on GitHub whatsoever (no label tools or label parameters exist on any tool). After you create the task issue with `create_issue`, advise the human repository owner (`cgj8702`) to review and attach the `jules` label to summon Jules.
-- Programmatic Jules API interaction: Once Jules responds with a session/task ID (typically via a comment on the issue), the agent can interact with Jules through the Jules REST API (`src/webhook_agent/github/jules_api.py`):
-  - `get_session(session_id)` — retrieve session state (`QUEUED`, `PLANNING`, `AWAITING_PLAN_APPROVAL`, `AWAITING_USER_FEEDBACK`, `IN_PROGRESS`, `PAUSED`, `COMPLETED`, `FAILED`)
-  - `approve_plan(session_id)` — approve a pending plan (auto-approved by default when `JULES_AUTO_APPROVE_PLAN=1`)
-  - `send_message(session_id, prompt)` — send a message if Jules requests user feedback
-  - `extract_session_id(text)` — extract a session ID from a comment body or URL
-  - `list_activities(session_id)` — list session activities for progress insight
-- The agent does **not** post progress comments to GitHub threads — all communication with Jules happens via the Jules REST API.
-- When a human engineer requests code changes, bug fixes, refactoring, or feature implementations:
-  1. Analyze the context, inspect affected files via `read_file` or `search_files`, and identify the root cause, design approach, and invariants.
-  2. Call `create_issue` to open the task issue directly (or output the specification if requested).
-  3. Advise that the human repository owner (`cgj8702`) must attach the `jules` label to summon Jules (`google-labs-jules[bot]`), and you will audit the resulting PR.
 """
 
 
@@ -257,7 +239,6 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
     elif canonical.startswith("issues."):
         issue = raw.get("issue", {})
         issue_num = issue.get("number", "unknown")
-        action = raw.get("action")
         parts.append(f"Issue Number: {issue_num}")
         parts.append(f"Issue Title: {issue.get('title', 'N/A')}")
         parts.append(f"Issue Body: {issue.get('body') or ''}")
@@ -267,24 +248,8 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 "\n### 🎯 ISSUE TRIAGE DIRECTIVE:\n"
                 "A new issue was filed. Analyze the reported problem or feature request concisely.\n"
                 "- If enough context is provided, summarize your assessment and potential approach in 1-2 paragraphs.\n"
-                "- If code changes will be required, advise that the human repository owner may review and attach the `jules` label to summon Jules.\n"
                 "- Limit tool calls strictly (<= 2 calls) to check basic facts if needed. Do NOT perform exhaustive repo-wide scans."
             )
-
-        # Label add/remove events: surface which label changed and whether the
-        # acting user is the repository owner. The owner's label action is an
-        # explicit manual override that the agent must respect and never reverse.
-        if action in ("labeled", "unlabeled"):
-            label = raw.get("label") or {}
-            label_name = label.get("name", "unknown") if isinstance(label, dict) else "unknown"
-            parts.append(f"Label Action: {action}")
-            parts.append(f"Label Name: {label_name}")
-            if is_owner_sender(sender, raw):
-                parts.append(
-                    f"OWNER OVERRIDE: '{sender_login}' is the repository owner. This "
-                    f"'{action}' action on label '{label_name}' is an explicit manual "
-                    "override. Respect it and do not reverse or re-add the label."
-                )
     elif canonical.startswith("pull_request."):
         pr = raw.get("pull_request", {})
         pr_num = pr.get("number", "unknown")
@@ -433,7 +398,11 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         raw.get("pull_request") is not None
         or (raw.get("issue") or {}).get("pull_request") is not None
         or canonical.startswith(
-            ("pull_request.", "pull_request_review.", "pull_request_review_comment.")
+            (
+                "pull_request.",
+                "pull_request_review.",
+                "pull_request_review_comment.",
+            )
         )
     )
     has_comment_review_intent = is_pr_context and has_review_slash_command(comment_body)

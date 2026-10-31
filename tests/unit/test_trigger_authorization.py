@@ -165,14 +165,13 @@ class TestTriggerAuthorization:
         assert self.processor.should_process_event(ev_first_timer) is False
 
     def test_exempt_logins_case_insensitive(self) -> None:
-        """Exempt logins (cgj8702, cgj8702-agents, dependabot[bot], google-labs-jules[bot]) bypass association check."""
+        """Exempt logins (cgj8702, cgj8702-agents, dependabot[bot]) bypass association check."""
         exempt_logins = [
             "cgj8702",
             "CGJ8702",
             "cgj8702-agents",
             "dependabot[bot]",
             "Dependabot[Bot]",
-            "google-labs-jules[bot]",
         ]
         for login in exempt_logins:
             # Comment event with NONE association but exempt sender

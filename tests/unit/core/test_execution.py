@@ -1043,8 +1043,8 @@ class TestResolveEventPolicy:
     def test_issue_comment_with_quote_reply_stays_general_pair_programming(self) -> None:
         """Quoted text in blockquotes (> or │) must not trigger review slash commands or audit mode."""
         quote_body = (
-            "> If you'd like to pursue this refactoring, please review and attach the jules label\n\n"
-            "well, first i need you to create the issue w the jules spec for me dude lol"
+            "> If you'd like to pursue this refactoring, please review and attach the task label\n\n"
+            "well, first i need you to create the issue w the task spec for me dude lol"
         )
         event_data = {
             "canonical": "issue_comment.created",
@@ -1131,7 +1131,7 @@ class TestResolveEventPolicy:
         assert policy.may_post_comment is False
 
     def test_partner_bot_pull_request_opened_is_formal_audit(self) -> None:
-        for bot_login in ("cline-cloud[bot]", "google-labs-jules[bot]"):
+        for bot_login in ("cline-cloud[bot]",):
             event_data = {
                 "canonical": "pull_request.opened",
                 "repository": {"full_name": "owner/repo"},
@@ -1147,7 +1147,7 @@ class TestResolveEventPolicy:
         event_data = {
             "canonical": "issue_comment.created",
             "repository": {"full_name": "owner/repo"},
-            "sender": {"login": "google-labs-jules[bot]"},
+            "sender": {"login": "cline-cloud[bot]"},
             "raw_payload": {
                 "issue": {"number": 42, "pull_request": {}},
                 "comment": {"body": "/review please"},
@@ -1161,7 +1161,7 @@ class TestResolveEventPolicy:
         event_data = {
             "canonical": "issue_comment.created",
             "repository": {"full_name": "owner/repo"},
-            "sender": {"login": "google-labs-jules[bot]"},
+            "sender": {"login": "cline-cloud[bot]"},
             "raw_payload": {
                 "issue": {"number": 42, "pull_request": {}},
                 "comment": {"body": "I updated the files."},

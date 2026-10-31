@@ -206,32 +206,6 @@ class TestTier0DropGuard:
         assert processor.should_process_event(event) is False
         assert pr_closed_registry.is_closed(repo, pr_number) is True
 
-    def test_drops_non_owner_jules_label(self, processor: WebhookProcessor) -> None:
-        """Non-owner attaching jules label is dropped in Tier 0."""
-        event = _base_event(
-            "issues",
-            "labeled",
-            sender="random-user",
-            extra_raw={
-                "label": {"name": "jules"},
-                "issue": {"number": 10, "state": "open"},
-            },
-        )
-        assert processor.should_process_event(event) is False
-
-    def test_allows_owner_jules_label(self, processor: WebhookProcessor) -> None:
-        """Owner attaching jules label passes Tier 0 for Tier 1 handling."""
-        event = _base_event(
-            "issues",
-            "labeled",
-            sender="cgj8702",
-            extra_raw={
-                "label": {"name": "jules"},
-                "issue": {"number": 10, "state": "open"},
-            },
-        )
-        assert processor.should_process_event(event) is True
-
 
 class TestTier1ProgrammaticActions:
     def test_check_suite_completed_handled_programmatically(
@@ -254,23 +228,6 @@ class TestTier1ProgrammaticActions:
             status = processor._handle_tier_1_programmatic(event, "check_suite.completed", "del-ci")
             assert status == Tier1Status.TERMINAL
             mock_ci.assert_called_once_with(event)
-
-    def test_owner_jules_label_handled_programmatically(self, processor: WebhookProcessor) -> None:
-        """Owner jules label is handled in Tier 1 with 0 LLM calls (TERMINAL)."""
-        event = _base_event(
-            "issues",
-            "labeled",
-            sender="cgj8702",
-            extra_raw={
-                "label": {"name": "jules"},
-                "issue": {"number": 456, "state": "open"},
-            },
-        )
-        event["canonical"] = "issues.labeled"
-        with patch.object(processor, "handle_jules_label", return_value=True) as mock_jules:
-            status = processor._handle_tier_1_programmatic(event, "issues.labeled", "del-jules")
-            assert status == Tier1Status.TERMINAL
-            mock_jules.assert_called_once_with(event)
 
     def test_base_branch_merge_sync_handled_programmatically(
         self, processor: WebhookProcessor

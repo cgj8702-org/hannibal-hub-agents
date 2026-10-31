@@ -214,7 +214,9 @@ async def _execute_adk_runner(
                     "🏁 [Investigation Gate] Review already submitted successfully (trace: %s); skipping exploration loop.",
                     trace_id[-4:],
                 )
-            turn = 1
+                turn = max_investigation_turns + 1  # Force exit of while loop
+            else:
+                turn = 1
             while (
                 not has_investigated and not has_submitted_review and turn < max_investigation_turns
             ):
@@ -708,6 +710,25 @@ def execute_agent_event(
         not f.lower().endswith(doc_extensions) for f in changed_files_list
     )
     active_tier = event_data.get("tier") or _resolve_tier()
+
+    # Build user message first to populate event_data with scorecard items
+    user_message: genai_types.Content | None = None
+    resumed_dossier = event_data.get("precompiled_dossier") or (
+        event_data.get("resumed_checkpoint") or {}
+    ).get("precompiled_dossier")
+    if resumed_dossier:
+        logger.info(
+            "⚡ Fast-path: using stored precompiled dossier from review checkpoint (skipping AST/symbol pre-audit)"
+        )
+        user_message = genai_types.Content(
+            role="user",
+            parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
+        )
+        event_data["deterministic_precompiled_ast"] = True
+    else:
+        user_message = agent._build_user_message(event_data)
+
+    # Initialize deterministic_state with populated event_data values
     deterministic_state = {
         "is_code_audit": is_code_audit,
         "model_name": agent._current_model_name,
@@ -729,7 +750,6 @@ def execute_agent_event(
         "deterministic_test_scorecard_item": event_data.get("deterministic_test_scorecard_item"),
     }
 
-    user_message: genai_types.Content | None = None
     resumed_dossier = event_data.get("precompiled_dossier") or (
         event_data.get("resumed_checkpoint") or {}
     ).get("precompiled_dossier")
@@ -1071,7 +1091,11 @@ def execute_agent_event(
             has_resolutions = '"resolutions"' in full_text
             has_verdict = '"verdict"' in full_text
             is_pr_comment = canonical.startswith(
-                ("issue_comment.", "pull_request_review_comment.", "pull_request_review.")
+                (
+                    "issue_comment.",
+                    "pull_request_review_comment.",
+                    "pull_request_review.",
+                )
             )
             if is_pr_comment and has_resolutions and has_verdict:
                 is_comment_reconciliation = True

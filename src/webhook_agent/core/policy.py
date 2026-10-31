@@ -34,10 +34,6 @@ SUPPRESSED_BOT_LOGINS: frozenset[str] = frozenset(
 # Autonomous partner coding bots whose PRs are subject to zero-bypass code review
 PARTNER_BOT_LOGINS: frozenset[str] = frozenset(
     {
-        "google-labs-jules[bot]",
-        "google-labs-jules",
-        "google-jules[bot]",
-        "google-jules",
         "cline-cloud[bot]",
         "cline-cloud",
     }
@@ -161,9 +157,23 @@ def resolve_event_policy(
             reason=f"comment targets third-party bot: {canonical}",
         )
 
+    # Determine if this event involves a PR
+    is_pr = bool(
+        raw.get("pull_request") is not None
+        or (raw.get("issue") or {}).get("pull_request") is not None
+        or canonical.startswith(
+            (
+                "pull_request.",
+                "pull_request_review.",
+                "pull_request_review_comment.",
+            )
+        )
+    )
+
     # --- FORMAL_AUDIT: PR lifecycle events ---
-    # Partner bots (Cline, Jules) and human contributors get zero-bypass formal audit on PR events
-    if canonical in FORMAL_REVIEW_EVENTS:
+    # Strict guard: only PR events can enter formal audit mode.
+    # Issue events must be triaged/discussed, never reviewed as PRs.
+    if is_pr and canonical in FORMAL_REVIEW_EVENTS:
         session_key = _derive_session_key(event_data, raw, canonical)
         auditor_budget = get_auditor_thinking_budget()
         return EventPolicy(
@@ -180,7 +190,11 @@ def resolve_event_policy(
         raw.get("pull_request") is not None
         or (raw.get("issue") or {}).get("pull_request") is not None
         or canonical.startswith(
-            ("pull_request.", "pull_request_review.", "pull_request_review_comment.")
+            (
+                "pull_request.",
+                "pull_request_review.",
+                "pull_request_review_comment.",
+            )
         )
     )
 
@@ -201,7 +215,7 @@ def resolve_event_policy(
         )
 
     # 3. Non-PR bot activity (comments/reviews) is ignored unless review intent was requested.
-    # Partner bots are exempt for ISSUE events only: issues filed by Cline/Jules were otherwise
+    # Partner bots are exempt for ISSUE events only: issues filed by Cline were otherwise
     # never triaged (see #441). Triage cannot start a ping-pong loop, because any comment the
     # agent posts emits issue_comment — which this same rule still suppresses for bot senders.
     is_partner_bot = sender_login_lower in PARTNER_BOT_LOGINS

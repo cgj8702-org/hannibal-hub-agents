@@ -19,51 +19,6 @@ BOT_APP_SLUG = "hannibal-hub-agents"
 # Distinct from the machine account cgj8702-agents; only the human owner counts.
 OWNER_LOGIN = "cgj8702"
 
-# Autonomous coding partner bot logins (Jules)
-JULES_BOT_LOGINS = {
-    "google-labs-jules[bot]",
-    "google-labs-jules",
-    "google-jules[bot]",
-    "google-jules",
-}
-
-
-def is_jules_sender(
-    sender: dict[str, Any] | None,
-    raw_payload: dict[str, Any] | None = None,
-) -> bool:
-    """Check whether a sender or raw payload represents the Jules coding agent bot.
-
-    Uses multiple signals (known logins, handle substring, and performed_via_github_app)
-    so detection is robust against upstream GitHub App handle evolution.
-    """
-    if isinstance(sender, dict):
-        user = sender.get("user") if isinstance(sender.get("user"), dict) else sender
-        if isinstance(user, dict):
-            login = (user.get("login") or "").strip().lower()
-            if (
-                login in JULES_BOT_LOGINS
-                or "google-labs-jules" in login
-                or "google-jules" in login
-                or (login.endswith("[bot]") and "jules" in login)
-            ):
-                return True
-
-    if isinstance(raw_payload, dict):
-        candidate_apps = [
-            raw_payload.get("performed_via_github_app"),
-        ]
-        comment = raw_payload.get("comment")
-        if isinstance(comment, dict):
-            candidate_apps.append(comment.get("performed_via_github_app"))
-        for app in candidate_apps:
-            if isinstance(app, dict):
-                slug = (app.get("slug") or "").strip().lower()
-                if "jules" in slug:
-                    return True
-
-    return False
-
 
 def is_owner_sender(
     sender: dict[str, Any] | None,
@@ -113,10 +68,6 @@ def _is_bot_sender(sender: dict[str, Any] | None) -> bool:
     user: dict[str, Any] = raw_user if isinstance(raw_user, dict) else sender
     login = str(user.get("login") or "").strip().lower()
     sender_type = str(user.get("type") or "").strip()
-
-    # Jules is an external mutation partner bot; its PR lifecycle events are reviewed natively
-    if is_jules_sender(sender):
-        return False
 
     if is_hannibal_bot_login(login):
         return True

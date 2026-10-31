@@ -47,14 +47,8 @@ DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS = "1"
 DEFAULT_WEBHOOK_TIER = "free"
 # Author associations allowed to trigger agent runs (comma-separated).
 DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS = "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR"
-DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot],google-labs-jules[bot]"
+DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot]"
 
 # Repositories with native GitHub branch protection that auto-dismisses stale reviews on push.
 # The bot skips manual review dismissal on these repositories (comma-separated).
 DEFAULT_NATIVE_STALE_REVIEW_DISMISSAL_REPOS = "cgj8702-org/hannibal-hub-agents"
-
-# --- Jules API Configuration ---
-DEFAULT_JULES_BASE_URL = "https://jules.googleapis.com/v1alpha"
-# When 1, the agent auto-approves Jules plans that await approval. Set to 0 to require
-# manual plan approval via the Jules web app or API.
-DEFAULT_JULES_AUTO_APPROVE_PLAN = "1"
