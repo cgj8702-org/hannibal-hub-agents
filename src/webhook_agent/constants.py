@@ -52,3 +52,8 @@ DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot]"
 # Repositories with native GitHub branch protection that auto-dismisses stale reviews on push.
 # The bot skips manual review dismissal on these repositories (comma-separated).
 DEFAULT_NATIVE_STALE_REVIEW_DISMISSAL_REPOS = "cgj8702-org/hannibal-hub-agents"
+
+# --- Debug Logging ---
+# Enable debug logging for model thoughts and responses per turn.
+# Set LOG_MODEL_THOUGHTS=1 to capture prompt/response/thoughts in Cloud Logging at DEBUG level.
+DEFAULT_LOG_MODEL_THOUGHTS = "1"

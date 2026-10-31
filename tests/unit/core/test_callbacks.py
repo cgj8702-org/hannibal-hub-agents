@@ -444,3 +444,195 @@ async def test_before_tool_callback_logs_real_arguments(caplog: pytest.LogCaptur
         "read_file" in record.message and "src/webhook_agent/worker.py" in record.message
         for record in caplog.records
     )
+
+
+# --- Tests for new model thoughts logging helpers ---
+
+
+def test_is_model_thoughts_logging_enabled_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_is_model_thoughts_logging_enabled returns True when env var not set (default is '1')."""
+    from webhook_agent.core.callbacks import _is_model_thoughts_logging_enabled
+
+    monkeypatch.delenv("LOG_MODEL_THOUGHTS", raising=False)
+    assert _is_model_thoughts_logging_enabled() is True
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("off", False),
+        ("", False),
+        ("random", False),
+    ],
+)
+def test_is_model_thoughts_logging_enabled_values(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: bool
+) -> None:
+    """_is_model_thoughts_logging_enabled handles various truthy/falsy values."""
+    from webhook_agent.core.callbacks import _is_model_thoughts_logging_enabled
+
+    monkeypatch.setenv("LOG_MODEL_THOUGHTS", value)
+    assert _is_model_thoughts_logging_enabled() is expected
+
+
+def test_extract_thoughts_from_response_with_thought_attribute() -> None:
+    """_extract_thoughts_from_response extracts content from 'thought' attribute."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_thoughts_from_response
+
+    resp = MagicMock()
+    part = MagicMock()
+    part.thought = "This is my reasoning process"
+    part.text = None
+    resp.content.parts = [part]
+
+    result = _extract_thoughts_from_response(resp)
+    assert result == "This is my reasoning process"
+
+
+def test_extract_thoughts_from_response_with_thought_signature() -> None:
+    """_extract_thoughts_from_response extracts content from parts with thought_signature."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_thoughts_from_response
+
+    resp = MagicMock()
+    part = MagicMock()
+    part.thought = None
+    part.text = "Let me think about this step by step"
+    part.thought_signature = "signature"
+    resp.content.parts = [part]
+
+    result = _extract_thoughts_from_response(resp)
+    assert result == "Let me think about this step by step"
+
+
+def test_extract_thoughts_from_response_multiple_parts() -> None:
+    """_extract_thoughts_from_response concatenates multiple thought parts."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_thoughts_from_response
+
+    resp = MagicMock()
+    part1 = MagicMock()
+    part1.thought = "First thought"
+    part1.text = None
+    part2 = MagicMock()
+    part2.thought = None
+    part2.text = "Second thought"
+    part2.thought_signature = "sig"
+    part3 = MagicMock()
+    part3.thought = "Third thought"
+    part3.text = None
+    resp.content.parts = [part1, part2, part3]
+
+    result = _extract_thoughts_from_response(resp)
+    assert result == "First thought\nSecond thought\nThird thought"
+
+
+def test_extract_thoughts_from_response_no_thoughts() -> None:
+    """_extract_thoughts_from_response returns empty string when no thoughts present."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_thoughts_from_response
+
+    resp = MagicMock()
+    part = MagicMock()
+    part.thought = None
+    part.text = "Regular response text"
+    # Explicitly remove thought_signature attribute so hasattr returns False
+    del part.thought_signature
+    resp.content.parts = [part]
+
+    result = _extract_thoughts_from_response(resp)
+    assert result == ""
+
+
+def test_extract_thoughts_from_response_no_content() -> None:
+    """_extract_thoughts_from_response handles missing content gracefully."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_thoughts_from_response
+
+    resp = MagicMock()
+    resp.content = None
+
+    result = _extract_thoughts_from_response(resp)
+    assert result == ""
+
+
+def test_extract_response_text_regular_text() -> None:
+    """_extract_response_text extracts regular response text (non-thought)."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_response_text
+
+    resp = MagicMock()
+    part = MagicMock()
+    part.text = "This is the actual response"
+    # Explicitly remove thought_signature attribute so hasattr returns False
+    del part.thought_signature
+    resp.content.parts = [part]
+
+    result = _extract_response_text(resp)
+    assert result == "This is the actual response"
+
+
+def test_extract_response_text_excludes_thoughts() -> None:
+    """_extract_response_text excludes parts with thought_signature."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_response_text
+
+    resp = MagicMock()
+    part1 = MagicMock()
+    part1.text = "This is a thought"
+    part1.thought_signature = "sig"
+    part2 = MagicMock()
+    part2.text = "This is the actual response"
+    # Explicitly remove thought_signature attribute so hasattr returns False
+    del part2.thought_signature
+    resp.content.parts = [part1, part2]
+
+    result = _extract_response_text(resp)
+    assert result == "This is the actual response"
+
+
+def test_extract_response_text_multiple_regular_parts() -> None:
+    """_extract_response_text concatenates multiple regular response parts."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_response_text
+
+    resp = MagicMock()
+    part1 = MagicMock()
+    part1.text = "First part"
+    del part1.thought_signature
+    part2 = MagicMock()
+    part2.text = "Second part"
+    del part2.thought_signature
+    resp.content.parts = [part1, part2]
+
+    result = _extract_response_text(resp)
+    assert result == "First part\nSecond part"
+
+
+def test_extract_response_text_no_content() -> None:
+    """_extract_response_text handles missing content gracefully."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import _extract_response_text
+
+    resp = MagicMock()
+    resp.content = None
+
+    result = _extract_response_text(resp)
+    assert result == ""

@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from types import FrameType
 
+# Import constants for default values
+from webhook_agent.constants import DEFAULT_LOG_MODEL_THOUGHTS
+
 # Ensure src/ is on sys.path for direct entry point execution
 SRC_DIR = Path(__file__).resolve().parent / "src"
 if str(SRC_DIR) not in sys.path:
@@ -15,6 +18,16 @@ if str(SRC_DIR) not in sys.path:
 
 # Configure logging for the entry point
 log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+# If model thoughts logging is enabled, ensure DEBUG level
+if os.environ.get("LOG_MODEL_THOUGHTS", DEFAULT_LOG_MODEL_THOUGHTS).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+):
+    log_level_name = "DEBUG"
+
 log_level = getattr(logging, log_level_name, logging.INFO)
 
 logging.basicConfig(
