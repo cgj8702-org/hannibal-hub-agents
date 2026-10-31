@@ -305,6 +305,83 @@ def verify_resolutions(
     return verified_results
 
 
+def _is_deletion_refactor_pr(diff_text: str) -> bool:
+    """Detect if a PR is a pure deletion/refactor with few added lines in code files.
+
+    Returns True if the PR has fewer than 2 added lines in code files (excluding
+    docs, configs, etc.), indicating a pure deletion or refactor.
+    """
+    if not diff_text:
+        return False
+
+    # Count added lines in code files (excluding docs, configs, etc.)
+    code_extensions = {
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".rb",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".php",
+        ".swift",
+        ".kt",
+        ".scala",
+        ".clj",
+        ".hs",
+        ".ml",
+        ".fs",
+        ".vb",
+        ".pl",
+        ".pm",
+        ".t",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".fish",
+        ".ps1",
+        ".bat",
+        ".cmd",
+        ".sql",
+        ".r",
+        ".m",
+        ".jl",
+        ".lua",
+        ".rkt",
+        ".ss",
+        ".scm",
+        ".cl",
+        ".lsp",
+        ".el",
+        ".vim",
+        ".ex",
+        ".exs",
+        ".erl",
+        ".hrl",
+        ".dart",
+    }
+
+    added_lines_count = 0
+    current_file = ""
+    for line in diff_text.splitlines():
+        if line.startswith(("--- a/", "+++ b/")):
+            current_file = line[6:].strip()
+        elif line.startswith("+") and not line.startswith("+++"):
+            # Check if this is a code file
+            if any(current_file.endswith(ext) for ext in code_extensions):
+                added_lines_count += 1
+                if added_lines_count >= 2:
+                    return False
+    return added_lines_count < 2
+
+
 def verify_citations(
     findings: Sequence[Finding],
     touched_or_diff: dict[str, set[int]] | str,
@@ -341,9 +418,14 @@ def verify_citations(
         if not actual_diff_text:
             actual_diff_text = actual_diff_text_for_walk
 
+    # Detect if this is a deletion/refactor PR (few added lines in code files)
+    is_deletion_refactor = _is_deletion_refactor_pr(actual_diff_text)
+
     issues: list[GroundingIssue] = []
     for finding in findings:
-        issues.extend(_check_one(finding, anchors, line_text, changed, actual_diff_text))
+        issues.extend(
+            _check_one(finding, anchors, line_text, changed, actual_diff_text, is_deletion_refactor)
+        )
     return issues
 
 
@@ -402,6 +484,7 @@ def _check_one(
     line_text: dict[str, dict[int, str]],
     changed: set[str],
     diff_text: str = "",
+    is_deletion_refactor: bool = False,
 ) -> list[GroundingIssue]:
     """Run every check applicable to a single finding."""
     issues: list[GroundingIssue] = []
@@ -428,6 +511,19 @@ def _check_one(
                     "scorecard_path_not_changed",
                     finding,
                     f"Scorecard note cites '{path}', which is not changed by this PR.",
+                )
+            )
+            return issues
+        # For deletion/refactor PRs, be more lenient about paths not changed
+        if is_deletion_refactor:
+            issues.append(
+                _issue(
+                    "soft",
+                    "path_not_changed",
+                    finding,
+                    f"{finding.kind} cites '{path}', which this PR does not change. If the "
+                    f"claim is about a pre-existing guard elsewhere, cite the changed file "
+                    f"that relies on it (or move it to unverified_claims).",
                 )
             )
             return issues
@@ -497,9 +593,10 @@ def _check_one(
                 )
 
     if not (finding.evidence or "").strip():
+        # For deletion/refactor PRs, missing evidence is soft (model should return empty verified_invariants)
         issues.append(
             _issue(
-                "hard",
+                "soft" if is_deletion_refactor else "hard",
                 "missing_evidence",
                 finding,
                 f"{finding.kind} on '{path}' has no evidence; state what in the diff "
@@ -517,7 +614,7 @@ def _check_one(
                     if norm_code not in norm_diff:
                         issues.append(
                             _issue(
-                                "hard",
+                                "soft" if is_deletion_refactor else "hard",
                                 "evidence_not_in_diff",
                                 finding,
                                 f"{finding.kind} on '{path}:{finding.line}' evidence text "
@@ -543,9 +640,10 @@ def _check_one(
             re.search(r"^[A-Z0-9_]+\s*=\s*", (finding.evidence or "").strip()) is not None
         )
         if is_behavioral and not is_static_fact and not has_concrete_quote_or_test:
+            # For deletion/refactor PRs, unsubstantiated behavioral invariant is soft
             issues.append(
                 _issue(
-                    "hard",
+                    "soft" if is_deletion_refactor else "hard",
                     "unsubstantiated_behavioral_invariant",
                     finding,
                     f"Invariant claim on '{path}' asserts behavioral logic ('{finding.evidence}') "
