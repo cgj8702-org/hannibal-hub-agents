@@ -560,6 +560,14 @@ def execute_agent_event(
         else ""
     )
 
+    logger.debug(
+        "🔍 [execute_agent_event] is_pr_context=%s, head_sha=%s, repo=%s, pr_number=%s",
+        is_pr_context,
+        head_sha[:7] if head_sha else "N/A",
+        repo_full_name,
+        pr_number,
+    )
+
     sender = event_data.get("sender") or {}
     sender_login = sender.get("login", "") if isinstance(sender, dict) else str(sender or "")
     if not sender_login:
@@ -728,7 +736,18 @@ def execute_agent_event(
         event_data["deterministic_precompiled_ast"] = True
     elif not (is_pr_context and head_sha):
         # Only build outside workspace if we won't have a workspace to rebuild in
+        logger.debug(
+            "🔧 [Initial Build] Building user message OUTSIDE workspace (is_pr_context=%s, head_sha=%s)",
+            is_pr_context,
+            head_sha[:7] if head_sha else "N/A",
+        )
         user_message = agent._build_user_message(event_data)
+    else:
+        logger.debug(
+            "⏭️ [Initial Build] SKIPPING initial build - will build INSIDE workspace (is_pr_context=%s, head_sha=%s)",
+            is_pr_context,
+            head_sha[:7] if head_sha else "N/A",
+        )
     # If is_pr_context and head_sha, we'll build inside the workspace context below
 
     # Initialize deterministic_state with populated event_data values
@@ -1153,7 +1172,16 @@ def execute_agent_event(
 
     async def _execute_with_workspace() -> None:
         nonlocal user_message
+        logger.debug(
+            "🔍 [_execute_with_workspace] Entry: is_pr_context=%s, head_sha=%s, user_message is None=%s",
+            is_pr_context,
+            head_sha[:7] if head_sha else "N/A",
+            user_message is None,
+        )
         if not is_pr_context or not head_sha:
+            logger.debug(
+                "🔧 [_execute_with_workspace] No PR context or head_sha - building OUTSIDE workspace"
+            )
             if user_message is None:
                 user_message = agent._build_user_message(event_data)
                 deterministic_state["deterministic_precompiled_ast"] = bool(
@@ -1175,8 +1203,16 @@ def execute_agent_event(
             _finalize_results()
             return
 
+        logger.debug("🔧 [_execute_with_workspace] Entering pr_workspace context manager")
         async with pr_workspace(gh_client, repo_full_name, head_sha) as ws_env:
+            logger.debug(
+                "🔍 [_execute_with_workspace] pr_workspace returned: ws_env is None=%s",
+                ws_env is None,
+            )
             if ws_env is not None:
+                logger.debug(
+                    "✅ [_execute_with_workspace] Got workspace environment - building INSIDE workspace"
+                )
                 with use_environment(ws_env):
                     # (Re)build the user message inside the active PR workspace so that
                     # compile_pre_audit_dossier() can read get_active_environment() and
@@ -1200,6 +1236,9 @@ def execute_agent_event(
                     await _run()
                     _finalize_results()
             else:
+                logger.warning(
+                    "⚠️ [_execute_with_workspace] pr_workspace returned None - falling back to OUTSIDE workspace build"
+                )
                 if user_message is None:
                     user_message = agent._build_user_message(event_data)
                     deterministic_state["deterministic_precompiled_ast"] = bool(

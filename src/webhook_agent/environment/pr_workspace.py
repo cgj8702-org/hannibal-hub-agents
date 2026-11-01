@@ -45,6 +45,12 @@ async def pr_workspace(
     - Never raises on setup/download failure; logs warning and yields None.
     - Cleans up ephemeral files upon exit.
     """
+    logger.debug(
+        "🔍 [pr_workspace] Entry: repo=%s, head_sha=%s, gh is None=%s",
+        repo_full_name,
+        head_sha[:7] if head_sha else "N/A",
+        gh is None,
+    )
     enable = ENABLE_PR_WORKSPACE.strip().lower()
     if enable in ("0", "false", "no", "off"):
         logger.info("PR workspace disabled via ENABLE_PR_WORKSPACE=0")
@@ -57,6 +63,10 @@ async def pr_workspace(
         return
 
     logger.info("Beginning PR workspace download and setup for %s@%s", repo_full_name, head_sha)
+    logger.debug(
+        "🔍 [pr_workspace] ENABLE_PR_WORKSPACE=%s, proceeding with download",
+        enable,
+    )
 
     try:
         repo = gh.get_repo(repo_full_name)
@@ -99,6 +109,10 @@ async def pr_workspace(
                         temp_archive.write(chunk)
 
             temp_archive.seek(0)
+            logger.debug(
+                "🔍 [pr_workspace] Archive downloaded successfully: %d bytes",
+                downloaded,
+            )
         except Exception as fetch_err:
             logger.warning(
                 "PR workspace download failed for %s@%s: %s",
@@ -111,7 +125,15 @@ async def pr_workspace(
 
         short_sha = head_sha[:7] if head_sha else "ephemeral"
         sandbox_prefix = f"hannibal-sandbox-{short_sha}-"
+        logger.debug(
+            "🔍 [pr_workspace] Creating ephemeral environment with prefix: %s",
+            sandbox_prefix,
+        )
         async with ephemeral_environment(prefix=sandbox_prefix) as env:
+            logger.debug(
+                "🔍 [pr_workspace] Ephemeral environment created at: %s",
+                env.root,
+            )
             extraction_ok = False
             file_count = 0
             extracted_bytes = 0
@@ -143,6 +165,11 @@ async def pr_workspace(
 
                     tar.extractall(path=env.root, members=members, filter="data")
                 extraction_ok = True
+                logger.debug(
+                    "🔍 [pr_workspace] Extraction successful: %d files, %d bytes",
+                    file_count,
+                    extracted_bytes,
+                )
             except Exception as extract_err:
                 logger.warning(
                     "PR workspace extraction failed for %s@%s: %s",
