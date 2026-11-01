@@ -60,7 +60,6 @@ FORMAL_REVIEW_EVENTS: frozenset[str] = frozenset(
         "pull_request.synchronize",
         "pull_request.ready_for_review",
         "pull_request_review_requested",
-        "pull_request_review.submitted",
     }
 )
 
