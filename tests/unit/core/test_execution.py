@@ -1053,33 +1053,40 @@ def _sanitize_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
     return fixture
 
 
-def test_execute_agent_event_extracts_head_sha_from_review_commit_id(tmp_path: Path) -> None:
-    """Verify execute_agent_event extracts head_sha from review.commit_id for pull_request_review events.
+def test_execute_agent_event_ignores_pull_request_review_submitted(tmp_path: Path) -> None:
+    """Verify execute_agent_event ignores pull_request_review.submitted events (bot's own review).
 
-    For pull_request_review events (submitted, edited, dismissed), the SHA is in review.commit_id,
-    not in pull_request.head.sha. This test verifies the extraction logic correctly prioritizes
-    review.commit_id for these event types using real fixtures.
+    The bot should not process its own review submissions to avoid loops.
     """
     import json
 
     from webhook_agent.processor import WebhookProcessor
 
-    # Load test fixture for pull_request_review.edited (pre-sanitized to replace bot users)
+    # Load test fixture for pull_request_review.submitted
     fixture_path = (
         Path(__file__).parent.parent.parent
         / "fixtures"
         / "webhooks"
-        / "pull_request_review.edited.test.json"
+        / "pull_request_review.submitted.test.json"
     )
     with open(fixture_path) as f:
         fixture = json.load(f)
 
-    # Create a real WebhookProcessor to test the full pipeline
+    # Create a real WebhookProcessor
     processor = WebhookProcessor()
 
-    # Prepare event data from real fixture
+    # Mock the GitHub client to return an open PR
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+    mock_pr.state = "open"
+    mock_pr.head.sha = "861dcb544a359a5cb947a824c33be3065cbb9ecb"
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+    processor._gh = mock_gh
+
     event_data: dict[str, Any] = {
-        "canonical": "pull_request_review.edited",
+        "canonical": "pull_request_review.submitted",
         "repository": {"full_name": "cgj8702-org/hannibal-hub-agents"},
         "sender": {"login": "test-user", "type": "User"},
         "raw_payload": fixture,
@@ -1092,13 +1099,12 @@ def test_execute_agent_event_extracts_head_sha_from_review_commit_id(tmp_path: P
         # Process the event through the real pipeline
         processor._dispatch_tier_2_llm(
             payload=event_data,
-            event_key="pull_request_review.edited",
+            event_key="pull_request_review.submitted",
             delivery_id="test-delivery",
         )
 
-        # Verify the head_sha was correctly extracted from review.commit_id
-        # The fixture has commit_id: "0ec3a7c11f203126a87e3dd2c04a465ff2aceb4d"
-        assert mock_execute.called
+        # Verify the event was ignored (ADK runner not called)
+        assert not mock_execute.called
 
 
 def test_execute_agent_event_extracts_head_sha_from_pull_request_head_sha(
@@ -1127,6 +1133,16 @@ def test_execute_agent_event_extracts_head_sha_from_pull_request_head_sha(
     # Create a real WebhookProcessor
     processor = WebhookProcessor()
 
+    # Mock the GitHub client to return an open PR
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+    mock_pr.state = "open"
+    mock_pr.head.sha = "608506ac57703cfc411fa818ac6f7c2bb3f45373"
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+    processor._gh = mock_gh
+
     event_data: dict[str, Any] = {
         "canonical": "pull_request.opened",
         "repository": {"full_name": "cgj8702-org/hannibal-hub-agents"},
@@ -1149,10 +1165,67 @@ def test_execute_agent_event_extracts_head_sha_from_pull_request_head_sha(
         assert mock_execute.called
 
 
-def test_execute_agent_event_extracts_head_sha_from_review_commit_id_dismissed(
+def test_execute_agent_event_ignores_pull_request_review_edited(tmp_path: Path) -> None:
+    """Verify execute_agent_event ignores pull_request_review.edited events.
+
+    The bot should not re-review when its own review is edited.
+    """
+    import json
+
+    from webhook_agent.processor import WebhookProcessor
+
+    # Load test fixture for pull_request_review.edited
+    fixture_path = (
+        Path(__file__).parent.parent.parent
+        / "fixtures"
+        / "webhooks"
+        / "pull_request_review.edited.test.json"
+    )
+    with open(fixture_path) as f:
+        fixture = json.load(f)
+
+    # Create a real WebhookProcessor
+    processor = WebhookProcessor()
+
+    # Mock the GitHub client to return an open PR
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+    mock_pr.state = "open"
+    mock_pr.head.sha = "0ec3a7c11f203126a87e3dd2c04a465ff2aceb4d"
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+    processor._gh = mock_gh
+
+    event_data: dict[str, Any] = {
+        "canonical": "pull_request_review.edited",
+        "repository": {"full_name": "cgj8702-org/hannibal-hub-agents"},
+        "sender": {"login": "test-user", "type": "User"},
+        "raw_payload": fixture,
+    }
+
+    # Mock only the ADK runner (model calls)
+    with patch("webhook_agent.core.execution._execute_adk_runner") as mock_execute:
+        mock_execute.return_value = []
+
+        # Process the event through the real pipeline
+        processor._dispatch_tier_2_llm(
+            payload=event_data,
+            event_key="pull_request_review.edited",
+            delivery_id="test-delivery",
+        )
+
+        # Verify the event was ignored (ADK runner not called)
+        assert not mock_execute.called
+
+
+def test_execute_agent_event_ignores_pull_request_review_dismissed(
     tmp_path: Path,
 ) -> None:
-    """Verify execute_agent_event extracts head_sha from review.commit_id for pull_request_review.dismissed events."""
+    """Verify execute_agent_event ignores pull_request_review.dismissed events.
+
+    The bot should not re-review when its own review is dismissed.
+    """
     import json
 
     from webhook_agent.processor import WebhookProcessor
@@ -1169,6 +1242,16 @@ def test_execute_agent_event_extracts_head_sha_from_review_commit_id_dismissed(
 
     # Create a real WebhookProcessor
     processor = WebhookProcessor()
+
+    # Mock the GitHub client to return an open PR
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+    mock_pr.state = "open"
+    mock_pr.head.sha = "0ec3a7c11f203126a87e3dd2c04a465ff2aceb4d"
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+    processor._gh = mock_gh
 
     event_data: dict[str, Any] = {
         "canonical": "pull_request_review.dismissed",
@@ -1188,9 +1271,8 @@ def test_execute_agent_event_extracts_head_sha_from_review_commit_id_dismissed(
             delivery_id="test-delivery",
         )
 
-        # Verify the head_sha was correctly extracted from review.commit_id
-        # The fixture has commit_id: "0ec3a7c11f203126a87e3dd2c04a465ff2aceb4d"
-        assert mock_execute.called
+        # Verify the event was ignored (ADK runner not called)
+        assert not mock_execute.called
 
 
 def test_derive_session_id_fast_fails_without_fallback() -> None:
