@@ -7,8 +7,6 @@ import pytest
 from webhook_agent.core.callbacks import _check_pr_closed_short_circuit
 from webhook_agent.core.cancellation import AbortAgentExecution, pr_closed_registry
 
-pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
-
 
 def test_pr_closed_registry_mark_and_check():
     """Verify marking a PR closed sets status in registry."""

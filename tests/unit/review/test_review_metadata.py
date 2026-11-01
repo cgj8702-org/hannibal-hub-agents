@@ -6,9 +6,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
-
-
 from webhook_agent.review.metadata import (
     extract_review_metadata,
     format_findings_for_agent,

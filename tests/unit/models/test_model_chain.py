@@ -17,8 +17,6 @@ from webhook_agent.models.model_chain import (
     is_gemini_3_plus,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
-
 
 def test_get_model_chain_free_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify free tier fallback chain defaults."""

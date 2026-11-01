@@ -165,10 +165,27 @@ def parse_legacy_review_findings(body: str) -> dict[str, list[dict[str, Any]]]:
     )
     if risk_match:
         section_text = risk_match.group(1).strip()
-        if not re.search(r"^\s*\*\s*\*None identified", section_text, re.MULTILINE):
+        # Check for "None identified" in any format:
+        # - * *None identified* (bold)
+        # - * None identified (plain)
+        # - * None identified. (with period)
+        # Case-insensitive match
+        none_identified_pattern = re.compile(
+            r"^\s*\*\s*\*?None identified\.?\s*$", re.IGNORECASE | re.MULTILINE
+        )
+        if not none_identified_pattern.search(section_text):
             for line in section_text.split("\n"):
+                stripped = line.strip()
+                # Skip lines that are just "* *None identified" or "* None identified" (with or without period)
+                if re.match(r"^\s*\*\s*\*?None identified\.?\s*$", stripped, re.IGNORECASE):
+                    continue
                 if line.startswith(("* ", "- ")) and not line.strip().startswith(
-                    ("* *None identified", "* None identified")
+                    (
+                        "* *None identified",
+                        "* None identified",
+                        "* *None identified.",
+                        "* None identified.",
+                    )
                 ):
                     clean_risk = re.sub(r"^(?:\*|-)\s*(?:\*\*Risk:\*\*\s*)?", "", line)
                     clean_risk = clean_risk.strip()

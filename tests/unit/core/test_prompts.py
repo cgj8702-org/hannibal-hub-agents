@@ -18,8 +18,6 @@ from webhook_agent.core.prompts import (
     get_max_input_tokens,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent]
-
 
 def test_max_input_tokens_tier_resolution() -> None:
     """Test get_max_input_tokens respects paid vs free tier."""
