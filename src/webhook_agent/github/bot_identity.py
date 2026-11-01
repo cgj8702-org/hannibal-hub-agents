@@ -91,7 +91,15 @@ def _is_bot_event(normalized: dict[str, Any]) -> bool:
 
     Checks top-level sender, raw_payload sender, comment author, review author,
     and performed_via_github_app.
+
+    Note: For pull_request_review.edited and pull_request_review.dismissed events,
+    the review author is the bot that posted the review, but the event is triggered
+    by a user editing/dismissing the review. So we skip the review author check
+    for those specific events. For pull_request_review.submitted, the bot IS the
+    one submitting the review, so we still check the review author.
     """
+    canonical = normalized.get("canonical", "")
+
     # 1. Top-level sender check
     if _is_bot_sender(normalized.get("sender")):
         return True
@@ -109,10 +117,19 @@ def _is_bot_event(normalized: dict[str, Any]) -> bool:
     if isinstance(comment, dict) and _is_bot_sender(comment.get("user")):
         return True
 
-    # 4. Review author check
+    # 4. Review author check (skip for pull_request_review.edited and .dismissed)
+    # For pull_request_review.edited and .dismissed, the review author is the bot
+    # that posted the review, but the event is triggered by a user editing/dismissing.
+    # For pull_request_review.submitted, the bot IS the one submitting, so we check.
+    canonical = normalized.get("canonical", "")
+    is_pr_review_edited_or_dismissed = canonical in (
+        "pull_request_review.edited",
+        "pull_request_review.dismissed",
+    )
     review = raw.get("review")
-    if isinstance(review, dict) and _is_bot_sender(review.get("user")):
-        return True
+    if isinstance(review, dict) and not is_pr_review_edited_or_dismissed:
+        if _is_bot_sender(review.get("user")):
+            return True
 
     # 5. Review comment author check
     review_comment = raw.get("review_comment")
