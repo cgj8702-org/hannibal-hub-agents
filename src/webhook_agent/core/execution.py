@@ -554,18 +554,32 @@ def execute_agent_event(
         )
 
     is_pr_context = bool(raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request"))
+
+    # For pull_request_review events, the SHA is in review.commit_id
+    # For pull_request events, the SHA is in pull_request.head.sha
+    # Fallback to raw.after for push events
+    review_commit_id = ""
+    if raw.get("review") and isinstance(raw.get("review"), dict):
+        review_commit_id = str(raw["review"].get("commit_id") or "")
+
     head_sha = (
-        str((raw.get("pull_request") or {}).get("head", {}).get("sha") or raw.get("after") or "")
+        str(
+            review_commit_id
+            or (raw.get("pull_request") or {}).get("head", {}).get("sha")
+            or raw.get("after")
+            or ""
+        )
         if is_pr_context
         else ""
     )
 
     logger.debug(
-        "🔍 [execute_agent_event] is_pr_context=%s, head_sha=%s, repo=%s, pr_number=%s",
+        "🔍 [execute_agent_event] is_pr_context=%s, head_sha=%s, repo=%s, pr_number=%s, review_commit_id=%s",
         is_pr_context,
         head_sha[:7] if head_sha else "N/A",
         repo_full_name,
         pr_number,
+        review_commit_id[:7] if review_commit_id else "N/A",
     )
 
     sender = event_data.get("sender") or {}
