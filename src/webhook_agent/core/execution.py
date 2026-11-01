@@ -553,11 +553,16 @@ def execute_agent_event(
             f"Cannot execute agent event: missing PR or issue number for repository '{repo_full_name}'"
         )
 
-    is_pr_context = bool(raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request"))
+    is_pr_context = bool(
+        raw.get("pull_request")
+        or (raw.get("issue") or {}).get("pull_request")
+        or (raw.get("check_suite") or {}).get("pull_requests")
+    )
 
     # For pull_request_review events, the SHA is in review.commit_id
     # For pull_request events, the SHA is in pull_request.head.sha
     # Fallback to raw.after for push events
+    # Check check_suite.pull_requests[].head.sha for check_suite events
     review_commit_id = ""
     if raw.get("review") and isinstance(raw.get("review"), dict):
         review_commit_id = str(raw["review"].get("commit_id") or "")
@@ -567,6 +572,10 @@ def execute_agent_event(
             review_commit_id
             or (raw.get("pull_request") or {}).get("head", {}).get("sha")
             or raw.get("after")
+            or (raw.get("check_suite") or {})
+            .get("pull_requests", [{}])[0]
+            .get("head", {})
+            .get("sha")
             or ""
         )
         if is_pr_context
