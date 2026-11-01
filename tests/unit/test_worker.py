@@ -20,7 +20,7 @@ from google.api_core import exceptions as gcp_exceptions
 
 from webhook_agent.processor import WebhookProcessor
 
-pytestmark = [pytest.mark.integration, pytest.mark.webhook_agent, pytest.mark.pubsub]
+pytestmark = [pytest.mark.pubsub]
 
 # ---------------------------------------------------------------------------
 # Fixtures
