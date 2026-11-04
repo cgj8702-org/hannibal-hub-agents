@@ -563,6 +563,7 @@ def execute_agent_event(
     # For pull_request events, the SHA is in pull_request.head.sha
     # Fallback to raw.after for push events
     # Check check_suite.pull_requests[].head.sha for check_suite events
+    # For issue_comment / PR comment events, head SHA is in diff_sha or head_sha
     review_commit_id = ""
     if raw.get("review") and isinstance(raw.get("review"), dict):
         review_commit_id = str(raw["review"].get("commit_id") or "")
@@ -571,6 +572,10 @@ def execute_agent_event(
         str(
             review_commit_id
             or (raw.get("pull_request") or {}).get("head", {}).get("sha")
+            or raw.get("head_sha")
+            or raw.get("diff_sha")
+            or event_data.get("head_sha")
+            or event_data.get("diff_sha")
             or raw.get("after")
             or (raw.get("check_suite") or {})
             .get("pull_requests", [{}])[0]
@@ -581,6 +586,23 @@ def execute_agent_event(
         if is_pr_context
         else ""
     )
+
+    if is_pr_context and not head_sha and gh_client and pr_number:
+        try:
+            pr_obj = gh_client.get_repo(repo_full_name).get_pull(int(pr_number))
+            head_sha = str(getattr(getattr(pr_obj, "head", None), "sha", "") or "")
+            if head_sha:
+                raw["head_sha"] = head_sha
+                raw["diff_sha"] = raw.get("diff_sha") or head_sha
+                event_data["head_sha"] = head_sha
+        except Exception as exc:
+            logger.debug("Could not resolve head_sha from GitHub: %s", exc)
+
+    if head_sha:
+        if not raw.get("head_sha"):
+            raw["head_sha"] = head_sha
+        if not event_data.get("head_sha"):
+            event_data["head_sha"] = head_sha
 
     logger.debug(
         "🔍 [execute_agent_event] is_pr_context=%s, head_sha=%s, repo=%s, pr_number=%s, review_commit_id=%s",

@@ -135,6 +135,11 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         # always reflects the live head, which may be newer than the SHA the
         # webhook targets; recording it lets the auditor refuse a mixed pair.
         diff_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        if diff_sha:
+            raw["diff_sha"] = diff_sha
+            raw["head_sha"] = diff_sha
+            payload["head_sha"] = diff_sha
+
         raw_patches: dict[str, str] = {}
         for f in pr.get_files():
             changed_files.append(f.filename)
@@ -151,7 +156,6 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
 
         if diff_lines:
             raw["changed_files"] = changed_files
-            raw["diff_sha"] = diff_sha
             raw_diff = "\n".join(diff_lines)
             filtered = filter_review_diff(raw_diff)
             raw["pr_diff"] = filtered.filtered_diff or raw_diff

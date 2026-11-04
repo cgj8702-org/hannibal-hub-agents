@@ -1149,6 +1149,13 @@ class WebhookProcessor:
             _prefetch_inline_comment_context(gh, repo_name, payload)
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 
+            if not head_sha and raw.get("diff_sha"):
+                head_sha = str(raw["diff_sha"])
+                payload["head_sha"] = head_sha
+            elif not head_sha and raw.get("head_sha"):
+                head_sha = str(raw["head_sha"])
+                payload["head_sha"] = head_sha
+
             # Re-check closed/merged state if live prefetch discovered it was closed on GitHub
             if is_pr_event and pr_num_int is not None:
                 updated_pr = (
