@@ -293,3 +293,38 @@ def test_prefetch_pr_diff_falls_back_to_raw_diff_when_patch_none() -> None:
     assert "pr_diff" in raw
     assert "uv.lock" in raw["pr_diff"]
     assert "+new" in raw["pr_diff"]
+    assert raw["diff_sha"] == "a" * 40
+    assert raw["head_sha"] == "a" * 40
+    assert payload["head_sha"] == "a" * 40
+
+
+def test_prefetch_pr_diff_sets_head_sha_for_issue_comment() -> None:
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+
+    mock_pr.get_files.return_value = []
+    mock_pr.head.sha = "c" * 40
+    mock_pr.state = "open"
+    mock_pr.merged = False
+
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+
+    payload = {
+        "canonical": "issue_comment.created",
+        "raw_payload": {
+            "issue": {
+                "number": 284,
+                "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/284"},
+            },
+            "comment": {"body": "/re-review pls"},
+        },
+    }
+
+    _prefetch_pr_diff(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert raw["diff_sha"] == "c" * 40
+    assert raw["head_sha"] == "c" * 40
+    assert payload["head_sha"] == "c" * 40

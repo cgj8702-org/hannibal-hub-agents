@@ -166,10 +166,19 @@ def test_local_environment_kills_child_process_group_on_timeout():
             child_pid = int(pid_file.read_text().strip())
 
             # Give OS a moment to reap
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.2)
 
-            # ProcessLookupError proves the child process was killed
-            with pytest.raises(ProcessLookupError):
+            # ProcessLookupError proves the child process was killed (or in container PID namespaces, it becomes a zombie until reaped)
+            is_dead = False
+            try:
                 os.kill(child_pid, 0)
+                status_path = Path(f"/proc/{child_pid}/status")
+                if status_path.exists():
+                    status_text = status_path.read_text()
+                    if "State:\tZ" in status_text:
+                        is_dead = True
+            except ProcessLookupError:
+                is_dead = True
+            assert is_dead, f"Child process {child_pid} was not killed"
 
     asyncio.run(_run())

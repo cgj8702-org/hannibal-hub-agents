@@ -2444,3 +2444,98 @@ def test_execute_agent_event_defers_formal_audit_when_diff_snapshot_is_stale() -
     assert "Deferred" in results[0].detail
     assert "aaaaaaa" in results[0].detail  # event head, truncated to 7
     assert "bbbbbbb" in results[0].detail  # diff snapshot, truncated to 7
+
+
+def test_execute_agent_event_resolves_head_sha_from_diff_sha_for_issue_comment() -> None:
+    """When issue_comment arrives on a PR, head_sha must be extracted from diff_sha."""
+    mock_agent = MagicMock()
+    mock_agent.dry_run = False
+    mock_agent._derive_session_id.return_value = "session-284"
+    mock_agent._build_user_message.return_value = genai_types.Content(
+        parts=[genai_types.Part.from_text(text="Re-review")]
+    )
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    expected_sha = "c" * 40
+    event_data = {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "human_dev"},
+        "raw_payload": {
+            "issue": {
+                "number": 284,
+                "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/284"},
+            },
+            "comment": {"body": "/re-review pls"},
+            "diff_sha": expected_sha,
+        },
+    }
+
+    mock_ws = AsyncMock()
+    mock_ws.__aenter__.return_value = None  # simulate fallback ws
+    mock_ws.__aexit__.return_value = None
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock) as runner,
+        patch("webhook_agent.core.execution.pr_workspace", return_value=mock_ws) as workspace,
+    ):
+        execute_agent_event(mock_agent, event_data, MagicMock(), "trace-comment")
+
+    # pr_workspace must have been called with the diff_sha!
+    workspace.assert_called_once()
+    assert workspace.call_args[0][2] == expected_sha
+    runner.assert_called_once()
+
+
+def test_execute_agent_event_resolves_head_sha_from_github_when_missing() -> None:
+    """When head_sha is missing from payload, it must be fetched live from GitHub."""
+    mock_agent = MagicMock()
+    mock_agent.dry_run = False
+    mock_agent._derive_session_id.return_value = "session-284"
+    mock_agent._build_user_message.return_value = genai_types.Content(
+        parts=[genai_types.Part.from_text(text="Re-review")]
+    )
+    mock_session = MagicMock()
+    mock_session.state = {}
+    mock_agent._session_service.get_session = AsyncMock(return_value=mock_session)
+    mock_agent._session_service.create_session = AsyncMock()
+    mock_agent._session_service.append_event = AsyncMock()
+    mock_agent._session_service.user_state = {}
+
+    mock_gh = MagicMock()
+    mock_repo = mock_gh.get_repo.return_value
+    mock_pr = mock_repo.get_pull.return_value
+    live_sha = "d" * 40
+    mock_pr.head.sha = live_sha
+
+    event_data = {
+        "canonical": "issue_comment.created",
+        "repository": {"full_name": "owner/repo"},
+        "sender": {"login": "human_dev"},
+        "raw_payload": {
+            "issue": {
+                "number": 284,
+                "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/284"},
+            },
+            "comment": {"body": "/re-review pls"},
+        },
+    }
+
+    mock_ws = AsyncMock()
+    mock_ws.__aenter__.return_value = None
+    mock_ws.__aexit__.return_value = None
+
+    with (
+        patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock) as runner,
+        patch("webhook_agent.core.execution.pr_workspace", return_value=mock_ws) as workspace,
+    ):
+        execute_agent_event(mock_agent, event_data, mock_gh, "trace-gh-fallback")
+
+    workspace.assert_called_once()
+    assert workspace.call_args[0][2] == live_sha
+    runner.assert_called_once()
