@@ -634,6 +634,42 @@ def test_approve_with_usable_patches_is_unchanged(mock_submit, monkeypatch):
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_approve_with_raw_diff_fallback_preserves_approve(mock_submit, monkeypatch):
+    """When file.patch is None (e.g. large lockfile), raw diff fallback recovers patch and preserves APPROVE."""
+    monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"uv.lock": None})
+    pr_mock = ctx.state["gh_client"].get_repo.return_value.get_pull.return_value
+    pr_mock.raw_diff = (
+        "diff --git a/uv.lock b/uv.lock\n"
+        "index 111..222 100644\n"
+        "--- a/uv.lock\n"
+        "+++ b/uv.lock\n"
+        "@@ -370,5 +370,5 @@\n"
+        " [[package]]\n"
+        ' name = "authlib"\n'
+        '-version = "1.7.2"\n'
+        '+version = "1.9.1"\n'
+    )
+
+    payload = {
+        "executive_summary": "Routine lockfile bump recovered via raw diff",
+        "confidence": 9,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "context_gaps": [],
+        "verdict": "APPROVE",
+    }
+    res = review(ctx, 8111, json.dumps(payload), "APPROVE")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, _submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "APPROVE"
+    assert json.loads(_submitted_body).get("verdict") == "APPROVE"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_retrieval_failure_downgrades_approve_to_comment(mock_submit, monkeypatch, caplog):
     """When patch retrieval fails, APPROVE is downgraded to COMMENT."""
     monkeypatch.setenv("STRICT_REVIEW_GROUNDING", "0")

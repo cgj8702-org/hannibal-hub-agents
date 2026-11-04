@@ -20,6 +20,7 @@ __all__ = [
     "create_issue",
     "get_issue",
     "list_dir",
+    "parse_patches_from_unified_diff",
     "read_file",
     "resolve_bot_review_threads",
     "resolve_review_thread",
@@ -59,7 +60,12 @@ def __getattr__(name: str) -> Any:
         mod = importlib.import_module(".ast_tools", __package__)
         return getattr(mod, name)
 
-    if name in {"check_window", "verify_line_reference", "walk_right_side"}:
+    if name in {
+        "check_window",
+        "parse_patches_from_unified_diff",
+        "verify_line_reference",
+        "walk_right_side",
+    }:
         mod = importlib.import_module(".diff_tools", __package__)
         return getattr(mod, name)
 

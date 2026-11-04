@@ -339,13 +339,32 @@ def _collect_pr_patches(pr: Any) -> dict[str, str | None]:
 
     Returns an empty mapping when no patch text is available, so the caller can tell
     "cannot verify" apart from "verified nothing" instead of silently passing.
+    When individual file patches are omitted by GitHub's files API (e.g. large lockfiles),
+    falls back to fetching and parsing the raw PR unified diff.
     """
     try:
-        return {
-            str(file.filename): getattr(file, "patch", None)
-            for file in pr.get_files()
-            if getattr(file, "filename", None)
-        }
+        patches: dict[str, str | None] = {}
+        missing_patches = False
+        for file in pr.get_files():
+            fn = getattr(file, "filename", None)
+            if fn:
+                p = getattr(file, "patch", None)
+                patches[str(fn)] = p
+                if not p:
+                    missing_patches = True
+
+        if missing_patches or not any(patches.values()):
+            from webhook_agent.github.pr_context import fetch_pr_raw_diff
+            from webhook_agent.tools.diff_tools import parse_patches_from_unified_diff
+
+            raw_diff = fetch_pr_raw_diff(pr)
+            if raw_diff:
+                parsed = parse_patches_from_unified_diff(raw_diff)
+                for path, patch in parsed.items():
+                    if (path in patches and not patches[path]) or path not in patches:
+                        patches[path] = patch
+
+        return patches
     except Exception as err:
         logger.debug("Could not collect PR patches for the grounding check: %s", err)
         return {}
@@ -421,11 +440,8 @@ def review(
                 changed_files = list(state_dict.get("deterministic_changed_files") or [])
             else:
                 try:
-                    for f in pr.get_files():
-                        fn = getattr(f, "filename", None)
-                        if isinstance(fn, str):
-                            changed_files.append(fn)
-                            patches[fn] = getattr(f, "patch", None)
+                    patches = _collect_pr_patches(pr)
+                    changed_files = list(patches.keys())
                     retrieval_ok = True
                 except Exception as files_err:
                     logger.debug("Could not inspect PR files for investigation gate: %s", files_err)
@@ -536,9 +552,9 @@ def review(
         )
 
         grounding_patches: dict[str, str | None] = {}
-        if retrieval_ok is True:
+        if retrieval_ok is True and any(patches.values()):
             grounding_patches = patches
-        elif retrieval_ok is None:
+        else:
             grounding_patches = _collect_pr_patches(pr)
 
         diff_text_val = diff_text_from_patches(grounding_patches) if grounding_patches else ""

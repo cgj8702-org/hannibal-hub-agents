@@ -22,6 +22,7 @@ from .pr_context import (
     _prefetch_pr_diff,
     _prefetch_previous_bot_reviews,
     _should_prefetch_diff,
+    fetch_pr_raw_diff,
 )
 from .thread_resolver import (
     ReviewComment,
@@ -45,6 +46,7 @@ __all__ = [
     "_prefetch_previous_bot_reviews",
     "_should_prefetch_diff",
     "auto_resolve_coderabbit_threads",
+    "fetch_pr_raw_diff",
     "fetch_pr_review_threads",
     "generate_jwt",
     "get_installation_token",
