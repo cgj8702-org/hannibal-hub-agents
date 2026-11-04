@@ -60,6 +60,27 @@ def _should_prefetch_diff(canonical: str, raw: dict[str, Any]) -> bool:
     return False
 
 
+def fetch_pr_raw_diff(pr: Any) -> str:
+    """Fetch complete unified diff from GitHub when individual file patches are omitted."""
+    try:
+        raw_override = getattr(pr, "raw_diff", None)
+        if isinstance(raw_override, str):
+            return raw_override
+
+        requester = getattr(pr, "_requester", None) or getattr(pr, "requester", None)
+        if requester is not None:
+            _headers, data = requester.requestBlobAndCheck(
+                "GET", pr.url, headers={"Accept": "application/vnd.github.v3.diff"}
+            )
+            if isinstance(data, bytes):
+                return data.decode("utf-8", errors="replace")
+            if isinstance(data, str):
+                return data
+    except Exception as err:
+        logger.debug("Could not fetch raw PR diff: %s", err)
+    return ""
+
+
 def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
     """Programmatically pre-fetch PR diff and inject into raw_payload for review execution."""
     try:
@@ -114,9 +135,18 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
         # always reflects the live head, which may be newer than the SHA the
         # webhook targets; recording it lets the auditor refuse a mixed pair.
         diff_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
+        raw_patches: dict[str, str] = {}
         for f in pr.get_files():
             changed_files.append(f.filename)
-            patch = f.patch or "No patch available (binary/renamed/empty)."
+            patch = f.patch
+            if not patch:
+                if not raw_patches:
+                    raw_diff_text = fetch_pr_raw_diff(pr)
+                    if raw_diff_text:
+                        from webhook_agent.tools.diff_tools import parse_patches_from_unified_diff
+
+                        raw_patches = parse_patches_from_unified_diff(raw_diff_text)
+                patch = raw_patches.get(f.filename) or "No patch available (binary/renamed/empty)."
             diff_lines.append(f"File: {f.filename} ({f.status})\nPatch:\n{patch}\n{'-' * 40}")
 
         if diff_lines:
@@ -293,4 +323,5 @@ __all__ = [
     "_prefetch_pr_diff",
     "_prefetch_previous_bot_reviews",
     "_should_prefetch_diff",
+    "fetch_pr_raw_diff",
 ]

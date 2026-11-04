@@ -233,3 +233,63 @@ def test_prefetch_previous_bot_reviews_ignores_other_bots() -> None:
     raw = payload["raw_payload"]
     assert raw["prior_reviews_had_request_changes"] is False
     assert "previous_bot_reviews" not in raw
+
+
+def test_fetch_pr_raw_diff_via_requester() -> None:
+    from webhook_agent.github.pr_context import fetch_pr_raw_diff
+
+    mock_pr = MagicMock()
+    mock_pr.url = "https://api.github.com/repos/owner/repo/pulls/1"
+    mock_pr.raw_diff = None
+    mock_requester = MagicMock()
+    mock_requester.requestBlobAndCheck.return_value = (
+        {},
+        b"diff --git a/uv.lock b/uv.lock\n@@ -1,2 +1,2 @@\n-a\n+b\n",
+    )
+    mock_pr._requester = mock_requester
+
+    diff = fetch_pr_raw_diff(mock_pr)
+    assert "diff --git a/uv.lock b/uv.lock" in diff
+    assert "+b" in diff
+
+
+def test_fetch_pr_raw_diff_via_raw_override() -> None:
+    from webhook_agent.github.pr_context import fetch_pr_raw_diff
+
+    mock_pr = MagicMock()
+    mock_pr.raw_diff = "diff --git a/file b/file\n"
+    assert fetch_pr_raw_diff(mock_pr) == "diff --git a/file b/file\n"
+
+
+def test_prefetch_pr_diff_falls_back_to_raw_diff_when_patch_none() -> None:
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+
+    mock_file = MagicMock()
+    mock_file.filename = "uv.lock"
+    mock_file.status = "modified"
+    mock_file.patch = None
+
+    mock_pr.get_files.return_value = [mock_file]
+    mock_pr.head.sha = "a" * 40
+    mock_pr.state = "open"
+    mock_pr.merged = False
+    mock_pr.raw_diff = "diff --git a/uv.lock b/uv.lock\n@@ -1,2 +1,2 @@\n-old\n+new\n"
+
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+
+    payload = {
+        "canonical": "pull_request.opened",
+        "raw_payload": {
+            "pull_request": {"number": 277},
+        },
+    }
+
+    _prefetch_pr_diff(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert "pr_diff" in raw
+    assert "uv.lock" in raw["pr_diff"]
+    assert "+new" in raw["pr_diff"]

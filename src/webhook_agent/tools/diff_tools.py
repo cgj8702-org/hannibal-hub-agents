@@ -179,3 +179,59 @@ def verify_line_reference(diff_text: str, file_path: str, line_number: int) -> b
     if file_path in anchors and line_number in anchors[file_path]:
         return True
     return bool(stripped_path in anchors and line_number in anchors[stripped_path])
+
+
+def parse_patches_from_unified_diff(diff_text: str) -> dict[str, str]:
+    """Extract a {path: patch_text} mapping from a raw git unified diff.
+
+    Each patch body starts at the first '@@' hunk header and includes all
+    subsequent hunk lines for that file, mirroring PyGithub's file.patch.
+    """
+    if not diff_text or not diff_text.strip():
+        return {}
+
+    patches: dict[str, str] = {}
+    current_file: str | None = None
+    hunk_lines: list[str] = []
+    in_hunk = False
+
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            if current_file and hunk_lines:
+                patches[current_file] = "\n".join(hunk_lines)
+            hunk_lines = []
+            in_hunk = False
+
+            parts = line.split(" ")
+            if len(parts) >= 4:
+                b_path = parts[3]
+                a_path = parts[2]
+                if b_path.startswith("b/") and b_path != "b//dev/null":
+                    current_file = b_path[2:]
+                elif a_path.startswith("a/") and a_path != "a//dev/null":
+                    current_file = a_path[2:]
+                else:
+                    current_file = None
+            else:
+                current_file = None
+            continue
+
+        if line.startswith("+++ ") and not in_hunk:
+            target = line[4:].strip()
+            if target != "/dev/null":
+                if target.startswith(("a/", "b/")):
+                    current_file = target[2:]
+                else:
+                    current_file = target
+            continue
+
+        if line.startswith("@@ "):
+            in_hunk = True
+            hunk_lines.append(line)
+        elif in_hunk:
+            hunk_lines.append(line)
+
+    if current_file and hunk_lines:
+        patches[current_file] = "\n".join(hunk_lines)
+
+    return patches
