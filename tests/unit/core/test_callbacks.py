@@ -98,6 +98,37 @@ async def test_before_model_callback_uses_shared_client(monkeypatch: pytest.Monk
 
 
 @pytest.mark.anyio
+async def test_before_model_callback_resolves_model_from_agent_model_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from webhook_agent.models.rate_limiter import rpm_waiter
+
+    ctx = MagicMock()
+    ctx.state = {"active_tier": "paid"}
+    agent_model_mock = MagicMock()
+    agent_model_mock.model = "gemini-3.5-flash"
+    ctx.agent.model = agent_model_mock
+
+    req = MagicMock()
+    req.contents = "sample content"
+    req.model = None
+
+    mock_check = AsyncMock()
+    monkeypatch.setattr(rpm_waiter, "check_and_wait", mock_check)
+
+    res = await before_model_callback(ctx, req)
+    assert res is None
+    assert ctx.state.get("active_model") == "gemini-3.5-flash"
+    mock_check.assert_awaited_once_with(
+        model="gemini-3.5-flash",
+        estimated_tokens=ctx.state["prompt_tokens"],
+        tier="paid",
+    )
+
+
+@pytest.mark.anyio
 async def test_after_model_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 

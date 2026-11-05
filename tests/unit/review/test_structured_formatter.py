@@ -93,6 +93,53 @@ def test_enforce_verdict_with_codeblock_json(valid_code_review_pass):
     assert "## 🛡️ Code Review: `REQUEST_CHANGES`" in rendered_md
 
 
+def test_enforce_verdict_preserves_caller_comment_verdict(valid_code_review_pass):
+    """Verify _enforce_verdict never mechanically upgrades an intended COMMENT to APPROVE."""
+    json_str = valid_code_review_pass.model_dump_json()
+    rendered_md, verdict, _inline_comments = _enforce_verdict(json_str, "COMMENT")
+    assert verdict == "COMMENT"
+    assert "## 🛡️ Code Review: `COMMENT`" in rendered_md
+
+
+def test_enforce_verdict_sync_preserves_caller_comment_verdict():
+    """Verify _enforce_verdict never mechanically upgrades a sync review COMMENT to APPROVE."""
+    sync_resp = SyncReviewResponse(
+        summary="Incremental updates with non-blocking feedback.",
+        resolutions=[],
+        critical_issues=[],
+        minor_suggestions=[
+            IssueItem(
+                path="src/logic.py",
+                line=5,
+                description="Minor maintainability suggestion",
+                suggested_fix="return True",
+            )
+        ],
+    )
+    json_str = sync_resp.model_dump_json()
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        json_str, "COMMENT", review_mode="sync"
+    )
+    assert verdict == "COMMENT"
+    assert "## ⚡ Code Review Update: `COMMENT`" in rendered_md
+
+
+def test_enforce_verdict_text_review_preserves_comment_verdict():
+    """Verify fallback text parsing never mechanically upgrades COMMENT to APPROVE."""
+    text_review = """## 🛡️ Code Review: `COMMENT`
+
+### 1. Executive Summary
+PR adds non-blocking cache adjustments.
+
+### 2. Audit Dimension Scorecard
+| Dimension | Status | Notes |
+| Logic & Boundaries | PASS | Logic is sound. |
+"""
+    rendered_md, verdict, _inline_comments = _enforce_verdict(text_review, "COMMENT")
+    assert verdict == "COMMENT"
+    assert "## 🛡️ Code Review: `COMMENT`" in rendered_md
+
+
 def test_sync_review_rendering():
     sync_resp = SyncReviewResponse(
         summary="Incremental fixes applied for PR review feedback.",

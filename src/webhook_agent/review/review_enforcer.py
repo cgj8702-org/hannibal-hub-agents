@@ -181,6 +181,26 @@ def _unverified_item(
     )
 
 
+def _has_review_findings_or_warnings(obj: Any) -> bool:
+    """Return True if a review response has non-empty issues, warnings, risks, or unverified claims."""
+    if not obj:
+        return False
+    if getattr(obj, "critical_issues", None):
+        return True
+    if getattr(obj, "minor_suggestions", None):
+        return True
+    if getattr(obj, "risks_and_edge_cases", None):
+        return True
+    if getattr(obj, "unverified_claims", None):
+        return True
+    scorecard = getattr(obj, "scorecard", []) or []
+    for sc in scorecard:
+        sc_status = getattr(sc, "status", "")
+        if sc_status in ("WARN", "FAIL", "UNKNOWN", "ERROR"):
+            return True
+    return False
+
+
 def apply_scorecard_floor(
     scorecard: list[ScorecardItem],
     deterministic_item: ScorecardItem,
@@ -394,6 +414,15 @@ def _enforce_verdict(
     )
     is_intended_request_changes = is_caller_request_changes or is_body_request_changes
 
+    is_caller_comment = req_event == "COMMENT"
+    is_body_comment = bool(
+        re.search(
+            r"##\s*(?:🛡️|⚡)?\s*Code Review(?:\s*Update)?:\s*`?COMMENT`?",
+            body,
+            re.IGNORECASE,
+        )
+    )
+
     # Step 1: Attempt robust JSON payload extraction, quote repair, and object salvage
     extracted_data = extract_json_payload(body)
     data_candidates: list[dict[str, Any]] = [extracted_data] if extracted_data else []
@@ -567,6 +596,8 @@ def _enforce_verdict(
                     continue
                 if is_intended_request_changes and not data.get("verdict"):
                     data["verdict"] = "REQUEST_CHANGES"
+                elif is_body_comment and not data.get("verdict"):
+                    data["verdict"] = "COMMENT"
 
                 # Process candidate findings through Hunter & Critic if present
                 if "candidate_findings" in data and isinstance(data["candidate_findings"], list):
@@ -730,6 +761,14 @@ def _enforce_verdict(
                             "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
                         )
                         enforced_verdict = "REQUEST_CHANGES"
+                    elif (
+                        is_body_comment
+                        or (is_caller_comment and _has_review_findings_or_warnings(sync_obj))
+                    ) and enforced_verdict == "APPROVE":
+                        logger.warning(
+                            "Safety Guardrail: Prevented mechanical upgrade of sync COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
+                        )
+                        enforced_verdict = "COMMENT"
                     inline_comments: list[dict[str, Any]] = []
                     if diff_text:
                         from .comment_poster import (
@@ -835,6 +874,14 @@ def _enforce_verdict(
                             "Safety Guardrail: Prevented mechanical upgrade of REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
                         )
                         enforced_verdict = "REQUEST_CHANGES"
+                    elif (
+                        is_body_comment
+                        or (is_caller_comment and _has_review_findings_or_warnings(cr_obj))
+                    ) and enforced_verdict == "APPROVE":
+                        logger.warning(
+                            "Safety Guardrail: Prevented mechanical upgrade of COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
+                        )
+                        enforced_verdict = "COMMENT"
                     inline_comments = []
                     if diff_text:
                         from .comment_poster import (
@@ -866,6 +913,8 @@ def _enforce_verdict(
             )
         if is_intended_request_changes and not parsed_dict.get("verdict"):
             parsed_dict["verdict"] = "REQUEST_CHANGES"
+        elif is_body_comment and not parsed_dict.get("verdict"):
+            parsed_dict["verdict"] = "COMMENT"
         if review_mode == "sync" and "summary" not in parsed_dict:
             parsed_dict["summary"] = parsed_dict.get("executive_summary")
             if not parsed_dict["summary"]:
@@ -1028,6 +1077,13 @@ def _enforce_verdict(
                 "Safety Guardrail: Prevented mechanical upgrade of text REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
             )
             enforced_verdict = "REQUEST_CHANGES"
+        elif (
+            is_body_comment or (is_caller_comment and _has_review_findings_or_warnings(cr_obj))
+        ) and enforced_verdict == "APPROVE":
+            logger.warning(
+                "Safety Guardrail: Prevented mechanical upgrade of text COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
+            )
+            enforced_verdict = "COMMENT"
         inline_comments = []
         if diff_text:
             from .comment_poster import (
