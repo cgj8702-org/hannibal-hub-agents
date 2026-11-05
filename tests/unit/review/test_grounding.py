@@ -58,6 +58,28 @@ def test_placeholder_path_is_hard() -> None:
     assert issues[0].is_hard
 
 
+def test_suggestion_placeholder_or_empty_path_is_soft() -> None:
+    """An unanchored or placeholder path on a suggestion is soft, not a hard rejection."""
+    issues = verify_citations(
+        [Finding("suggestion", "", None, "Consider adding unit tests")],
+        SAMPLE_DIFF,
+        ["src/main.py"],
+    )
+    assert [i.code for i in issues] == ["empty_or_placeholder_path"]
+    assert not issues[0].is_hard
+
+
+def test_suggestion_file_level_missing_line_is_soft() -> None:
+    """A file-level suggestion with line=None is soft, allowing architectural suggestions."""
+    issues = verify_citations(
+        [Finding("suggestion", "src/main.py", None, "Consider refactoring this module")],
+        SAMPLE_DIFF,
+        ["src/main.py"],
+    )
+    assert [i.code for i in issues] == ["file_level_suggestion"]
+    assert not issues[0].is_hard
+
+
 def test_unchanged_path_is_hard() -> None:
     """Citing a file the PR does not touch is a hard failure."""
     issues = verify_citations(

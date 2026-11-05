@@ -509,28 +509,43 @@ def review(
         )
         invalid_findings: list[str] = []
 
-        all_issues = [("critical", item) for item in critical_list] + [
-            ("suggestion", item) for item in minor_list
-        ]
-        for kind, issue in all_issues:
+        # Validate critical issues (strict blockers requiring exact path, line, and replacement code)
+        for issue in critical_list:
             p = (issue.path or "").strip().lower()
             if not p or p in ("codebase", "unknown"):
                 invalid_findings.append(
-                    f"{kind} issue '{issue.description[:50]}...' lacks exact file path (got '{issue.path}')"
+                    f"critical issue '{issue.description[:50]}...' lacks exact file path (got '{issue.path}')"
                 )
             if issue.line is None or issue.line <= 0:
                 invalid_findings.append(
-                    f"{kind} issue on '{issue.path}' lacks valid line number (got '{issue.line}')"
+                    f"critical issue on '{issue.path}' lacks valid line number (got '{issue.line}')"
                 )
             fix = (issue.suggested_fix or "").strip().lower()
-            if kind == "critical" and not fix:
+            if not fix:
                 invalid_findings.append(
                     f"critical issue on '{issue.path}:{issue.line}' lacks concrete suggested_fix replacement code"
                 )
-            elif fix and any(bp in fix for bp in forbidden_boilerplate):
+            elif any(bp in fix for bp in forbidden_boilerplate):
                 invalid_findings.append(
-                    f"{kind} issue on '{issue.path}:{issue.line}' has generic boilerplate suggested_fix ('{issue.suggested_fix}')"
+                    f"critical issue on '{issue.path}:{issue.line}' has generic boilerplate suggested_fix ('{issue.suggested_fix}')"
                 )
+
+        # Validate minor suggestions (advisory: allow file-level citations and unanchored suggestions)
+        for issue in minor_list:
+            p = (issue.path or "").strip().lower()
+            if p in ("codebase", "unknown"):
+                issue.path = ""
+            if issue.line is not None and issue.line <= 0:
+                issue.line = None
+            fix = (issue.suggested_fix or "").strip().lower()
+            if fix and any(bp in fix for bp in forbidden_boilerplate):
+                invalid_findings.append(
+                    f"suggestion issue on '{issue.path}:{issue.line}' has generic boilerplate suggested_fix ('{issue.suggested_fix}')"
+                )
+
+        # Sync normalized minor suggestions back to parsed_data & body
+        parsed_data["minor_suggestions"] = [item.model_dump() for item in minor_list]
+        body = json.dumps(parsed_data)
 
         # Check REQUEST_CHANGES without actionable issues
         effective_event = (event or getattr(review_obj, "verdict", None) or "COMMENT").upper()
