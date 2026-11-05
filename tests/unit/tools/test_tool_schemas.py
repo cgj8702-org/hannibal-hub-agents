@@ -111,6 +111,14 @@ def test_review_input():
     assert inp.pr_number == 55
     assert inp.event == "APPROVE"
 
+    # Sanitizes literal quoted dictionary keys from LLM output
+    inp_quoted_keys = ReviewInput.model_validate(
+        {'"pr_number"': 287, "'body'": "test body", '"event"': "COMMENT"}
+    )
+    assert inp_quoted_keys.pr_number == 287
+    assert inp_quoted_keys.body == "test body"
+    assert inp_quoted_keys.event == "COMMENT"
+
     # Coerced event case and issue_number alias
     inp2 = ReviewInput.model_validate(
         {"issue_number": "60", "body": "looks good", "event": "comment"}

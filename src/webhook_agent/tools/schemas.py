@@ -18,6 +18,16 @@ class ToolInputBase(BaseModel):
 
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return {
+                (k.strip().strip("'\"").strip() if isinstance(k, str) else k): v
+                for k, v in data.items()
+            }
+        return data
+
 
 class ReadFileInput(ToolInputBase):
     """Input schema for read_file tool."""

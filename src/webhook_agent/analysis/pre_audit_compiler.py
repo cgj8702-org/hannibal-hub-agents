@@ -95,7 +95,11 @@ def compile_pre_audit_dossier(
         items: list[str] = []
         try:
             for pf in py_files_to_ast:
-                res = verify_python_ast(file_path=pf, diff_text=pr_diff_text)
+                res = verify_python_ast(
+                    file_path=pf,
+                    diff_text=pr_diff_text,
+                    repo_root=repo_root_path,
+                )
                 if not res.startswith("Error: No code snippet provided and file"):
                     items.append(res)
         except Exception as e:
@@ -159,12 +163,14 @@ def compile_pre_audit_dossier(
             )
             return None, item
 
-    # Execute all 4 static pipelines concurrently
+    # Execute all 4 static pipelines concurrently, propagating per-thread ContextVar state
+    import contextvars
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        f_ast = executor.submit(_run_ast_scan)
-        f_sym = executor.submit(_run_symbol_analysis)
-        f_test = executor.submit(_run_test_pipeline)
-        f_sec = executor.submit(_run_security_scan)
+        f_ast = executor.submit(contextvars.copy_context().run, _run_ast_scan)
+        f_sym = executor.submit(contextvars.copy_context().run, _run_symbol_analysis)
+        f_test = executor.submit(contextvars.copy_context().run, _run_test_pipeline)
+        f_sec = executor.submit(contextvars.copy_context().run, _run_security_scan)
 
         ast_items = f_ast.result()
         sym_reports, contract_item = f_sym.result()

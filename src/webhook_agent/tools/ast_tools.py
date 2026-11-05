@@ -79,6 +79,7 @@ def verify_python_ast(
     file_path: str,
     code_snippet: str | None = None,
     diff_text: str | None = None,
+    repo_root: Path | str | None = None,
 ) -> str:
     """Verify syntax, AST structure, and potential runtime defects in Python code.
 
@@ -124,15 +125,24 @@ def verify_python_ast(
             from webhook_agent.tools.paths import resolve_sandboxed_path
 
             target_file: Path | None = None
-            for p_cand in [Path(file_path), Path(cleaned_path)]:
-                if p_cand.is_absolute() and p_cand.is_file():
-                    target_file = p_cand
-                    break
+            if repo_root is not None:
+                root_path = Path(repo_root)
+                for rel_cand in [cleaned_path, file_path]:
+                    cand = (root_path / rel_cand).resolve()
+                    if cand.is_file():
+                        target_file = cand
+                        break
 
             if target_file is None:
-                sandboxed_file = resolve_sandboxed_path(cleaned_path) or resolve_sandboxed_path(
-                    file_path
-                )
+                for p_cand in [Path(file_path), Path(cleaned_path)]:
+                    if p_cand.is_absolute() and p_cand.is_file():
+                        target_file = p_cand
+                        break
+
+            if target_file is None:
+                sandboxed_file = resolve_sandboxed_path(
+                    cleaned_path, root=repo_root
+                ) or resolve_sandboxed_path(file_path, root=repo_root)
                 if sandboxed_file and sandboxed_file.is_file():
                     target_file = sandboxed_file
 

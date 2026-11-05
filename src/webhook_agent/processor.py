@@ -147,6 +147,7 @@ SUPPRESSED_EVENT_NAMES: frozenset[str] = frozenset(
         "release",
         "sponsorship",
         "milestone",
+        "label",
     }
 )
 
@@ -1118,6 +1119,14 @@ class WebhookProcessor:
                 pr_num_int = int(pr_number)
             except (TypeError, ValueError):
                 pr_num_int = None
+        else:
+            logger.info(
+                "Skipping Tier 2 dispatch: event '%s' has no associated PR or issue number for %s (delivery_id=%s)",
+                canonical or payload.get("event_name", "unknown"),
+                repo_name,
+                delivery_id,
+            )
+            return
         head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
 
         resumed_checkpoint: dict[str, Any] | None = None

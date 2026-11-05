@@ -53,6 +53,16 @@ def _base_event(
 
 
 class TestTier0DropGuard:
+    def test_drops_label_created_events(self, processor: WebhookProcessor) -> None:
+        """Repository metadata events like label.created are dropped at Tier 0."""
+        event = _base_event(
+            "label",
+            "created",
+            sender="cgj8702",
+            extra_raw={"label": {"name": "bug", "color": "f29513"}},
+        )
+        assert processor.should_process_event(event) is False
+
     def test_drops_untargeted_issue_opened(self, processor: WebhookProcessor) -> None:
         """Issue opened without mentioning the bot or requesting triage is dropped (record-only)."""
         event = _base_event(
@@ -394,3 +404,18 @@ class TestPipelineDispatch:
         ):
             processor._dispatch_event(event, "pull_request.opened", "del-2")
             mock_tier_2.assert_called_once_with(event, "pull_request.opened", "del-2")
+
+    def test_dispatch_tier_2_skips_when_missing_pr_or_issue_number(
+        self, processor: WebhookProcessor
+    ) -> None:
+        """Events without an associated PR or issue number do not dispatch to AgentCore."""
+        mock_agent = MagicMock()
+        with patch.object(processor, "_get_agent_core", return_value=mock_agent):
+            payload = _base_event(
+                "custom",
+                "action",
+                sender="cgj8702",
+                extra_raw={"repository": {"full_name": "cgj8702-org/test-repo"}},
+            )
+            processor._dispatch_tier_2_llm(payload, "custom.action", "del-123")
+            mock_agent.run.assert_not_called()
