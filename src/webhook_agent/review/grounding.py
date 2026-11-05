@@ -763,6 +763,23 @@ _KNOWN_EXTENSIONS = frozenset(
         "patch",
     }
 )
+_KNOWN_STDLIB_MODULE_PREFIXES = frozenset(
+    {
+        "asyncio.",
+        "threading.",
+        "multiprocessing.",
+        "concurrent.",
+        "subprocess.",
+        "logging.",
+        "os.",
+        "sys.",
+        "json.",
+        "re.",
+        "math.",
+        "typing.",
+        "pathlib.",
+    }
+)
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])"
     r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
@@ -1180,6 +1197,7 @@ def verify_semantic_invariant(
         for p in cited_paths
         if "." in p.rsplit("/", 1)[-1]
         and p.rsplit("/", 1)[-1].rsplit(".", 1)[-1] in _KNOWN_EXTENSIONS
+        and not any(p.startswith(pfx) for pfx in _KNOWN_STDLIB_MODULE_PREFIXES)
     }
     for m in _INVARIANT_CITATION_RE.finditer(raw_inv):
         cited_paths.add(bare_path(m.group(1)).lower())
@@ -1315,6 +1333,8 @@ def extract_cited_paths(text: str) -> set[str]:
     paths: set[str] = set()
     for match in _PATH_RE.finditer(text or ""):
         candidate = match.group(0).strip("./").lower()
+        if any(candidate.startswith(pfx) for pfx in _KNOWN_STDLIB_MODULE_PREFIXES):
+            continue
         if "/" in candidate:
             paths.add(candidate)
             continue

@@ -581,6 +581,16 @@ def test_verify_semantic_invariant_rejects_nonexistent_file() -> None:
     assert "phantom_db.py" in reason
 
 
+def test_verify_semantic_invariant_allows_stdlib_symbols_without_path_error() -> None:
+    """An invariant citing standard library classes like asyncio.Lock is not treated as a hallucinated file."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    diff = "--- a/src/main.py\n+++ b/src/main.py\n@@ -1,1 +1,2 @@\n+import asyncio\n+lock = asyncio.Lock()\n"
+    inv = "The use of `asyncio.Lock` guarantees atomicity of state updates."
+    status, _reason = verify_semantic_invariant(inv, diff, ["src/main.py"])
+    assert status == "GROUNDED"
+
+
 def test_verify_semantic_invariant_rejects_nonexistent_test() -> None:
     """An invariant claiming a test that does not exist in diff or suite is hallucinated."""
     from webhook_agent.review.grounding import verify_semantic_invariant

@@ -178,3 +178,21 @@ def test_compile_pre_audit_dossier_baseline_loader() -> None:
 
         res2 = loader("src/missing.py")
         assert res2 is None
+
+
+def test_compile_pre_audit_dossier_propagates_repo_root_to_ast(tmp_path: Path) -> None:
+    """Verify that when an active environment exists, repo_root is passed to verify_python_ast."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    f = src_dir / "worker.py"
+    f.write_text("def sample_worker_func(): pass\n", encoding="utf-8")
+
+    env = LocalEnvironment(tmp_path)
+    with use_environment(env):
+        dossier = compile_pre_audit_dossier(
+            changed_files=["src/worker.py"],
+            pr_diff_text="",
+            event_data={},
+        )
+    assert dossier.ast_verified is True
+    assert "sample_worker_func" in dossier.dossier_markdown

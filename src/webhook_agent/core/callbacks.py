@@ -638,6 +638,14 @@ async def before_tool_callback(
 
     from webhook_agent.tools.schemas import TOOL_INPUT_SCHEMAS
 
+    if isinstance(args, dict):
+        cleaned_args = {
+            (k.strip().strip("'\"").strip() if isinstance(k, str) else k): v
+            for k, v in args.items()
+        }
+        args.clear()
+        args.update(cleaned_args)
+
     schema_cls = TOOL_INPUT_SCHEMAS.get(tool.name)
     if schema_cls is not None:
         try:
