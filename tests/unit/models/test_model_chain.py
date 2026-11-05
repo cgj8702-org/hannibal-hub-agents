@@ -129,6 +129,22 @@ def test_select_model_for_event_pull_request_opened(monkeypatch: pytest.MonkeyPa
     assert _select_model_for_event(event_sync) == "primary-pr-model"
 
 
+def test_select_model_for_event_paid_tier_defaults_to_3_5_flash_for_reviews(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify paid tier defaults to gemini-3.5-flash for PR reviews to prevent rubberstamping."""
+    monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")
+    monkeypatch.setenv("WEBHOOK_TIER", "paid")
+    monkeypatch.delenv("PRIMARY_MODEL", raising=False)
+    monkeypatch.delenv("GEMMA_MODEL", raising=False)
+
+    event_opened = {"canonical": "pull_request.opened", "raw_payload": {}}
+    assert _select_model_for_event(event_opened) == "gemini-3.5-flash"
+
+    event_sync = {"canonical": "pull_request.synchronize", "raw_payload": {}}
+    assert _select_model_for_event(event_sync) == "gemini-3.5-flash"
+
+
 def test_select_model_for_event_comment_with_review_intent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify comment events with review intent keywords or bot mention route to primary."""
     monkeypatch.setenv("ENABLE_DYNAMIC_MODEL_ROUTING", "1")

@@ -39,7 +39,7 @@ All Gemini models below provide **250,000 TPM**, allowing full multi-file PR rev
 
 ### 💳 Paid Tier Chain (3.x High-Bandwidth & 4M TPM Token Expansion)
 
-Default primary model: `gemini-3.5-flash-lite` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars, or escalated to `gemini-3.8-flash` / `gemini-2.5-pro` via `/deep`, `/audit`, `/reason`, or `/model`).
+Default primary model for code reviews: `gemini-3.5-flash` (can be overridden via `PRIMARY_MODEL` / `GEMMA_MODEL` env vars, or escalated to `gemini-3.8-flash` on heavy diffs / `gemini-2.5-pro` via `/deep`, `/audit`, `/reason`, or `/model`). Routine non-PR events default to `gemini-3.5-flash-lite`.
 
 Optimized for high-throughput with massive 4,000,000 TPM and **Unlimited RPD**, removing diff and payload truncation boundaries:
 - **Unshackled Context Window**: Up to 1,000,000 input tokens on paid tier.

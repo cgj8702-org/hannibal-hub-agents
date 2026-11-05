@@ -169,7 +169,7 @@ def _select_model_for_event(event_data: dict[str, Any]) -> str:
     to the primary model, and routine lifecycle events to the lightweight model.
     """
     active_tier = _resolve_tier()
-    default_primary = "gemini-3.5-flash-lite"
+    default_primary = "gemini-3.5-flash" if active_tier == "paid" else "gemini-3.5-flash-lite"
     default_lightweight = "gemini-3.5-flash-lite"
     primary = os.environ.get(
         "PRIMARY_MODEL",
@@ -235,7 +235,7 @@ def get_active_model(event_data: dict[str, Any] | None = None) -> str:
     chain = get_model_chain()
     if chain:
         return chain[0]
-    default_primary = "gemini-3.5-flash-lite"
+    default_primary = "gemini-3.5-flash" if _resolve_tier() == "paid" else "gemini-3.5-flash-lite"
     return os.environ.get(
         "PRIMARY_MODEL",
         os.environ.get("GEMMA_MODEL", default_primary),

@@ -1645,6 +1645,21 @@ class TestToolGating:
         assert "Mandatory Investigation Gate" in result["error"]
 
     @pytest.mark.anyio
+    async def test_review_tool_rejected_when_only_list_dir_executed(self) -> None:
+        """Verify list_dir alone does not satisfy the mandatory investigation gate."""
+        from webhook_agent.core.callbacks import before_tool_callback
+
+        tool = MagicMock()
+        tool.name = "review"
+        ctx = self._make_tool_context(Mode.FORMAL_AUDIT)
+        ctx.state["is_code_audit"] = True
+        ctx.state["tools_executed"] = ["list_dir"]
+        result = await before_tool_callback(tool, {"pr_number": 42, "body": "{}"}, ctx)
+        assert result is not None
+        assert "error" in result
+        assert "Mandatory Investigation Gate" in result["error"]
+
+    @pytest.mark.anyio
     async def test_review_tool_allowed_when_code_audit_with_investigation(self) -> None:
         from webhook_agent.core.callbacks import before_tool_callback
 
