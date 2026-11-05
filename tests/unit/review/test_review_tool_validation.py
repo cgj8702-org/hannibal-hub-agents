@@ -434,6 +434,91 @@ def test_review_accepts_advisory_minor_suggestion_with_empty_suggested_fix(mock_
     assert mock_submit.called
 
 
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_accepts_minor_suggestion_with_file_level_path_no_line(mock_submit, mock_ctx):
+    """Verify that review() tool accepts file-level minor suggestions with line=None."""
+    mock_submit.return_value = ("Review submitted", True)
+    mock_ctx.state["deterministic_changed_files"] = ["README.md"]
+    payload = {
+        "executive_summary": "Docs review with file-level feedback.",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "README.md",
+                "line": None,
+                "description": "Consider adding architectural diagrams to this file.",
+                "suggested_fix": "",
+            }
+        ],
+        "context_gaps": [],
+    }
+    res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
+    assert res == "Review submitted"
+    assert mock_submit.called
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_accepts_minor_suggestion_with_empty_path(mock_submit, mock_ctx):
+    """Verify that review() tool accepts unanchored minor suggestions with path='' and line=None."""
+    mock_submit.return_value = ("Review submitted", True)
+    mock_ctx.state["deterministic_changed_files"] = ["README.md"]
+    payload = {
+        "executive_summary": "Review with unanchored general suggestion.",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "",
+                "line": None,
+                "description": "Consider adding unit tests for newly added helper functions.",
+                "suggested_fix": "",
+            }
+        ],
+        "context_gaps": [],
+    }
+    res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _pr, body_arg, _event, _key, _state = mock_submit.call_args[0]
+    parsed = json.loads(body_arg)
+    assert parsed["minor_suggestions"][0]["path"] == ""
+    assert parsed["minor_suggestions"][0]["line"] is None
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_normalizes_minor_suggestion_placeholder_path_and_non_positive_line(
+    mock_submit, mock_ctx
+):
+    """Verify that review() normalizes placeholder path ('codebase') to '' and line <= 0 to None."""
+    mock_submit.return_value = ("Review submitted", True)
+    mock_ctx.state["deterministic_changed_files"] = ["README.md"]
+    payload = {
+        "executive_summary": "Review with placeholder path.",
+        "confidence": 5,
+        "risks_and_edge_cases": [],
+        "critical_issues": [],
+        "minor_suggestions": [
+            {
+                "path": "codebase",
+                "line": 0,
+                "description": "Consider organizing tests into domain packages.",
+                "suggested_fix": "",
+            }
+        ],
+        "context_gaps": [],
+    }
+    res = review(mock_ctx, 123, json.dumps(payload), "COMMENT")
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _pr, body_arg, _event, _key, _state = mock_submit.call_args[0]
+    parsed = json.loads(body_arg)
+    assert parsed["minor_suggestions"][0]["path"] == ""
+    assert parsed["minor_suggestions"][0]["line"] is None
+
+
 # ---------------------------------------------------------------------------
 # Phase 2.2: deterministic citation grounding (warn-only unless strict)
 # ---------------------------------------------------------------------------

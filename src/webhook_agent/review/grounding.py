@@ -526,7 +526,7 @@ def _check_one(
     if not path or path.lower() in PLACEHOLDER_PATHS:
         issues.append(
             _issue(
-                "hard",
+                "soft" if finding.kind == "suggestion" else "hard",
                 "empty_or_placeholder_path",
                 finding,
                 f"{finding.kind} has no exact file path (got {raw_path!r}); cite a real "
@@ -583,23 +583,43 @@ def _check_one(
         )
 
     if finding.line is None:
-        issues.append(
-            _issue(
-                "hard",
-                "missing_line",
-                finding,
-                f"{finding.kind} on '{path}' has no line number; cite the specific line.",
+        if finding.kind == "suggestion":
+            issues.append(
+                _issue(
+                    "soft",
+                    "file_level_suggestion",
+                    finding,
+                    f"Suggestion on '{path}' is file-level (no line number).",
+                )
             )
-        )
+        else:
+            issues.append(
+                _issue(
+                    "hard",
+                    "missing_line",
+                    finding,
+                    f"{finding.kind} on '{path}' has no line number; cite the specific line.",
+                )
+            )
     elif finding.line <= 0:
-        issues.append(
-            _issue(
-                "hard",
-                "non_positive_line",
-                finding,
-                f"{finding.kind} on '{path}' has a non-positive line ({finding.line}).",
+        if finding.kind == "suggestion":
+            issues.append(
+                _issue(
+                    "soft",
+                    "non_positive_line",
+                    finding,
+                    f"Suggestion on '{path}' has a non-positive line ({finding.line}).",
+                )
             )
-        )
+        else:
+            issues.append(
+                _issue(
+                    "hard",
+                    "non_positive_line",
+                    finding,
+                    f"{finding.kind} on '{path}' has a non-positive line ({finding.line}).",
+                )
+            )
     else:
         known_lines = line_text.get(path)
         if known_lines is not None:
@@ -625,10 +645,10 @@ def _check_one(
                 )
 
     if not (finding.evidence or "").strip():
-        # For deletion/refactor PRs, missing evidence is soft (model should return empty verified_invariants)
+        # For deletion/refactor PRs and suggestions, missing evidence is soft
         issues.append(
             _issue(
-                "soft" if is_deletion_refactor else "hard",
+                "soft" if (is_deletion_refactor or finding.kind == "suggestion") else "hard",
                 "missing_evidence",
                 finding,
                 f"{finding.kind} on '{path}' has no evidence; state what in the diff "
@@ -638,7 +658,7 @@ def _check_one(
     else:
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
-        if diff_text and finding.kind != "scorecard":
+        if diff_text and finding.kind not in ("scorecard", "suggestion"):
             norm_diff = _norm_evidence(diff_text)
             for quote in code_quotes:
                 if len(_norm_evidence(quote)) > 24:
