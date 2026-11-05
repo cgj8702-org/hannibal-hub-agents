@@ -577,7 +577,9 @@ async def before_tool_callback(
     if tool.name == "review" and (
         tool_context.state.get("is_code_audit") or tool_context.state.get("user:is_code_audit")
     ):
-        investigative_tools = {"read_file", "search_files", "list_dir"}
+        # Code audit investigation requires deep code inspection via read_file or search_files.
+        # list_dir alone is layout reconnaissance and does not satisfy the code investigation requirement.
+        investigative_tools = {"read_file", "search_files"}
         tools_executed = (
             tool_context.state.get("tools_executed")
             or tool_context.state.get("user:tools_executed")
@@ -611,7 +613,7 @@ async def before_tool_callback(
             return {
                 "error": (
                     "Mandatory Investigation Gate: You cannot submit a code review before actively exploring the repository. "
-                    "Use `search_files`, `list_dir`, or `read_file` to inspect callers, directory layout, contract boundaries, "
+                    "Use `search_files` or `read_file` to inspect callers, contract boundaries, "
                     "and related test suites across the repository before submitting your review."
                 )
             }
