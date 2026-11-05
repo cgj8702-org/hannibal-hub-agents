@@ -916,10 +916,8 @@ class WebhookProcessor:
                 "pull_request_review_comment.",
             )
         )
-        pr_number = (
-            pr_data.get("number")
-            if isinstance(pr_data, dict)
-            else (raw.get("issue") or {}).get("number")
+        pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
+            "number"
         )
 
         pr_num_int: int | None = None
@@ -1108,10 +1106,8 @@ class WebhookProcessor:
                 "pull_request_review_comment.",
             )
         )
-        pr_number = (
-            pr_data.get("number")
-            if isinstance(pr_data, dict)
-            else (raw.get("issue") or {}).get("number")
+        pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
+            "number"
         )
         pr_num_int: int | None = None
         if pr_number is not None:
