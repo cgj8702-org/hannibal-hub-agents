@@ -82,29 +82,31 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
 
 #### 3a. `CodeReviewResponse` (Initial Reviews)
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
-2. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
+2. **verdict**: Explicit review verdict ("APPROVE", "REQUEST_CHANGES", "COMMENT"). If any scorecard dimension is WARN, UNKNOWN, or ERROR, or if you identify non-blocking issues or risks, you MUST explicitly set verdict to "COMMENT". Only set "APPROVE" when all 5 dimensions are PASS/N/A with zero critical issues and zero unverified risks.
+3. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
    - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).
    - `notes`: Specific, diff-grounded verification findings or justification (citing verified AST structures, locks, or test assertions).
-3. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants citing specific file paths and lines (`path:line: guarantee`). If asserting behavioral logic (e.g. handles, logs, checks, skips), you MUST back it up by quoting the exact modified code in backticks (e.g. 'path:line: `exact_code_quote` performs ...') or citing a specific test function (e.g. `test_foo`). Behavioral claims without a backticked diff quote or test citation will fail automated grounding validation! For PRs that only delete/remove code, or pure refactorings with no newly added logic lines to quote, return an empty list (`verified_invariants: []`) and convey domain guarantees via `semantic_invariants`.
-4. **semantic_invariants**: 1-3 high-level architectural, domain, or behavioral guarantees asserted by model reasoning without mechanical line citations.
-5. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
-6. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
-7. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
+4. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants citing specific file paths and lines (`path:line: guarantee`). If asserting behavioral logic (e.g. handles, logs, checks, skips), you MUST back it up by quoting the exact modified code in backticks (e.g. 'path:line: `exact_code_quote` performs ...') or citing a specific test function (e.g. `test_foo`). Behavioral claims without a backticked diff quote or test citation will fail automated grounding validation! For PRs that only delete/remove code, or pure refactorings with no newly added logic lines to quote, return an empty list (`verified_invariants: []`) and convey domain guarantees via `semantic_invariants`.
+5. **semantic_invariants**: 1-3 high-level architectural, domain, or behavioral guarantees asserted by model reasoning without mechanical line citations.
+6. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
+7. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
+8. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
 
 #### 3b. `SyncReviewResponse` (Synchronization Re-Reviews)
 1. **summary**: 1-2 concise sentences summarizing incremental commit changes and their impact.
-2. **resolutions**: Resolution status for ALL prior review findings (critical issues, suggestions, risks, and scorecard warnings). For EACH prior finding supplied in the "Pre-Fetched Prior Review Findings" section:
+2. **verdict**: Explicit sync review verdict ("APPROVE", "REQUEST_CHANGES", "COMMENT").
+3. **resolutions**: Resolution status for ALL prior review findings (critical issues, suggestions, risks, and scorecard warnings). For EACH prior finding supplied in the "Pre-Fetched Prior Review Findings" section:
    - `item_description`: Description of the previously flagged item.
    - `status`: "RESOLVED" if addressed by new commits, "UNRESOLVED" if still outstanding.
    - `evidence`: Concrete diff citation or line reference proving resolution or persistence.
    - `category`: "CRITICAL", "SUGGESTION", or "RISK" (matching the original finding category).
    If no prior findings were flagged (clean prior pass), leave `resolutions` as an empty list (`[]`). Do NOT invent or backfill items.
-3. **scorecard**: Same 5-dimension matrix as `CodeReviewResponse`, evaluated against the incremental diff.
-4. **critical_issues**: New blocking defects introduced in this update only. Empty (`[]`) if clean.
-5. **minor_suggestions**: New non-blocking suggestions introduced in this update only. Empty (`[]`) if clean.
-6. **verified_invariants**: Same as `CodeReviewResponse`, grounded in the incremental diff.
-7. **semantic_invariants**: Same as `CodeReviewResponse`.
+4. **scorecard**: Same 5-dimension matrix as `CodeReviewResponse`, evaluated against the incremental diff.
+5. **critical_issues**: New blocking defects introduced in this update only. Empty (`[]`) if clean.
+6. **minor_suggestions**: New non-blocking suggestions introduced in this update only. Empty (`[]`) if clean.
+7. **verified_invariants**: Same as `CodeReviewResponse`, grounded in the incremental diff.
+8. **semantic_invariants**: Same as `CodeReviewResponse`.
 
 ### 4. Grounding & Verification Directives
 1. **Observable Defects & Diff Grounding**:

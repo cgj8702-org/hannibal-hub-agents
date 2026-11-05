@@ -128,7 +128,22 @@ async def before_model_callback(
         default_model = get_active_model()
     except ImportError:
         default_model = "gemini-3.8-flash"
-    target_model = getattr(llm_request, "model", None) or default_model
+    target_model = getattr(llm_request, "model", None)
+    if not target_model and hasattr(callback_context, "agent"):
+        agent_obj = getattr(callback_context, "agent", None)
+        agent_model = getattr(agent_obj, "model", None) if agent_obj else None
+        if isinstance(agent_model, str) and agent_model.strip():
+            target_model = agent_model.strip()
+        elif agent_model is not None:
+            inner_model = getattr(agent_model, "model", None)
+            if isinstance(inner_model, str) and inner_model.strip():
+                target_model = inner_model.strip()
+    if not target_model:
+        target_model = (
+            callback_context.state.get("active_model")
+            or callback_context.state.get("user:active_model")
+            or default_model
+        )
 
     input_text = ""
     if hasattr(llm_request, "contents") and llm_request.contents:
