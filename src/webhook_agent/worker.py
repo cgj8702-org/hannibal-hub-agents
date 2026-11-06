@@ -196,12 +196,10 @@ def setup_cloud_logging() -> None:
 def main() -> int:
     from webhook_agent.constants import (
         DEFAULT_PUBSUB_DEAD_LETTER_TOPIC,
-        DEFAULT_PUBSUB_PROJECT,
         DEFAULT_PUBSUB_SUBSCRIPTION,
     )
 
     setup_cloud_logging()
-    os.environ.get("PUBSUB_PROJECT", DEFAULT_PUBSUB_PROJECT)
     subscription = os.environ.get("PUBSUB_SUBSCRIPTION", DEFAULT_PUBSUB_SUBSCRIPTION)
     dead_letter_topic = os.environ.get("PUBSUB_DEAD_LETTER_TOPIC", DEFAULT_PUBSUB_DEAD_LETTER_TOPIC)
 

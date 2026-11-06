@@ -672,3 +672,85 @@ def test_extract_response_text_no_content() -> None:
 
     result = _extract_response_text(resp)
     assert result == ""
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_create_issue_gating_blocks_when_disallowed() -> None:
+    """before_tool_callback blocks create_issue when may_create_issue is False."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import before_tool_callback
+
+    tool = MagicMock()
+    tool.name = "create_issue"
+    args = {"title": "Bug report", "body": "Details"}
+    ctx = MagicMock()
+    ctx.state = {"may_create_issue": False}
+
+    res = await before_tool_callback(tool, args, ctx)
+    assert res is not None
+    assert "error" in res
+    assert "may_create_issue=False" in res["error"]
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_create_issue_allows_when_permitted() -> None:
+    """before_tool_callback allows create_issue when may_create_issue is True."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import before_tool_callback
+
+    tool = MagicMock()
+    tool.name = "create_issue"
+    args = {"title": "Bug report", "body": "Details"}
+    ctx = MagicMock()
+    ctx.state = {"may_create_issue": True}
+
+    res = await before_tool_callback(tool, args, ctx)
+    assert res is None
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_typed_review_tools_gated_by_mode() -> None:
+    """submit_initial_review and submit_sync_review require FORMAL_AUDIT mode."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import before_tool_callback
+    from webhook_agent.core.policy import Mode
+
+    for tool_name in ["submit_initial_review", "submit_sync_review"]:
+        tool = MagicMock()
+        tool.name = tool_name
+        args = {"report": {}}
+        ctx = MagicMock()
+        ctx.state = {"agent_mode": Mode.THREAD_COLLAB}
+
+        res = await before_tool_callback(tool, args, ctx)
+        assert res is not None
+        assert "error" in res
+        assert "Only permitted in mode 'formal_audit'" in res["error"]
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_typed_review_tools_investigation_gate() -> None:
+    """submit_initial_review and submit_sync_review enforce Mandatory Investigation Gate."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import before_tool_callback
+    from webhook_agent.core.policy import Mode
+
+    for tool_name in ["submit_initial_review", "submit_sync_review"]:
+        tool = MagicMock()
+        tool.name = tool_name
+        args = {"report": {}}
+        ctx = MagicMock()
+        ctx.state = {
+            "agent_mode": Mode.FORMAL_AUDIT,
+            "is_code_audit": True,
+            "tools_executed": ["list_dir"],  # list_dir does not satisfy investigation gate
+        }
+
+        res = await before_tool_callback(tool, args, ctx)
+        assert res is not None
+        assert "error" in res
+        assert "Mandatory Investigation Gate" in res["error"]

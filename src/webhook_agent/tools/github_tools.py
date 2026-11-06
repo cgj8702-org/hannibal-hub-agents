@@ -328,6 +328,15 @@ def create_issue(
     Returns:
         A string describing the result, including issue number and URL.
     """
+    may_create_issue = bool(
+        ctx.state.get("may_create_issue") or ctx.state.get("user:may_create_issue")
+    )
+    if not may_create_issue:
+        return (
+            "Error creating issue: Creation of issues is disallowed by policy "
+            "(may_create_issue is False for this event)."
+        )
+
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
     try:

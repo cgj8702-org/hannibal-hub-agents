@@ -186,18 +186,6 @@ def resolve_event_policy(
             reason=f"formal review event: {canonical}",
         )
 
-    is_pr = bool(
-        raw.get("pull_request") is not None
-        or (raw.get("issue") or {}).get("pull_request") is not None
-        or canonical.startswith(
-            (
-                "pull_request.",
-                "pull_request_review.",
-                "pull_request_review_comment.",
-            )
-        )
-    )
-
     # --- Review-intent slash commands on PRs -> FORMAL_AUDIT ---
     # Only PRs can enter formal audit; review commands on issues remain in triage/discussion
     if is_pr and has_review_slash_command(comment_body):
