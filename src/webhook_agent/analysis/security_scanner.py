@@ -30,7 +30,6 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "docs/",
     ".agents/",
     "dev/",
-    "scripts/",
     "assets/",
 )
 
@@ -40,7 +39,6 @@ EXEMPT_FILE_SUFFIXES: tuple[str, ...] = (
     ".md",
     ".rst",
     ".txt",
-    ".json",
     ".lock",
 )
 

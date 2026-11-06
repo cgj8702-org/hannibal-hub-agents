@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import tarfile
 import tempfile
 from collections.abc import AsyncIterator
@@ -51,7 +52,8 @@ async def pr_workspace(
         head_sha[:7] if head_sha else "N/A",
         gh is None,
     )
-    enable = ENABLE_PR_WORKSPACE.strip().lower()
+    enable_val = os.environ.get("ENABLE_PR_WORKSPACE", ENABLE_PR_WORKSPACE)
+    enable = str(enable_val).strip().lower()
     if enable in ("0", "false", "no", "off"):
         logger.info("PR workspace disabled via ENABLE_PR_WORKSPACE=0")
         yield None

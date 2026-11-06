@@ -98,6 +98,35 @@ def test_scan_diff_secrets_respects_exempt_path() -> None:
     assert "Exempt file path" in f.exemption_reason
 
 
+def test_scan_diff_secrets_flags_json_and_scripts() -> None:
+    scanner = SecurityScanner()
+    diff_json = """diff --git a/credentials.json b/credentials.json
+--- a/credentials.json
++++ b/credentials.json
+@@ -1,2 +1,3 @@
++{
++  "private_key": "ghp_abzdefghijklnmopqrstuvwxyz9876543210"
++}
+"""
+    findings_json = scanner.scan_diff_secrets(diff_json)
+    assert len(findings_json) >= 1
+    assert findings_json[0].file_path == "credentials.json"
+    assert findings_json[0].is_exempt is False
+    assert findings_json[0].confidence == "PROVEN"
+
+    diff_script = """diff --git a/scripts/deploy.sh b/scripts/deploy.sh
+--- a/scripts/deploy.sh
++++ b/scripts/deploy.sh
+@@ -1,2 +1,3 @@
++DEPLOY_TOKEN="ghp_abzdefghijklnmopqrstuvwxyz9876543210"
+"""
+    findings_script = scanner.scan_diff_secrets(diff_script)
+    assert len(findings_script) >= 1
+    assert findings_script[0].file_path == "scripts/deploy.sh"
+    assert findings_script[0].is_exempt is False
+    assert findings_script[0].confidence == "PROVEN"
+
+
 def test_scan_python_bandit_subprocess(tmp_path: Path) -> None:
     scanner = SecurityScanner(repo_root=tmp_path)
 

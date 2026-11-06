@@ -130,11 +130,16 @@ def evaluate_dependency_fast_path(
             or (raw.get("sender") or {}).get("login", "")
             or ""
         )
+        sender_type = (
+            (payload.get("sender") or {}).get("type", "")
+            or (raw.get("sender") or {}).get("type", "")
+            or ""
+        )
         head_branch = (pr_data.get("head") or {}).get("ref", "")
         changed_files = raw.get("changed_files") or []
         pr_diff = raw.get("pr_diff") or ""
 
-        if is_pure_dependency_pr(sender_login, head_branch, changed_files):
+        if is_pure_dependency_pr(sender_login, head_branch, changed_files, sender_type=sender_type):
             logger.info(
                 "⚡ Evaluating deterministic fast-path for PR %s#%s (%d changed files)",
                 repo_name,
