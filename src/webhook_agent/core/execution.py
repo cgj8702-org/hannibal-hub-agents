@@ -345,10 +345,26 @@ def _submit_deterministic_review(
                     elif f"user:{k}" in final_session.state:
                         review_state[k] = final_session.state[f"user:{k}"]
 
+            fallback_event = ""
+            if isinstance(raw_verdict, str) and raw_verdict.strip().upper() in (
+                "APPROVE",
+                "REQUEST_CHANGES",
+                "COMMENT",
+            ):
+                fallback_event = raw_verdict.strip().upper()
+            elif hasattr(raw_verdict, "verdict") and getattr(raw_verdict, "verdict", None):
+                fallback_event = str(raw_verdict.verdict).strip().upper()
+            elif isinstance(raw_verdict, dict) and raw_verdict.get("verdict"):
+                fallback_event = str(raw_verdict["verdict"]).strip().upper()
+            elif hasattr(raw_analysis, "verdict") and getattr(raw_analysis, "verdict", None):
+                fallback_event = str(raw_analysis.verdict).strip().upper()
+            elif isinstance(raw_analysis, dict) and raw_analysis.get("verdict"):
+                fallback_event = str(raw_analysis["verdict"]).strip().upper()
+
             detail, submitted = _submit_formal_review(
                 pr,
                 review_payload,
-                "COMMENT",
+                fallback_event,
                 f"{repo_full_name}#{pr_number}",
                 review_state,
                 analyzed_sha=head_sha,

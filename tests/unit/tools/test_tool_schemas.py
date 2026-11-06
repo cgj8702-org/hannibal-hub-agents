@@ -126,6 +126,29 @@ def test_review_input():
     assert inp2.pr_number == 60
     assert inp2.event == "COMMENT"
 
+    # Default event is None when omitted
+    inp_no_event = ReviewInput.model_validate({"pr_number": 10, "body": "some review"})
+    assert inp_no_event.event is None
+
+    # Coerce report dict into body
+    inp_report = ReviewInput.model_validate(
+        {"pr_number": 11, "report": {"executive_summary": "Looks great"}}
+    )
+    assert inp_report.pr_number == 11
+    assert "Looks great" in inp_report.body
+
+    # Coerce top-level review payload fields into body
+    inp_top_level = ReviewInput.model_validate(
+        {
+            "pr": 12,
+            "executive_summary": "Clean PR",
+            "scorecard": [{"name": "Security", "status": "PASS"}],
+        }
+    )
+    assert inp_top_level.pr_number == 12
+    assert "Clean PR" in inp_top_level.body
+    assert "Security" in inp_top_level.body
+
     # Invalid event
     with pytest.raises(ValidationError):
         ReviewInput.model_validate({"pr_number": 1, "body": "test", "event": "INVALID"})

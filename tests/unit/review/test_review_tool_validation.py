@@ -221,6 +221,27 @@ def test_review_accepts_valid_payload(mock_submit, mock_ctx):
 
 
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_review_infers_event_from_scorecard(mock_submit, mock_ctx):
+    mock_submit.return_value = ("Review submitted", True)
+    mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]
+    mock_ctx.state["deterministic_precompiled_ast"] = True
+    payload = {
+        "executive_summary": "All checks passed cleanly.",
+        "scorecard": [
+            {"name": "Contract Integrity", "status": "PASS"},
+            {"name": "Security & Secrets", "status": "PASS"},
+            {"name": "Test Coverage & Regressions", "status": "PASS"},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    res = review(mock_ctx, 123, json.dumps(payload))
+    assert res == "Review submitted"
+    assert mock_submit.called
+    assert mock_submit.call_args[0][2] == "APPROVE"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_review_allows_python_pr_without_pre_audit_and_logs_warning(mock_submit, mock_ctx, caplog):
     mock_submit.return_value = ("Review submitted", True)
     mock_ctx.state["deterministic_changed_files"] = ["src/webhook_agent/core/agent_definition.py"]

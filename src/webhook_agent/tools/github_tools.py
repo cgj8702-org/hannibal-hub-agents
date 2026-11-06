@@ -661,7 +661,22 @@ def review(
         body = json.dumps(parsed_data)
 
         # Check REQUEST_CHANGES without actionable issues
-        effective_event = (event or getattr(review_obj, "verdict", None) or "COMMENT").upper()
+        effective_event = (event or getattr(review_obj, "verdict", None) or "").upper()
+        if not effective_event:
+            if critical_list:
+                effective_event = "REQUEST_CHANGES"
+            elif hasattr(review_obj, "scorecard") and review_obj.scorecard:
+                from webhook_agent.review.review_enforcer import (
+                    calculate_strict_verdict,
+                    calculate_sync_verdict,
+                )
+
+                if isinstance(review_obj, SyncReviewResponse):
+                    effective_event = calculate_sync_verdict(review_obj)
+                else:
+                    effective_event = calculate_strict_verdict(review_obj)
+            else:
+                effective_event = "COMMENT"
         if effective_event == "REQUEST_CHANGES":
             if not is_sync and not critical_list:
                 invalid_findings.append(
