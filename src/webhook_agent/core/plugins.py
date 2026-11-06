@@ -31,11 +31,27 @@ class WebhookHistoryPruningPlugin(BasePlugin):
         if hasattr(llm_request, "contents") and isinstance(llm_request.contents, list):
             if len(llm_request.contents) > self.max_events:
                 old_count = len(llm_request.contents)
+                # Determine candidate start index
+                start_idx = len(llm_request.contents) - (self.max_events - 1)
+
+                # Ensure we never orphan a tool response (function_response) without
+                # its preceding function call turn, which causes Gemini API 400 Bad Request.
+                while start_idx > 1:
+                    first_kept = llm_request.contents[start_idx]
+                    parts = getattr(first_kept, "parts", None) or []
+                    is_tool_response = getattr(first_kept, "role", "") == "tool" or any(
+                        getattr(p, "function_response", None) is not None for p in parts
+                    )
+                    if is_tool_response:
+                        start_idx -= 1
+                    else:
+                        break
+
                 # Preserve initial turn [0] (system instructions and initial context)
-                # and retain the most recent (self.max_events - 1) events
+                # and retain the most recent events
                 llm_request.contents = [
                     llm_request.contents[0],
-                    *llm_request.contents[-(self.max_events - 1) :],
+                    *llm_request.contents[start_idx:],
                 ]
                 logger.debug(
                     "✂️ WebhookHistoryPruningPlugin: Pruned model contents from %d to %d events",
@@ -82,7 +98,10 @@ class ToolOutputPruningPlugin(BasePlugin):
                 getattr(p, "function_response", None) or getattr(p, "function_call", None)
                 for p in content.parts
             )
-            if is_user:
+            has_fn_response = any(
+                getattr(p, "function_response", None) is not None for p in content.parts
+            )
+            if is_user or has_fn_response:
                 turns_seen += 1
 
             if turns_seen <= self.protect_recent_turns:

@@ -117,6 +117,29 @@ def test_search_files_path_traversal_denied():
     asyncio.run(_run())
 
 
+def test_search_files_no_ignore_allows_dot_directories():
+    async def _run():
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            env = LocalEnvironment(root)
+            workflow_dir = root / ".github" / "workflows"
+            workflow_dir.mkdir(parents=True, exist_ok=True)
+            (workflow_dir / "ci.yml").write_text("name: CI Workflow\nrun: pytest")
+
+            # no_ignore=False skips .github
+            with use_environment(env):
+                res_ignored = await search_files(pattern="CI Workflow", no_ignore=False)
+            assert res_ignored["total"] == 0
+
+            # no_ignore=True finds matches in .github
+            with use_environment(env):
+                res_found = await search_files(pattern="CI Workflow", no_ignore=True)
+            assert res_found["total"] == 1
+            assert ".github/workflows/ci.yml" in res_found["matches"][0]["path"]
+
+    asyncio.run(_run())
+
+
 def test_search_files_function_tool_schema_declaration():
     """Verify that search_files generates a valid FunctionTool schema declaration without PydanticSchemaGenerationError."""
     tool = FunctionTool(search_files)

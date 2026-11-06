@@ -636,6 +636,44 @@ class TestReadFile:
         assert "hello world" in result
         repo.get_contents.assert_called_once_with("src/main.py")
 
+    def test_read_file_uses_active_environment(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.environment.context import use_environment
+        from webhook_agent.environment.local import LocalEnvironment
+        from webhook_agent.tools.github_tools import read_file
+
+        (tmp_path / "app.py").write_text("print('from sandbox head')")
+        env = LocalEnvironment(tmp_path)
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        with use_environment(env):
+            result = read_file(ctx, "app.py")
+
+        assert "from sandbox head" in result
+        ctx.state["gh_client"].get_repo.assert_not_called()
+
+    def test_list_dir_uses_active_environment(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.environment.context import use_environment
+        from webhook_agent.environment.local import LocalEnvironment
+        from webhook_agent.tools.github_tools import list_dir
+
+        (tmp_path / "foo.py").write_text("code")
+        (tmp_path / "subdir").mkdir()
+        env = LocalEnvironment(tmp_path)
+        ctx = MagicMock()
+        ctx.state = {"gh_client": MagicMock(), "repo_full_name": "owner/repo"}
+
+        with use_environment(env):
+            result = list_dir(ctx, "")
+
+        assert "foo.py" in result
+        assert "subdir" in result
+        ctx.state["gh_client"].get_repo.assert_not_called()
+
     def test_read_file_with_ref(self):
         from unittest.mock import MagicMock
 

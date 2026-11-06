@@ -1051,8 +1051,10 @@ class WebhookProcessor:
                 )
 
                 audit_cache_key = build_reconciliation_cache_key(repo_name, pr_number, head_sha)
-                is_proactive_event = str(delivery_id).startswith("proactive-reconcile-")
-                if not is_proactive_event and not try_claim_reconciliation(audit_cache_key):
+                is_proactive_or_resume = str(delivery_id).startswith(
+                    ("proactive-reconcile-", "resume-")
+                )
+                if not is_proactive_or_resume and not try_claim_reconciliation(audit_cache_key):
                     logger.info(
                         "🔒 In-Flight Audit Deduplication: PR %s#%s (commit %s) is already in-flight or reviewed. Skipping duplicate webhook execution.",
                         repo_name,
@@ -1220,6 +1222,19 @@ class WebhookProcessor:
                 payload.get("canonical", ""),
             )
             _remove_eyes_reaction(gh, repo_name, payload, reaction=eyes_reaction)
+
+        # If the run failed (e.g. model unavailable, retries exhausted, agent crash),
+        # release the claim and evict from processed deliveries so resume sweeps can retry.
+        has_failure = bool(results and any(not getattr(r, "success", True) for r in results))
+        if has_failure:
+            if audit_cache_key:
+                from webhook_agent.state.reconciliation import (
+                    release_reconciliation_claim,
+                )
+
+                release_reconciliation_claim(audit_cache_key)
+            if delivery_id != "unknown":
+                self._processed_deliveries.pop(delivery_id, None)
         if results:
             tool_summary: dict[str, int] = {}
             for r in results:

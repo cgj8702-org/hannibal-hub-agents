@@ -104,7 +104,9 @@ async def before_agent_callback(callback_context: CallbackContext) -> None:
 
     reset_guardrail_state(callback_context.state)
 
-    callback_context.state.setdefault("tools_executed", [])
+    callback_context.state["tools_executed"] = []
+    if isinstance(callback_context.state, dict):
+        callback_context.state.pop("user:tools_executed", None)
     agent_name = getattr(callback_context, "agent_name", None) or getattr(
         getattr(callback_context, "agent", None), "name", "unknown_agent"
     )

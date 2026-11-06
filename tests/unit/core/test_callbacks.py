@@ -23,10 +23,15 @@ pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
 @pytest.mark.anyio
 async def test_before_agent_callback() -> None:
     ctx = MagicMock()
-    ctx.state = {}
+    ctx.state = {
+        "tools_executed": ["read_file", "search_files"],
+        "user:tools_executed": ["read_file"],
+    }
     await before_agent_callback(ctx)
     assert "active_tier" in ctx.state
     assert ctx.state["active_tier"] in ("free", "paid")
+    assert ctx.state["tools_executed"] == []
+    assert "user:tools_executed" not in ctx.state
 
 
 @pytest.mark.anyio
