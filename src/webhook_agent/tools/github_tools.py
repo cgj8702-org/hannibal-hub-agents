@@ -126,26 +126,54 @@ def read_file(
     Returns:
         Header plus line-numbered content, or an error string.
     """
+    clean_path = file_path.strip().strip("/")
+    candidate_paths = [clean_path]
+    if not clean_path.startswith("src/"):
+        candidate_paths.append(f"src/{clean_path}")
+    else:
+        candidate_paths.append(clean_path[4:])
+
+    # 1. Prefer reading directly from the active PR workspace sandbox at PR head
+    if ref is None:
+        from webhook_agent.environment.context import get_active_environment
+
+        env = get_active_environment()
+        if env is not None:
+            for p in candidate_paths:
+                try:
+                    resolved = env.resolve_path(p)
+                    if resolved is not None and resolved.is_file():
+                        decoded = resolved.read_text(encoding="utf-8", errors="replace")
+                        return _format_numbered_slice(p, decoded, start_line, max_lines)
+                    elif resolved is not None and resolved.is_dir():
+                        return f"Error: '{file_path}' is a directory, not a file."
+                except Exception as env_err:
+                    logger.debug("Sandbox file read failed for %s: %s", p, env_err)
+                    break
+
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
-    clean_path = file_path.strip().strip("/")
     try:
         repo = gh.get_repo(repo_name)
         kwargs: dict[str, Any] = {}
-        if ref is not None:
-            kwargs["ref"] = ref
-
-        candidate_paths = [clean_path]
-        if not clean_path.startswith("src/"):
-            candidate_paths.append(f"src/{clean_path}")
-        else:
-            candidate_paths.append(clean_path[4:])
+        target_ref = ref
+        if target_ref is None and hasattr(ctx, "state") and isinstance(ctx.state, dict):
+            target_ref = (
+                ctx.state.get("head_sha")
+                or ctx.state.get("user:head_sha")
+                or ctx.state.get("analyzed_sha")
+                or ctx.state.get("user:analyzed_sha")
+            )
+        if target_ref is not None:
+            kwargs["ref"] = target_ref
 
         content_file = None
+        matched_path = clean_path
         last_exc: Exception | None = None
         for p in candidate_paths:
             try:
                 content_file = repo.get_contents(p, **kwargs)
+                matched_path = p
                 break
             except Exception as exc:
                 last_exc = exc
@@ -157,7 +185,7 @@ def read_file(
         if isinstance(content_file, list):
             return f"Error: '{file_path}' is a directory, not a file."
         decoded = content_file.decoded_content.decode("utf-8", errors="replace")
-        return _format_numbered_slice(clean_path, decoded, start_line, max_lines)
+        return _format_numbered_slice(matched_path, decoded, start_line, max_lines)
     except Exception as e:
         return f"Error reading file: {e}"
 
@@ -172,14 +200,66 @@ def list_dir(ctx: Context, dir_path: str = "", ref: str | None = None) -> str:
     Returns:
         Formatted listing of files and subdirectories.
     """
+    clean_path = dir_path.strip().strip("/")
+    candidate_paths = [clean_path]
+    if clean_path and not clean_path.startswith("src/"):
+        candidate_paths.append(f"src/{clean_path}")
+
+    # 1. Prefer reading directly from active PR workspace sandbox at PR head
+    if ref is None:
+        from webhook_agent.environment.context import get_active_environment
+
+        env = get_active_environment()
+        if env is not None:
+            for p in candidate_paths:
+                try:
+                    resolved = env.resolve_path(p or ".")
+                    if resolved is not None and resolved.is_dir():
+                        lines = [f"Directory listing for '{p or '/'}':"]
+                        entries = [e for e in resolved.iterdir() if not e.name.startswith(".")]
+                        sorted_path_entries = sorted(
+                            entries,
+                            key=lambda c: (
+                                0 if c.is_dir() else 1,
+                                c.name.lower(),
+                            ),
+                        )
+                        max_entries = 100
+                        for p_item in sorted_path_entries[:max_entries]:
+                            item_type = "dir" if p_item.is_dir() else "file"
+                            item_size = p_item.stat().st_size if p_item.is_file() else 0
+                            prefix = (
+                                "[DIR] " if item_type == "dir" else f"[FILE] ({item_size} bytes) "
+                            )
+                            rel_p = str(p_item.relative_to(env.working_dir))
+                            lines.append(f"  {prefix}{p_item.name} -> {rel_p}")
+                        if len(entries) > max_entries:
+                            lines.append(f"  ... and {len(entries) - max_entries} more entries")
+                        return "\n".join(lines)
+                    elif resolved is not None and resolved.is_file():
+                        return (
+                            f"Error: '{dir_path}' is a file, not a directory. "
+                            "Use read_file to view its contents."
+                        )
+                except Exception as env_err:
+                    logger.debug("Sandbox list_dir failed for %s: %s", p, env_err)
+                    break
+
     gh = _get_gh_from_ctx(ctx)
     repo_name = _get_repo_full_name(ctx)
-    clean_path = dir_path.strip().strip("/")
     try:
         repo = gh.get_repo(repo_name)
         kwargs: dict[str, Any] = {}
-        if ref is not None:
-            kwargs["ref"] = ref
+        target_ref = ref
+        if target_ref is None and hasattr(ctx, "state") and isinstance(ctx.state, dict):
+            target_ref = (
+                ctx.state.get("head_sha")
+                or ctx.state.get("user:head_sha")
+                or ctx.state.get("analyzed_sha")
+                or ctx.state.get("user:analyzed_sha")
+            )
+        if target_ref is not None:
+            kwargs["ref"] = target_ref
 
         candidate_paths = [clean_path]
         if clean_path and not clean_path.startswith("src/"):

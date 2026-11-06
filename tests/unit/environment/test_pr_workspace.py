@@ -329,3 +329,21 @@ def test_pr_workspace_network_error_graceful_fallback(caplog):
         assert "Could not obtain archive download link" in caplog.text
 
     asyncio.run(_run())
+
+
+def test_pr_workspace_caller_exception_propagates_cleanly():
+    """Verify that caller exceptions inside pr_workspace when download fails propagate cleanly without generator RuntimeError."""
+
+    class CustomCallerError(Exception):
+        pass
+
+    async def _run():
+        mock_gh = MagicMock()
+        mock_gh.get_repo.side_effect = Exception("GitHub API 500 Internal Error")
+
+        with pytest.raises(CustomCallerError, match="caller blew up"):
+            async with pr_workspace(mock_gh, "owner/repo", "headsha123") as env:
+                assert env is None
+                raise CustomCallerError("caller blew up")
+
+    asyncio.run(_run())

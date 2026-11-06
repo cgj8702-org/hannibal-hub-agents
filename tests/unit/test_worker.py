@@ -1273,6 +1273,60 @@ class TestBaseBranchMergeSync:
         processor.process_event(payload2)
         assert processor._agent_core.run.call_count == 1
 
+    def test_process_event_failed_run_releases_reconciliation_claim(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.state.reconciliation import (
+            build_reconciliation_cache_key,
+            clear_reconciliation_cache,
+            try_claim_reconciliation,
+        )
+        from webhook_agent.webhook_types import ActionResult
+
+        monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
+        clear_reconciliation_cache()
+
+        processor = WebhookProcessor()
+        mock_gh = MagicMock()
+        mock_repo = MagicMock()
+        mock_pr = MagicMock()
+        mock_pr.state = "open"
+        mock_pr.merged = False
+        mock_pr.head.sha = "commit_sha_fail"
+        mock_repo.get_pull.return_value = mock_pr
+        processor._gh = mock_gh
+        processor._agent_core = MagicMock()
+        # Simulate retry exhaustion failure returning ActionResult(success=False)
+        processor._agent_core.run.return_value = [
+            ActionResult(tool="plan", success=False, detail="Model unavailable after retries")
+        ]
+
+        payload = {
+            "canonical": "pull_request.opened",
+            "delivery_id": "delivery-fail-1",
+            "event_name": "pull_request",
+            "action": "opened",
+            "sender": {"login": "developer"},
+            "repository": {"full_name": "cgj8702-org/hannibal-hub"},
+            "raw_payload": {
+                "pull_request": {
+                    "number": 315,
+                    "state": "open",
+                    "head": {"ref": "feat/branch-fail", "sha": "commit_sha_fail"},
+                }
+            },
+        }
+
+        processor.process_event(payload)
+        # Because run failed, delivery_id was popped and claim was released
+        assert "delivery-fail-1" not in processor._processed_deliveries
+
+        cache_key = build_reconciliation_cache_key(
+            "cgj8702-org/hannibal-hub", 315, "commit_sha_fail"
+        )
+        # Can be claimed again for retry/resumption!
+        assert try_claim_reconciliation(cache_key) is True
+
     def test_process_event_proactive_reconciliation_is_not_self_suppressed(self, monkeypatch):
         from unittest.mock import MagicMock
 

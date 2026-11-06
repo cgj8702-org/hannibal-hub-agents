@@ -70,6 +70,7 @@ async def pr_workspace(
         enable,
     )
 
+    archive_url = None
     try:
         repo = gh.get_repo(repo_full_name)
         archive_url = repo.get_archive_link("tarball", ref=head_sha)
@@ -80,9 +81,12 @@ async def pr_workspace(
             head_sha,
             link_err,
         )
+
+    if not archive_url:
         yield None
         return
 
+    archive_ready = False
     with tempfile.TemporaryFile(mode="w+b") as temp_archive:
         try:
             downloaded = 0
@@ -95,26 +99,25 @@ async def pr_workspace(
                             repo_full_name,
                             head_sha,
                         )
-                        yield None
-                        return
-                    async for chunk in response.aiter_bytes():
-                        downloaded += len(chunk)
-                        if downloaded > MAX_DOWNLOAD_BYTES:
-                            logger.warning(
-                                "Archive for %s@%s exceeded 100 MB download cap (downloaded %d bytes); aborting workspace setup",
-                                repo_full_name,
-                                head_sha,
+                    else:
+                        async for chunk in response.aiter_bytes():
+                            downloaded += len(chunk)
+                            if downloaded > MAX_DOWNLOAD_BYTES:
+                                logger.warning(
+                                    "Archive for %s@%s exceeded 100 MB download cap (downloaded %d bytes); aborting workspace setup",
+                                    repo_full_name,
+                                    head_sha,
+                                    downloaded,
+                                )
+                                break
+                            temp_archive.write(chunk)
+                        else:
+                            temp_archive.seek(0)
+                            archive_ready = True
+                            logger.debug(
+                                "🔍 [pr_workspace] Archive downloaded successfully: %d bytes",
                                 downloaded,
                             )
-                            yield None
-                            return
-                        temp_archive.write(chunk)
-
-            temp_archive.seek(0)
-            logger.debug(
-                "🔍 [pr_workspace] Archive downloaded successfully: %d bytes",
-                downloaded,
-            )
         except Exception as fetch_err:
             logger.warning(
                 "PR workspace download failed for %s@%s: %s",
@@ -122,6 +125,8 @@ async def pr_workspace(
                 head_sha,
                 fetch_err,
             )
+
+        if not archive_ready:
             yield None
             return
 
