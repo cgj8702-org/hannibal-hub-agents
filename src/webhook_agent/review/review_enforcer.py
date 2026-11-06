@@ -182,17 +182,22 @@ def _unverified_item(
 
 
 def _has_review_findings_or_warnings(obj: Any) -> bool:
-    """Return True if a review response has non-empty issues, warnings, risks, or unverified claims."""
+    """Return True if a review response has non-empty actionable issues, warnings, risks, or unverified claims."""
     if not obj:
         return False
     if getattr(obj, "critical_issues", None):
         return True
     if getattr(obj, "minor_suggestions", None):
         return True
-    if getattr(obj, "risks_and_edge_cases", None):
-        return True
     if getattr(obj, "unverified_claims", None):
         return True
+    risks = getattr(obj, "risks_and_edge_cases", None) or []
+    for r in risks:
+        rec = getattr(r, "recommendation", None) or (
+            r.get("recommendation") if isinstance(r, dict) else ""
+        )
+        if rec and str(rec).strip():
+            return True
     scorecard = getattr(obj, "scorecard", []) or []
     for sc in scorecard:
         sc_status = getattr(sc, "status", "")
@@ -306,28 +311,6 @@ def _apply_citation_grounding(
 
     has_hard = any(getattr(i, "is_hard", False) for i in issues)
     return issues, has_hard
-
-
-def _parse_scorecard_scores(body: str) -> list[int]:
-    """Extract individual category scores from a review body's scorecard.
-
-    Supports both Callout list format ('* **Category:** N/5') and table format ('| **Category** | N |').
-    Returns a list of parsed integer scores, or empty list if none found.
-    """
-    scores: list[int] = []
-    # Match callout list format: * **Code Correctness:** 5/5
-    for match in re.finditer(r"\*\s*\*\*[^*]+\*\*\s*:\s*(\d)(?:/5)?", body):
-        score = int(match.group(1))
-        if 1 <= score <= 5:
-            scores.append(score)
-
-    if not scores:
-        # Fallback to table format: | **Code Correctness** | 5 |
-        for match in re.finditer(r"\|\s*\*\*[^*]+\*\*\s*\|\s*(\d)\s*\|", body):
-            score = int(match.group(1))
-            if 1 <= score <= 5:
-                scores.append(score)
-    return scores
 
 
 def _enforce_verdict(

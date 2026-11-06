@@ -12,8 +12,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from webhook_agent.analysis.ast_analyzer import analyze_python_code
-
 logger = logging.getLogger(__name__)
 
 
@@ -102,29 +100,53 @@ def verify_python_ast(
     is_partial_diff_view = False
     if not code_text or not code_text.strip():
         cleaned_path = _strip_diff_prefix(file_path)
-        if diff_text:
+
+        # 1. Prefer reading real file from active PR workspace sandbox checked out at PR head
+        target_file: Path | None = None
+        from webhook_agent.environment.context import get_active_environment
+
+        env = get_active_environment()
+        if env is not None:
+            for cand_p in [cleaned_path, file_path]:
+                try:
+                    resolved = env.resolve_path(cand_p)
+                    if resolved and resolved.is_file():
+                        target_file = resolved
+                        break
+                except Exception as resolve_err:
+                    logger.debug(
+                        "Failed resolving candidate path %s in env: %s", cand_p, resolve_err
+                    )
+
+        if target_file and target_file.is_file():
             try:
-                from webhook_agent.tools.diff_tools import walk_right_side
+                code_text = target_file.read_text(encoding="utf-8", errors="replace")
+            except Exception as read_err:
+                return f"Error reading file '{file_path}': {read_err}"
 
-                _, text_map = walk_right_side(diff_text)
-                file_lines = text_map.get(cleaned_path) or text_map.get(file_path)
-                if file_lines:
-                    sorted_line_keys = sorted(file_lines.keys())
-                    sorted_lines = [file_lines[k] for k in sorted_line_keys]
-                    code_text = "\n".join(sorted_lines)
-                    if len(sorted_line_keys) > 1 and any(
-                        b != a + 1 for a, b in itertools.pairwise(sorted_line_keys)
-                    ):
-                        is_partial_diff_view = True
-            except Exception as diff_err:
-                logger.debug(
-                    "Could not extract lines from diff_text for %s: %s", file_path, diff_err
-                )
-
+        # 2. Extract lines from diff_text if file is not in workspace sandbox (defends against host disk bleed)
         if not code_text or not code_text.strip():
-            from webhook_agent.tools.paths import resolve_sandboxed_path
+            if diff_text:
+                try:
+                    from webhook_agent.tools.diff_tools import walk_right_side
 
-            target_file: Path | None = None
+                    _, text_map = walk_right_side(diff_text)
+                    file_lines = text_map.get(cleaned_path) or text_map.get(file_path)
+                    if file_lines:
+                        sorted_line_keys = sorted(file_lines.keys())
+                        sorted_lines = [file_lines[k] for k in sorted_line_keys]
+                        code_text = "\n".join(sorted_lines)
+                        if len(sorted_line_keys) > 1 and any(
+                            b != a + 1 for a, b in itertools.pairwise(sorted_line_keys)
+                        ):
+                            is_partial_diff_view = True
+                except Exception as diff_err:
+                    logger.debug(
+                        "Could not extract lines from diff_text for %s: %s", file_path, diff_err
+                    )
+
+        # 3. Fall back to local repo_root / disk if not found in sandbox or diff_text
+        if not code_text or not code_text.strip():
             if repo_root is not None:
                 root_path = Path(repo_root)
                 for rel_cand in [cleaned_path, file_path]:
@@ -140,6 +162,8 @@ def verify_python_ast(
                         break
 
             if target_file is None:
+                from webhook_agent.tools.paths import resolve_sandboxed_path
+
                 sandboxed_file = resolve_sandboxed_path(
                     cleaned_path, root=repo_root
                 ) or resolve_sandboxed_path(file_path, root=repo_root)
@@ -182,19 +206,13 @@ def verify_python_ast(
     visitor = StructuralDefectVisitor(skip_unreachable=is_partial_diff_view)
     visitor.visit(tree)
 
-    # 3. Impact scoring via ast_analyzer
-    analysis_res = analyze_python_code(code_text)
-    categories_str = (
-        ", ".join(analysis_res.categories_found) if analysis_res.categories_found else "None"
-    )
-
+    # 3. Node count inspection
+    nodes_analyzed = len(list(ast.walk(tree)))
     status_str = "PARSE OK (partial diff view)" if is_partial_diff_view else "SYNTAX VALID"
     lines = [
         f"✅ AST Verification for '{file_path}':",
         f"- Status: {status_str}",
-        f"- Risk Score: {analysis_res.risk_score:.2f}",
-        f"- Nodes Analyzed: {analysis_res.nodes_analyzed}",
-        f"- Impact Categories: {categories_str}",
+        f"- Nodes Analyzed: {nodes_analyzed}",
     ]
 
     if visitor.defects:

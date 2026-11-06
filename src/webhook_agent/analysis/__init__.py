@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .ast_analyzer import ASTAnalysisResult, analyze_diff_hunks, analyze_python_code
 from .dependency_tree import (
     LockfilePackage,
     build_dependency_grounding_context,
@@ -51,7 +50,6 @@ from .test_impact import (
 )
 
 __all__ = [
-    "ASTAnalysisResult",
     "BrokenCallSite",
     "CallSiteSpec",
     "CallSiteVisitor",
@@ -69,8 +67,6 @@ __all__ = [
     "SymbolImpactReport",
     "TestImpactAnalyzer",
     "TestImpactReport",
-    "analyze_diff_hunks",
-    "analyze_python_code",
     "build_dependency_grounding_context",
     "evaluate_contract_integrity",
     "evaluate_security_integrity",

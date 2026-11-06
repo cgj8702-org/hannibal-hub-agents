@@ -26,6 +26,8 @@ __all__ = [
     "resolve_review_thread",
     "review",
     "search_files",
+    "submit_initial_review",
+    "submit_sync_review",
     "verify_line_reference",
     "verify_python_ast",
     "walk_right_side",
@@ -52,6 +54,8 @@ def __getattr__(name: str) -> Any:
         "resolve_bot_review_threads",
         "resolve_review_thread",
         "review",
+        "submit_initial_review",
+        "submit_sync_review",
     }:
         mod = importlib.import_module(".github_tools", __package__)
         return getattr(mod, name)

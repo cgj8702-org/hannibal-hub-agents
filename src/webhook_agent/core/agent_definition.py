@@ -6,7 +6,6 @@ Extracted from webhook_agent.py as part of Phase 4 modularization.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from github import Github
@@ -64,7 +63,6 @@ from webhook_agent.models.rate_limiter import (
     _resolve_tier,
     get_active_api_key,
 )
-from webhook_agent.review.verdict_parser import calculate_verdict
 from webhook_agent.review.writeback_policy import (
     evaluate_writeback_policy,
 )
@@ -80,16 +78,6 @@ from webhook_agent.webhook_types import ActionResult
 
 logger = logging.getLogger("webhook_agent.core.agent_definition")
 
-# Retry configuration for transient server errors
-_MAX_RETRIES = int(
-    os.environ.get("PRIMARY_MODEL_MAX_RETRIES") or os.environ.get("GEMMA_MODEL_MAX_RETRIES") or "5"
-)
-_FALLBACK_MODEL = (
-    os.environ.get("PRIMARY_MODEL_FALLBACK")
-    or os.environ.get("GEMMA_MODEL_FALLBACK")
-    or "gemini-3.5-flash-lite"
-)
-
 # Bot identity — used for writeback policy
 BOT_LOGIN = "hannibal-hub-agents[bot]"
 
@@ -100,8 +88,6 @@ __all__ = [
     "MAX_INPUT_TOKENS",
     "STATIC_REVIEW_INSTRUCTION",
     "SYSTEM_INSTRUCTION",
-    "_FALLBACK_MODEL",
-    "_MAX_RETRIES",
     "WebhookAgent",
     "_truncate_input_for_tier",
     "_truncate_text_to_token_limit",
@@ -109,7 +95,6 @@ __all__ = [
     "build_static_review_instruction",
     "build_transient_turn_content",
     "build_user_message",
-    "calculate_verdict",
     "count_tokens_exact",
     "execute_agent_event",
     "get_max_input_tokens",

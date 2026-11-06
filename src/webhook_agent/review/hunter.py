@@ -14,23 +14,6 @@ from webhook_agent.review.schemas import CandidateFinding
 
 logger = logging.getLogger("webhook_agent.review.hunter")
 
-HUNTER_INSTRUCTION = """You are Hunter, a high-recall code defect and regression discovery engine.
-Your mission is to find genuine regressions, broken call sites, signature contract mismatches,
-resource leaks, and acceptance criteria gaps introduced by PR changes.
-
-For each potential defect you identify, formulate a rigorous `CandidateFinding`:
-1. file_path and line_number
-2. severity: CRITICAL, HIGH, MEDIUM, LOW, or NIT
-3. confidence_score: from 1 to 10
-4. title: concise one-line summary
-5. description: clinical explanation of why the code is defective
-6. suggested_fix: actionable replacement code snippet
-7. falsification_check: an explicit instruction telling a skeptical adversarial critic how
-   to attempt to disprove or falsify this finding against callers or framework guarantees.
-
-Search broadly across the repository using `search_files` to locate callers and impacted interfaces.
-"""
-
 
 class HunterEngine:
     """Orchestrates candidate finding extraction and normalization for the Hunter stage."""

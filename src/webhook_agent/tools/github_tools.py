@@ -18,6 +18,7 @@ from webhook_agent.review.grounding import (
     strict_grounding_enabled,
 )
 from webhook_agent.review.review_enforcer import _submit_formal_review
+from webhook_agent.review.schemas import CodeReviewResponse, SyncReviewResponse
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER
 
 if TYPE_CHECKING:
@@ -457,20 +458,21 @@ _grounding_findings = extract_grounding_findings
 def review(
     ctx: Context,
     pr_number: int,
-    body: str,
-    event: str = "COMMENT",
+    body: str | CodeReviewResponse | SyncReviewResponse | None = None,
+    event: str | None = None,
+    *,
+    report: CodeReviewResponse | SyncReviewResponse | None = None,
 ) -> str:
     """Submit a formal review on a pull request.
 
-    The review findings MUST be supplied as a structured JSON string matching the
-    CodeReviewResponse schema (for initial PR reviews) or SyncReviewResponse schema
-    (for PR synchronization updates). The final GitHub Markdown review is deterministically
-    rendered from the validated schema.
+    Accepts either a typed `report` (CodeReviewResponse or SyncReviewResponse)
+    or a JSON-serialized `body` string for backwards compatibility.
 
     Args:
         pr_number: Pull request number.
         body: Review payload (strictly a JSON string conforming to CodeReviewResponse or SyncReviewResponse).
-        event: Review event type. One of APPROVE, COMMENT, REQUEST_CHANGES.
+        event: Review event type. One of APPROVE, COMMENT, REQUEST_CHANGES. Defaults to report verdict.
+        report: Strongly typed CodeReviewResponse or SyncReviewResponse model instance.
 
     Returns:
         A string describing the result.
@@ -537,39 +539,61 @@ def review(
                         pr_number,
                     )
 
-        # Pre-submission finding validation: force LLM self-correction if payload has boilerplate or missing line numbers
-        from webhook_agent.review.formatter import extract_json_payload
+        # Ingestion: accept typed report directly, or extract and parse from body JSON
         from webhook_agent.review.schemas import CodeReviewResponse, SyncReviewResponse
 
-        parsed_data = extract_json_payload(body)
-        if not parsed_data or not isinstance(parsed_data, dict):
-            return (
-                "Error: Review submission rejected. The 'body' argument must be a valid JSON string conforming "
-                "to the CodeReviewResponse (for initial reviews) or SyncReviewResponse (for synchronization reviews) "
-                "schema. Please format your review findings as JSON and call review() again."
-            )
-
-        # Check review type and parse into schema
-        is_sync = "resolutions" in parsed_data or (
-            "summary" in parsed_data and "executive_summary" not in parsed_data
-        )
         review_obj: SyncReviewResponse | CodeReviewResponse
-        try:
-            if is_sync:
-                review_obj = SyncReviewResponse.model_validate(parsed_data)
-                critical_list = review_obj.critical_issues
-                minor_list = review_obj.minor_suggestions
-                resolutions_list = review_obj.resolutions
-            else:
-                review_obj = CodeReviewResponse.model_validate(parsed_data)
-                critical_list = review_obj.critical_issues
-                minor_list = review_obj.minor_suggestions
-                resolutions_list = []
-        except Exception as val_err:
-            return (
-                f"Error: Review submission rejected due to schema validation error: {val_err}. "
-                "Please fix the schema fields and call review() again."
+        parsed_data: dict[str, Any] | None = None
+        if isinstance(body, (CodeReviewResponse, SyncReviewResponse)):
+            report = body
+            body = None
+        elif isinstance(report, str) and body is None:
+            body = report
+            report = None
+
+        if report is not None:
+            review_obj = report
+            is_sync = isinstance(review_obj, SyncReviewResponse)
+            parsed_data = review_obj.model_dump()
+            critical_list = review_obj.critical_issues
+            minor_list = review_obj.minor_suggestions
+            resolutions_list = getattr(review_obj, "resolutions", [])
+        else:
+            if not body or not isinstance(body, str):
+                return (
+                    "Error: Review submission rejected. You must provide either a structured 'report' "
+                    "or a JSON string 'body'."
+                )
+            from webhook_agent.review.formatter import extract_json_payload
+
+            parsed_data = extract_json_payload(body)
+            if not parsed_data or not isinstance(parsed_data, dict):
+                return (
+                    "Error: Review submission rejected. The 'body' argument must be a valid JSON string conforming "
+                    "to the CodeReviewResponse (for initial reviews) or SyncReviewResponse (for synchronization reviews) "
+                    "schema. Please format your review findings as JSON and call review() again."
+                )
+
+            # Check review type and parse into schema
+            is_sync = "resolutions" in parsed_data or (
+                "summary" in parsed_data and "executive_summary" not in parsed_data
             )
+            try:
+                if is_sync:
+                    review_obj = SyncReviewResponse.model_validate(parsed_data)
+                    critical_list = review_obj.critical_issues
+                    minor_list = review_obj.minor_suggestions
+                    resolutions_list = review_obj.resolutions
+                else:
+                    review_obj = CodeReviewResponse.model_validate(parsed_data)
+                    critical_list = review_obj.critical_issues
+                    minor_list = review_obj.minor_suggestions
+                    resolutions_list = []
+            except Exception as val_err:
+                return (
+                    f"Error: Review submission rejected due to schema validation error: {val_err}. "
+                    "Please fix the schema fields and call review() again."
+                )
 
         # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement
         from webhook_agent.review.critic import CriticEngine
@@ -781,7 +805,7 @@ def review(
         result, _submitted = _submit_formal_review(
             pr,
             body,
-            event,
+            effective_event,
             target_key,
             getattr(ctx, "state", None),
             analyzed_sha=str(state_dict.get("head_sha") or state_dict.get("user:head_sha") or ""),
@@ -797,6 +821,46 @@ def review(
         if type(e).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(e)):
             raise
         return f"Error submitting review: {e}"
+
+
+def submit_initial_review(
+    ctx: Context,
+    pr_number: int,
+    report: CodeReviewResponse,
+    event: str | None = None,
+) -> str:
+    """Submit a formal code review for a newly opened pull request.
+
+    Args:
+        ctx: Agent execution context.
+        pr_number: Pull request number.
+        report: Structured review report matching CodeReviewResponse schema.
+        event: Optional review event type (APPROVE, COMMENT, REQUEST_CHANGES). Defaults to report verdict.
+
+    Returns:
+        A clinical status string reporting review submission result.
+    """
+    return review(ctx, pr_number=pr_number, report=report, event=event)
+
+
+def submit_sync_review(
+    ctx: Context,
+    pr_number: int,
+    report: SyncReviewResponse,
+    event: str | None = None,
+) -> str:
+    """Submit a synchronization re-review for updated pull request commits.
+
+    Args:
+        ctx: Agent execution context.
+        pr_number: Pull request number.
+        report: Structured review report matching SyncReviewResponse schema.
+        event: Optional review event type (APPROVE, COMMENT, REQUEST_CHANGES). Defaults to report verdict.
+
+    Returns:
+        A clinical status string reporting review submission result.
+    """
+    return review(ctx, pr_number=pr_number, report=report, event=event)
 
 
 def resolve_review_thread(ctx: Context, thread_id: str) -> str:

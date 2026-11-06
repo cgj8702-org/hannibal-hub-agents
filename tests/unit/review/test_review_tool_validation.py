@@ -894,3 +894,103 @@ def test_sync_review_request_changes_grounds_resolutions_when_diff_text_empty(
     assert submitted_event == "REQUEST_CHANGES"
     submitted_data = json.loads(submitted_body)
     assert submitted_data["resolutions"][0]["status"] == "UNRESOLVED"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_submit_initial_review_typed_pydantic_model(mock_submit):
+    """Verify submit_initial_review accepts a typed CodeReviewResponse instance directly."""
+    from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem
+    from webhook_agent.tools.github_tools import submit_initial_review
+
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    report = CodeReviewResponse(
+        executive_summary="Typed audit report",
+        verdict="APPROVE",
+        scorecard=[
+            ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Clean"),
+            ScorecardItem(dimension="Concurrency & State", status="PASS", notes="Clean"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+            ScorecardItem(dimension="Contract Integrity", status="PASS", notes="Clean"),
+            ScorecardItem(dimension="Test Coverage & Regressions", status="PASS", notes="Clean"),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        verified_invariants=[],
+        semantic_invariants=[],
+        risks_and_edge_cases=[],
+    )
+    res = submit_initial_review(ctx, 8112, report=report)
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "APPROVE"
+    data = json.loads(submitted_body)
+    assert data["executive_summary"] == "Typed audit report"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_submit_sync_review_typed_pydantic_model(mock_submit):
+    """Verify submit_sync_review accepts a typed SyncReviewResponse instance directly."""
+    from webhook_agent.review.schemas import SyncReviewResponse
+    from webhook_agent.tools.github_tools import submit_sync_review
+
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    report = SyncReviewResponse(
+        summary="Typed sync review",
+        verdict="APPROVE",
+        resolutions=[],
+        scorecard=[],
+        critical_issues=[],
+        minor_suggestions=[],
+        verified_invariants=[],
+        semantic_invariants=[],
+    )
+    res = submit_sync_review(ctx, 8113, report=report)
+    assert res == "Review submitted"
+    assert mock_submit.called
+    _submitted_pr, submitted_body, submitted_event, _target_key, _state = mock_submit.call_args[0]
+    assert submitted_event == "APPROVE"
+    data = json.loads(submitted_body)
+    assert data["summary"] == "Typed sync review"
+
+
+def test_has_review_findings_or_warnings_informational_risk_does_not_block():
+    """Verify informational risks without recommendations do not count as actionable findings."""
+    from webhook_agent.review.review_enforcer import _has_review_findings_or_warnings
+    from webhook_agent.review.schemas import CodeReviewResponse, RiskItem, ScorecardItem
+
+    clean_report = CodeReviewResponse(
+        executive_summary="Clean report",
+        verdict="APPROVE",
+        scorecard=[ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Clean")],
+        critical_issues=[],
+        minor_suggestions=[],
+        verified_invariants=[],
+        semantic_invariants=[],
+        risks_and_edge_cases=[
+            RiskItem(
+                risk="Extreme archive size is handled gracefully",
+                recommendation="",  # Purely informational!
+            )
+        ],
+    )
+    assert _has_review_findings_or_warnings(clean_report) is False
+
+    actionable_report = CodeReviewResponse(
+        executive_summary="Actionable report",
+        verdict="COMMENT",
+        scorecard=[],
+        critical_issues=[],
+        minor_suggestions=[],
+        verified_invariants=[],
+        semantic_invariants=[],
+        risks_and_edge_cases=[
+            RiskItem(
+                risk="Memory leak risk",
+                recommendation="Add periodic cache eviction",  # Actionable!
+            )
+        ],
+    )
+    assert _has_review_findings_or_warnings(actionable_report) is True

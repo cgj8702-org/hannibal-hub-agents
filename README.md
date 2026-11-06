@@ -49,10 +49,8 @@ flowchart TD
 ├── docs/                    # Architecture, model chain, plans, and technical documentation
 ├── scripts/
 │   ├── load_secrets.sh      # Load environment variables dynamically from GCP Secret Manager
-│   ├── migrate_pubsub_messages.py # Pub/Sub backlog migration helper
 │   ├── setup_vm_user_service.sh   # VM user-space systemd service setup script
 │   ├── hannibal-webhook-agent.service # User-space systemd unit file template
-│   ├── publish_test_message.py    # Test webhook payload publisher
 │   ├── ruff-all.sh                # Lint, format, and type-check runner shared with the hook
 │   └── install-git-hooks.sh       # Pre-commit hook installer for lint & type validation
 ├── src/
