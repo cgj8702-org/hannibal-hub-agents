@@ -53,7 +53,6 @@ from .metadata import (
 )
 from .review_enforcer import (
     _enforce_verdict,
-    _parse_scorecard_scores,
     _submit_formal_review,
     apply_scorecard_floor,
     is_contract_dimension,
@@ -70,7 +69,6 @@ from .schemas import (
     VerifiedInvariant,
     is_unmitigated_breaking_risk,
 )
-from .verdict_parser import calculate_verdict
 from .writeback_policy import (
     _COMMENT_RATE_LIMITER,
     CommentRateLimiter,
@@ -96,7 +94,6 @@ __all__ = [
     "_add_eyes_reaction",
     "_enforce_verdict",
     "_is_formal_review_eligible",
-    "_parse_scorecard_scores",
     "_remove_eyes_reaction",
     "_review_lock",
     "_submit_formal_review",
@@ -107,7 +104,6 @@ __all__ = [
     "build_reconciliation_cache_key",
     "calculate_strict_verdict",
     "calculate_sync_verdict",
-    "calculate_verdict",
     "clear_reconciliation_cache",
     "evaluate_dependency_fast_path",
     "evaluate_writeback_policy",

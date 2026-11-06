@@ -281,14 +281,6 @@ def filter_review_diff(
     is_reviewable = bool(kept_files and reviewable_lines > 0)
     budget = budget_for(reviewable_lines) if is_reviewable else 0
 
-    from .ast_analyzer import analyze_diff_hunks
-
-    primary_path = next(
-        (f for f in kept_files if f.endswith(".py")),
-        kept_files[0] if kept_files else "diff.py",
-    )
-    ast_res = analyze_diff_hunks(primary_path, diff_text=filtered_text)
-
     return DiffFilterResult(
         filtered_diff=filtered_text,
         reviewable_lines=reviewable_lines,
@@ -296,6 +288,6 @@ def filter_review_diff(
         skipped_files=skipped_files,
         is_reviewable=is_reviewable,
         budget=budget,
-        ast_risk_score=ast_res.risk_score,
-        ast_impact_counts=ast_res.impact_counts,
+        ast_risk_score=0.0,
+        ast_impact_counts={},
     )

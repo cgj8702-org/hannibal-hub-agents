@@ -82,7 +82,7 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
 
 #### 3a. `CodeReviewResponse` (Initial Reviews)
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
-2. **verdict**: Explicit review verdict ("APPROVE", "REQUEST_CHANGES", "COMMENT"). If any scorecard dimension is WARN, UNKNOWN, or ERROR, or if you identify non-blocking issues or risks, you MUST explicitly set verdict to "COMMENT". Only set "APPROVE" when all 5 dimensions are PASS/N/A with zero critical issues and zero unverified risks.
+2. **verdict**: Explicit review verdict ("APPROVE", "REQUEST_CHANGES", "COMMENT"). If any scorecard dimension is WARN, UNKNOWN, or ERROR, or if you identify non-blocking issues or actionable risks, you MUST explicitly set verdict to "COMMENT". Only set "APPROVE" when all 5 dimensions are PASS/N/A with zero critical issues and zero unmitigated actionable risks.
 3. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
    - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).

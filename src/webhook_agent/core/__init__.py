@@ -18,7 +18,6 @@ from webhook_agent.core.agent_definition import (
     build_static_review_instruction,
     build_transient_turn_content,
     build_user_message,
-    calculate_verdict,
     count_tokens_exact,
     execute_agent_event,
     get_max_input_tokens,
@@ -40,7 +39,6 @@ from webhook_agent.core.guardrails import GuardrailsPlugin, IterationBudgetPlugi
 from webhook_agent.core.loop_helpers import (
     _ensure_bg_loop,
     get_shared_genai_client,
-    get_shared_text_generation_provider,
     run_in_bg_loop,
 )
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
@@ -74,13 +72,11 @@ __all__ = [
     "build_static_review_instruction",
     "build_transient_turn_content",
     "build_user_message",
-    "calculate_verdict",
     "count_tokens_exact",
     "execute_agent_event",
     "get_issue",
     "get_max_input_tokens",
     "get_shared_genai_client",
-    "get_shared_text_generation_provider",
     "list_dir",
     "on_tool_error_callback",
     "pr_closed_registry",

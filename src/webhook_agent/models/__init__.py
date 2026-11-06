@@ -7,12 +7,6 @@ from .depleted_registry import (
     FirestoreDepletedModelRegistry,
     firestore_depleted_registry,
 )
-from .genai_provider import (
-    GenerateContentProvider,
-    TextGenerationProvider,
-    TextGenerationResult,
-    get_text_generation_provider,
-)
 from .model_chain import (
     get_active_model,
     get_model_chain,
@@ -34,12 +28,9 @@ from .secret_manager import resolve_secret
 __all__ = [
     "DepletedModelRegistry",
     "FirestoreDepletedModelRegistry",
-    "GenerateContentProvider",
     "RPMWaiter",
     "RateLimitExceededError",
     "RateLimitedGemini",
-    "TextGenerationProvider",
-    "TextGenerationResult",
     "compute_round_allowance",
     "extract_rate_limit_details",
     "firestore_depleted_registry",
@@ -48,7 +39,6 @@ __all__ = [
     "get_adk_model",
     "get_allowed_models",
     "get_model_chain",
-    "get_text_generation_provider",
     "is_gemini_3_plus",
     "resolve_secret",
     "resolve_webhook_api_key",

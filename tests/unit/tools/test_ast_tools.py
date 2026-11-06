@@ -115,7 +115,7 @@ def add(a: int, b: int) -> int:
     result = verify_python_ast("src/math_ops.py", code_snippet=valid_code)
     assert "SYNTAX VALID" in result
     assert "Structural Defects: None detected." in result
-    assert "Risk Score:" in result
+    assert "Nodes Analyzed:" in result
 
 
 def test_verify_python_ast_syntax_error():

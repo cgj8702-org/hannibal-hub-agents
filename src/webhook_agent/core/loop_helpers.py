@@ -14,7 +14,6 @@ from concurrent.futures import CancelledError, Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
-from webhook_agent.models.genai_provider import get_text_generation_provider
 from webhook_agent.models.rate_limiter import get_active_api_key
 
 logger = logging.getLogger("webhook_agent.core.loop_helpers")
@@ -112,11 +111,3 @@ def get_shared_genai_client() -> Any:
     except Exception as exc:
         logger.exception("Failed to create shared GenAI client: %s", exc)
         return None
-
-
-def get_shared_text_generation_provider() -> Any | None:
-    """Return the shared provider adapter for the default generateContent path."""
-    client = get_shared_genai_client()
-    if client is None:
-        return None
-    return get_text_generation_provider(client)
