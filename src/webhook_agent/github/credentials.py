@@ -5,7 +5,7 @@ Functions:
 - get_installation_token(jwt, installation_id)
 - cached token storage in user's cache dir
 
-This is a minimal, secure-by-default skeleton for obtaining and caching
+This is the production implementation for obtaining and caching
 GitHub App installation tokens. Do NOT commit private keys to source control.
 """
 

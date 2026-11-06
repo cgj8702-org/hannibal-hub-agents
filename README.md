@@ -88,7 +88,7 @@ flowchart TD
 The project includes built-in strategies to maximize context efficiency, eliminate unnecessary LLM calls, and execute 1-turn webhook responses:
 
 1. **ADK workflow evaluation**:
-   - Event scope is classified deterministically by `resolve_event_policy()` (`core/policy.py`), which assigns one of `FORMAL_AUDIT`, `THREAD_COLLAB`, `ISSUE_TRIAGE`, or `IGNORE` before any model call.
+   - Event scope is classified deterministically by `resolve_event_policy()` (`core/policy.py`), which assigns one of `FORMAL_AUDIT`, `THREAD_COLLAB`, `ISSUE_TRIAGE`, `GENERAL_PAIR_PROGRAMMING`, or `IGNORE` before any model call.
    - Pull-request context and diffs are hydrated before model evaluation.
    - Structured review output is normalized before writeback.
 2. **Deterministic Pre-Audits & Audit Reconciliation**:

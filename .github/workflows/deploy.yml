@@ -50,7 +50,8 @@ jobs:
 
       - name: VM Deploy via IAP
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           gcloud compute ssh carly@hannibal-hub-free \
             --project=chatbot-project-hannibal \
@@ -71,8 +72,7 @@ jobs:
               git fetch --quiet origin
               cleanup
 
-              git checkout --quiet main
-              git reset --quiet --hard origin/main
+              git checkout --quiet -B main ${TARGET_SHA}
               git clean -fd --quiet
 
               uv sync --no-dev --frozen

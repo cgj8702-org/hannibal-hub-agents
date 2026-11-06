@@ -808,6 +808,7 @@ def execute_agent_event(
         "deterministic_precompiled_ast": bool(event_data.get("deterministic_precompiled_ast")),
         "formal_review_eligible": policy.mode == Mode.FORMAL_AUDIT,
         "agent_mode": policy.mode,
+        "may_create_issue": bool(getattr(policy, "may_create_issue", False)),
         "deterministic_contract_scorecard_item": event_data.get(
             "deterministic_contract_scorecard_item"
         ),
@@ -816,20 +817,6 @@ def execute_agent_event(
         ),
         "deterministic_test_scorecard_item": event_data.get("deterministic_test_scorecard_item"),
     }
-
-    resumed_dossier = event_data.get("precompiled_dossier") or (
-        event_data.get("resumed_checkpoint") or {}
-    ).get("precompiled_dossier")
-    if resumed_dossier:
-        logger.info(
-            "⚡ Fast-path: using stored precompiled dossier from review checkpoint (skipping AST/symbol pre-audit)"
-        )
-        user_message = genai_types.Content(
-            role="user",
-            parts=[genai_types.Part.from_text(text=str(resumed_dossier))],
-        )
-        event_data["deterministic_precompiled_ast"] = True
-        deterministic_state["deterministic_precompiled_ast"] = True
 
     async def _run() -> None:
         nonlocal results, final_session, user_message

@@ -11,6 +11,7 @@ Provides native ADK lifecycle callbacks for:
 from __future__ import annotations
 
 import contextlib
+import inspect
 import logging
 import os
 from typing import Any
@@ -175,8 +176,20 @@ async def before_model_callback(
 
             client = get_shared_genai_client()
             if client:
-                resp = client.models.count_tokens(model=target_model, contents=input_text)
-                if resp and resp.total_tokens:
+                raw_contents = getattr(llm_request, "contents", None) or input_text
+                resp = None
+                aio_models = getattr(getattr(client, "aio", None), "models", None)
+                if aio_models is not None and inspect.iscoroutinefunction(
+                    getattr(aio_models, "count_tokens", None)
+                ):
+                    resp = await aio_models.count_tokens(model=target_model, contents=raw_contents)
+                elif hasattr(client, "models") and hasattr(client.models, "count_tokens"):
+                    call_res = client.models.count_tokens(model=target_model, contents=raw_contents)
+                    if inspect.isawaitable(call_res):
+                        resp = await call_res
+                    else:
+                        resp = call_res
+                if resp and isinstance(getattr(resp, "total_tokens", None), (int, float)):
                     exact_tokens = int(resp.total_tokens)
                     used_heuristic = False
         except Exception as err:
@@ -579,7 +592,8 @@ async def before_tool_callback(
 
     # Mode-based tool gating (fail closed before argument parsing)
     mode = tool_context.state.get("agent_mode", Mode.IGNORE)
-    if tool.name == "review" and mode != Mode.FORMAL_AUDIT:
+    review_tools = {"review", "submit_initial_review", "submit_sync_review"}
+    if tool.name in review_tools and mode != Mode.FORMAL_AUDIT:
         return {
             "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
             f"Only permitted in mode '{Mode.FORMAL_AUDIT}'."
@@ -589,9 +603,19 @@ async def before_tool_callback(
             "error": f"Tool '{tool.name}' is not permitted in mode '{mode}'. "
             f"Only permitted in mode '{Mode.THREAD_COLLAB}'."
         }
+    if tool.name == "create_issue":
+        may_create_issue = bool(
+            tool_context.state.get("may_create_issue")
+            or tool_context.state.get("user:may_create_issue")
+        )
+        if not may_create_issue:
+            return {
+                "error": f"Tool '{tool.name}' is not permitted for this event policy (may_create_issue=False). "
+                "Issues may only be created during authorized issue triage or discussion workflows."
+            }
 
     # Mandatory Investigation Gate: block review tool if code audit has not used investigative tools yet
-    if tool.name == "review" and (
+    if tool.name in review_tools and (
         tool_context.state.get("is_code_audit") or tool_context.state.get("user:is_code_audit")
     ):
         # Code audit investigation requires deep code inspection via read_file or search_files.
