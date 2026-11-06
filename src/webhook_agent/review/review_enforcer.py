@@ -1000,6 +1000,20 @@ def _enforce_verdict(
                     enforced_verdict=enforced_verdict,
                 )
 
+            if is_intended_request_changes and enforced_verdict == "APPROVE":
+                logger.warning(
+                    "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
+                )
+                enforced_verdict = "REQUEST_CHANGES"
+            elif (
+                is_body_comment
+                or (is_caller_comment and _has_review_findings_or_warnings(sync_obj))
+            ) and enforced_verdict == "APPROVE":
+                logger.warning(
+                    "Safety Guardrail: Prevented mechanical upgrade of sync COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
+                )
+                enforced_verdict = "COMMENT"
+
             rendered_body = render_sync_review_markdown(
                 sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
             )
@@ -1135,6 +1149,7 @@ def _submit_formal_review(
         ``(status_message, submitted)``.
     """
     with _review_lock(target_key):
+        repo_name, _, number_text = target_key.rpartition("#")
         live_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
         requested_sha = analyzed_sha.strip()
         reviewed_sha = requested_sha or live_sha
@@ -1210,7 +1225,6 @@ def _submit_formal_review(
 
         claim = None
         if reviewed_sha:
-            repo_name, _, number_text = target_key.rpartition("#")
             claim = review_claim_registry.claim(
                 repo_name,
                 int(number_text),

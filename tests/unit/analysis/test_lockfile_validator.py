@@ -91,6 +91,34 @@ def test_is_pure_dependency_pr_human_author_without_dependabot_branch_rejected()
     )
 
 
+def test_is_pure_dependency_pr_human_author_with_dependabot_branch_rejected():
+    """Prevent spoofing: human authors pushing to dependabot/ branches must be rejected."""
+    assert not is_pure_dependency_pr(
+        sender_login="attacker",
+        branch_name="dependabot/uv/pypdf-6.19.0",
+        changed_files=["uv.lock"],
+    )
+
+
+def test_is_pure_dependency_pr_spoofed_bot_login_rejected():
+    """Prevent prefix spoofing: usernames like dependabot-attacker must not pass."""
+    assert not is_pure_dependency_pr(
+        sender_login="dependabot-attacker",
+        branch_name="dependabot/uv/pypdf-6.19.0",
+        changed_files=["uv.lock"],
+    )
+
+
+def test_is_pure_dependency_pr_user_type_rejected():
+    """Ensure sender_type User is rejected even if login matches bot name."""
+    assert not is_pure_dependency_pr(
+        sender_login="dependabot[bot]",
+        branch_name="dependabot/uv/pypdf-6.19.0",
+        changed_files=["uv.lock"],
+        sender_type="User",
+    )
+
+
 def test_parse_bumped_packages_from_diff():
     bumps = parse_bumped_packages_from_diff(SAMPLE_UV_LOCK_DIFF)
     assert len(bumps) == 1

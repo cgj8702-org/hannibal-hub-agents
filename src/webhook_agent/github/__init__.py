@@ -52,7 +52,6 @@ __all__ = [
     "get_installation_token",
     "is_coderabbit_auto_resolve_enabled",
     "is_hannibal_bot_login",
-    "list_activities",
     "load_cached_token",
     "load_private_key",
     "resolve_review_thread",

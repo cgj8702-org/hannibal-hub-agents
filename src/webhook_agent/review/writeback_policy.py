@@ -197,15 +197,18 @@ def evaluate_writeback_policy(
         ]
 
     # Check mutation policy
-    allow_auto = ALLOW_AUTOMATED_MUTATIONS in (
+    effective_allow_mutations = os.environ.get(
+        "ALLOW_AUTOMATED_MUTATIONS", ALLOW_AUTOMATED_MUTATIONS
+    )
+    allow_auto = str(effective_allow_mutations).strip().lower() in (
         "1",
         "true",
-        "True",
+        "yes",
     )
     if not allow_auto and not dry_run:
         logger.debug(
             "⛔ Mutations disabled (ALLOW_AUTOMATED_MUTATIONS=%s)",
-            ALLOW_AUTOMATED_MUTATIONS,
+            effective_allow_mutations,
         )
         logger.info(
             "mutations disabled by policy (trace: %s)",

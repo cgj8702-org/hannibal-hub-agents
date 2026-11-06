@@ -45,6 +45,7 @@ def is_pure_dependency_pr(
     sender_login: str,
     branch_name: str,
     changed_files: list[str],
+    sender_type: str | None = None,
 ) -> bool:
     """Determine whether a PR is exclusively an automated dependency update.
 
@@ -52,23 +53,30 @@ def is_pure_dependency_pr(
         sender_login: GitHub login of the PR author or sender.
         branch_name: Head branch name of the PR.
         changed_files: List of all files changed in the PR.
+        sender_type: Optional GitHub user type (e.g. "Bot" or "User").
 
     Returns:
-        True if the author/branch indicates an automated dependency bump AND
-        every single changed file is a recognized dependency file.
+        True if the author is an authenticated dependency bot AND the branch
+        indicates a dependency bump AND every single changed file is a recognized
+        dependency file.
     """
     if not changed_files:
         return False
 
     norm_sender = (sender_login or "").lower().strip()
     norm_branch = (branch_name or "").lower().strip()
+    norm_type = (sender_type or "").lower().strip()
 
-    is_bot_author = norm_sender in DEPENDENCY_BOT_LOGINS or norm_sender.startswith("dependabot")
+    is_bot_author = norm_sender in DEPENDENCY_BOT_LOGINS
+    if sender_type is not None and norm_type and norm_type != "bot":
+        is_bot_author = False
+
     is_deps_branch = (
         norm_branch.startswith(("dependabot/", "renovate/")) or "/dependabot/" in norm_branch
     )
 
-    if not (is_bot_author or is_deps_branch):
+    # Require BOTH bot identity AND dependency branch to prevent spoofing
+    if not (is_bot_author and is_deps_branch):
         return False
 
     # Ensure all modified files are strictly dependency/lockfile artifacts

@@ -1608,7 +1608,8 @@ def extract_scorecard_invariants(
 
 def strict_grounding_enabled() -> bool:
     """Return True when ungrounded citations should reject or downgrade a review, not merely log."""
-    return STRICT_REVIEW_GROUNDING in ("1", "true", "True")
+    val = os.environ.get("STRICT_REVIEW_GROUNDING", STRICT_REVIEW_GROUNDING)
+    return str(val).strip().lower() in ("1", "true", "yes")
 
 
 __all__ = [
