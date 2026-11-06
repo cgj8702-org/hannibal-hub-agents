@@ -8,6 +8,7 @@ touching external GitHub APIs.
 from __future__ import annotations
 
 import contextlib
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -87,8 +88,8 @@ class ReviewInput(ToolInputBase):
 
     pr_number: int = Field(..., ge=1, description="Pull request number.")
     body: str = Field(..., min_length=1, description="Review payload JSON or markdown string.")
-    event: Literal["APPROVE", "COMMENT", "REQUEST_CHANGES"] = Field(
-        default="COMMENT", description="Review verdict event."
+    event: Literal["APPROVE", "COMMENT", "REQUEST_CHANGES"] | None = Field(
+        default=None, description="Review verdict event."
     )
 
     @model_validator(mode="before")
@@ -100,6 +101,33 @@ class ReviewInput(ToolInputBase):
                     data["pr_number"] = data["issue_number"]
                 elif "number" in data:
                     data["pr_number"] = data["number"]
+                elif "pr" in data:
+                    data["pr_number"] = data["pr"]
+
+            if "body" not in data or not data["body"]:
+                if data.get("report"):
+                    if isinstance(data["report"], dict):
+                        data["body"] = json.dumps(data["report"])
+                    elif isinstance(data["report"], str):
+                        data["body"] = data["report"]
+                elif any(
+                    k in data
+                    for k in (
+                        "scorecard",
+                        "executive_summary",
+                        "summary",
+                        "critical_issues",
+                        "minor_suggestions",
+                        "resolutions",
+                    )
+                ):
+                    payload = {
+                        k: v
+                        for k, v in data.items()
+                        if k not in ("pr_number", "issue_number", "number", "pr", "event")
+                    }
+                    data["body"] = json.dumps(payload)
+
             if "event" in data and isinstance(data["event"], str):
                 data["event"] = data["event"].upper()
         return data

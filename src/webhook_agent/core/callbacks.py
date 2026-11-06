@@ -684,8 +684,16 @@ async def before_tool_callback(
                 tool.name,
                 val_err,
             )
+            err_details = [
+                f"Field '{' -> '.join(str(loc) for loc in err.get('loc', []))}': {err.get('msg', '')}"
+                for err in val_err.errors()
+            ]
+            detail_str = "; ".join(err_details) if err_details else str(val_err)
             return {
-                "error": f"Tool '{tool.name}' argument validation failed. Please fix the argument types/names and try again."
+                "error": (
+                    f"Tool '{tool.name}' argument validation failed: {detail_str}. "
+                    "Please fix the argument types/names and try again."
+                )
             }
 
     # Track executed tools in session state for downstream audit gates
@@ -705,6 +713,9 @@ async def on_tool_error_callback(
 ) -> dict[str, Any] | None:
     """Self-healing error recovery callback."""
     logger.debug("on_tool_error_callback: tool '%s' raised error: %s", tool.name, error)
+    if type(error).__name__ == "AbortAgentExecution" or "AbortAgentExecution" in str(type(error)):
+        return None
+
     err_str = str(error).lower()
     if "429" in err_str or "resource_exhausted" in err_str:
         return {
@@ -712,7 +723,9 @@ async def on_tool_error_callback(
             "detail": f"Tool '{tool.name}' experienced a temporary limit or error ({error}). Audit proceeding using remaining available tools.",
         }
 
-    return None
+    return {
+        "error": f"Tool '{tool.name}' raised an error: {error}. Please adjust your arguments or proceed using alternative tools."
+    }
 
 
 async def after_tool_callback(

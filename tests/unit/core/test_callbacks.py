@@ -275,6 +275,51 @@ async def test_on_tool_error_callback() -> None:
 
 
 @pytest.mark.anyio
+async def test_on_tool_error_callback_generic_exception() -> None:
+    tool = MagicMock()
+    tool.name = "read_file"
+    args = {"file_path": "main.py"}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    err = ValueError("Permission denied")
+    res = await on_tool_error_callback(tool, args, ctx, err)
+    assert res is not None
+    assert "error" in res
+    assert "Tool 'read_file' raised an error: Permission denied" in res["error"]
+
+
+@pytest.mark.anyio
+async def test_on_tool_error_callback_bubbles_abort_agent_execution() -> None:
+    from webhook_agent.core.cancellation import AbortAgentExecution
+
+    tool = MagicMock()
+    tool.name = "review"
+    args = {"pr_number": 123}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    err = AbortAgentExecution("PR is closed")
+    res = await on_tool_error_callback(tool, args, ctx, err)
+    assert res is None
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_detailed_validation_error() -> None:
+    tool = MagicMock()
+    tool.name = "get_issue"
+    args = {"number": -5}
+    ctx = MagicMock()
+    ctx.state = {}
+
+    res = await before_tool_callback(tool, args, ctx)
+    assert res is not None
+    assert "error" in res
+    assert "Tool 'get_issue' argument validation failed" in res["error"]
+    assert "Field 'number'" in res["error"]
+
+
+@pytest.mark.anyio
 async def test_before_tool_callback_allow_multiple_tools() -> None:
     from webhook_agent.core.policy import Mode
 

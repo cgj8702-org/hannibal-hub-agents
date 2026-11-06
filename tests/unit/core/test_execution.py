@@ -142,6 +142,7 @@ def test_submit_deterministic_review_with_session_state() -> None:
         )
 
         mock_submit.assert_called_once()
+        assert mock_submit.call_args[0][2] == "APPROVE"
         mock_checkpoint.assert_called_once_with("owner/repo", 42, "commit-sha-123")
         assert len(results) == 1
         assert results[0].tool == "review"
