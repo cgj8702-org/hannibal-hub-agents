@@ -256,7 +256,7 @@ def test_symbol_impact_analyzer_without_baseline_loader(tmp_path: Path):
     mod_file = src_dir / "service.py"
     mod_file.write_text("def run(a, b, c): pass\n")
     caller_file = src_dir / "caller.py"
-    caller_file.write_text("run(1, 2)\n")
+    caller_file.write_text("from src.service import run\nrun(1, 2)\n")
 
     analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
     reports = analyzer.analyze_modified_files(["src/service.py"], baseline_loader=None)
@@ -265,6 +265,66 @@ def test_symbol_impact_analyzer_without_baseline_loader(tmp_path: Path):
     assert reports[0].sig_diff is None
     assert len(reports[0].broken_call_sites) == 1
     assert reports[0].broken_call_sites[0].confidence == "PROVEN"
+
+
+def test_symbol_impact_analyzer_unverified_call_site_capped_at_suspected(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    mod_file = src_dir / "service.py"
+    mod_file.write_text("def run(a, b, c): pass\n")
+    caller_file = src_dir / "caller.py"
+    # Unimported name-only call site
+    caller_file.write_text("run(1, 2)\n")
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/service.py"], baseline_loader=None)
+    assert len(reports) == 1
+    assert reports[0].symbol_name == "run"
+    assert len(reports[0].broken_call_sites) == 1
+    # Unverified name-only match is capped at SUSPECTED
+    assert reports[0].broken_call_sites[0].confidence == "SUSPECTED"
+
+    # Evaluates to WARN, never hard FAIL
+    item = evaluate_contract_integrity(reports)
+    assert item.status == "WARN"
+    assert "SUSPECTED: Unverified call site(s) may be affected" in item.notes
+
+
+def test_symbol_impact_analyzer_receiver_resolution(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    mod_file = src_dir / "worker.py"
+    mod_file.write_text("def process(item, retries=3): pass\n")
+    caller_file = src_dir / "caller.py"
+    caller_file.write_text("import src.worker as wrk\nwrk.process()\n")
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/worker.py"], baseline_loader=None)
+    assert len(reports) == 1
+    assert reports[0].symbol_name == "process"
+    assert len(reports[0].broken_call_sites) == 1
+    # Receiver wrk was resolved to src.worker -> PROVEN
+    assert reports[0].broken_call_sites[0].confidence == "PROVEN"
+
+    item = evaluate_contract_integrity(reports)
+    assert item.status == "FAIL"
+
+
+def test_symbol_impact_analyzer_other_module_import_capped_at_suspected(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True)
+    mod_file = src_dir / "service.py"
+    mod_file.write_text("def run(a, b, c): pass\n")
+    caller_file = src_dir / "caller.py"
+    # Caller explicitly imports 'run' from a completely different module
+    caller_file.write_text("from other_module import run\nrun(1, 2)\n")
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/service.py"], baseline_loader=None)
+    assert len(reports) == 1
+    assert reports[0].symbol_name == "run"
+    assert len(reports[0].broken_call_sites) == 1
+    assert reports[0].broken_call_sites[0].confidence == "SUSPECTED"
 
 
 def test_analyze_modified_files_skips_dunder_methods(tmp_path: Path) -> None:

@@ -1466,11 +1466,13 @@ class TestConversationalAgent:
         mock_issue.create_comment.assert_not_called()
         assert not any(r.tool == "add_comment" for r in results)
 
-    def test_conversational_app_name_aligned_with_agent(self):
+    def test_conversational_app_name_isolated_from_audit(self):
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
-        assert agent._conversational_app.name == agent._app_name
+        assert agent._conversational_app.name == f"{agent._app_name}_conversational"
+        assert agent._app.name == agent._app_name
+        assert agent._conversational_app.name != agent._app.name
 
     def test_build_user_message_for_issues_opened(self):
         from webhook_agent.core.agent_definition import WebhookAgent

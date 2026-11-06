@@ -14,7 +14,6 @@ from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps import App
 from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import START, Workflow
 from google.genai import types as genai_types
 
@@ -51,6 +50,7 @@ from webhook_agent.core.prompts import (
     get_max_input_tokens,
 )
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
+from webhook_agent.core.session_service import BoundedSessionService
 from webhook_agent.github.bot_identity import _is_bot_event
 from webhook_agent.models.model_chain import (
     _DEPLETED_MODEL_REGISTRY,
@@ -134,8 +134,8 @@ class WebhookAgent:
         self.dry_run = dry_run
         self._app_name = "hannibal-hub-agents"
 
-        # Session service — keeps per-PR conversation history
-        self._session_service = InMemorySessionService()
+        # Bounded session service — keeps per-PR conversation history with LRU eviction
+        self._session_service = BoundedSessionService()
 
         # Track current model chain (TPM Descending)
         self._model_chain = get_model_chain()
@@ -259,7 +259,7 @@ class WebhookAgent:
         )
 
         self._conversational_app = App(
-            name=self._app_name,
+            name=f"{self._app_name}_conversational",
             root_agent=self._conversational_workflow,
             context_cache_config=context_cache_config,
             plugins=[

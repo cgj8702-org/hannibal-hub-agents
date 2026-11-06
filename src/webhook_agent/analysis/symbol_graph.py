@@ -77,6 +77,9 @@ class CallSiteSpec:
     raw_code: str = ""
     is_attribute_call: bool = False  # True if obj.method(), False if direct func()
     receiver_name: str | None = None
+    is_import_resolved: bool | None = None
+    imported_from: str | None = None
+    is_receiver_resolved: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -258,12 +261,133 @@ class SymbolDefinitionVisitor(ast.NodeVisitor):
         self.signatures[qualname] = sig
 
 
+def _get_module_candidates(file_path: str) -> set[str]:
+    """Derive possible Python import module paths from a file path."""
+    if not file_path:
+        return set()
+    p = Path(file_path)
+    if p.suffix == ".py":
+        p = p.with_suffix("")
+    parts = list(p.parts)
+    if not parts:
+        return set()
+    if parts[-1] == "__init__":
+        parts.pop()
+    if not parts:
+        return set()
+
+    candidates: set[str] = set()
+    candidates.add(".".join(parts))
+    if parts[0] in ("src", "lib") and len(parts) > 1:
+        candidates.add(".".join(parts[1:]))
+    candidates.add(parts[-1])
+    for i in range(1, len(parts)):
+        candidates.add(".".join(parts[i:]))
+    return candidates
+
+
+def _resolve_relative_import(node: ast.ImportFrom, caller_file_path: str) -> str | None:
+    """Resolve relative import from caller file path to a module name."""
+    if node.level == 0:
+        return node.module
+
+    p = Path(caller_file_path)
+    parts = list(p.parts)
+    if parts and parts[0] in ("src", "lib"):
+        parts = parts[1:]
+    if parts:
+        pkg_parts = parts[:-1]
+    else:
+        pkg_parts = []
+
+    pop_count = node.level - 1
+    if pop_count > len(pkg_parts):
+        return None
+    if pop_count > 0:
+        base_pkg = pkg_parts[:-pop_count]
+    else:
+        base_pkg = pkg_parts
+
+    if node.module:
+        return ".".join([*base_pkg, node.module])
+    return ".".join(base_pkg) if base_pkg else None
+
+
+@dataclass
+class CallerImportMap:
+    """Import and definition mapping extracted from a caller file AST."""
+
+    resolved_direct_names: dict[str, str] = field(default_factory=dict)
+    other_imported_names: dict[str, str] = field(default_factory=dict)
+    resolved_receivers: dict[str, str] = field(default_factory=dict)
+    local_definitions: set[str] = field(default_factory=set)
+    has_target_wildcard: bool = False
+
+
+def extract_caller_import_map(
+    tree: ast.AST,
+    caller_file_path: str,
+    target_symbol: str,
+    target_file_path: str | None = None,
+) -> CallerImportMap:
+    """Extract import and receiver resolution map for a candidate caller file."""
+    cmap = CallerImportMap()
+    if not target_file_path:
+        return cmap
+
+    target_candidates = _get_module_candidates(target_file_path)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in target_candidates:
+                    receiver = alias.asname or alias.name.split(".")[-1]
+                    cmap.resolved_receivers[receiver] = alias.name
+                elif alias.name == target_symbol:
+                    cmap.other_imported_names[alias.asname or alias.name] = alias.name
+
+        elif isinstance(node, ast.ImportFrom):
+            resolved_mod = _resolve_relative_import(node, caller_file_path)
+            if resolved_mod and resolved_mod in target_candidates:
+                for alias in node.names:
+                    if alias.name == "*":
+                        cmap.has_target_wildcard = True
+                    elif alias.name == target_symbol:
+                        local_name = alias.asname or alias.name
+                        cmap.resolved_direct_names[local_name] = resolved_mod
+                    else:
+                        submod = f"{resolved_mod}.{alias.name}"
+                        if submod in target_candidates or alias.name in target_candidates:
+                            receiver = alias.asname or alias.name
+                            cmap.resolved_receivers[receiver] = submod
+            else:
+                for alias in node.names:
+                    if alias.name == target_symbol:
+                        local_name = alias.asname or alias.name
+                        mod_str = resolved_mod or node.module or ""
+                        cmap.other_imported_names[local_name] = mod_str
+
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == target_symbol:
+                cmap.local_definitions.add(node.name)
+
+    return cmap
+
+
 class CallSiteVisitor(ast.NodeVisitor):
     """AST visitor to find all call sites of a target symbol in a Python module."""
 
-    def __init__(self, target_symbol: str, file_path: str = "") -> None:
+    def __init__(
+        self,
+        target_symbol: str,
+        file_path: str = "",
+        target_file_path: str | None = None,
+        import_map: CallerImportMap | None = None,
+    ) -> None:
         self.target_symbol = target_symbol
         self.file_path = file_path
+        self.target_file_path = target_file_path
+        self.import_map = import_map
         self.call_sites: list[CallSiteSpec] = []
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -271,12 +395,46 @@ class CallSiteVisitor(ast.NodeVisitor):
         callee_name = ""
         is_attribute_call = False
         receiver_name: str | None = None
+        is_import_resolved: bool | None = None
+        imported_from: str | None = None
+        is_receiver_resolved: bool | None = None
 
         # Direct function call: func(...)
-        if isinstance(node.func, ast.Name) and node.func.id == self.target_symbol:
-            is_match = True
-            callee_name = node.func.id
-            is_attribute_call = False
+        if isinstance(node.func, ast.Name):
+            func_id = node.func.id
+            is_target_name = func_id == self.target_symbol
+            is_resolved_alias = (
+                self.import_map is not None and func_id in self.import_map.resolved_direct_names
+            )
+            if is_target_name or is_resolved_alias:
+                is_match = True
+                callee_name = func_id
+                is_attribute_call = False
+
+                if self.target_file_path is None:
+                    is_import_resolved = None
+                elif self.file_path and self.file_path == self.target_file_path:
+                    is_import_resolved = True
+                    imported_from = self.target_file_path
+                elif self.import_map is not None:
+                    if func_id in self.import_map.resolved_direct_names:
+                        is_import_resolved = True
+                        imported_from = self.import_map.resolved_direct_names[func_id]
+                    elif func_id in self.import_map.other_imported_names:
+                        is_import_resolved = False
+                        imported_from = self.import_map.other_imported_names[func_id]
+                    elif func_id in self.import_map.local_definitions:
+                        is_import_resolved = False
+                        imported_from = "local_definition"
+                    elif self.import_map.has_target_wildcard:
+                        is_import_resolved = True
+                        imported_from = "wildcard"
+                    else:
+                        is_import_resolved = False
+                        imported_from = None
+                else:
+                    is_import_resolved = False
+
         # Attribute call: obj.method(...)
         elif isinstance(node.func, ast.Attribute) and node.func.attr == self.target_symbol:
             is_match = True
@@ -284,6 +442,17 @@ class CallSiteVisitor(ast.NodeVisitor):
             is_attribute_call = True
             if isinstance(node.func.value, ast.Name):
                 receiver_name = node.func.value.id
+
+            if self.target_file_path is None:
+                is_receiver_resolved = None
+            elif self.import_map is not None:
+                if receiver_name and receiver_name in self.import_map.resolved_receivers:
+                    is_receiver_resolved = True
+                    imported_from = self.import_map.resolved_receivers[receiver_name]
+                else:
+                    is_receiver_resolved = False
+            else:
+                is_receiver_resolved = False
 
         if is_match:
             has_star = any(isinstance(a, ast.Starred) for a in node.args)
@@ -302,6 +471,9 @@ class CallSiteVisitor(ast.NodeVisitor):
                 raw_code=ast.unparse(node),
                 is_attribute_call=is_attribute_call,
                 receiver_name=receiver_name,
+                is_import_resolved=is_import_resolved,
+                imported_from=imported_from,
+                is_receiver_resolved=is_receiver_resolved,
             )
             self.call_sites.append(call_spec)
 
@@ -427,9 +599,18 @@ def verify_call_site_compatibility(
     sig: SignatureSpec,
 ) -> BrokenCallSite | None:
     """Verify whether a call site satisfies the callable's signature constraints."""
-    confidence: Literal["PROVEN", "SUSPECTED"] = (
-        "SUSPECTED" if call_site.is_attribute_call else "PROVEN"
-    )
+    confidence: Literal["PROVEN", "SUSPECTED"]
+    if call_site.is_import_resolved is True or call_site.is_receiver_resolved is True:
+        confidence = "PROVEN"
+    elif call_site.is_attribute_call:
+        confidence = "SUSPECTED"
+    elif call_site.is_import_resolved is False:
+        # Bare name call site in a file where import was unverified or from another module.
+        # Cap unverified name-only matches at SUSPECTED instead of a hard PROVEN FAIL.
+        confidence = "SUSPECTED"
+    else:
+        # Backward-compatible fallback when import resolution was not performed (None)
+        confidence = "PROVEN"
 
     # If dynamic forwarding is used (*args or **kwargs), skip static argument count mismatch
     # but still catch explicit unexpected keywords if **kwargs is not accepted
@@ -547,10 +728,12 @@ class SymbolImpactAnalyzer:
         self,
         symbol_name: str,
         exclude_paths: set[str] | None = None,
+        target_file_path: str | None = None,
     ) -> list[CallSiteSpec]:
         """Scan repository for all call sites referencing the target symbol.
 
-        Uses fast substring pre-filtering to parse AST only on candidate files.
+        Uses fast substring pre-filtering to parse AST only on candidate files,
+        and resolves import/receiver binding when target_file_path is provided.
         """
         exclude = exclude_paths or set()
         call_sites: list[CallSiteSpec] = []
@@ -583,7 +766,23 @@ class SymbolImpactAnalyzer:
             except SyntaxError:
                 continue
 
-            visitor = CallSiteVisitor(target_symbol=symbol_name, file_path=rel_path)
+            import_map = (
+                extract_caller_import_map(
+                    tree=tree,
+                    caller_file_path=rel_path,
+                    target_symbol=symbol_name,
+                    target_file_path=target_file_path,
+                )
+                if target_file_path
+                else None
+            )
+
+            visitor = CallSiteVisitor(
+                target_symbol=symbol_name,
+                file_path=rel_path,
+                target_file_path=target_file_path,
+                import_map=import_map,
+            )
             visitor.visit(tree)
             call_sites.extend(visitor.call_sites)
 
@@ -630,6 +829,7 @@ class SymbolImpactAnalyzer:
         call_sites = self.find_call_sites_in_repo(
             symbol_name=symbol_name,
             exclude_paths={file_path},
+            target_file_path=file_path,
         )
 
         broken_list: list[BrokenCallSite] = []
@@ -777,10 +977,12 @@ def evaluate_contract_integrity(
         citation_str = "; ".join(citations)
         if len(suspected_broken) > 3:
             citation_str += f" (+{len(suspected_broken) - 3} more)"
+        has_dynamic = any(b.call_site.is_attribute_call for b in suspected_broken)
+        category = "Dynamic call site(s)" if has_dynamic else "Unverified call site(s)"
         return ScorecardItem(
             dimension="Contract Integrity",
             status="WARN",
-            notes=f"SUSPECTED: Dynamic call site(s) may be affected: {citation_str}.",
+            notes=f"SUSPECTED: {category} may be affected: {citation_str}.",
         )
 
     breaking_diffs = [rep for rep in reports if rep.sig_diff and rep.sig_diff.is_breaking]

@@ -239,7 +239,7 @@ def test_build_user_message_runs_symbol_and_test_impact_when_workspace_active(
     src_dir = tmp_path / "src"
     src_dir.mkdir(parents=True)
     (src_dir / "service.py").write_text("def run(a, b, new_req): pass\n")
-    (src_dir / "caller.py").write_text("run(1, 2)\n")
+    (src_dir / "caller.py").write_text("from src.service import run\nrun(1, 2)\n")
 
     env = LocalEnvironment(tmp_path)
     mock_gh = MagicMock()

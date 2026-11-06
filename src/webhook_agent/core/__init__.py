@@ -42,6 +42,7 @@ from webhook_agent.core.loop_helpers import (
     run_in_bg_loop,
 )
 from webhook_agent.core.sanitizer_plugin import PromptSanitizerPlugin
+from webhook_agent.core.session_service import BoundedSessionService
 from webhook_agent.tools.github_tools import (
     get_issue,
     list_dir,
@@ -57,6 +58,7 @@ __all__ = [
     "STATIC_REVIEW_INSTRUCTION",
     "SYSTEM_INSTRUCTION",
     "AbortAgentExecution",
+    "BoundedSessionService",
     "GuardrailsPlugin",
     "IterationBudgetPlugin",
     "PRClosedRegistry",
