@@ -129,7 +129,7 @@ SUPPRESSED_PR_METADATA_ACTIONS: frozenset[str] = frozenset(
 # are NOT subscribed, and are listed here as guards so they can never reach the agent if a
 # subscription is ever re-added. No code path reads their payloads, and
 # build_transient_turn_content has no branch for them -- so reaching the agent means an empty
-# prompt and a hallucinated reply (see docs/plans/repo_reclamation.md §8.1).
+# prompt and a hallucinated reply.
 SUPPRESSED_EVENT_NAMES: frozenset[str] = frozenset(
     {
         "check_suite",
