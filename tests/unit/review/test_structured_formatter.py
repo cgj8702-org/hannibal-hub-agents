@@ -314,6 +314,8 @@ def test_normalize_code_review_dict_edge_cases():
     assert normalize_code_review_dict({}) == {
         "executive_summary": "Autonomous PR code review report.",
         "scorecard": [],
+        "candidate_findings": [],
+        "verification_verdicts": [],
         "risks_and_edge_cases": [],
         "critical_issues": [],
         "minor_suggestions": [],

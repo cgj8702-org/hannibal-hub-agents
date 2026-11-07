@@ -59,8 +59,7 @@ flowchart TD
 │   ├── LOG_SINK_SETUP.md    # Cloud Logging setup and export configuration
 │   ├── MODEL_CHAIN.md       # Model fallback chains, tiering, and rate limits
 │   ├── review_rules.md      # Review policies, invariants, and scorecard rules
-│   ├── slash_commands_catalog.md # Supported webhook slash commands
-│   └── templates_catalog.md # Review output schemas and markdown templates
+│   └── slash_commands_catalog.md # Supported webhook slash commands & architecture guide
 ├── scripts/
 │   ├── load_secrets.sh      # Load environment variables dynamically from GCP Secret Manager
 │   ├── setup_vm_user_service.sh   # VM user-space systemd service setup script

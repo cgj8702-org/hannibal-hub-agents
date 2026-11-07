@@ -383,3 +383,114 @@ def test_issue_item_confidence_alias_and_critic_filter() -> None:
     assert len(survivors) == 1
     assert survivors[0].line == 20
     assert survivors[0].description == "Hard crash on None input"
+
+
+def test_critic_structured_telemetry_logging(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify CriticEngine logs structured telemetry with extra['json_fields']."""
+    import logging
+
+    critic = CriticEngine(min_confidence=8)
+    cand_nit = CandidateFinding(
+        id="cand-nit-1",
+        file_path="src/foo.py",
+        severity="NIT",
+        confidence_score=9,
+        title="Extra line",
+        description="Just a nit",
+    )
+    cand_low = CandidateFinding(
+        id="cand-low-1",
+        file_path="src/foo.py",
+        severity="MEDIUM",
+        confidence_score=5,
+        title="Minor edge",
+        description="Low confidence finding",
+    )
+
+    with caplog.at_level(logging.INFO):
+        assert critic.evaluate_candidate(cand_nit) is False
+        assert critic.evaluate_candidate(cand_low) is False
+
+    nit_records = [
+        r
+        for r in caplog.records
+        if getattr(r, "json_fields", {}).get("event") == "finding_falsified"
+        and getattr(r, "json_fields", {}).get("candidate_id") == "cand-nit-1"
+    ]
+    assert len(nit_records) == 1
+    assert nit_records[0].json_fields["category"] == "critic_drop"
+    assert nit_records[0].json_fields["severity"] == "NIT"
+
+    low_records = [
+        r
+        for r in caplog.records
+        if getattr(r, "json_fields", {}).get("event") == "finding_falsified"
+        and getattr(r, "json_fields", {}).get("candidate_id") == "cand-low-1"
+    ]
+    assert len(low_records) == 1
+    assert low_records[0].json_fields["category"] == "critic_drop"
+    assert low_records[0].json_fields["confidence"] == 5
+
+
+def test_review_tool_with_candidate_findings() -> None:
+    """Verify review() tool in github_tools processes candidate_findings through Hunter & Critic."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.review.schemas import CodeReviewResponse
+    from webhook_agent.tools.github_tools import review
+
+    ctx = MagicMock()
+    mock_gh = MagicMock()
+    mock_repo = mock_gh.get_repo.return_value
+    mock_pr = MagicMock()
+    mock_repo.get_pull.return_value = mock_pr
+
+    mock_file = MagicMock()
+    mock_file.filename = "src/webhook_agent/core/test_module.py"
+    mock_file.patch = "@@ -10,1 +10,2 @@\n-old\n+new"
+    mock_pr.get_files.return_value = [mock_file]
+
+    ctx.state = {
+        "gh_client": mock_gh,
+        "repo_full_name": "owner/repo",
+        "skip_investigation_gate": True,
+        "deterministic_changed_files": ["src/webhook_agent/core/test_module.py"],
+    }
+
+    report = CodeReviewResponse(
+        executive_summary="Audit with candidate findings.",
+        verdict="REQUEST_CHANGES",
+        scorecard=[
+            {"dimension": "Logic & Boundaries", "status": "FAIL", "notes": "Fails"},
+            {"dimension": "Concurrency & State", "status": "PASS", "notes": "ok"},
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "ok"},
+            {"dimension": "Contract Integrity", "status": "PASS", "notes": "ok"},
+            {"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "ok"},
+        ],
+        candidate_findings=[
+            {
+                "id": "cand-crit",
+                "file_path": "src/webhook_agent/core/test_module.py",
+                "line_number": 10,
+                "severity": "CRITICAL",
+                "confidence_score": 9,
+                "title": "Uncaught crash",
+                "description": "Will crash with KeyError",
+                "suggested_fix": "return None",
+                "falsification_check": "Check KeyError handling",
+            },
+            {
+                "id": "cand-nit",
+                "file_path": "src/webhook_agent/core/test_module.py",
+                "line_number": 11,
+                "severity": "NIT",
+                "confidence_score": 9,
+                "title": "Comment nit",
+                "description": "Fix punctuation",
+            },
+        ],
+    )
+
+    res = review(ctx, pr_number=1, report=report)
+    assert "Submitted review (REQUEST_CHANGES)" in res
+    assert mock_pr.create_review.called

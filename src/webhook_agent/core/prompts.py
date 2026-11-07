@@ -128,8 +128,10 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
      * **Concurrency & State Mutation**: Are shared objects, caches, or globals mutated asynchronously without locks? Are event loop tasks properly tracked or could they be garbage collected?
      * **Contract & Signature Drift**: Do changes alter default values, return shapes, or type signatures that external callers depend upon?
      * **Edge & Boundary Conditions**: Empty collections, zero values, off-by-one calculations, or pagination limits.
-7. **Silence by Default (High Signal, Low Noise)**:
-   - Only surface findings with confidence >= 8 (scale 1-10) and non-NIT severity. Falsify candidate findings against caller semantics before reporting.
+7. **Adversarial Hunter-Critic Verification (High Signal, Low Noise)**:
+   - High-Recall Hunter Stage: Discover candidate issues (`candidate_findings`) articulating an explicit `falsification_check` (an adversarial hypothesis attempting to disprove the finding).
+   - Adversarial Critic Stage: Evaluate candidates against repository invariants, caller semantics, and boundary contracts.
+   - Confidence Floor & NIT Filtering: Only surface verified findings with confidence >= 8 (scale 1-10) and non-NIT severity. Disproven candidates or findings with confidence < 8 are discarded.
    - Silence by Default applies strictly to verified sound code: if you have thoroughly checked edge cases and verified zero regressions, return empty issue lists (`critical_issues: []`, `minor_suggestions: []`). Do NOT remain silent on suspected regressions or unverified contracts.
    - Maintain clinical brevity. Do NOT cheerlead, flatter, or regurgitate author claims.
 8. **Actionable Suggestions & Valid AST Syntax**:
