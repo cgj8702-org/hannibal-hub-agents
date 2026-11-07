@@ -676,9 +676,13 @@ def review(
                     else:
                         review_obj.minor_suggestions.append(issue)
 
-        # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement
-        review_obj.critical_issues = critic_engine.filter_issues(review_obj.critical_issues)
-        review_obj.minor_suggestions = critic_engine.filter_issues(review_obj.minor_suggestions)
+        # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement,
+        # demoting moderate confidence (5-7) findings to minor_suggestions to prevent finding vanishing.
+        review_obj.critical_issues, review_obj.minor_suggestions = (
+            critic_engine.partition_and_filter_issues(
+                review_obj.critical_issues, review_obj.minor_suggestions
+            )
+        )
 
         # Apply Severity Governor to normalize severities
         review_obj.critical_issues = severity_governor.apply_governance_to_issues(

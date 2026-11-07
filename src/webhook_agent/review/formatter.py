@@ -243,7 +243,7 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
-    """Calculate PR review verdict mechanically from structured issues and scorecard."""
+    """Calculate PR review verdict mechanically from structured issues, scorecard, and invariants."""
     if len(review.critical_issues) > 0:
         logger.info(
             "Mechanical verdict: REQUEST_CHANGES (%d critical issues)",
@@ -270,7 +270,9 @@ def calculate_strict_verdict(review: CodeReviewResponse) -> str:
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
-    if getattr(review, "verdict", None) is None and has_unverified_or_warning:
+    if getattr(review, "verdict", None) is None and (
+        has_unverified_or_warning or bool(getattr(review, "unverified_claims", None))
+    ):
         return "COMMENT"
     logger.debug("Mechanical verdict: APPROVE (0 critical issues)")
     return "APPROVE"
@@ -310,10 +312,12 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
-    if getattr(review, "verdict", None) is None and has_unverified_or_warning:
+    if getattr(review, "verdict", None) is None and (
+        has_unverified_or_warning or bool(getattr(review, "unverified_claims", None))
+    ):
         return "COMMENT"
     logger.debug(
-        "Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",
+        "Sync verdict: APPROVE (all critical items RESOLVED, %d minor suggestions)",
         len(review.minor_suggestions),
     )
     return "APPROVE"

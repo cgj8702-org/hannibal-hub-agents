@@ -82,7 +82,7 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
 
 #### 3a. `CodeReviewResponse` (Initial Reviews)
 1. **executive_summary**: 1-2 concise, clinical sentences summarizing PR goal, overall architecture, and verdict rationale.
-2. **verdict**: Explicit review verdict ("APPROVE", "REQUEST_CHANGES", "COMMENT"). If any scorecard dimension is WARN, UNKNOWN, or ERROR, or if you identify non-blocking issues or actionable risks, you MUST explicitly set verdict to "COMMENT". Only set "APPROVE" when all 5 dimensions are PASS/N/A with zero critical issues and zero unmitigated actionable risks.
+2. **verdict**: Explicit review verdict ("APPROVE", "REQUEST_CHANGES", "COMMENT"). If any scorecard dimension is WARN, UNKNOWN, or ERROR, or if you identify non-blocking issues or minor suggestions, you MUST set verdict to "COMMENT" (or "REQUEST_CHANGES" for critical blockers). Only set "APPROVE" when all 5 dimensions are PASS/N/A with zero critical issues, zero minor suggestions, and zero unverified claims.
 3. **scorecard**: Mandatory evaluation matrix across all 5 audit dimensions:
    - `dimension`: "Logic & Boundaries", "Concurrency & State", "Security & Secrets", "Contract Integrity", "Test Coverage & Regressions".
    - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).
@@ -136,6 +136,7 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
      * **Concurrency & State Mutation**: Are shared objects, caches, or globals mutated asynchronously without locks? Are event loop tasks properly tracked or could they be garbage collected?
      * **Contract & Signature Drift**: Do changes alter default values, return shapes, or type signatures that external callers depend upon?
      * **Edge & Boundary Conditions**: Empty collections, zero values, off-by-one calculations, or pagination limits.
+   - For any PR modifying application logic, actively test boundary conditions. If defensive checks or error handling are missing, report them in `minor_suggestions` (or `critical_issues` if breaking). Do NOT silently ignore unverified assumptions.
 9. **Adversarial Hunter-Critic Verification (High Signal, Low Noise)**:
    - High-Recall Hunter Stage: Discover candidate issues (`candidate_findings`) articulating `window` (quoted line numbers and text) and an explicit `falsification_check` / `verify_steps`.
    - Adversarial Critic Stage: Evaluate candidates against repository invariants, cheapness rules, and diff window bounds.
@@ -147,8 +148,8 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
 
 ### 5. Verdict Rules
 - ANY critical issue or failing scorecard dimension (`status == "FAIL"`) -> verdict MUST be `REQUEST_CHANGES`.
-- ANY scorecard dimension with `WARN`, `UNKNOWN`, or `ERROR`, or any unverified critical claims -> verdict MUST be `COMMENT` (never `APPROVE`).
-- ONLY assign `APPROVE` if ALL 5 audit dimensions are `PASS` (or `N/A`), exactly 0 critical issues exist, all prior items are resolved, and you have actively verified that failure modes and boundary conditions are defended.
+- ANY scorecard dimension with `WARN`, `UNKNOWN`, or `ERROR`, ANY minor suggestion, ANY unresolved prior finding, or ANY unverified claims -> verdict MUST be `COMMENT` (never `APPROVE`).
+- ONLY assign `APPROVE` if ALL 5 audit dimensions are `PASS` (or `N/A`), exactly 0 critical issues exist, exactly 0 minor suggestions exist, 0 unverified claims exist, all prior items are resolved, and you have actively verified that failure modes and boundary conditions are defended.
 
 ### 6. Dependency & Lockfile Protocol
 When reviewing dependency PRs (sender `dependabot[bot]` or branch starting with `dependabot/`):
@@ -272,8 +273,11 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
     elif canonical.startswith("pull_request."):
         pr = raw.get("pull_request", {})
         pr_num = pr.get("number", "unknown")
+        # CRITICAL ZERO-AUTHOR-CLAIM INVARIANT:
+        # PR Body (description) is strictly excluded to prevent author confirmation bias.
+        # The audit is grounded purely in the unified diff, pre-audit AST/compiler dossier, and repository source.
         parts.append(f"PR Number: {pr_num}")
-        parts.append(f"PR Title: {pr.get('title', 'N/A')}")
+        parts.append(f"PR Title (UNVERIFIED): {pr.get('title', 'N/A')}")
         parts.append(f"PR Head Branch: {(pr.get('head') or {}).get('ref', 'N/A')}")
         parts.append(f"PR Base Branch: {(pr.get('base') or {}).get('ref', 'N/A')}")
         parts.append(f"PR Additions: {pr.get('additions', 'N/A')}")

@@ -343,8 +343,11 @@ def _finalize_enforced_review(
     if det_test_item is not None:
         review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_test_item)
 
-    review_obj.critical_issues = critic_engine.filter_issues(review_obj.critical_issues)
-    review_obj.minor_suggestions = critic_engine.filter_issues(review_obj.minor_suggestions)
+    review_obj.critical_issues, review_obj.minor_suggestions = (
+        critic_engine.partition_and_filter_issues(
+            review_obj.critical_issues, review_obj.minor_suggestions
+        )
+    )
 
     if isinstance(review_obj, SyncReviewResponse):
         # Programmatic hallucination guard: clear resolutions if no prior review
