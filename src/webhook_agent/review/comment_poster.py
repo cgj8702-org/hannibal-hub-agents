@@ -319,6 +319,12 @@ def build_github_review_comments(
                 line_val,
             )
 
+    # Apply Severity Governor tagging and sort CRITICAL first, then MAJOR, then MINOR
+    from webhook_agent.review.critic.severity_governor import SeverityGovernor
+
+    governor = SeverityGovernor()
+    inline_comments = governor.tag_and_sort_comments(inline_comments)
+
     return inline_comments, anchored_keys
 
 
