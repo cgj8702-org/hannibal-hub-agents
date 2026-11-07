@@ -39,11 +39,18 @@ if [ -z "$WEBHOOK_SECRET" ]; then
     exit 1
 fi
 
-# Save private key to ephemeral path
-mkdir -p -m 700 /tmp/keys && chmod 700 /tmp/keys
-( umask 077; gcloud secrets versions access latest --secret="GITHUB_PRIVATE_KEY" --project="${PROJECT_ID}" > /tmp/keys/github-app-private-key.pem )
-chmod 600 /tmp/keys/github-app-private-key.pem
-export GITHUB_PRIVATE_KEY_PATH="/tmp/keys/github-app-private-key.pem"
+# Save private key to secure user-scoped runtime directory
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
+    KEYS_DIR="${XDG_RUNTIME_DIR}/hannibal-keys"
+elif [ -n "${HOME:-}" ] && [ -d "${HOME}" ]; then
+    KEYS_DIR="${HOME}/.local/share/hannibal/keys"
+else
+    KEYS_DIR="/tmp/hannibal-$(id -u)-keys"
+fi
+mkdir -p -m 700 "${KEYS_DIR}" && chmod 700 "${KEYS_DIR}"
+( umask 077; gcloud secrets versions access latest --secret="GITHUB_PRIVATE_KEY" --project="${PROJECT_ID}" > "${KEYS_DIR}/github-app-private-key.pem" )
+chmod 600 "${KEYS_DIR}/github-app-private-key.pem"
+export GITHUB_PRIVATE_KEY_PATH="${KEYS_DIR}/github-app-private-key.pem"
 export PRIVATE_KEY_PATH="${GITHUB_PRIVATE_KEY_PATH}"
 
 # Fetch cgj8702-agents GitHub token (if configured in Secret Manager)
@@ -51,9 +58,9 @@ CGJ8702_AGENTS_TOKEN=$(gcloud secrets versions access latest --secret="CGJ8702_A
 export CGJ8702_AGENTS_TOKEN
 
 # Fetch webhook-agent service account key for Pub/Sub & Logging auth
-( umask 077; gcloud secrets versions access latest --secret="WEBHOOK_AGENT_SA_KEY" --project="${PROJECT_ID}" > /tmp/keys/webhook-agent-sa-key.json )
-chmod 600 /tmp/keys/webhook-agent-sa-key.json
-export GOOGLE_APPLICATION_CREDENTIALS="/tmp/keys/webhook-agent-sa-key.json"
+( umask 077; gcloud secrets versions access latest --secret="WEBHOOK_AGENT_SA_KEY" --project="${PROJECT_ID}" > "${KEYS_DIR}/webhook-agent-sa-key.json" )
+chmod 600 "${KEYS_DIR}/webhook-agent-sa-key.json"
+export GOOGLE_APPLICATION_CREDENTIALS="${KEYS_DIR}/webhook-agent-sa-key.json"
 
 export PUBSUB_PROJECT="${PROJECT_ID}"
 export PUBSUB_TOPIC="projects/${PROJECT_ID}/topics/webhooks"

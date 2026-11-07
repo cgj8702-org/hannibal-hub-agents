@@ -239,35 +239,41 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
-    """Calculate PR review verdict mechanically from structured issues."""
+    """Calculate PR review verdict mechanically from structured issues and scorecard."""
     if len(review.critical_issues) > 0:
         logger.info(
             "Mechanical verdict: REQUEST_CHANGES (%d critical issues)",
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
-    for sc in getattr(review, "scorecard", []):
-        sc_status = getattr(sc, "status", "")
+    has_unverified_or_warning = False
+    for sc in getattr(review, "scorecard", []) or []:
+        sc_status = (getattr(sc, "status", "") or "").upper()
         if sc_status == "FAIL":
             logger.info(
                 "Mechanical verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
             )
             return "REQUEST_CHANGES"
-        elif sc_status in ("UNKNOWN", "ERROR"):
-            logger.warning(
-                "Scorecard dimension has unverified status (%s): %s", sc_status, sc.dimension
+        elif sc_status in ("WARN", "UNKNOWN", "ERROR"):
+            has_unverified_or_warning = True
+            logger.info(
+                "Scorecard dimension has unverified or warning status (%s): %s",
+                sc_status,
+                sc.dimension,
             )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.debug("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
+    if getattr(review, "verdict", None) is None and has_unverified_or_warning:
+        return "COMMENT"
     logger.debug("Mechanical verdict: APPROVE (0 critical issues)")
     return "APPROVE"
 
 
 def calculate_sync_verdict(review: SyncReviewResponse) -> str:
-    """Calculate sync re-review verdict mechanically from resolutions and new issues."""
+    """Calculate sync re-review verdict mechanically from resolutions, new issues, and scorecard."""
     unresolved_critical = [
         r
         for r in review.resolutions
@@ -280,21 +286,27 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
-    for sc in getattr(review, "scorecard", []):
-        sc_status = getattr(sc, "status", "")
+    has_unverified_or_warning = False
+    for sc in getattr(review, "scorecard", []) or []:
+        sc_status = (getattr(sc, "status", "") or "").upper()
         if sc_status == "FAIL":
             logger.debug(
                 "Sync verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
             )
             return "REQUEST_CHANGES"
-        elif sc_status in ("UNKNOWN", "ERROR"):
-            logger.warning(
-                "Sync scorecard dimension has unverified status (%s): %s", sc_status, sc.dimension
+        elif sc_status in ("WARN", "UNKNOWN", "ERROR"):
+            has_unverified_or_warning = True
+            logger.info(
+                "Sync scorecard dimension has unverified or warning status (%s): %s",
+                sc_status,
+                sc.dimension,
             )
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
         logger.debug("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
+        return "COMMENT"
+    if getattr(review, "verdict", None) is None and has_unverified_or_warning:
         return "COMMENT"
     logger.debug(
         "Sync verdict: APPROVE (all items RESOLVED, %d minor suggestions)",

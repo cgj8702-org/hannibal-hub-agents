@@ -25,13 +25,13 @@ def test_is_exempt_file_path() -> None:
     assert is_exempt_file_path("tests/unit/test_app.py") is True
     assert is_exempt_file_path("test/integration/test_api.py") is True
     assert is_exempt_file_path("fixtures/dummy_keys.json") is True
-    assert is_exempt_file_path("docs/security.md") is True
     assert is_exempt_file_path("conftest.py") is True
     assert is_exempt_file_path("uv.lock") is True
-    assert is_exempt_file_path(".agents/skills/test.py") is True
     assert is_exempt_file_path("package-lock.json") is True
 
-    # Production code paths (not exempt)
+    # Production code, documentation, and asset paths (not exempt from secret scanning)
+    assert is_exempt_file_path("docs/security.md") is False
+    assert is_exempt_file_path("assets/config.json") is False
     assert is_exempt_file_path("src/webhook_agent/core/auth.py") is False
     assert is_exempt_file_path("src/webhook_agent/app.py") is False
     assert is_exempt_file_path("main.py") is False

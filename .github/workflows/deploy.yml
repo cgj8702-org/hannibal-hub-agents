@@ -50,16 +50,18 @@ jobs:
 
       - name: VM Deploy via IAP
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || secrets.GH_TOKEN }}
           TARGET_SHA: ${{ github.sha }}
         run: |
-          gcloud compute ssh carly@hannibal-hub-free \
+          printf "%s\n%s\n" "${GH_TOKEN}" "${TARGET_SHA}" | gcloud compute ssh carly@hannibal-hub-free \
             --project=chatbot-project-hannibal \
             --zone=us-east1-d \
             --tunnel-through-iap \
             --quiet \
-            --command="
+            --command='
               set -e
+              read -r REPO_TOKEN
+              read -r TARGET_SHA
               cd /home/carly/hannibal-hub-agents
 
               cleanup() {
@@ -68,33 +70,33 @@ jobs:
               trap cleanup EXIT
 
               # Authenticate, fetch, then immediately scrub token from git config
-              git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/cgj8702-org/hannibal-hub-agents.git
+              git remote set-url origin "https://x-access-token:${REPO_TOKEN}@github.com/cgj8702-org/hannibal-hub-agents.git"
               git fetch --quiet origin
               cleanup
 
-              git checkout --quiet -B main ${TARGET_SHA}
+              git checkout --quiet -B main "${TARGET_SHA}"
               git clean -fd --quiet
 
               uv sync --no-dev --frozen
 
               mkdir -p ~/.config/systemd/user
               cp scripts/hannibal-webhook-agent.service ~/.config/systemd/user/
-              loginctl enable-linger \$(id -u -n) || true
-              export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+              loginctl enable-linger $(id -u -n) || true
+              export XDG_RUNTIME_DIR=/run/user/$(id -u)
               systemctl --user daemon-reload
               systemctl --user enable hannibal-webhook-agent
               systemctl --user restart hannibal-webhook-agent
 
               # Verify service actually started and is healthy
               sleep 15
-              ACTIVE=\$(systemctl --user is-active hannibal-webhook-agent || true)
-              RESTARTS=\$(systemctl --user show -p NRestarts --value hannibal-webhook-agent || true)
-              if [ \"\$ACTIVE\" = 'active' ] && [ \"\$RESTARTS\" = '0' ]; then
-                echo 'Deployment Complete. Service is active with 0 restarts.'
+              ACTIVE=$(systemctl --user is-active hannibal-webhook-agent || true)
+              RESTARTS=$(systemctl --user show -p NRestarts --value hannibal-webhook-agent || true)
+              if [ "$ACTIVE" = "active" ] && [ "$RESTARTS" = "0" ]; then
+                echo "Deployment Complete. Service is active with 0 restarts."
               else
-                echo \"ERROR: Service check failed (active=\$ACTIVE, restarts=\$RESTARTS)!\"
+                echo "ERROR: Service check failed (active=$ACTIVE, restarts=$RESTARTS)!"
                 systemctl --user status hannibal-webhook-agent --no-pager || true
                 journalctl --user -u hannibal-webhook-agent --no-pager -n 50 || true
                 exit 1
               fi
-            "
+            '
