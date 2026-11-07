@@ -53,6 +53,8 @@ class HunterEngine:
                         description=str(item.get("description") or ""),
                         suggested_fix=item.get("suggested_fix"),
                         falsification_check=str(item.get("falsification_check") or ""),
+                        window=item.get("window"),
+                        verify_steps=item.get("verify_steps"),
                     )
                 )
             except Exception as parse_err:

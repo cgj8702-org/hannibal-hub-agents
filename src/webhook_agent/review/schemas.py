@@ -222,8 +222,24 @@ class CandidateFinding(BaseModel):
         default="",
         description="Explicit test or check for an adversarial critic to attempt to disprove this finding",
     )
+    window: str | None = Field(
+        default=None,
+        description="Quoted code lines with line numbers as shown in the diff/file for verification",
+    )
+    verify_steps: str | None = Field(
+        default=None,
+        description="Stated procedure for verifying or reproducing this finding",
+    )
 
-    @field_validator("file_path", "title", "description", "falsification_check", mode="before")
+    @field_validator(
+        "file_path",
+        "title",
+        "description",
+        "falsification_check",
+        "window",
+        "verify_steps",
+        mode="before",
+    )
     @classmethod
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)

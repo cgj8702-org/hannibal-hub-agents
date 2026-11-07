@@ -494,3 +494,68 @@ def test_review_tool_with_candidate_findings() -> None:
     res = review(ctx, pr_number=1, report=report)
     assert "Submitted review (REQUEST_CHANGES)" in res
     assert mock_pr.create_review.called
+
+
+def test_critic_evaluate_candidate_drops_expensive_verification() -> None:
+    critic = CriticEngine(min_confidence=8)
+    cand = CandidateFinding(
+        id="c-expensive",
+        file_path="src/service.py",
+        line_number=40,
+        severity="HIGH",
+        confidence_score=9,
+        title="Cross-file deadlock",
+        description="Deadlock risk",
+        falsification_check="Trace callers across codebase in other files to evaluate locking",
+    )
+    assert critic.evaluate_candidate(cand) is False
+
+
+def test_critic_evaluate_candidate_verifies_and_snaps_window() -> None:
+    critic = CriticEngine(min_confidence=8)
+    file_lines = {
+        50: "def execute_task(task_id):",
+        51: "    validate_task_id(task_id)",
+        52: "    return queue.push(task_id)",
+    }
+    cand = CandidateFinding(
+        id="c-window",
+        file_path="src/worker.py",
+        line_number=48,  # Model thought line 48 (+2 drift)
+        severity="HIGH",
+        confidence_score=9,
+        title="Missing task validation",
+        description="Validation check",
+        falsification_check="Verify task_id is checked",
+    )
+    cand.window = """
+    48: def execute_task(task_id):
+    49:     validate_task_id(task_id)
+    """
+
+    assert critic.evaluate_candidate(cand, file_lines=file_lines) is True
+    # The line number was snapped by +2 to line 50!
+    assert cand.line_number == 50
+
+
+def test_critic_evaluate_candidate_drops_fabricated_window() -> None:
+    critic = CriticEngine(min_confidence=8)
+    file_lines = {
+        50: "def execute_task(task_id):",
+        51: "    return queue.push(task_id)",
+    }
+    cand = CandidateFinding(
+        id="c-fab",
+        file_path="src/worker.py",
+        line_number=50,
+        severity="HIGH",
+        confidence_score=9,
+        title="Invented code",
+        description="Hallucinated code lines",
+        falsification_check="Check code",
+    )
+    cand.window = """
+    50: def completely_invented_method_not_in_file():
+    51:     return False
+    """
+    assert critic.evaluate_candidate(cand, file_lines=file_lines) is False
