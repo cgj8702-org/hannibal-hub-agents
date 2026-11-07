@@ -2555,3 +2555,76 @@ def test_execute_agent_event_resolves_head_sha_from_github_when_missing() -> Non
     workspace.assert_called_once()
     assert workspace.call_args[0][2] == live_sha
     runner.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_feeds_back_review_validation_error() -> None:
+    """Verify _execute_adk_runner catches rejected review() call and feeds the error back to the model."""
+    from google.genai import types as genai_types
+
+    calls = 0
+    received_directives: list[str] = []
+
+    class MockRunner:
+        async def run_async(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            new_msg = kwargs.get("new_message")
+            if new_msg and new_msg.parts:
+                received_directives.append(getattr(new_msg.parts[0], "text", "") or "")
+
+            if calls == 1:
+                # Turn 1: Model investigates with read_file, then calls review() which fails validation
+                fn_resp1 = MagicMock()
+                fn_resp1.name = "read_file"
+                fn_resp1.response = "def login(): pass"
+
+                fn_resp2 = MagicMock()
+                fn_resp2.name = "review"
+                fn_resp2.response = (
+                    "Error: Review submission rejected due to schema validation error: "
+                    "scorecard dimension 'Contract Integrity' missing notes"
+                )
+
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp1, fn_resp2],
+                    content=None,
+                )
+            elif calls == 2:
+                # Turn 2: Model receives feedback directive and submits valid review
+                fn_resp_valid = MagicMock()
+                fn_resp_valid.name = "review"
+                fn_resp_valid.response = "Review submitted successfully"
+
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp_valid],
+                    content=MagicMock(
+                        parts=[MagicMock(text="Submitted corrected review.", thought=False)]
+                    ),
+                )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test-feedback",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=True,
+    )
+
+    assert calls == 2
+    assert len(received_directives) == 2
+    # Verify the second turn received the exact error feedback
+    assert "Review Submission Error Feedback:" in received_directives[1]
+    assert "scorecard dimension 'Contract Integrity' missing notes" in received_directives[1]
+    assert any(r.tool == "review" and r.success for r in results)

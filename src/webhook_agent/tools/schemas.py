@@ -171,12 +171,45 @@ class CreateIssueInput(ToolInputBase):
         return data
 
 
+class SearchFilesInput(ToolInputBase):
+    """Input schema for search_files tool."""
+
+    pattern: str = Field(
+        ..., min_length=1, max_length=500, description="Regex pattern to search for."
+    )
+    path: str = Field(
+        default=".", description="Relative path within the environment to search from."
+    )
+    file_glob: str | None = Field(
+        default=None, description="Optional glob pattern to filter filenames (e.g. '*.py')."
+    )
+    limit: int = Field(default=50, ge=1, le=200, description="Maximum number of matches to return.")
+    ignore_case: bool = Field(
+        default=False, description="Whether to perform case-insensitive regex matching."
+    )
+    no_ignore: bool = Field(default=False, description="If True, do not skip ignored directories.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "pattern" not in data:
+                for key in ("query", "regex", "search", "term"):
+                    if data.get(key) is not None:
+                        data["pattern"] = str(data[key])
+                        break
+            if "file_glob" not in data and "glob" in data:
+                data["file_glob"] = data["glob"]
+        return data
+
+
 TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "read_file": ReadFileInput,
     "list_dir": ListDirInput,
     "get_issue": GetIssueInput,
     "review": ReviewInput,
     "create_issue": CreateIssueInput,
+    "search_files": SearchFilesInput,
 }
 
 
@@ -187,5 +220,6 @@ __all__ = [
     "ListDirInput",
     "ReadFileInput",
     "ReviewInput",
+    "SearchFilesInput",
     "ToolInputBase",
 ]

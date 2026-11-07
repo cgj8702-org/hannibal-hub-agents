@@ -11,6 +11,7 @@ from webhook_agent.tools.schemas import (
     ListDirInput,
     ReadFileInput,
     ReviewInput,
+    SearchFilesInput,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.webhook_agent]
@@ -154,12 +155,35 @@ def test_review_input():
         ReviewInput.model_validate({"pr_number": 1, "body": "test", "event": "INVALID"})
 
 
+def test_search_files_input():
+    # Valid default
+    inp1 = SearchFilesInput.model_validate({"pattern": "def test_foo"})
+    assert inp1.pattern == "def test_foo"
+    assert inp1.path == "."
+    assert inp1.limit == 50
+    assert inp1.ignore_case is False
+
+    # Aliases coerced (query -> pattern, glob -> file_glob)
+    inp2 = SearchFilesInput.model_validate(
+        {"query": "import asyncio", "glob": "*.py", "limit": "20", "ignore_case": True}
+    )
+    assert inp2.pattern == "import asyncio"
+    assert inp2.file_glob == "*.py"
+    assert inp2.limit == 20
+    assert inp2.ignore_case is True
+
+    # Empty pattern rejected
+    with pytest.raises(ValidationError):
+        SearchFilesInput.model_validate({"pattern": ""})
+
+
 def test_tool_input_schemas_registry():
     assert "read_file" in TOOL_INPUT_SCHEMAS
     assert "list_dir" in TOOL_INPUT_SCHEMAS
     assert "get_issue" in TOOL_INPUT_SCHEMAS
     assert "review" in TOOL_INPUT_SCHEMAS
     assert "create_issue" in TOOL_INPUT_SCHEMAS
+    assert "search_files" in TOOL_INPUT_SCHEMAS
     assert "get_commit_diff" not in TOOL_INPUT_SCHEMAS
     assert "add_label" not in TOOL_INPUT_SCHEMAS
     assert "update_issue" not in TOOL_INPUT_SCHEMAS
