@@ -1,15 +1,12 @@
-"""Hunter Sub-Agent for high-recall candidate issue discovery.
-
-Lifting patterns from Google's adk-recipes/long-horizon-harness:
-Stage 1 of the Native 'Hunter -> Critic -> Gate' pipeline. Discovers candidate issues
-(broken callers, unhandled edge cases, linked issue gaps) and articulates falsification checks.
-"""
+"""Hunter Engine orchestrating candidate finding extraction, budgeting, and 3+ grouping."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+from webhook_agent.review.hunter.budgeter import ReviewBudgeter
+from webhook_agent.review.hunter.grouping import DefectGrouper
 from webhook_agent.review.schemas import CandidateFinding
 
 logger = logging.getLogger("webhook_agent.review.hunter")
@@ -18,11 +15,18 @@ logger = logging.getLogger("webhook_agent.review.hunter")
 class HunterEngine:
     """Orchestrates candidate finding extraction and normalization for the Hunter stage."""
 
-    def __init__(self, agent_runner: Any = None) -> None:
+    def __init__(
+        self,
+        agent_runner: Any = None,
+        budgeter: ReviewBudgeter | None = None,
+        grouper: DefectGrouper | None = None,
+    ) -> None:
         self.agent_runner = agent_runner
+        self.budgeter = budgeter or ReviewBudgeter()
+        self.grouper = grouper or DefectGrouper()
 
     def parse_candidate_findings(
-        self, raw_findings: list[dict[str, Any]] | list[Any]
+        self, raw_findings: list[dict[str, Any]] | list[Any], apply_grouping: bool = True
     ) -> list[CandidateFinding]:
         """Convert raw LLM finding dictionaries into validated CandidateFinding instances."""
         parsed: list[CandidateFinding] = []
@@ -59,4 +63,8 @@ class HunterEngine:
                 )
             except Exception as parse_err:
                 logger.debug("Could not parse CandidateFinding item %s: %s", item, parse_err)
+
+        if apply_grouping and len(parsed) >= 3:
+            parsed = self.grouper.group_candidates(parsed)
+
         return parsed
