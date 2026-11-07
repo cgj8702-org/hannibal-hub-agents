@@ -212,8 +212,13 @@ class CriticEngine:
         )
         return survivors
 
-    def filter_issues(self, issues: list[IssueItem]) -> list[IssueItem]:
+    def filter_issues(
+        self,
+        issues: list[IssueItem],
+        min_confidence: int | None = None,
+    ) -> list[IssueItem]:
         """Filter out low-confidence findings (< min_confidence) and NITs from IssueItems."""
+        threshold = min_confidence if min_confidence is not None else self.min_confidence
         survivors: list[IssueItem] = []
         for issue in issues:
             # 1. Severity or Category check
@@ -245,18 +250,18 @@ class CriticEngine:
             if raw_conf is not None:
                 try:
                     conf = int(raw_conf)
-                    if conf < self.min_confidence:
+                    if conf < threshold:
                         logger.info(
                             "🛡️ Critic dropped IssueItem at %s:%s: confidence %d < threshold %d",
                             issue.path,
                             issue.line,
                             conf,
-                            self.min_confidence,
+                            threshold,
                             extra={
                                 "json_fields": {
                                     "event": "finding_falsified",
                                     "category": "critic_drop",
-                                    "reason": f"confidence {conf} < threshold {self.min_confidence}",
+                                    "reason": f"confidence {conf} < threshold {threshold}",
                                     "path": issue.path,
                                     "line": issue.line,
                                     "confidence": conf,
@@ -296,3 +301,63 @@ class CriticEngine:
                 len(issues) - len(survivors),
             )
         return survivors
+
+    def partition_and_filter_issues(
+        self,
+        critical_issues: list[IssueItem],
+        minor_suggestions: list[IssueItem],
+    ) -> tuple[list[IssueItem], list[IssueItem]]:
+        """Filter critical issues and minor suggestions with smart demotion.
+
+        - Issues in critical_issues with confidence >= min_confidence (and not NIT) survive as critical.
+        - Issues in critical_issues with moderate confidence (5 <= confidence < min_confidence)
+          are demoted to minor_suggestions rather than dropped into the void.
+        - Issues in minor_suggestions survive if confidence >= 5 (or untagged) and not pure cosmetic nits.
+        - Style NITs and very low confidence (< 5) items are dropped.
+        """
+        surviving_critical: list[IssueItem] = []
+        candidate_minor: list[IssueItem] = list(minor_suggestions)
+
+        for issue in critical_issues:
+            sev = str(getattr(issue, "severity", "") or "").strip().upper()
+            cat = str(getattr(issue, "category", "") or "").strip().upper()
+            desc = issue.description.strip()
+            is_nit = (
+                sev == "NIT"
+                or cat == "NIT"
+                or bool(
+                    re.match(r"^(?:\[nit\]|\(nit\)|nit[:\s\-]|\bstyle nit\b)", desc, re.IGNORECASE)
+                )
+            )
+
+            raw_conf = getattr(issue, "confidence_score", None)
+            if raw_conf is None:
+                raw_conf = getattr(issue, "confidence", None)
+            conf: int | None = None
+            if raw_conf is not None:
+                try:
+                    conf = int(raw_conf)
+                except (ValueError, TypeError):
+                    conf = None
+
+            if is_nit:
+                continue
+
+            if conf is not None and conf < 5:
+                continue
+
+            if conf is not None and conf < self.min_confidence:
+                logger.info(
+                    "🛡️ Critic demoted IssueItem at %s:%s to minor_suggestions: confidence %d < threshold %d",
+                    issue.path,
+                    issue.line,
+                    conf,
+                    self.min_confidence,
+                )
+                candidate_minor.append(issue)
+                continue
+
+            surviving_critical.append(issue)
+
+        surviving_minor = self.filter_issues(candidate_minor, min_confidence=5)
+        return surviving_critical, surviving_minor

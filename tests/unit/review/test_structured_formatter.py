@@ -15,6 +15,7 @@ from webhook_agent.review.schemas import (
     CodeReviewResponse,
     IssueItem,
     RiskItem,
+    ScorecardItem,
     SyncResolutionItem,
     SyncReviewResponse,
     is_unmitigated_breaking_risk,
@@ -1487,3 +1488,61 @@ def test_submit_formal_review_fast_fails_without_creating_review() -> None:
     assert submitted is False
     assert "Failed: Unparseable review payload" in result
     pr.create_review.assert_not_called()
+
+
+def test_calculate_strict_verdict_demotes_to_comment_on_scorecard_warning() -> None:
+    """Anti-rubberstamp gate: Review must default to COMMENT when scorecard has WARN/UNKNOWN/ERROR."""
+    for bad_status in ("WARN", "UNKNOWN", "ERROR"):
+        review = CodeReviewResponse(
+            executive_summary="Reviewer report.",
+            confidence=5,
+            critical_issues=[],
+            minor_suggestions=[],
+            scorecard=[
+                ScorecardItem(
+                    dimension="Concurrency & State",
+                    status=bad_status,
+                    notes=f"Test note for {bad_status}",
+                ),
+                ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+            ],
+        )
+        assert calculate_strict_verdict(review) == "COMMENT"
+
+
+def test_calculate_strict_verdict_demotes_to_comment_on_unverified_claims() -> None:
+    """Anti-rubberstamp gate: Review must default to COMMENT when unverified claims exist."""
+    review = CodeReviewResponse(
+        executive_summary="Reviewer report.",
+        confidence=5,
+        critical_issues=[],
+        minor_suggestions=[],
+        unverified_claims=["src/logic.py:42: Unverified performance invariant claim"],
+    )
+    assert calculate_strict_verdict(review) == "COMMENT"
+
+
+def test_calculate_sync_verdict_demotes_to_comment_on_scorecard_warning() -> None:
+    """Anti-rubberstamp gate: Sync review must default to COMMENT when scorecard has warning."""
+    sync_resp = SyncReviewResponse(
+        summary="Sync re-review report.",
+        resolutions=[],
+        scorecard=[
+            ScorecardItem(
+                dimension="Test Coverage & Regressions",
+                status="WARN",
+                notes="Missing regression test for new boundary",
+            ),
+        ],
+    )
+    assert calculate_sync_verdict(sync_resp) == "COMMENT"
+
+
+def test_calculate_sync_verdict_demotes_to_comment_on_unverified_claims() -> None:
+    """Anti-rubberstamp gate: Sync review must default to COMMENT when unverified claims exist."""
+    sync_resp = SyncReviewResponse(
+        summary="Sync re-review report.",
+        resolutions=[],
+        unverified_claims=["src/worker.py:100: Demoted unverified invariant"],
+    )
+    assert calculate_sync_verdict(sync_resp) == "COMMENT"
