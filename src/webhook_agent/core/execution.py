@@ -209,6 +209,9 @@ async def _execute_adk_runner(
         if is_code_audit:
             has_investigated = any(r.tool in investigative_tools for r in results)
             has_submitted_review = any(r.tool == "review" and r.success for r in results)
+            last_review_failed = bool(
+                results and results[-1].tool == "review" and not results[-1].success
+            )
             if has_submitted_review:
                 logger.info(
                     "🏁 [Investigation Gate] Review already submitted successfully (trace: %s); skipping exploration loop.",
@@ -218,32 +221,62 @@ async def _execute_adk_runner(
             else:
                 turn = 1
             while (
-                not has_investigated and not has_submitted_review and turn < max_investigation_turns
+                (not has_investigated or last_review_failed)
+                and not has_submitted_review
+                and turn < max_investigation_turns
             ):
                 turn += 1
-                logger.info(
-                    "🔍 [Investigation Gate] Model attempted review on code changes without "
-                    "using investigative tools (trace: %s). Enforcing multi-turn exploration turn %d/%d...",
-                    trace_id[-4:],
-                    turn,
-                    max_investigation_turns,
-                )
                 emitted_texts.clear()
-                followup_directive = genai_types.Content(
-                    role="user",
-                    parts=[
-                        genai_types.Part.from_text(
-                            text=(
-                                "Mandatory Investigation Gate: You cannot finalize a code review in a single turn without "
-                                "active repository exploration. Use `search_files`, `list_dir`, or `read_file` to inspect callers, "
-                                "directory layout, contract boundaries, and related test suites across the repository before providing your final review."
+                if last_review_failed:
+                    failed_reviews = [r for r in results if r.tool == "review" and not r.success]
+                    last_failed = failed_reviews[-1]
+                    err_detail = last_failed.detail or str(last_failed.action_result)
+                    logger.info(
+                        "🔁 [Self-Healing Review Gate] Feeding review validation error back to model (trace: %s, turn %d/%d): %s",
+                        trace_id[-4:],
+                        turn,
+                        max_investigation_turns,
+                        err_detail,
+                    )
+                    followup_directive = genai_types.Content(
+                        role="user",
+                        parts=[
+                            genai_types.Part.from_text(
+                                text=(
+                                    f"Review Submission Error Feedback:\n"
+                                    f"{err_detail}\n\n"
+                                    "Your previous review() tool call failed validation. You must fix these schema/grounding "
+                                    "errors and call `review()` again with the corrected payload."
+                                )
                             )
-                        )
-                    ],
-                )
+                        ],
+                    )
+                else:
+                    logger.info(
+                        "🔍 [Investigation Gate] Model attempted review on code changes without "
+                        "using investigative tools (trace: %s). Enforcing multi-turn exploration turn %d/%d...",
+                        trace_id[-4:],
+                        turn,
+                        max_investigation_turns,
+                    )
+                    followup_directive = genai_types.Content(
+                        role="user",
+                        parts=[
+                            genai_types.Part.from_text(
+                                text=(
+                                    "Mandatory Investigation Gate: You cannot finalize a code review in a single turn without "
+                                    "active repository exploration. Use `search_files`, `list_dir`, or `read_file` to inspect callers, "
+                                    "directory layout, contract boundaries, and related test suites across the repository before providing your final review."
+                                )
+                            )
+                        ],
+                    )
                 await _run_single_turn(followup_directive)
                 has_investigated = any(r.tool in investigative_tools for r in results)
                 has_submitted_review = any(r.tool == "review" and r.success for r in results)
+                last_review_failed = bool(
+                    results and results[-1].tool == "review" and not results[-1].success
+                )
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
             logger.warning(

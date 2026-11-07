@@ -51,6 +51,13 @@ from .metadata import (
     parse_legacy_review_findings,
     serialize_review_metadata,
 )
+from .normalizer import (
+    clean_field_string,
+    is_implausible_body,
+    is_not_cheap_finding,
+    normalize_code_review_payload,
+    normalize_sync_review_payload,
+)
 from .review_enforcer import (
     _enforce_verdict,
     _submit_formal_review,
@@ -104,6 +111,7 @@ __all__ = [
     "build_reconciliation_cache_key",
     "calculate_strict_verdict",
     "calculate_sync_verdict",
+    "clean_field_string",
     "clear_reconciliation_cache",
     "evaluate_dependency_fast_path",
     "evaluate_writeback_policy",
@@ -121,11 +129,15 @@ __all__ = [
     "is_contract_dimension",
     "is_echo_description",
     "is_echo_suggestion",
+    "is_implausible_body",
+    "is_not_cheap_finding",
     "is_reconciliation_claimed",
     "is_repo_with_native_stale_review_dismissal",
     "is_unmitigated_breaking_risk",
     "normalize_code_review_dict",
+    "normalize_code_review_payload",
     "normalize_sync_review_dict",
+    "normalize_sync_review_payload",
     "parse_legacy_review_findings",
     "parse_text_review_to_dict",
     "release_reconciliation_claim",
