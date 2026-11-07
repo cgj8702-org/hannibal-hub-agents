@@ -797,6 +797,55 @@ def review(
                     "You must provide concrete critical_issues with path, line, and replacement code, or set event to APPROVE."
                 )
 
+        # Strict Invariant Dominance Gate: Machine-proven invariants must dominate on code PRs
+        if modifies_python and not skip_gate:
+            if hasattr(review_obj, "semantic_invariants") and review_obj.semantic_invariants:
+                from webhook_agent.review.grounding import promote_semantic_to_verified
+
+                promoted, remaining = promote_semantic_to_verified(
+                    review_obj.semantic_invariants,
+                    diff_text_val,
+                    changed_paths=list(grounding_patches),
+                )
+                if promoted:
+                    for p_inv in promoted:
+                        if p_inv not in review_obj.verified_invariants:
+                            review_obj.verified_invariants.append(p_inv)
+                    review_obj.semantic_invariants = remaining
+
+            if not review_obj.verified_invariants and review_obj.scorecard and diff_text_val:
+                from webhook_agent.review.grounding import extract_scorecard_invariants
+
+                recovered = extract_scorecard_invariants(
+                    review_obj.scorecard,
+                    diff_text_val,
+                    changed_paths=list(grounding_patches),
+                )
+                if recovered:
+                    for rec in recovered:
+                        if rec not in review_obj.verified_invariants:
+                            review_obj.verified_invariants.append(rec)
+
+            num_verified = len(getattr(review_obj, "verified_invariants", []) or [])
+            num_semantic = len(getattr(review_obj, "semantic_invariants", []) or [])
+
+            if num_semantic > num_verified:
+                invalid_findings.append(
+                    f"semantic_invariants (count {num_semantic}) outnumbers machine-proven verified_invariants "
+                    f"(count {num_verified}). Machine-proven invariants must dominate on code PRs. "
+                    "Anchor your invariant claims to exact diff lines (path:line) with concrete code proof."
+                )
+            if num_semantic > 2:
+                invalid_findings.append(
+                    f"semantic_invariants count ({num_semantic}) exceeds maximum allowed cap of 2. "
+                    "Focus on machine-proven invariants anchored to diff hunks."
+                )
+
+            if parsed_data is not None:
+                parsed_data["verified_invariants"] = list(review_obj.verified_invariants)
+                parsed_data["semantic_invariants"] = list(review_obj.semantic_invariants)
+                body = json.dumps(parsed_data)
+
         has_usable_patches = any(patch for patch in grounding_patches.values())
         if not has_usable_patches:
             logger.warning(

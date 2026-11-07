@@ -38,10 +38,12 @@ from webhook_agent.review.grounding.heuristics import (
 )
 from webhook_agent.review.grounding.invariants import (
     BEHAVIORAL_KEYWORDS,
+    enforce_invariant_dominance,
     extract_scorecard_invariants,
     filter_and_ground_semantic_invariants,
     is_machine_verified_invariant,
     partition_invariants,
+    promote_semantic_to_verified,
     verify_semantic_invariant,
 )
 from webhook_agent.review.grounding.resolutions import (
@@ -64,6 +66,7 @@ __all__ = [
     "citation_overlap",
     "detect_prior_decision_contradiction",
     "diff_text_from_patches",
+    "enforce_invariant_dominance",
     "extract_bare_symbols",
     "extract_cited_paths",
     "extract_cited_symbols",
@@ -76,6 +79,7 @@ __all__ = [
     "ngram_containment",
     "parse_removal_hunks",
     "partition_invariants",
+    "promote_semantic_to_verified",
     "strict_grounding_enabled",
     "touched_lines_by_file",
     "verify_citations",

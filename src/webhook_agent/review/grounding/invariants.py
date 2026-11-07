@@ -27,7 +27,11 @@ from webhook_agent.review.grounding.citations import (
     _norm_evidence,
     bare_path,
 )
-from webhook_agent.review.grounding.heuristics import extract_cited_paths, extract_cited_symbols
+from webhook_agent.review.grounding.heuristics import (
+    extract_bare_symbols,
+    extract_cited_paths,
+    extract_cited_symbols,
+)
 from webhook_agent.tools.diff_tools import walk_right_side
 
 logger = logging.getLogger("webhook_agent.review.grounding")
@@ -103,6 +107,123 @@ _UNCERTAINTY_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+_INVARIANT_OPERATIVE_VERBS: frozenset[str] = frozenset(
+    {
+        "ensures",
+        "ensure",
+        "ensuring",
+        "maintains",
+        "maintain",
+        "maintaining",
+        "prevents",
+        "prevent",
+        "preventing",
+        "guarantees",
+        "guarantee",
+        "guaranteeing",
+        "enforces",
+        "enforce",
+        "enforcing",
+        "requires",
+        "require",
+        "requiring",
+        "handles",
+        "handle",
+        "handling",
+        "validates",
+        "validate",
+        "validating",
+        "rejects",
+        "reject",
+        "rejecting",
+        "drops",
+        "drop",
+        "dropping",
+        "allows",
+        "allow",
+        "allowing",
+        "disallows",
+        "disallow",
+        "disallowing",
+        "restricts",
+        "restrict",
+        "restricting",
+        "coordinates",
+        "coordinate",
+        "coordinating",
+        "triggers",
+        "trigger",
+        "triggering",
+        "preserves",
+        "preserve",
+        "preserving",
+        "preserved",
+        "isolates",
+        "isolate",
+        "isolating",
+        "executes",
+        "execute",
+        "executing",
+        "delegates",
+        "delegate",
+        "delegating",
+        "retains",
+        "retain",
+        "retaining",
+        "maps",
+        "map",
+        "mapping",
+        "survives",
+        "survive",
+        "surviving",
+        "terminates",
+        "terminate",
+        "terminating",
+        "synchronizes",
+        "synchronize",
+        "synchronizing",
+        "protects",
+        "protect",
+        "protecting",
+        "provides",
+        "provide",
+        "providing",
+        "guards",
+        "guard",
+        "guarding",
+        "bounds",
+        "bound",
+        "bounding",
+        "limits",
+        "limit",
+        "limiting",
+        "ignores",
+        "ignore",
+        "ignoring",
+        "skips",
+        "skip",
+        "skipping",
+        "filters",
+        "filter",
+        "filtering",
+        "tracks",
+        "track",
+        "tracking",
+        "blocks",
+        "block",
+        "blocking",
+        "avoids",
+        "avoid",
+        "avoiding",
+        "mitigates",
+        "mitigate",
+        "mitigating",
+        "asserts",
+        "assert",
+        "asserting",
+    }
+)
+
 
 def is_machine_verified_invariant(
     invariant: str,
@@ -115,8 +236,10 @@ def is_machine_verified_invariant(
     1. It points to a cited file and line in the diff (via path:line citation), where:
        - The cited file is among the changed paths / diff files.
        - Any non-path code quotes appear in the diff.
-       - If asserting behavioral logic, it contains a concrete code quote from the diff or
-         cites a test function (test_\\w+).
+       - If asserting behavioral logic, it contains a concrete code quote from the diff,
+         cites a test function (test_\\w+), or matches code tokens on an anchored/snapped diff line.
+       - The cited line number matches or falls within hunk snapping tolerance (<= 10 lines)
+         of a right-side diff hunk in that file.
     2. OR it contains a concrete code quote (>= 16 chars) or test symbol directly found in the diff.
     Otherwise, it is classified as Semantic [Model-Asserted].
     """
@@ -142,12 +265,24 @@ def is_machine_verified_invariant(
         anchors, line_text = walk_right_side(diff_text)
         if path not in line_text and path not in anchors:
             return False
+
+        known_lines = line_text.get(path, {})
         if line_num is not None:
-            known_lines = line_text.get(path, {})
-            if known_lines and line_num not in known_lines:
+            if known_lines:
+                if line_num not in known_lines:
+                    closest_dist = min(abs(line_num - kl) for kl in known_lines)
+                    if closest_dist > 10:
+                        return False
+            else:
                 return False
 
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(raw_inv) if q.strip()]
+        single_quotes = [
+            q.strip()
+            for q in re.findall(r"'([A-Za-z0-9_]{2,})'", raw_inv)
+            if q.strip() and q.lower() not in _COMMON_BUILTINS
+        ]
+        raw_quotes.extend(single_quotes)
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
         for q in code_quotes:
             if len(_norm_evidence(q)) > 24 and _norm_evidence(q) not in norm_diff:
@@ -159,13 +294,40 @@ def is_machine_verified_invariant(
             _norm_evidence(q) in norm_diff for q in code_quotes
         )
         has_test = re.search(r"\btest_\w+", ev) is not None
-        has_concrete_quote_or_test = has_diff_quote or has_test
+
+        # Check if invariant references identifiers present on the anchor lines
+        has_anchor_token_match = False
+        if known_lines:
+            target_lines = (
+                [line_num]
+                if (line_num is not None and line_num in known_lines)
+                else (
+                    [kl for kl in known_lines if abs(line_num - kl) <= 10]
+                    if line_num is not None
+                    else list(known_lines.keys())
+                )
+            )
+            anchor_tokens = {
+                t.lower()
+                for kl in target_lines
+                for t in _IDENTIFIER_RE.findall(known_lines.get(kl, ""))
+            }
+            inv_tokens = {t.lower() for t in _IDENTIFIER_RE.findall(raw_inv)} - _COMMON_BUILTINS
+            has_anchor_token_match = bool(anchor_tokens & inv_tokens)
+
+        has_concrete_quote_or_test = has_diff_quote or has_test or has_anchor_token_match
         is_static_fact = re.search(r"^[A-Z0-9_]+\s*=\s*", raw_inv) is not None
 
         return not (is_behavioral and not is_static_fact and not has_concrete_quote_or_test)
 
     # No path:line citation: check if it directly quotes diff code or cites a test function in the diff
     raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(raw_inv) if q.strip()]
+    single_quotes = [
+        q.strip()
+        for q in re.findall(r"'([A-Za-z0-9_]{2,})'", raw_inv)
+        if q.strip() and q.lower() not in _COMMON_BUILTINS
+    ]
+    raw_quotes.extend(single_quotes)
     code_quotes = [q for q in raw_quotes if not _is_path_citation(q)]
     has_matching_quote = any(
         len(_norm_evidence(q)) >= 16 and _norm_evidence(q) in norm_diff for q in code_quotes
@@ -174,6 +336,38 @@ def is_machine_verified_invariant(
         t in norm_diff for t in re.findall(r"\btest_\w+", raw_inv.lower())
     )
     return has_matching_quote or has_test
+
+
+def promote_semantic_to_verified(
+    semantic_invariants: Sequence[str],
+    diff_text: str,
+    changed_paths: Collection[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Examine semantic invariants and promote any that possess mechanical proof.
+
+    When the model places an invariant into semantic_invariants that actually satisfies
+    mechanical verification requirements (e.g. valid path:line citation with diff proof,
+    or verifiable code quote/test citation), this function promotes it to verified_invariants.
+
+    Returns:
+        (promoted_verified, remaining_semantic)
+    """
+    if not semantic_invariants or not diff_text:
+        return [], list(semantic_invariants)
+
+    promoted: list[str] = []
+    remaining: list[str] = []
+
+    for inv in semantic_invariants:
+        clean = (inv or "").strip()
+        if not clean:
+            continue
+        if is_machine_verified_invariant(clean, diff_text, changed_paths):
+            promoted.append(clean)
+        else:
+            remaining.append(clean)
+
+    return promoted, remaining
 
 
 def partition_invariants(
@@ -193,6 +387,45 @@ def partition_invariants(
         else:
             semantic.append(clean)
     return verified, semantic
+
+
+def enforce_invariant_dominance(
+    verified_invariants: Sequence[str],
+    semantic_invariants: Sequence[str],
+    max_semantic: int = 2,
+    is_code_pr: bool = True,
+) -> tuple[list[str], list[str], list[str]]:
+    """Enforce machine-proven invariant dominance and hard-cap semantic claims.
+
+    Rules:
+    1. semantic_invariants is capped at max_semantic (default 2).
+    2. On code PRs (is_code_pr=True), verified_invariants must dominate:
+       allowed_semantic = min(max_semantic, len(verified_invariants)).
+       On non-code PRs, allowed_semantic = max_semantic.
+    Any excess semantic invariants are demoted to unverified_claims.
+
+    Returns:
+        (retained_verified, retained_semantic, demoted_excess)
+    """
+    retained_verified = [inv.strip() for inv in verified_invariants if (inv or "").strip()]
+    retained_semantic: list[str] = []
+    demoted_excess: list[str] = []
+
+    if is_code_pr:
+        allowed_semantic = min(max_semantic, len(retained_verified))
+    else:
+        allowed_semantic = max_semantic
+
+    for idx, inv in enumerate(semantic_invariants):
+        clean = (inv or "").strip()
+        if not clean:
+            continue
+        if idx < allowed_semantic:
+            retained_semantic.append(clean)
+        else:
+            demoted_excess.append(clean)
+
+    return retained_verified, retained_semantic, demoted_excess
 
 
 def _resolve_repo_root(repo_root: Path | str | None = None) -> Path | None:
@@ -435,8 +668,8 @@ def verify_semantic_invariant(
                 f"Claimed test '{tc}' does not exist in diff or repository test suite",
             )
 
-    # 3. Fact-check cited symbols in backticks
-    cited_symbols = extract_cited_symbols(raw_inv)
+    # 3. Fact-check cited symbols in backticks or code identifiers
+    cited_symbols = extract_cited_symbols(raw_inv) | extract_bare_symbols(raw_inv)
     domain_symbols = [s for s in cited_symbols if s not in _COMMON_BUILTINS]
     if domain_symbols:
         diff_tokens = {t.lower() for t in _IDENTIFIER_RE.findall(diff_text or "")}
@@ -465,6 +698,14 @@ def verify_semantic_invariant(
         return (
             "UNVERIFIED",
             "Expresses residual uncertainty or unverified claim; demoting to unverified_claims",
+        )
+
+    # 5. Require at least one operative invariant verb asserting an architectural property
+    inv_words = {w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", raw_inv)}
+    if not (inv_words & _INVARIANT_OPERATIVE_VERBS):
+        return (
+            "UNVERIFIED",
+            "Lacks an operative invariant verb or architectural guarantee; demoting to unverified_claims",
         )
 
     return "GROUNDED", "Grounded in valid repository entities and behavioral reasoning"

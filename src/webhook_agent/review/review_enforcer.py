@@ -378,9 +378,25 @@ def _finalize_enforced_review(
         enforced_verdict = calculate_strict_verdict(review_obj)
 
     if diff_for_grounding:
-        from webhook_agent.review.grounding import partition_invariants
+        is_code_pr = _diff_touches_python(diff_for_grounding)
+
+        if review_obj.semantic_invariants:
+            from webhook_agent.review.grounding import promote_semantic_to_verified
+
+            promoted_v, remaining_s = promote_semantic_to_verified(
+                review_obj.semantic_invariants,
+                diff_for_grounding,
+                changed_paths=changed_paths,
+            )
+            if promoted_v:
+                for pv in promoted_v:
+                    if pv not in review_obj.verified_invariants:
+                        review_obj.verified_invariants.append(pv)
+                review_obj.semantic_invariants = remaining_s
 
         if review_obj.verified_invariants:
+            from webhook_agent.review.grounding import partition_invariants
+
             v_invs, s_invs = partition_invariants(
                 review_obj.verified_invariants,
                 diff_for_grounding,
@@ -417,6 +433,20 @@ def _finalize_enforced_review(
             for dc in demoted_claims:
                 if dc not in review_obj.unverified_claims:
                     review_obj.unverified_claims.append(dc)
+
+        from webhook_agent.review.grounding import enforce_invariant_dominance
+
+        v_dom, s_dom, demoted_dom = enforce_invariant_dominance(
+            review_obj.verified_invariants,
+            review_obj.semantic_invariants,
+            max_semantic=2,
+            is_code_pr=is_code_pr,
+        )
+        review_obj.verified_invariants = v_dom
+        review_obj.semantic_invariants = s_dom
+        for dd in demoted_dom:
+            if dd not in review_obj.unverified_claims:
+                review_obj.unverified_claims.append(dd)
 
         grounding_issues, has_hard = _apply_citation_grounding(
             review_obj,
