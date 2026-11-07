@@ -570,9 +570,17 @@ class TestToolRegistration:
             "dry_run": True,
         }
 
+        scorecard = (
+            '[{"dimension": "Logic & Boundaries", "status": "PASS", "notes": "ok"}, '
+            '{"dimension": "Concurrency & State", "status": "PASS", "notes": "ok"}, '
+            '{"dimension": "Security & Secrets", "status": "PASS", "notes": "ok"}, '
+            '{"dimension": "Contract Integrity", "status": "PASS", "notes": "ok"}, '
+            '{"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "ok"}]'
+        )
         body = (
             '{"executive_summary": "All good", "critical_issues": [], '
             '"minor_suggestions": [], "risks_and_edge_cases": [], '
+            f'"scorecard": {scorecard}, '
             '"verified_invariants": [{"invariant": "Precompiled AST integrity holds", '
             '"path": "src/webhook_agent/core/test_module.py", "line": 10, "evidence": "AST verified"}], '
             '"context_gaps": []}'

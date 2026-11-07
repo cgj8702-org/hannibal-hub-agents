@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from github import Github
@@ -463,6 +464,45 @@ def _collect_pr_patches(pr: Any) -> dict[str, str | None]:
 # Backward-compatibility alias for internal callers
 _grounding_findings = extract_grounding_findings
 
+REQUIRED_AUDIT_DIMENSIONS: tuple[str, ...] = (
+    "Logic & Boundaries",
+    "Concurrency & State",
+    "Security & Secrets",
+    "Contract Integrity",
+    "Test Coverage & Regressions",
+)
+
+
+def _matches_audit_dimension(dim: str, target: str) -> bool:
+    d = dim.strip().lower()
+    t = target.strip().lower()
+    if d == t:
+        return True
+    if "logic" in t and ("logic" in d or "boundar" in d):
+        return True
+    if "concurr" in t and ("concurr" in d or "state" in d or "race" in d):
+        return True
+    if "contract" in t and "contract" in d:
+        return True
+    if ("security" in t or "secret" in t) and ("security" in d or "secret" in d):
+        return True
+    return bool(("test" in t or "coverage" in t) and ("test" in d or "coverage" in d))
+
+
+def get_missing_scorecard_dimensions(scorecard: Sequence[Any]) -> list[str]:
+    """Return any of the 5 canonical audit dimensions omitted from the scorecard."""
+    missing: list[str] = []
+    dims = [
+        getattr(item, "dimension", None)
+        or (item.get("dimension") if isinstance(item, dict) else "")
+        or ""
+        for item in scorecard or []
+    ]
+    for required in REQUIRED_AUDIT_DIMENSIONS:
+        if not any(_matches_audit_dimension(d, required) for d in dims):
+            missing.append(required)
+    return missing
+
 
 def review(
     ctx: Context,
@@ -523,6 +563,7 @@ def review(
 
         patches: dict[str, str | None] = {}
         retrieval_ok: bool | None = None
+        modifies_python: bool = False
         # Collect changed files and patches for grounding, and log warning if Python files changed without pre-audit
         skip_gate = state_dict.get("skip_investigation_gate", False)
         if not skip_gate:
@@ -621,6 +662,17 @@ def review(
             "address unintended modification",
         )
         invalid_findings: list[str] = []
+
+        # Strict Scorecard Gate: Enforce that code reviews evaluate all 5 audit dimensions
+        if modifies_python and not skip_gate:
+            missing_dims = get_missing_scorecard_dimensions(review_obj.scorecard)
+            if missing_dims:
+                invalid_findings.append(
+                    f"scorecard is missing required audit dimension(s): {missing_dims}. "
+                    "The review MUST evaluate all 5 audit dimensions ('Logic & Boundaries', "
+                    "'Concurrency & State', 'Security & Secrets', 'Contract Integrity', "
+                    "'Test Coverage & Regressions')."
+                )
 
         # Validate critical issues (strict blockers requiring exact path, line, and replacement code)
         for issue in critical_list:

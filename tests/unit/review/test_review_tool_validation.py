@@ -36,6 +36,14 @@ def mock_ctx():
 
 _ALPHA_PATCH = "@@ -10,2 +10,3 @@\n existing_line\n+added_line\n"
 
+_FULL_SAMPLE_SCORECARD = [
+    {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Logic verified."},
+    {"dimension": "Concurrency & State", "status": "PASS", "notes": "Concurrency verified."},
+    {"dimension": "Security & Secrets", "status": "PASS", "notes": "Security verified."},
+    {"dimension": "Contract Integrity", "status": "PASS", "notes": "Contract verified."},
+    {"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "Tests verified."},
+]
+
 
 def _grounding_ctx(patches, *, files_error=None):
     """Build a Context whose PR exposes the given {path: patch} mapping."""
@@ -77,6 +85,7 @@ def test_review_rejects_generic_codebase_path(mock_ctx):
         "executive_summary": "Test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [
             {
                 "path": "codebase",
@@ -98,6 +107,7 @@ def test_review_rejects_missing_line_number(mock_ctx):
         "executive_summary": "Test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [
             {
                 "path": "src/main.py",
@@ -119,6 +129,7 @@ def test_review_rejects_missing_suggested_fix(mock_ctx):
         "executive_summary": "Test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [
             {
                 "path": "src/main.py",
@@ -140,6 +151,7 @@ def test_review_rejects_boilerplate_suggested_fix(mock_ctx):
         "executive_summary": "Test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [
             {
                 "path": "src/main.py",
@@ -161,6 +173,7 @@ def test_review_rejects_request_changes_without_critical_issues(mock_ctx):
         "executive_summary": "Test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -204,6 +217,7 @@ def test_review_accepts_valid_payload(mock_submit, mock_ctx):
         "executive_summary": "Valid initial review",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [
             {
                 "path": "src/model_chain.py",
@@ -228,6 +242,8 @@ def test_review_infers_event_from_scorecard(mock_submit, mock_ctx):
     payload = {
         "executive_summary": "All checks passed cleanly.",
         "scorecard": [
+            {"name": "Logic & Boundaries", "status": "PASS"},
+            {"name": "Concurrency & State", "status": "PASS"},
             {"name": "Contract Integrity", "status": "PASS"},
             {"name": "Security & Secrets", "status": "PASS"},
             {"name": "Test Coverage & Regressions", "status": "PASS"},
@@ -250,6 +266,7 @@ def test_review_allows_python_pr_without_pre_audit_and_logs_warning(mock_submit,
         "executive_summary": "Test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -273,6 +290,7 @@ def test_review_allows_python_pr_with_ast_verification(mock_submit, mock_ctx):
         "executive_summary": "Valid review after ast check",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -291,6 +309,7 @@ def test_review_skips_investigation_gate_when_no_python_files(mock_submit, mock_
         "executive_summary": "Docs review",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -308,6 +327,7 @@ def test_review_allows_approve_without_verified_invariants(mock_submit, mock_ctx
         "executive_summary": "PR looks great, approving.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "verified_invariants": [],
@@ -331,6 +351,7 @@ def test_review_ignores_legacy_invariants_on_approve(mock_submit, mock_ctx):
         "executive_summary": "PR looks great, approving.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "verified_invariants": [
@@ -361,6 +382,7 @@ def test_review_accepts_approve_with_valid_verified_invariants(mock_submit, mock
         "executive_summary": "PR verified and approved.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "verified_invariants": [
@@ -413,6 +435,7 @@ def test_review_handles_adk_state_object_properly(mock_submit, mock_ctx):
         "executive_summary": "PR verified and approved.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "verified_invariants": [
@@ -439,6 +462,7 @@ def test_review_accepts_advisory_minor_suggestion_with_empty_suggested_fix(mock_
         "executive_summary": "Docs review with advisory feedback.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [
             {
@@ -464,6 +488,7 @@ def test_review_accepts_minor_suggestion_with_file_level_path_no_line(mock_submi
         "executive_summary": "Docs review with file-level feedback.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [
             {
@@ -489,6 +514,7 @@ def test_review_accepts_minor_suggestion_with_empty_path(mock_submit, mock_ctx):
         "executive_summary": "Review with unanchored general suggestion.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [
             {
@@ -520,6 +546,7 @@ def test_review_normalizes_minor_suggestion_placeholder_path_and_non_positive_li
         "executive_summary": "Review with placeholder path.",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [
             {
@@ -551,6 +578,7 @@ def _critical_payload(path, line):
         "executive_summary": "Grounding test summary",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [
             {
                 "path": path,
@@ -676,6 +704,7 @@ def test_strict_mode_skipped_grounding_downgrades_approve_to_comment(
         "executive_summary": "Attempting approval on binary-only PR",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -702,6 +731,7 @@ def test_non_strict_mode_skipped_grounding_downgrades_approve_to_comment(
         "executive_summary": "Attempting approval on binary-only PR in non-strict mode",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -726,6 +756,7 @@ def test_approve_with_usable_patches_is_unchanged(mock_submit, monkeypatch):
         "executive_summary": "Clean PR with valid patches",
         "confidence": 8,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -762,6 +793,7 @@ def test_approve_with_raw_diff_fallback_preserves_approve(mock_submit, monkeypat
         "executive_summary": "Routine lockfile bump recovered via raw diff",
         "confidence": 9,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -785,6 +817,7 @@ def test_retrieval_failure_downgrades_approve_to_comment(mock_submit, monkeypatc
         "executive_summary": "Attempting approval when files API fails",
         "confidence": 5,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
         "context_gaps": [],
@@ -810,6 +843,7 @@ def test_grounding_rejects_unciteable_finding_when_strict(mock_submit, monkeypat
         "executive_summary": "Grounding test summary",
         "confidence": 8,
         "risks_and_edge_cases": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [
             {
@@ -845,6 +879,7 @@ def test_sync_review_request_changes_evaluates_after_grounding_allows_ungrounded
                 "path": "src/alpha.py",
             }
         ],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
         "critical_issues": [],
         "minor_suggestions": [],
     }
@@ -953,7 +988,7 @@ def test_submit_initial_review_typed_pydantic_model(mock_submit):
 @patch("webhook_agent.tools.github_tools._submit_formal_review")
 def test_submit_sync_review_typed_pydantic_model(mock_submit):
     """Verify submit_sync_review accepts a typed SyncReviewResponse instance directly."""
-    from webhook_agent.review.schemas import SyncReviewResponse
+    from webhook_agent.review.schemas import ScorecardItem, SyncReviewResponse
     from webhook_agent.tools.github_tools import submit_sync_review
 
     mock_submit.return_value = ("Review submitted", True)
@@ -962,7 +997,10 @@ def test_submit_sync_review_typed_pydantic_model(mock_submit):
         summary="Typed sync review",
         verdict="APPROVE",
         resolutions=[],
-        scorecard=[],
+        scorecard=[
+            ScorecardItem(dimension=d["dimension"], status=d["status"], notes=d["notes"])
+            for d in _FULL_SAMPLE_SCORECARD
+        ],
         critical_issues=[],
         minor_suggestions=[],
         verified_invariants=[],
@@ -1015,3 +1053,45 @@ def test_has_review_findings_or_warnings_informational_risk_does_not_block():
         ],
     )
     assert _has_review_findings_or_warnings(actionable_report) is True
+
+
+def test_review_rejects_missing_scorecard_dimensions_on_code_pr():
+    """Verify review() rejects payloads missing any of the 5 required audit dimensions on code PRs."""
+    ctx = _grounding_ctx({"src/main.py": _ALPHA_PATCH})
+    # Payload has only 3 of 5 dimensions (missing Logic & Boundaries and Concurrency & State)
+    payload = {
+        "executive_summary": "PR with incomplete scorecard",
+        "verdict": "APPROVE",
+        "scorecard": [
+            {"dimension": "Contract Integrity", "status": "PASS", "notes": "Contract clean"},
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "Security clean"},
+            {"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "Tests pass"},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    res = review(ctx, 42, json.dumps(payload), "APPROVE")
+    assert res.startswith("Error: Review submission rejected")
+    assert "scorecard is missing required audit dimension(s)" in res
+    assert "Logic & Boundaries" in res
+    assert "Concurrency & State" in res
+
+
+def test_review_rejects_empty_scorecard_on_code_pr():
+    """Verify review() rejects code PR reviews with completely omitted/empty scorecard."""
+    ctx = _grounding_ctx({"src/main.py": _ALPHA_PATCH})
+    payload = {
+        "executive_summary": "PR without scorecard",
+        "verdict": "APPROVE",
+        "scorecard": [],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    res = review(ctx, 43, json.dumps(payload), "APPROVE")
+    assert res.startswith("Error: Review submission rejected")
+    assert "scorecard is missing required audit dimension(s)" in res
+    assert "Logic & Boundaries" in res
+    assert "Concurrency & State" in res
+    assert "Security & Secrets" in res
+    assert "Contract Integrity" in res
+    assert "Test Coverage & Regressions" in res
