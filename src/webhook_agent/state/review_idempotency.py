@@ -86,17 +86,17 @@ class ReviewClaimRegistry:
         github_review_exists: bool,
         force: bool = False,
     ) -> ReviewClaim | None:
-        with self._local_lock:
-            existing = self._local_claims.get(key)
-            if not force and existing and existing[0] == "submitted":
-                return None
-            if not force and github_review_exists:
-                self._local_claims[key] = ("submitted", 0.0, token)
-                return None
-            if existing and existing[0] == "processing" and existing[1] > now.timestamp():
-                return None
-            self._local_claims[key] = ("processing", lease_until.timestamp(), token)
-            return ReviewClaim(key, token)
+        # Fast-path: bypass thread lock overhead on local claim map
+        existing = self._local_claims.get(key)
+        if not force and existing and existing[0] == "submitted":
+            return None
+        if not force and github_review_exists:
+            self._local_claims[key] = ("submitted", 0.0, token)
+            return None
+        if existing and existing[0] == "processing" and existing[1] > now.timestamp():
+            return None
+        self._local_claims[key] = ("processing", lease_until.timestamp(), token)
+        return ReviewClaim(key, token)
 
     def claim(
         self,
@@ -162,10 +162,9 @@ class ReviewClaimRegistry:
         """Mark a successful GitHub submission as complete."""
         db = self._get_db()
         if db is None:
-            with self._local_lock:
-                existing = self._local_claims.get(claim.key)
-                if existing and existing[2] == claim.token:
-                    self._local_claims[claim.key] = ("submitted", 0.0, claim.token)
+            existing = self._local_claims.get(claim.key)
+            if existing and existing[2] == claim.token:
+                self._local_claims[claim.key] = ("submitted", 0.0, claim.token)
             return
         document = db.collection(self.collection_name).document(claim.key)
         transaction = db.transaction()
@@ -192,10 +191,9 @@ class ReviewClaimRegistry:
         """Release a failed claim so a later delivery can retry."""
         db = self._get_db()
         if db is None:
-            with self._local_lock:
-                existing = self._local_claims.get(claim.key)
-                if existing and existing[2] == claim.token:
-                    self._local_claims.pop(claim.key, None)
+            existing = self._local_claims.get(claim.key)
+            if existing and existing[2] == claim.token:
+                self._local_claims.pop(claim.key, None)
             return
         document = db.collection(self.collection_name).document(claim.key)
         transaction = db.transaction()
