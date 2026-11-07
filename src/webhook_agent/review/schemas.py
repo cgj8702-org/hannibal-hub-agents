@@ -78,6 +78,30 @@ class ScorecardItem(BaseModel):
             return "PASS"
         return "UNKNOWN"
 
+    @model_validator(mode="after")
+    def normalize_scorecard_notes(self) -> ScorecardItem:
+        raw_notes = (self.notes or "").strip()
+        upper_notes = raw_notes.upper()
+        if not raw_notes:
+            if self.status == "PASS":
+                self.notes = "Verified clean."
+            elif self.status == "N/A":
+                self.notes = "Not applicable to modified diff scope."
+        elif upper_notes in {"N/A", "NA", "NONE", "N / A", "NOT APPLICABLE", "NULL"}:
+            if self.status == "PASS":
+                self.notes = "Verified clean; not impacted by modified diff scope."
+            elif self.status == "N/A":
+                self.notes = "Not applicable to modified diff scope."
+            elif self.status == "WARN":
+                self.notes = "Potential risk identified in modified scope."
+            elif self.status == "FAIL":
+                self.notes = "Blocking defect identified in modified scope."
+            elif self.status == "ERROR":
+                self.notes = "Dimension evaluation error."
+            else:
+                self.notes = "No details provided."
+        return self
+
     def to_table_row(self) -> str:
         """Render a clean Markdown table row."""
         badge_map = {
@@ -89,7 +113,23 @@ class ScorecardItem(BaseModel):
             "ERROR": "`💥 ERROR`",
         }
         badge = badge_map.get(self.status, f"`{self.status}`")
-        safe_notes = self.notes.replace("|", "\\|").strip() or "Verified clean."
+        raw_notes = (self.notes or "").strip()
+        upper_notes = raw_notes.upper()
+        if not raw_notes:
+            safe_notes = (
+                "Not applicable to modified diff scope."
+                if self.status == "N/A"
+                else "Verified clean."
+            )
+        elif upper_notes in {"N/A", "NA", "NONE", "N / A", "NOT APPLICABLE", "NULL"}:
+            if self.status == "PASS":
+                safe_notes = "Verified clean; not impacted by modified diff scope."
+            elif self.status == "N/A":
+                safe_notes = "Not applicable to modified diff scope."
+            else:
+                safe_notes = "No details provided."
+        else:
+            safe_notes = raw_notes.replace("|", "\\|")
         return f"| **{self.dimension}** | {badge} | {safe_notes} |"
 
 

@@ -1305,6 +1305,20 @@ def test_scorecard_unknown_and_error_statuses() -> None:
     item_crash = ScorecardItem(dimension="Logic & Boundaries", status="crash_in_ast")
     assert item_crash.status == "ERROR"
 
+    # Lazy placeholders are normalized into clinical descriptions
+    item_na_pass = ScorecardItem(dimension="Concurrency & State", status="PASS", notes="N/A")
+    assert item_na_pass.notes == "Verified clean; not impacted by modified diff scope."
+    assert "Verified clean; not impacted by modified diff scope." in item_na_pass.to_table_row()
+
+    item_na_dim = ScorecardItem(dimension="Security & Secrets", status="N/A", notes="N/A")
+    assert item_na_dim.notes == "Not applicable to modified diff scope."
+    assert "Not applicable to modified diff scope." in item_na_dim.to_table_row()
+    assert "`⚪ N/A`" in item_na_dim.to_table_row()
+
+    item_blank_pass = ScorecardItem(dimension="Contract Integrity", status="PASS", notes="")
+    assert item_blank_pass.notes == "Verified clean."
+    assert "Verified clean." in item_blank_pass.to_table_row()
+
 
 def test_scorecard_unknown_verdict_behavior() -> None:
     """Verify UNKNOWN/ERROR/WARN in scorecard enforces COMMENT instead of silently approving."""
