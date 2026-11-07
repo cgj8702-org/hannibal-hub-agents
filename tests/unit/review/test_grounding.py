@@ -496,7 +496,7 @@ def test_long_untrue_code_quote_still_rejected() -> None:
 
 def test_is_path_citation_helper() -> None:
     """Verify _is_path_citation accurately distinguishes file paths from code symbols."""
-    from webhook_agent.review.grounding import _is_path_citation
+    from webhook_agent.review.grounding.citations import _is_path_citation
 
     # File paths and line citations
     assert _is_path_citation("src/main.py:10", "src/main.py") is True
@@ -693,7 +693,7 @@ def test_verify_semantic_invariant_rejects_fabricated_directory_with_real_basena
 
 def test_test_exists_in_suite_ignores_commented_definitions(tmp_path: Path) -> None:
     """_test_exists_in_suite must ignore comments like '# def test_foo' in diff text."""
-    from webhook_agent.review.grounding import _test_exists_in_suite
+    from webhook_agent.review.grounding.invariants import _test_exists_in_suite
 
     diff_with_comment = """
 --- a/src/test_example.py
@@ -739,7 +739,7 @@ def test_verify_semantic_invariant_rejects_compound_symbol_with_phantom_token() 
 
 def test_symbol_exists_in_codebase_token_level_match(tmp_path: Path) -> None:
     """_symbol_exists_in_codebase must match diff identifiers as tokens, not substrings."""
-    from webhook_agent.review.grounding import _symbol_exists_in_codebase
+    from webhook_agent.review.grounding.invariants import _symbol_exists_in_codebase
 
     diff_text = """
 +    # Diff mentioning running workers
