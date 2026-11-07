@@ -25,18 +25,23 @@ import re
 import time
 import uuid
 from datetime import UTC, datetime
-from enum import Enum
 from typing import Any
 
 from github import Auth, Github
 
-from webhook_agent.constants import (
-    DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS,
-    DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS,
-    DEFAULT_TRIGGER_EXEMPT_LOGINS,
-)
 from webhook_agent.core.cancellation import pr_closed_registry
-from webhook_agent.github.bot_identity import _is_bot_event
+from webhook_agent.events import (
+    SUPPRESSED_EVENT_NAMES,
+    SUPPRESSED_PR_METADATA_ACTIONS,
+    Tier1Status,
+    filter_tier_0,
+    handle_ci_completed,
+    handle_tier_1_programmatic,
+    is_actionable_issue_opened,
+    review_if_ci_green,
+    route_event,
+    should_process_event,
+)
 from webhook_agent.github.credentials import (
     generate_jwt,
     get_installation_token,
@@ -51,14 +56,9 @@ from webhook_agent.github.pr_context import (
     _should_prefetch_diff,
 )
 from webhook_agent.review.ci_gate import (
-    GATED_EVENTS,
-    PASSING_CONCLUSIONS,
-    CIState,
-    build_review_event,
     evaluate_ci,
     is_ci_gate_enabled,
     last_bot_review_sha,
-    pr_numbers_for_suite,
 )
 from webhook_agent.review.fast_path import (
     evaluate_dependency_fast_path,
@@ -67,7 +67,6 @@ from webhook_agent.review.fast_path import (
 from webhook_agent.review.formatter import (
     truncate_log_payload,
 )
-from webhook_agent.review.writeback_policy import is_automatic_pr_review_enabled
 
 from .core.agent_definition import WebhookAgent
 from .review.comment_poster import _add_eyes_reaction, _remove_eyes_reaction
@@ -100,57 +99,6 @@ def _has_meaningful_writeback(results: list[ActionResult] | None) -> bool:
 logger = logging.getLogger("webhook_agent.processor")
 core_logger = logging.getLogger("webhook_agent.core")
 
-SUPPRESSED_PR_METADATA_ACTIONS: frozenset[str] = frozenset(
-    {
-        "assigned",
-        "auto_merge_disabled",
-        "auto_merge_enabled",
-        "converted_to_draft",
-        "demilestoned",
-        "dequeued",
-        "enqueued",
-        "labeled",
-        "locked",
-        "milestoned",
-        "review_request_removed",
-        "unassigned",
-        "unlabeled",
-        "unlocked",
-    }
-)
-
-# Event names dropped before dispatch. Named (rather than inlined at the end of
-# should_process_event) so the router's perimeter filter can be asserted as a strict subset
-# of it -- see tests/unit/router/test_router.py. A router that drops more than this list
-# would lose events silently, so the subset relation is the invariant that matters.
-#
-# CI infrastructure events: We subscribe to check_suite only -- its `completed` action
-# drives the CI gate (see review/ci_gate.py). check_run / status / workflow_run / workflow_job
-# are NOT subscribed, and are listed here as guards so they can never reach the agent if a
-# subscription is ever re-added. No code path reads their payloads, and
-# build_transient_turn_content has no branch for them -- so reaching the agent means an empty
-# prompt and a hallucinated reply.
-SUPPRESSED_EVENT_NAMES: frozenset[str] = frozenset(
-    {
-        "check_suite",
-        "check_run",
-        "status",
-        "installation",
-        "installation_repositories",
-        "installation_target",
-        "pull_request_review_thread",
-        "workflow_run",
-        "workflow_job",
-        "star",
-        "watch",
-        "fork",
-        "release",
-        "sponsorship",
-        "milestone",
-        "label",
-    }
-)
-
 
 def _env_int(name: str, default: int) -> int:
     """Read an integer env var, treating empty/unset as the default.
@@ -169,13 +117,6 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-class Tier1Status(Enum):
-    """Result status of Tier 1 deterministic programmatic handling."""
-
-    TERMINAL = "terminal"  # Handled programmatically or suppressed (0 LLM calls needed)
-    ADVANCE = "advance"  # Preconditions passed; advance to Tier 2 LLM delegation
-
-
 # Re-exported module helpers (extracted to pr_context.py, fast_path.py, and review/comment_poster.py)
 # Preserved for backwards compatibility with existing consumers and unit tests.
 __all__ = [
@@ -190,9 +131,12 @@ __all__ = [
     "_prefetch_previous_bot_reviews",
     "_remove_eyes_reaction",
     "_should_prefetch_diff",
+    "evaluate_ci",
     "evaluate_dependency_fast_path",
     "generate_trace_id",
     "is_base_branch_merge_sync",
+    "is_ci_gate_enabled",
+    "last_bot_review_sha",
 ]
 
 
@@ -487,325 +431,39 @@ class WebhookProcessor:
         return self._agent_core
 
     # ---------------------------------------------------------------------------
-    # Routing helpers
+    # Routing and Perimeter Filtering (delegated to webhook_agent.events)
     # ---------------------------------------------------------------------------
     def route_event(self, ev: dict[str, Any]) -> str:
-        """Translate a GitHub event into a canonical internal event string.
-
-        Handles unknown events gracefully.
-        """
-        if ev.get("canonical"):
-            return str(ev["canonical"])
-        event_name = ev.get("event_name")
-        action = ev.get("action")
-        if event_name == "ping":
-            return "ping"
-        if event_name == "push":
-            return "push"
-        mapping = {
-            ("pull_request", "opened"): "pull_request.opened",
-            ("pull_request", "synchronize"): "pull_request.synchronize",
-            ("pull_request", "closed"): "pull_request.closed",
-            ("pull_request", "ready_for_review"): "pull_request.ready_for_review",
-            ("pull_request", "reopened"): "pull_request.reopened",
-            ("issue_comment", "created"): "issue_comment.created",
-            (
-                "pull_request_review_comment",
-                "created",
-            ): "pull_request_review_comment.created",
-            ("pull_request_review", "submitted"): "pull_request_review.submitted",
-            ("pull_request", "review_requested"): "pull_request_review_requested",
-            ("label", "created"): "label.created",
-            ("label", "deleted"): "label.deleted",
-            ("installation", "created"): "installation.created",
-            ("installation", "deleted"): "installation.deleted",
-        }
-        key = (str(event_name or ""), str(action or ""))
-        if canonical := mapping.get(key):
-            return canonical
-        if action:
-            return f"{event_name}.{action}"
-        return "unknown"
+        """Translate a GitHub event into a canonical internal event string."""
+        return route_event(ev)
 
     def _is_actionable_issue_opened(self, ev: dict[str, Any]) -> bool:
-        """Return True if an issues.opened event explicitly requests agent action.
-
-        Treats untargeted issue openings as informative record-only events (Tier 0 drop),
-        preventing unprompted multi-turn tool loops on general bug reports or discussions.
-        """
-        if os.environ.get("AUTO_TRIAGE_NEW_ISSUES", "0").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        ):
-            return True
-
-        raw = ev.get("raw_payload") or {}
-        sender = ev.get("sender") or raw.get("sender") or {}
-        sender_login = (sender.get("login") or "").strip().lower()
-
-        # Partner bots (e.g. Cline) that file issues to be triaged per #441
-        from webhook_agent.core.policy import PARTNER_BOT_LOGINS
-
-        if sender_login in PARTNER_BOT_LOGINS:
-            return True
-
-        issue = raw.get("issue") or {}
-        title = (issue.get("title") or "").lower()
-        body = (issue.get("body") or "").lower()
-        combined = f"{title}\n{body}"
-
-        # Explicit mention of bot
-        if "@hannibal-hub-agents" in combined or "hannibal-hub-agents" in combined:
-            return True
-
-        # Slash commands: review or triage directives
-        from webhook_agent.core.commands import has_review_slash_command
-
-        if has_review_slash_command(combined):
-            return True
-
-        return any(
-            bool(re.search(rf"(?<!\S){re.escape(cmd)}\b", combined)) for cmd in ("/triage", "/help")
-        )
+        """Return True if an issues.opened event explicitly requests agent action."""
+        return is_actionable_issue_opened(ev)
 
     def _filter_tier_0(self, ev: dict[str, Any]) -> tuple[bool, str]:
-        """Apply Tier 0 pure perimeter drops (0 compute, 0 API calls).
-
-        Returns:
-            tuple[bool, str]: (should_drop, reason). True if event should be dropped.
-        """
-        delivery_id = ev.get("delivery_id")
-        if delivery_id in self._processed_deliveries:
-            return True, "duplicate delivery"
-        if ev.get("event_name") == "check_suite" and ev.get("action") == "completed":
-            # Finished CI drives deferred reviews (see review/ci_gate.py).
-            if not is_ci_gate_enabled():
-                return True, "ci gate disabled"
-            return False, "check_suite.completed (actionable)"
-        if ev.get("event_name") == "push" or ev.get("canonical") == "push":
-            return True, "push event"
-        if _is_bot_event(ev):
-            return True, "bot event"
-
-        raw = ev.get("raw_payload") or {}
-        event_name = ev.get("event_name")
-
-        # Gated trigger authorization (T-03): restrict agent execution based on author association.
-        association: str | None = None
-        author_login = ""
-
-        if event_name in ("issue_comment", "pull_request_review_comment"):
-            comment = raw.get("comment") or raw.get("review_comment") or {}
-            association = comment.get("author_association")
-            author_login = (comment.get("user") or {}).get("login", "")
-        elif event_name in ("pull_request", "pr"):
-            pr_data = raw.get("pull_request") or {}
-            association = pr_data.get("author_association")
-            author_login = (pr_data.get("user") or {}).get("login", "")
-        else:
-            comment = raw.get("comment") or raw.get("review_comment") or {}
-
-        if association and isinstance(association, str):
-            allowed_raw = os.getenv(
-                "TRIGGER_ALLOWED_ASSOCIATIONS", DEFAULT_TRIGGER_ALLOWED_ASSOCIATIONS
-            )
-            allowed_associations = {a.strip().upper() for a in allowed_raw.split(",") if a.strip()}
-
-            if association.strip().upper() not in allowed_associations:
-                exempt_raw = os.getenv("TRIGGER_EXEMPT_LOGINS", DEFAULT_TRIGGER_EXEMPT_LOGINS)
-                exempt_logins = {
-                    login.strip().lower() for login in exempt_raw.split(",") if login.strip()
-                }
-
-                sender_login = (ev.get("sender") or raw.get("sender") or {}).get("login", "")
-                if (
-                    sender_login.lower() not in exempt_logins
-                    and author_login.lower() not in exempt_logins
-                ):
-                    logger.info(
-                        "Ignoring event with unauthorized author_association=%s (delivery_id=%s)",
-                        association,
-                        delivery_id,
-                    )
-                    return True, f"unauthorized author_association={association}"
-
-        comment = raw.get("comment") or raw.get("review_comment") or {}
-        comment_body = comment.get("body") or ""
-        cb_lower = comment_body.lower()
-        if "@dependabot" in cb_lower:
-            return True, "comment mentions @dependabot"
-        if any(bot in cb_lower for bot in ("@coderabbitai", "@coderabbitai[bot]")):
-            logger.debug(
-                "Suppressing comment mentioning CodeRabbit (delivery_id=%s)",
-                delivery_id,
-            )
-            return True, "comment mentions CodeRabbit"
-
-        action = ev.get("action")
-        if action == "deleted":
-            if event_name in (
-                "issue_comment",
-                "pull_request_review_comment",
-                "pull_request",
-                "issue",
-            ):
-                return True, "deleted action"
-
-        if action == "edited":
-            sender_login = (ev.get("sender") or {}).get("login", "")
-            raw = ev.get("raw_payload") or {}
-            comment_user = (raw.get("comment") or {}).get("user") or {}
-            comment_author = comment_user.get("login", "")
-            allowed_users = {"cgj8702", "cgj8702-agents"}
-            if sender_login not in allowed_users and comment_author not in allowed_users:
-                return True, "edited action from non-allowed user"
-
-        canonical = self.route_event(ev)
-        # Suppress review-submission events to prevent self-review feedback loops. A submitted
-        # review says nothing about whether the PR is closed, so this arm must NOT register the
-        # PR in the closed registry — doing so poisons every later event for the registry's TTL
-        # window and silently skips the agent on an open PR (observed on #267).
-        if canonical == "pull_request_review.submitted":
-            return True, "pull_request_review.submitted (loop avoidance)"
-
-        # Suppress genuinely closed PR events and register them so in-flight agent work short-circuits.
-        # Accept both canonical spellings and the "pr" event-name alias: route_event's fallback yields
-        # "pr.closed" for event_name="pr" (not "pull_request.closed"), so without the alias a pr-aliased
-        # closed event would slip through unregistered. Defensive per CodeRabbit #268 — the
-        # X-GitHub-Event header only ever sends "pull_request" today, but the alias keeps the branch total.
-        if canonical in ("pull_request.closed", "pr.closed") or (
-            event_name in ("pull_request", "pr") and action == "closed"
-        ):
-            repo = raw.get("repository") or {}
-            repo_full_name = repo.get("full_name", "")
-            pr_data = raw.get("pull_request") or {}
-            pr_number = pr_data.get("number")
-            if repo_full_name and pr_number:
-                try:
-                    from webhook_agent.core.cancellation import pr_closed_registry
-
-                    pr_closed_registry.mark_closed(repo_full_name, int(pr_number))
-                except Exception as ex:
-                    logger.warning(
-                        "Failed to mark PR %s#%s closed in registry: %s",
-                        repo_full_name,
-                        pr_number,
-                        ex,
-                    )
-            return True, "closed PR event"
-
-        if canonical.startswith("pull_request_review_thread."):
-            return True, "review thread event"
-
-        # Suppress non-code metadata noise (labels, assignees, milestones, locks)
-        # on both pull requests and issues to prevent unsolicited conversational comments and review noise.
-        if (
-            action in SUPPRESSED_PR_METADATA_ACTIONS
-            and (
-                event_name in ("pull_request", "pr", "issues", "issue")
-                or canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
-            )
-        ) or (
-            canonical.startswith(("pull_request.", "pr.", "issues.", "issue."))
-            and canonical.split(".", 1)[1] in SUPPRESSED_PR_METADATA_ACTIONS
-        ):
-            logger.debug(
-                "Suppressing metadata event '%s' (action=%s) to prevent noise",
-                canonical,
-                action,
-            )
-            return True, f"suppressed metadata action {action}"
-
-        # Tier 0 Drop Guard: untargeted issues.opened events.
-        # Unless the issue explicitly tags @hannibal-hub-agents, includes a review/triage directive,
-        # or originates from an authorized partner bot, drop as record-only to prevent unprompted loops.
-        if canonical == "issues.opened" or (
-            event_name in ("issues", "issue") and action == "opened"
-        ):
-            if not self._is_actionable_issue_opened(ev):
-                logger.debug(
-                    "Suppressing untargeted issues.opened event (delivery_id=%s): no explicit mention or triage directive",
-                    delivery_id,
-                )
-                return True, "untargeted issues.opened (record only)"
-
-        # Ignore automated CI infrastructure noise, installation lifecycle events, and review
-        # thread state changes. See SUPPRESSED_EVENT_NAMES.
-        if event_name in SUPPRESSED_EVENT_NAMES:
-            return True, f"suppressed event name {event_name}"
-
-        return False, "actionable"
+        """Apply Tier 0 pure perimeter drops (0 compute, 0 API calls)."""
+        return filter_tier_0(
+            ev,
+            processed_deliveries=self._processed_deliveries,
+            route_event_fn=self.route_event,
+        )
 
     def should_process_event(self, ev: dict[str, Any]) -> bool:
-        """Apply Tier 0 loop‑avoidance, noise filtering, and duplication checks.
-
-        Returns True if event passed Tier 0 and is eligible for Tier 1 programmatic handling.
-        """
-        should_drop, reason = self._filter_tier_0(ev)
-        if should_drop:
-            logger.debug(
-                "Tier 0 dropped event: %s (delivery_id=%s)",
-                reason,
-                ev.get("delivery_id"),
-            )
-            return False
-        return True
+        """Apply Tier 0 loop-avoidance, noise filtering, and duplication checks."""
+        return should_process_event(
+            ev,
+            processed_deliveries=self._processed_deliveries,
+            route_event_fn=self.route_event,
+        )
 
     def _handle_ci_completed(self, payload: dict[str, Any]) -> None:
-        """Start reviews that were held back while CI was running.
-
-        A failed suite is ignored (silent skip). A passing one re-checks the whole commit, since
-        other suites may still be running or may have failed.
-        """
-        raw = payload.get("raw_payload") or {}
-        suite = raw.get("check_suite") or {}
-        repo_name = (raw.get("repository") or {}).get("full_name") or ""
-        head_sha = suite.get("head_sha") or ""
-        conclusion = str(suite.get("conclusion") or "").lower()
-        if not repo_name or not head_sha:
-            return
-        if not is_automatic_pr_review_enabled():
-            logger.info(
-                "CI gate: automatic reviews disabled (ENABLE_AUTOMATIC_PR_REVIEWS=%s); ignoring check_suite for %s",
-                os.environ.get("ENABLE_AUTOMATIC_PR_REVIEWS", DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS),
-                repo_name,
-            )
-            return
-        if conclusion not in PASSING_CONCLUSIONS:
-            logger.info(
-                "CI gate: suite for %s@%s concluded %r; not reviewing.",
-                repo_name,
-                head_sha[:7],
-                conclusion or "unknown",
-            )
-            return
-
-        gh = self.gh
-        for number in pr_numbers_for_suite(gh, repo_name, suite):
-            try:
-                self._review_if_ci_green(gh, repo_name, number, head_sha)
-            except Exception:
-                logger.exception("CI gate: failed to resume review for %s#%s", repo_name, number)
+        """Start reviews that were held back while CI was running."""
+        handle_ci_completed(self.gh, payload, self.process_event)
 
     def _review_if_ci_green(self, gh: Any, repo_name: str, number: int, head_sha: str) -> None:
         """Review PR ``number`` now if CI is fully green and the bot has not reviewed this commit."""
-        pr = gh.get_repo(repo_name).get_pull(number)
-        if pr.state != "open" or pr.head.sha != head_sha:
-            return  # closed, or a newer push superseded this commit (its own CI will report)
-        if evaluate_ci(gh, repo_name, head_sha) is not CIState.PASS:
-            return
-        reviewed_head, last_reviewed_sha = last_bot_review_sha(pr, head_sha)
-        if reviewed_head:
-            return
-        logger.info(
-            "CI gate: CI green for %s#%s (%s); starting review.", repo_name, number, head_sha[:7]
-        )
-        event = build_review_event(
-            pr, repo_name, head_sha, last_reviewed_sha, f"ci-gate-{uuid.uuid4()}"
-        )
-        self.process_event(event, ci_verified=True)
+        review_if_ci_green(gh, repo_name, number, head_sha, self.process_event)
 
     def process_event(self, payload: dict[str, Any], *, ci_verified: bool = False) -> None:
         """Process a Pub/Sub payload.
@@ -878,215 +536,18 @@ class WebhookProcessor:
     ) -> Tier1Status:
         """Execute Tier 1 deterministic operations (0 LLM calls).
 
-        Returns:
-            Tier1Status.ADVANCE if preconditions are satisfied for LLM evaluation.
-            Tier1Status.TERMINAL if handled or suppressed programmatically.
+        Delegates to webhook_agent.events.tier1_router.handle_tier_1_programmatic.
         """
-        if event_key == "check_suite.completed":
-            self._handle_ci_completed(payload)
-            return Tier1Status.TERMINAL
-
-        gh = self.gh
-
-        raw_repo = payload.get("repository")
-        if not isinstance(raw_repo, dict) and isinstance(payload.get("raw_payload"), dict):
-            raw_repo = payload["raw_payload"].get("repository")
-        raw_repo_name = raw_repo.get("full_name") if isinstance(raw_repo, dict) else None
-        if not raw_repo_name or not isinstance(raw_repo_name, str):
-            logger.warning("No repository found in event payload")
-            return Tier1Status.TERMINAL
-        repo_name: str = raw_repo_name
-
         dry_run = (os.environ.get("DRY_RUN", "0") in ("1", "true", "True")) or self.dry_run
-
-        if event_key == "pull_request.synchronize" and is_base_branch_merge_sync(
-            gh, repo_name, payload
-        ):
-            raw = payload.get("raw_payload") or {}
-            pr_data = raw.get("pull_request") or {}
-            pr_number = pr_data.get("number", "unknown")
-            base_ref = (pr_data.get("base") or {}).get("ref", "base")
-            head_sha = (pr_data.get("head") or {}).get("sha", "")[:7]
-            logger.info(
-                "Suppressed pull_request.synchronize for PR #%s: commit %s is a base branch update (merged '%s'). Skipping execution.",
-                pr_number,
-                head_sha,
-                base_ref,
-            )
-            return Tier1Status.TERMINAL
-
-        # Short-circuit if target PR is closed or merged
-        raw = payload.get("raw_payload") or {}
-        pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
-        canonical = payload.get("canonical", "")
-        is_pr_event = bool(pr_data) or canonical.startswith(
-            (
-                "pull_request.",
-                "pull_request_review",
-                "pull_request_review_comment.",
-            )
+        return handle_tier_1_programmatic(
+            self.gh,
+            payload,
+            event_key,
+            delivery_id,
+            dry_run=dry_run,
+            ci_verified=ci_verified,
+            handle_ci_completed_fn=self._handle_ci_completed,
         )
-        pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
-            "number"
-        )
-
-        pr_num_int: int | None = None
-        if is_pr_event and pr_number is not None:
-            try:
-                pr_num_int = int(pr_number)
-            except (TypeError, ValueError):
-                pr_num_int = None
-
-            raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
-            pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
-            merged_at_val = pr_data.get("merged_at") if isinstance(pr_data, dict) else None
-            is_merged = (
-                pr_data.get("merged") is True
-                or (isinstance(merged_at_val, str) and bool(merged_at_val.strip()))
-                if isinstance(pr_data, dict)
-                else False
-            )
-            if (
-                pr_state == "closed"
-                or is_merged
-                or (pr_num_int is not None and pr_closed_registry.is_closed(repo_name, pr_num_int))
-            ):
-                logger.info(
-                    "🔒 PR %s#%s is closed or merged; skipping agent execution.",
-                    repo_name,
-                    pr_number,
-                )
-                return Tier1Status.TERMINAL
-
-        head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
-
-        # Automatic PR reviews gate: skip automatic reviews on PR lifecycle events unless enabled.
-        if (
-            canonical in GATED_EVENTS or canonical == "pull_request_review_requested"
-        ) and not is_automatic_pr_review_enabled():
-            logger.info(
-                "Automatic PR review disabled (ENABLE_AUTOMATIC_PR_REVIEWS=%s); skipping %s for %s#%s",
-                os.environ.get("ENABLE_AUTOMATIC_PR_REVIEWS", DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS),
-                canonical,
-                repo_name,
-                pr_number,
-            )
-            return Tier1Status.TERMINAL
-
-        # CI gate: automatic reviews wait for fully green CI. Silent on pending or failed CI.
-        # This runs before the in-flight dedup claim below so that a deferred event does not
-        # consume the claim and block the review once CI turns green.
-        if (
-            not ci_verified
-            and canonical in GATED_EVENTS
-            and head_sha
-            and pr_num_int is not None
-            and is_ci_gate_enabled()
-        ):
-            ci_state = evaluate_ci(gh, repo_name, head_sha)
-            if ci_state is not CIState.PASS:
-                logger.info(
-                    "CI gate: PR %s#%s (commit %s) CI is %s; not reviewing now.",
-                    repo_name,
-                    pr_number,
-                    head_sha[:7],
-                    ci_state.value,
-                )
-                return Tier1Status.TERMINAL
-
-        # Fast-push debouncing & duplicate review gate: abort if superseded or already reviewed
-        if (
-            is_pr_event
-            and head_sha
-            and pr_num_int is not None
-            and (canonical in GATED_EVENTS or canonical == "pull_request_review_requested")
-            and gh is not None
-        ):
-            try:
-                live_pr = gh.get_repo(repo_name).get_pull(pr_num_int)
-                live_state = getattr(live_pr, "state", None)
-                if isinstance(live_state, str) and live_state != "open":
-                    logger.debug(
-                        "🔒 PR %s#%s is not open (state=%s); skipping.",
-                        repo_name,
-                        pr_number,
-                        live_state,
-                    )
-                    return Tier1Status.TERMINAL
-                live_head_sha = getattr(getattr(live_pr, "head", None), "sha", None)
-                if isinstance(live_head_sha, str) and live_head_sha and live_head_sha != head_sha:
-                    logger.info(
-                        "⚡ PR %s#%s commit %s superseded by live head %s; skipping evaluation.",
-                        repo_name,
-                        pr_number,
-                        head_sha[:7],
-                        live_head_sha[:7],
-                    )
-                    return Tier1Status.TERMINAL
-                already_reviewed, _ = last_bot_review_sha(live_pr, head_sha)
-                if already_reviewed:
-                    logger.info(
-                        "Skipping duplicate bot review for %s#%s at head %s (already reviewed)",
-                        repo_name,
-                        pr_number,
-                        head_sha[:7],
-                    )
-                    return Tier1Status.TERMINAL
-            except Exception as live_err:
-                logger.warning(
-                    "⚠️ Could not verify live PR head for %s#%s (commit %s): %s — "
-                    "deferring to avoid reviewing stale data.",
-                    repo_name,
-                    pr_number,
-                    head_sha[:7] if head_sha else "unknown",
-                    live_err,
-                )
-                return Tier1Status.TERMINAL
-
-        # In-Flight Audit Deduplication: prevent concurrent webhook processing for the same PR commit
-        if is_pr_event and pr_number is not None and head_sha:
-            if (
-                canonical
-                in (
-                    "pull_request.opened",
-                    "pull_request.synchronize",
-                    "pull_request.ready_for_review",
-                    "pull_request.reopened",
-                )
-                and head_sha
-            ):
-                from webhook_agent.state.reconciliation import (
-                    build_reconciliation_cache_key,
-                    try_claim_reconciliation,
-                )
-
-                audit_cache_key = build_reconciliation_cache_key(repo_name, pr_number, head_sha)
-                is_proactive_or_resume = str(delivery_id).startswith(
-                    ("proactive-reconcile-", "resume-")
-                )
-                if not is_proactive_or_resume and not try_claim_reconciliation(audit_cache_key):
-                    logger.info(
-                        "🔒 In-Flight Audit Deduplication: PR %s#%s (commit %s) is already in-flight or reviewed. Skipping duplicate webhook execution.",
-                        repo_name,
-                        pr_number,
-                        head_sha[:7],
-                    )
-                    return Tier1Status.TERMINAL
-
-        # Deterministic Fast-Path for automated Dependabot / lockfile PRs (0 LLM calls)
-        if not dry_run and is_pr_event and pr_number is not None:
-            if evaluate_dependency_fast_path(
-                gh=gh,
-                repo_name=repo_name,
-                payload=payload,
-                raw=raw,
-                pr_data=pr_data,
-                pr_number=pr_number,
-                dry_run=dry_run,
-            ):
-                return Tier1Status.TERMINAL
-
-        return Tier1Status.ADVANCE
 
     def _dispatch_tier_2_llm(
         self,
