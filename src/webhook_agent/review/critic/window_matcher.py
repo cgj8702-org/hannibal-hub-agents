@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-WINDOW_LINE = re.compile(r"^\s*(\d{1,12})\s*[:|]\s?(.*)$")
+WINDOW_LINE = re.compile(r"^\s*(\d{1,12})\s*[:|│]\s?(.*)$")
 ESCAPE_SEQ = re.compile(r"\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8}|\\x[0-9a-fA-F]{2}")
 MIN_PREFIX = 6
 MAX_DRIFT = 5
@@ -22,11 +22,16 @@ def norm(text: str) -> str:
     """Reduce a source line to a comparable ASCII skeleton.
 
     Drops escape sequences, normalizes unicode (NFKC), and discards non-ASCII and whitespace.
+    Also strips leading '+' or '-' if present (e.g. from diff lines quoted in windows).
     """
     text = text or ""
     text = ESCAPE_SEQ.sub("", text)
     text = unicodedata.normalize("NFKC", text)
-    return "".join(c for c in text if c.isascii() and not c.isspace())
+    # If the text begins with diff indicator '+' or '-', strip it for robust comparison
+    clean_chars = [c for c in text if c.isascii() and not c.isspace()]
+    if clean_chars and clean_chars[0] in ("+", "-"):
+        clean_chars = clean_chars[1:]
+    return "".join(clean_chars)
 
 
 class WindowMatcher:

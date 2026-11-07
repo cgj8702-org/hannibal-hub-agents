@@ -645,9 +645,10 @@ def review(
                     "Please fix the schema fields and call review() again."
                 )
 
-        from webhook_agent.review.critic import CriticEngine
+        from webhook_agent.review.critic import CriticEngine, SeverityGovernor
 
         critic_engine = CriticEngine()
+        severity_governor = SeverityGovernor()
 
         # Hunter & Critic Pipeline: if candidate_findings are present, verify through CriticEngine
         if review_obj.candidate_findings:
@@ -665,7 +666,12 @@ def review(
             survivor_issues = critic_engine.filter_and_verify(parsed_candidates, verdicts=verdicts)
             if not review_obj.critical_issues and not review_obj.minor_suggestions:
                 for issue in survivor_issues:
-                    if getattr(issue, "severity", None) in ("CRITICAL", "HIGH"):
+                    # Govern candidate severity: only proven deterministic failures may be CRITICAL
+                    tag = severity_governor.govern_severity(issue)
+                    if tag == "[CRITICAL]":
+                        review_obj.critical_issues.append(issue)
+                    elif tag == "[MAJOR]":
+                        # If critical issues exist or requested changes, keep in critical list
                         review_obj.critical_issues.append(issue)
                     else:
                         review_obj.minor_suggestions.append(issue)
@@ -673,6 +679,15 @@ def review(
         # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement
         review_obj.critical_issues = critic_engine.filter_issues(review_obj.critical_issues)
         review_obj.minor_suggestions = critic_engine.filter_issues(review_obj.minor_suggestions)
+
+        # Apply Severity Governor to normalize severities
+        review_obj.critical_issues = severity_governor.apply_governance_to_issues(
+            review_obj.critical_issues
+        )
+        review_obj.minor_suggestions = severity_governor.apply_governance_to_issues(
+            review_obj.minor_suggestions
+        )
+
         critical_list = review_obj.critical_issues
         minor_list = review_obj.minor_suggestions
 
