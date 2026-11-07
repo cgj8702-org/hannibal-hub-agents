@@ -9,6 +9,7 @@ from types import FrameType
 
 # Import constants for default values
 from webhook_agent.constants import DEFAULT_LOG_MODEL_THOUGHTS
+from webhook_agent.telemetry import UniversalJsonFormatter
 
 # Configure logging for the entry point
 log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -24,10 +25,13 @@ if os.environ.get("LOG_MODEL_THOUGHTS", DEFAULT_LOG_MODEL_THOUGHTS).lower() in (
 
 log_level = getattr(logging, log_level_name, logging.INFO)
 
+_json_handler = logging.StreamHandler()
+_json_handler.setFormatter(UniversalJsonFormatter())
+
 logging.basicConfig(
     level=log_level,
-    format="[%(asctime)s] [%(name)s] %(message)s",
-    datefmt="%H:%M:%S",
+    handlers=[_json_handler],
+    force=True,
 )
 
 logger = logging.getLogger("main")

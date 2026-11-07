@@ -209,6 +209,14 @@ def setup_cloud_logging() -> None:
         client = google.cloud.logging.Client(project=project_id)
         client.setup_logging(log_level=log_level)
 
+        # Attach UniversalJsonFormatter to handlers to ensure structured JSON output
+        from webhook_agent.telemetry.logging import UniversalJsonFormatter
+
+        for handler in logging.getLogger().handlers:
+            handler_name = type(handler).__name__
+            is_cloud = "CloudLogging" in handler_name
+            handler.setFormatter(UniversalJsonFormatter(is_cloud_logging_handler=is_cloud))
+
         # Drop ADK Runner's per-attempt 'Root node failed' traceback
         # (our orchestrator logs it once instead).
         logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
@@ -273,7 +281,16 @@ def main() -> int:
         "True",
     )
 
-    logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
+    logger.info(
+        "🚀 Starting sequential subscriber loop on %s",
+        subscription_path,
+        extra={
+            "json_fields": {
+                "event": "worker_started",
+                "subscription": subscription_path,
+            }
+        },
+    )
     while keep_running:
         touch_worker_heartbeat()
         now = time.time()
@@ -394,10 +411,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from webhook_agent.core.logging_helpers import UniversalJsonFormatter
+
     log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    handler = logging.StreamHandler()
+    handler.setFormatter(UniversalJsonFormatter())
     logging.basicConfig(
         level=getattr(logging, log_level_name, logging.INFO),
-        format="[%(asctime)s] [%(name)s] %(message)s",
-        datefmt="%H:%M:%S",
+        handlers=[handler],
+        force=True,
     )
     raise SystemExit(main())
