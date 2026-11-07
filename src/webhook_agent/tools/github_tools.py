@@ -645,10 +645,32 @@ def review(
                     "Please fix the schema fields and call review() again."
                 )
 
-        # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement
         from webhook_agent.review.critic import CriticEngine
 
         critic_engine = CriticEngine()
+
+        # Hunter & Critic Pipeline: if candidate_findings are present, verify through CriticEngine
+        if review_obj.candidate_findings:
+            from webhook_agent.review.hunter import HunterEngine
+
+            hunter_engine = HunterEngine()
+            parsed_candidates = hunter_engine.parse_candidate_findings(
+                review_obj.candidate_findings
+            )
+            verdicts = (
+                {v.finding_id: v for v in review_obj.verification_verdicts if v.finding_id}
+                if review_obj.verification_verdicts
+                else None
+            )
+            survivor_issues = critic_engine.filter_and_verify(parsed_candidates, verdicts=verdicts)
+            if not review_obj.critical_issues and not review_obj.minor_suggestions:
+                for issue in survivor_issues:
+                    if getattr(issue, "severity", None) in ("CRITICAL", "HIGH"):
+                        review_obj.critical_issues.append(issue)
+                    else:
+                        review_obj.minor_suggestions.append(issue)
+
+        # Adversarial Critic filtering: discard low-confidence (<8) and NIT issues before enforcement
         review_obj.critical_issues = critic_engine.filter_issues(review_obj.critical_issues)
         review_obj.minor_suggestions = critic_engine.filter_issues(review_obj.minor_suggestions)
         critical_list = review_obj.critical_issues

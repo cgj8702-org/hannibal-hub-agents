@@ -35,6 +35,16 @@ class CriticEngine:
             logger.info(
                 "🛡️ Critic dropped finding %s: NIT severity",
                 candidate.id or candidate.file_path,
+                extra={
+                    "json_fields": {
+                        "event": "finding_falsified",
+                        "category": "critic_drop",
+                        "reason": "NIT severity",
+                        "candidate_id": candidate.id,
+                        "file_path": candidate.file_path,
+                        "severity": candidate.severity,
+                    }
+                },
             )
             return False
 
@@ -45,6 +55,16 @@ class CriticEngine:
                     "🛡️ Critic disproved finding %s: %s",
                     candidate.id,
                     verdict.disproof_reason or "Disproven by adversarial check",
+                    extra={
+                        "json_fields": {
+                            "event": "finding_falsified",
+                            "category": "critic_disproved",
+                            "reason": verdict.disproof_reason or "Disproven by adversarial check",
+                            "candidate_id": candidate.id,
+                            "file_path": candidate.file_path,
+                            "confidence": verdict.confidence_score,
+                        }
+                    },
                 )
                 return False
             if verdict.confidence_score < self.min_confidence:
@@ -53,6 +73,16 @@ class CriticEngine:
                     candidate.id,
                     verdict.confidence_score,
                     self.min_confidence,
+                    extra={
+                        "json_fields": {
+                            "event": "finding_falsified",
+                            "category": "critic_drop",
+                            "reason": f"confidence {verdict.confidence_score} < threshold {self.min_confidence}",
+                            "candidate_id": candidate.id,
+                            "file_path": candidate.file_path,
+                            "confidence": verdict.confidence_score,
+                        }
+                    },
                 )
                 return False
             return True
@@ -64,6 +94,16 @@ class CriticEngine:
                 candidate.id,
                 candidate.confidence_score,
                 self.min_confidence,
+                extra={
+                    "json_fields": {
+                        "event": "finding_falsified",
+                        "category": "critic_drop",
+                        "reason": f"confidence {candidate.confidence_score} < threshold {self.min_confidence}",
+                        "candidate_id": candidate.id,
+                        "file_path": candidate.file_path,
+                        "confidence": candidate.confidence_score,
+                    }
+                },
             )
             return False
 
@@ -109,6 +149,15 @@ class CriticEngine:
                     issue.line,
                     sev,
                     cat,
+                    extra={
+                        "json_fields": {
+                            "event": "finding_falsified",
+                            "category": "critic_drop",
+                            "reason": f"NIT severity/category ({sev}/{cat})",
+                            "path": issue.path,
+                            "line": issue.line,
+                        }
+                    },
                 )
                 continue
 
@@ -126,6 +175,16 @@ class CriticEngine:
                             issue.line,
                             conf,
                             self.min_confidence,
+                            extra={
+                                "json_fields": {
+                                    "event": "finding_falsified",
+                                    "category": "critic_drop",
+                                    "reason": f"confidence {conf} < threshold {self.min_confidence}",
+                                    "path": issue.path,
+                                    "line": issue.line,
+                                    "confidence": conf,
+                                }
+                            },
                         )
                         continue
                 except (ValueError, TypeError):
@@ -138,6 +197,15 @@ class CriticEngine:
                     "🛡️ Critic dropped IssueItem at %s:%s: NIT indicator in description",
                     issue.path,
                     issue.line,
+                    extra={
+                        "json_fields": {
+                            "event": "finding_falsified",
+                            "category": "critic_drop",
+                            "reason": "NIT indicator in description",
+                            "path": issue.path,
+                            "line": issue.line,
+                        }
+                    },
                 )
                 continue
 

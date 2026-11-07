@@ -346,6 +346,14 @@ class CodeReviewResponse(BaseModel):
         default_factory=list,
         description="Systematic evaluation across mandatory audit dimensions",
     )
+    candidate_findings: list[CandidateFinding] = Field(
+        default_factory=list,
+        description="High-recall candidate issues discovered before adversarial falsification",
+    )
+    verification_verdicts: list[VerificationVerdict] = Field(
+        default_factory=list,
+        description="Adversarial verification results from the Critic stage",
+    )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,
         description="Blocking critical issues (syntax errors, security flaws, broken contracts)",
@@ -418,6 +426,14 @@ class SyncReviewResponse(BaseModel):
     scorecard: list[ScorecardItem] = Field(
         default_factory=list,
         description="Systematic evaluation across mandatory audit dimensions for incremental diff",
+    )
+    candidate_findings: list[CandidateFinding] = Field(
+        default_factory=list,
+        description="High-recall candidate issues discovered before adversarial falsification",
+    )
+    verification_verdicts: list[VerificationVerdict] = Field(
+        default_factory=list,
+        description="Adversarial verification results from the Critic stage",
     )
     critical_issues: list[IssueItem] = Field(
         default_factory=list,

@@ -22,9 +22,11 @@ import logging
 import os
 import random
 import signal
+import socket
 import threading
 import time
 import warnings
+from pathlib import Path
 from typing import Any
 
 import google.cloud.pubsub_v1 as pubsub_v1
@@ -59,6 +61,45 @@ logging.getLogger("google_adk.google.adk.runners").setLevel(logging.CRITICAL)
 logging.getLogger("google_adk.google.adk.workflow").setLevel(logging.CRITICAL)
 # Silence repetitive ADK experimental feature warnings
 warnings.filterwarnings("ignore", category=UserWarning, module=r"google\.adk")
+
+
+# ---------------------------------------------------------------------------
+# Worker Watchdog & Heartbeat Telemetry
+# ---------------------------------------------------------------------------
+def get_heartbeat_path() -> Path:
+    """Return worker heartbeat file path (XDG_RUNTIME_DIR or /tmp fallback)."""
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime and os.path.isdir(xdg_runtime):
+        return Path(xdg_runtime) / "hannibal-webhook-agent.heartbeat"
+    return Path("/tmp/hannibal-webhook-agent.heartbeat")
+
+
+def notify_systemd_watchdog() -> None:
+    """Send WATCHDOG=1 notification to systemd notification socket if configured."""
+    notify_socket = os.environ.get("NOTIFY_SOCKET")
+    if not notify_socket:
+        return
+    try:
+        sock_addr = notify_socket
+        if sock_addr.startswith("@"):
+            sock_addr = "\0" + sock_addr[1:]
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.sendto(
+                b"WATCHDOG=1",
+                sock_addr.encode("utf-8") if isinstance(sock_addr, str) else sock_addr,
+            )
+    except Exception as exc:
+        logger.debug("Systemd watchdog notification skipped: %s", exc)
+
+
+def touch_worker_heartbeat() -> None:
+    """Touch the worker heartbeat file and notify systemd watchdog."""
+    try:
+        path = get_heartbeat_path()
+        path.write_text(str(time.time()), encoding="utf-8")
+    except Exception as exc:
+        logger.debug("Failed to touch worker heartbeat file: %s", exc)
+    notify_systemd_watchdog()
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +275,7 @@ def main() -> int:
 
     logger.info("🚀 Starting sequential subscriber loop on %s", subscription_path)
     while keep_running:
+        touch_worker_heartbeat()
         now = time.time()
 
         # Check for graceful shutdown timeout
@@ -298,6 +340,7 @@ def main() -> int:
         ack_id = response.received_messages[0].ack_id
 
         logger.debug("📥 Received message: %s", str(message.message_id)[-4:])
+        touch_worker_heartbeat()
 
         try:
             payload = json.loads(message.data.decode())

@@ -26,9 +26,18 @@ Hannibal Hub has evolved beyond rigid slash commands. The agent uses a decoupled
 ## Architectural Details
 
 ### 1. Dual-Runner Architecture in `WebhookAgent`
-- **`_runner` (`_code_auditor`)**: Configured with strict 1-turn clinical review instructions, precompiled AST dossier, and structured Pydantic response models (`read_file`, `search_files`, `list_dir`, `review`). Only invoked when `_is_formal_review_eligible` evaluates to `True`.
+- **`_runner` (`_code_auditor`)**: Configured with strict clinical review instructions, precompiled AST dossier, investigative tools (`read_file`, `search_files`, `list_dir`), and the formal `review` submission tool. Equipped with self-healing error feedback loops that feed validation errors immediately back to the model.
 - **`_conversational_runner` (`_conversational_agent`)**: Dedicated conversational subagent with inspection and issue creation tools (`read_file`, `search_files`, `list_dir`, `get_issue`, `create_issue`). Prohibited from outputting raw JSON review schemas; outputs natural GitHub Flavored Markdown.
 
-### 3. Comment Rate Limiting & Safety
+### 2. Hunter-Critic Adversarial Review Pipeline
+- **Hunter Stage (`HunterEngine`)**: Discovers candidate issues (`candidate_findings`) articulating concrete defect hypotheses along with explicit `falsification_check` tests.
+- **Critic Stage (`CriticEngine`)**: Skeptical adversarial evaluation of candidate findings against repository invariants, caller contracts, and runtime semantics. Disproves false-positives and filters low-confidence findings (< 8) or stylistic NITs.
+- **Telemetry**: Emits structured Google Cloud Logging events (`event: finding_falsified`) for all disproven or dropped findings.
+
+### 3. Worker Watchdog & Liveliness Monitoring
+- Worker heartbeat timestamps are touched on every Pub/Sub pull iteration (`get_heartbeat_path()`).
+- Emits `WATCHDOG=1` notifications to systemd notification sockets (`NOTIFY_SOCKET`) to support automatic service restarts if streaming subscriber deadlocks occur.
+
+### 4. Comment Rate Limiting & Safety
 - Conversational comments are rate-limited via `_COMMENT_RATE_LIMITER` (sliding window per repository/PR key) to prevent runaway conversational loops.
 - Bot identity filters (`_is_bot_event`) prevent recursive feedback loops with other automated services.
