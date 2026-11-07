@@ -610,7 +610,9 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
     return data
 
 
-def render_code_review_markdown(review: CodeReviewResponse, verdict: str | None = None) -> str:
+def render_code_review_markdown(
+    review: CodeReviewResponse, verdict: str | None = None, **kwargs: Any
+) -> str:
     """Render CodeReviewResponse into clean, modern GitHub Markdown."""
     if verdict is None:
         verdict = calculate_strict_verdict(review)
@@ -791,6 +793,7 @@ def render_sync_review_markdown(
     review: SyncReviewResponse,
     verdict: str | None = None,
     has_prior_reviews: bool = True,
+    **kwargs: Any,
 ) -> str:
     """Render SyncReviewResponse into clean, modern GitHub Markdown."""
     if not has_prior_reviews:

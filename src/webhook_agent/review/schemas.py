@@ -310,12 +310,13 @@ class VerifiedInvariant(BaseModel):
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
 
-    def to_markdown(self) -> str:
-        if self.path:
-            loc = f"`{self.path}:{self.line}`" if self.line else f"`{self.path}`"
-            head = f"* **Invariant**: {self.invariant} ({loc})"
+    def to_markdown(self, prefix: str = "", **kwargs: Any) -> str:
+        loc = f"`{self.path}:{self.line}`" if self.line else (f"`{self.path}`" if self.path else "")
+        prefix_str = f"{prefix} " if prefix else ""
+        if loc:
+            head = f"* {prefix_str}**Invariant**: {self.invariant} ({loc})"
         else:
-            head = f"* **Invariant**: {self.invariant} (no citation provided)"
+            head = f"* {prefix_str}**Invariant**: {self.invariant} (no citation provided)"
         evidence = self.evidence or "none provided"
         return f"{head}\n  *Evidence*: {evidence}"
 
@@ -389,11 +390,17 @@ class CodeReviewResponse(BaseModel):
         cleaned = clean_field_string(v)
         return cleaned if cleaned else "Autonomous PR code review report."
 
-    def to_markdown(self, verdict: str | None = None, has_prior_reviews: bool = True) -> str:
+    def to_markdown(
+        self,
+        verdict: str | None = None,
+        has_prior_reviews: bool = True,
+        prefix: str = "",
+        **kwargs: Any,
+    ) -> str:
         """Render CodeReviewResponse into clean, modern GitHub Markdown."""
         from webhook_agent.review.formatter import render_code_review_markdown
 
-        return render_code_review_markdown(self, verdict=verdict)
+        return render_code_review_markdown(self, verdict=verdict, **kwargs)
 
 
 class SyncReviewResponse(BaseModel):
@@ -448,10 +455,16 @@ class SyncReviewResponse(BaseModel):
         cleaned = clean_field_string(v)
         return cleaned if cleaned else "Pull request synchronization review update."
 
-    def to_markdown(self, verdict: str | None = None, has_prior_reviews: bool = True) -> str:
+    def to_markdown(
+        self,
+        verdict: str | None = None,
+        has_prior_reviews: bool = True,
+        prefix: str = "",
+        **kwargs: Any,
+    ) -> str:
         """Render SyncReviewResponse into clean, modern GitHub Markdown."""
         from webhook_agent.review.formatter import render_sync_review_markdown
 
         return render_sync_review_markdown(
-            self, verdict=verdict, has_prior_reviews=has_prior_reviews
+            self, verdict=verdict, has_prior_reviews=has_prior_reviews, **kwargs
         )
