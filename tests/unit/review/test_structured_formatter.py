@@ -235,6 +235,44 @@ def test_calculate_sync_verdict_blocking_new_finding():
     assert verdict == "REQUEST_CHANGES"
 
 
+def test_calculate_sync_verdict_scorecard_floors():
+    """Verify calculate_sync_verdict enforces COMMENT when scorecard has WARN/UNKNOWN/ERROR or non-critical unresolved issues."""
+    from webhook_agent.review.schemas import ScorecardItem
+
+    # Scorecard UNKNOWN enforces COMMENT
+    sync_unknown = SyncReviewResponse(
+        summary="PR update with unverified dimension.",
+        resolutions=[],
+        scorecard=[
+            ScorecardItem(dimension="Contract Integrity", status="UNKNOWN", notes="Timed out"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+        ],
+    )
+    assert calculate_sync_verdict(sync_unknown) == "COMMENT"
+
+    # Scorecard WARN enforces COMMENT
+    sync_warn = SyncReviewResponse(
+        summary="PR update with warning dimension.",
+        resolutions=[],
+        scorecard=[
+            ScorecardItem(dimension="Contract Integrity", status="WARN", notes="Suspected issue"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+        ],
+    )
+    assert calculate_sync_verdict(sync_warn) == "COMMENT"
+
+    # Scorecard ERROR enforces COMMENT on missing verdict
+    sync_error = SyncReviewResponse(
+        summary="PR update with error dimension.",
+        resolutions=[],
+        scorecard=[
+            ScorecardItem(dimension="Contract Integrity", status="ERROR", notes="Parser failed"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+        ],
+    )
+    assert calculate_sync_verdict(sync_error) == "COMMENT"
+
+
 def test_parse_text_review_to_dict():
     """Verify that parse_text_review_to_dict correctly extracts structured data from loose text reviews."""
     from webhook_agent.review.formatter import parse_text_review_to_dict
@@ -814,7 +852,26 @@ def test_enforce_verdict_sync_review_resolution_guard_clears_hallucinations():
         "critical_issues": [],
         "minor_suggestions": []
     }"""
-    rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
+    state = {
+        "deterministic_contract_scorecard_item": {
+            "dimension": "Contract Integrity",
+            "status": "PASS",
+            "notes": "OK",
+        },
+        "deterministic_security_scorecard_item": {
+            "dimension": "Security & Secrets",
+            "status": "PASS",
+            "notes": "OK",
+        },
+        "deterministic_test_scorecard_item": {
+            "dimension": "Test Coverage & Regressions",
+            "status": "PASS",
+            "notes": "OK",
+        },
+    }
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        json_input, "APPROVE", pr=mock_pr, state=state
+    )
     assert verdict == "APPROVE"
     assert "Imaginary bug that was never reported" not in rendered_md
     assert "Resolution Tracker" not in rendered_md or "| Imaginary bug" not in rendered_md
@@ -842,7 +899,26 @@ def test_enforce_verdict_sync_review_resolution_guard_preserves_legitimate_resol
         "critical_issues": [],
         "minor_suggestions": []
     }"""
-    rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
+    state = {
+        "deterministic_contract_scorecard_item": {
+            "dimension": "Contract Integrity",
+            "status": "PASS",
+            "notes": "OK",
+        },
+        "deterministic_security_scorecard_item": {
+            "dimension": "Security & Secrets",
+            "status": "PASS",
+            "notes": "OK",
+        },
+        "deterministic_test_scorecard_item": {
+            "dimension": "Test Coverage & Regressions",
+            "status": "PASS",
+            "notes": "OK",
+        },
+    }
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        json_input, "APPROVE", pr=mock_pr, state=state
+    )
     assert verdict == "APPROVE"
     assert "Real bug reported in prior review" in rendered_md
 
@@ -878,7 +954,26 @@ def test_enforce_verdict_removal_only_patch_grounds_resolution():
         "critical_issues": [],
         "minor_suggestions": []
     }"""
-    rendered_md, verdict, _inline_comments = _enforce_verdict(json_input, "APPROVE", pr=mock_pr)
+    state = {
+        "deterministic_contract_scorecard_item": {
+            "dimension": "Contract Integrity",
+            "status": "PASS",
+            "notes": "OK",
+        },
+        "deterministic_security_scorecard_item": {
+            "dimension": "Security & Secrets",
+            "status": "PASS",
+            "notes": "OK",
+        },
+        "deterministic_test_scorecard_item": {
+            "dimension": "Test Coverage & Regressions",
+            "status": "PASS",
+            "notes": "OK",
+        },
+    }
+    rendered_md, verdict, _inline_comments = _enforce_verdict(
+        json_input, "APPROVE", pr=mock_pr, state=state
+    )
     assert verdict == "APPROVE"
     assert "dangerous_call security risk" in rendered_md
     assert "RESOLVED" in rendered_md
@@ -1209,7 +1304,7 @@ def test_scorecard_unknown_and_error_statuses() -> None:
 
 
 def test_scorecard_unknown_verdict_behavior() -> None:
-    """Verify UNKNOWN/ERROR in scorecard does not hard block or silently approve."""
+    """Verify UNKNOWN/ERROR/WARN in scorecard enforces COMMENT instead of silently approving."""
     from webhook_agent.review.schemas import ScorecardItem
 
     cr = CodeReviewResponse(
@@ -1221,9 +1316,33 @@ def test_scorecard_unknown_verdict_behavior() -> None:
             ScorecardItem(dimension="Security & Secrets", status="PASS", notes="No secrets."),
         ],
     )
-    # UNKNOWN alone does not force REQUEST_CHANGES (only FAIL does)
+    # UNKNOWN prevents APPROVE and enforces COMMENT
     verdict = calculate_strict_verdict(cr)
-    assert verdict == "APPROVE"
+    assert verdict == "COMMENT"
+
+    # WARN prevents APPROVE and enforces COMMENT
+    cr_warn = CodeReviewResponse(
+        executive_summary="Clean PR with suspected call.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Contract Integrity", status="WARN", notes="Suspected unverified call."
+            ),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="No secrets."),
+        ],
+    )
+    assert calculate_strict_verdict(cr_warn) == "COMMENT"
+
+    # ERROR prevents APPROVE and enforces COMMENT
+    cr_error = CodeReviewResponse(
+        executive_summary="Clean PR with analyzer error.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Contract Integrity", status="ERROR", notes="Analyzer failed to parse."
+            ),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="No secrets."),
+        ],
+    )
+    assert calculate_strict_verdict(cr_error) == "COMMENT"
 
 
 def test_parse_text_review_scorecard_unknown_and_error() -> None:

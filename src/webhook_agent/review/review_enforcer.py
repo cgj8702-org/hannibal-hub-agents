@@ -313,6 +313,171 @@ def _apply_citation_grounding(
     return issues, has_hard
 
 
+def _finalize_enforced_review(
+    review_obj: CodeReviewResponse | SyncReviewResponse,
+    *,
+    critic_engine: CriticEngine,
+    det_contract_item: ScorecardItem | None,
+    det_security_item: ScorecardItem | None,
+    det_test_item: ScorecardItem | None,
+    diff_for_grounding: str,
+    diff_text: str,
+    changed_paths: list[str],
+    head_sha: str,
+    pr: Any,
+    pr_label: str,
+    bot_reviews: list[Any],
+    existing_comments_data: list[dict[str, Any]],
+    review_budget: int | None,
+    has_prior_reviews: bool,
+    is_intended_request_changes: bool,
+    is_body_comment: bool,
+    is_caller_comment: bool,
+    is_text: bool = False,
+) -> tuple[str, str, list[dict[str, Any]]]:
+    """Finalize review object by applying scorecard floors, invariants, grounding, guardrails, comments, and markdown rendering."""
+    if det_contract_item is not None:
+        review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_contract_item)
+    if det_security_item is not None:
+        review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_security_item)
+    if det_test_item is not None:
+        review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_test_item)
+
+    review_obj.critical_issues = critic_engine.filter_issues(review_obj.critical_issues)
+    review_obj.minor_suggestions = critic_engine.filter_issues(review_obj.minor_suggestions)
+
+    if isinstance(review_obj, SyncReviewResponse):
+        # Programmatic hallucination guard: clear resolutions if no prior review
+        # had actionable items (critical issues, suggestions, or risks)
+        if pr is not None and review_obj.resolutions:
+            from webhook_agent.review.metadata import has_actionable_findings
+
+            prior_had_findings = any(
+                has_actionable_findings(
+                    getattr(r, "body", "") or "",
+                    getattr(r, "state", ""),
+                )
+                for r in bot_reviews
+            )
+            if not prior_had_findings:
+                logger.warning(
+                    "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior actionable findings exist in bot reviews)",
+                    len(review_obj.resolutions),
+                )
+                review_obj.resolutions = []
+
+        if diff_for_grounding and review_obj.resolutions:
+            from webhook_agent.review.grounding import verify_resolutions
+            from webhook_agent.review.schemas import SyncResolutionItem
+
+            grounded_res = verify_resolutions(review_obj.resolutions, diff_for_grounding)
+            review_obj.resolutions = [SyncResolutionItem.model_validate(r) for r in grounded_res]
+
+        enforced_verdict = calculate_sync_verdict(review_obj)
+    else:
+        enforced_verdict = calculate_strict_verdict(review_obj)
+
+    if diff_for_grounding:
+        from webhook_agent.review.grounding import partition_invariants
+
+        if review_obj.verified_invariants:
+            v_invs, s_invs = partition_invariants(
+                review_obj.verified_invariants,
+                diff_for_grounding,
+                changed_paths=changed_paths,
+            )
+            review_obj.verified_invariants = v_invs
+            for s in s_invs:
+                if s not in review_obj.semantic_invariants:
+                    review_obj.semantic_invariants.append(s)
+
+        if not review_obj.verified_invariants and review_obj.scorecard:
+            from webhook_agent.review.grounding import extract_scorecard_invariants
+
+            recovered_invariants = extract_scorecard_invariants(
+                review_obj.scorecard,
+                diff_for_grounding,
+                changed_paths=changed_paths,
+            )
+            if recovered_invariants:
+                review_obj.verified_invariants = recovered_invariants
+
+        if review_obj.semantic_invariants:
+            from webhook_agent.review.grounding import (
+                filter_and_ground_semantic_invariants,
+            )
+
+            grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
+                review_obj.semantic_invariants,
+                diff_for_grounding,
+                changed_paths=changed_paths,
+                head_sha=head_sha,
+            )
+            review_obj.semantic_invariants = grounded_sem
+            for dc in demoted_claims:
+                if dc not in review_obj.unverified_claims:
+                    review_obj.unverified_claims.append(dc)
+
+        grounding_issues, has_hard = _apply_citation_grounding(
+            review_obj,
+            diff_for_grounding,
+            changed_paths=changed_paths,
+            pr_label=pr_label,
+        )
+        enforced_verdict = _handle_strict_grounding_gate(
+            has_hard=has_hard,
+            grounding_issues=grounding_issues,
+            pr=pr,
+            pr_label=pr_label,
+            enforced_verdict=enforced_verdict,
+        )
+
+    mode_label = (
+        "sync " if isinstance(review_obj, SyncReviewResponse) else ("text " if is_text else "")
+    )
+    if is_intended_request_changes and enforced_verdict == "APPROVE":
+        logger.warning(
+            "Safety Guardrail: Prevented mechanical upgrade of %sREQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES.",
+            mode_label,
+        )
+        enforced_verdict = "REQUEST_CHANGES"
+    elif (
+        is_body_comment or (is_caller_comment and _has_review_findings_or_warnings(review_obj))
+    ) and enforced_verdict == "APPROVE":
+        logger.warning(
+            "Safety Guardrail: Prevented mechanical upgrade of %sCOMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT.",
+            mode_label,
+        )
+        enforced_verdict = "COMMENT"
+
+    inline_comments: list[dict[str, Any]] = []
+    if diff_text:
+        from .comment_poster import (
+            build_github_review_comments,
+            filter_echo_suggestions,
+        )
+
+        review_obj.minor_suggestions = filter_echo_suggestions(
+            review_obj.minor_suggestions, diff_text
+        )
+        review_issues = list(review_obj.critical_issues) + list(review_obj.minor_suggestions)
+        inline_comments, _ = build_github_review_comments(
+            review_issues,
+            diff_text,
+            existing_comments=existing_comments_data,
+            max_comments=review_budget,
+        )
+
+    if isinstance(review_obj, SyncReviewResponse):
+        rendered_body = render_sync_review_markdown(
+            review_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
+        )
+    else:
+        rendered_body = render_code_review_markdown(review_obj, enforced_verdict)
+
+    return rendered_body, enforced_verdict, inline_comments
+
+
 def _enforce_verdict(
     body: str,
     event: str,
@@ -335,8 +500,6 @@ def _enforce_verdict(
     """
     if not body or not body.strip():
         raise ValueError("Unparseable review payload: empty review body")
-
-    from .comment_poster import build_github_review_comments
 
     det_contract_item: ScorecardItem | None = deterministic_contract_item
     det_security_item: ScorecardItem | None = deterministic_security_item
@@ -572,6 +735,8 @@ def _enforce_verdict(
                 ", ".join(missing),
             )
 
+    diff_for_grounding = raw_diff or diff_text
+
     for data in data_candidates:
         try:
             if isinstance(data, dict):
@@ -637,144 +802,26 @@ def _enforce_verdict(
                 if use_sync_schema:
                     normalized_sync = normalize_sync_review_dict(data)
                     sync_obj = SyncReviewResponse.model_validate(normalized_sync)
-                    if det_contract_item is not None:
-                        sync_obj.scorecard = apply_scorecard_floor(
-                            sync_obj.scorecard, det_contract_item
-                        )
-                    if det_security_item is not None:
-                        sync_obj.scorecard = apply_scorecard_floor(
-                            sync_obj.scorecard, det_security_item
-                        )
-                    if det_test_item is not None:
-                        sync_obj.scorecard = apply_scorecard_floor(
-                            sync_obj.scorecard, det_test_item
-                        )
-                    sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
-                    sync_obj.minor_suggestions = critic_engine.filter_issues(
-                        sync_obj.minor_suggestions
+                    return _finalize_enforced_review(
+                        sync_obj,
+                        critic_engine=critic_engine,
+                        det_contract_item=det_contract_item,
+                        det_security_item=det_security_item,
+                        det_test_item=det_test_item,
+                        diff_for_grounding=diff_for_grounding,
+                        diff_text=diff_text,
+                        changed_paths=changed_paths,
+                        head_sha=head_sha,
+                        pr=pr,
+                        pr_label=pr_label,
+                        bot_reviews=bot_reviews,
+                        existing_comments_data=existing_comments_data,
+                        review_budget=review_budget,
+                        has_prior_reviews=has_prior_reviews,
+                        is_intended_request_changes=is_intended_request_changes,
+                        is_body_comment=is_body_comment,
+                        is_caller_comment=is_caller_comment,
                     )
-
-                    # Programmatic hallucination guard: clear resolutions if no prior review
-                    # had actionable items (critical issues, suggestions, or risks)
-                    if pr is not None and sync_obj.resolutions:
-                        from webhook_agent.review.metadata import has_actionable_findings
-
-                        prior_had_findings = any(
-                            has_actionable_findings(
-                                getattr(r, "body", "") or "",
-                                getattr(r, "state", ""),
-                            )
-                            for r in bot_reviews
-                        )
-                        if not prior_had_findings:
-                            logger.warning(
-                                "Resolution hallucination guard: Cleared %d fabricated resolutions (no prior actionable findings exist in bot reviews)",
-                                len(sync_obj.resolutions),
-                            )
-                            sync_obj.resolutions = []
-
-                    diff_for_grounding = raw_diff or diff_text
-                    if diff_for_grounding:
-                        from webhook_agent.review.grounding import (
-                            partition_invariants,
-                            verify_resolutions,
-                        )
-                        from webhook_agent.review.schemas import SyncResolutionItem
-
-                        grounded_res = verify_resolutions(sync_obj.resolutions, diff_for_grounding)
-                        sync_obj.resolutions = [
-                            SyncResolutionItem.model_validate(r) for r in grounded_res
-                        ]
-                        if sync_obj.verified_invariants:
-                            v_invs, s_invs = partition_invariants(
-                                sync_obj.verified_invariants,
-                                diff_for_grounding,
-                                changed_paths=changed_paths,
-                            )
-                            sync_obj.verified_invariants = v_invs
-                            for s in s_invs:
-                                if s not in sync_obj.semantic_invariants:
-                                    sync_obj.semantic_invariants.append(s)
-
-                        if not sync_obj.verified_invariants and sync_obj.scorecard:
-                            from webhook_agent.review.grounding import extract_scorecard_invariants
-
-                            recovered_invariants = extract_scorecard_invariants(
-                                sync_obj.scorecard,
-                                diff_for_grounding,
-                                changed_paths=changed_paths,
-                            )
-                            if recovered_invariants:
-                                sync_obj.verified_invariants = recovered_invariants
-
-                        if sync_obj.semantic_invariants:
-                            from webhook_agent.review.grounding import (
-                                filter_and_ground_semantic_invariants,
-                            )
-
-                            grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
-                                sync_obj.semantic_invariants,
-                                diff_for_grounding,
-                                changed_paths=changed_paths,
-                                head_sha=head_sha,
-                            )
-                            sync_obj.semantic_invariants = grounded_sem
-                            for dc in demoted_claims:
-                                if dc not in sync_obj.unverified_claims:
-                                    sync_obj.unverified_claims.append(dc)
-
-                    enforced_verdict = calculate_sync_verdict(sync_obj)
-                    if diff_for_grounding:
-                        grounding_issues, has_hard = _apply_citation_grounding(
-                            sync_obj,
-                            diff_for_grounding,
-                            changed_paths=changed_paths,
-                            pr_label=pr_label,
-                        )
-                        enforced_verdict = _handle_strict_grounding_gate(
-                            has_hard=has_hard,
-                            grounding_issues=grounding_issues,
-                            pr=pr,
-                            pr_label=pr_label,
-                            enforced_verdict=enforced_verdict,
-                        )
-
-                    if is_intended_request_changes and enforced_verdict == "APPROVE":
-                        logger.warning(
-                            "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
-                        )
-                        enforced_verdict = "REQUEST_CHANGES"
-                    elif (
-                        is_body_comment
-                        or (is_caller_comment and _has_review_findings_or_warnings(sync_obj))
-                    ) and enforced_verdict == "APPROVE":
-                        logger.warning(
-                            "Safety Guardrail: Prevented mechanical upgrade of sync COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
-                        )
-                        enforced_verdict = "COMMENT"
-                    inline_comments: list[dict[str, Any]] = []
-                    if diff_text:
-                        from .comment_poster import (
-                            build_github_review_comments,
-                            filter_echo_suggestions,
-                        )
-
-                        sync_obj.minor_suggestions = filter_echo_suggestions(
-                            sync_obj.minor_suggestions, diff_text
-                        )
-                        sync_issues = list(sync_obj.critical_issues) + list(
-                            sync_obj.minor_suggestions
-                        )
-                        inline_comments, _ = build_github_review_comments(
-                            sync_issues,
-                            diff_text,
-                            existing_comments=existing_comments_data,
-                            max_comments=review_budget,
-                        )
-                    rendered_body = render_sync_review_markdown(
-                        sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
-                    )
-                    return rendered_body, enforced_verdict, inline_comments
                 elif (
                     "executive_summary" in data
                     or "critical_issues" in data
@@ -783,107 +830,26 @@ def _enforce_verdict(
                 ):
                     normalized_data = normalize_code_review_dict(data)
                     cr_obj = CodeReviewResponse.model_validate(normalized_data)
-                    if det_contract_item is not None:
-                        cr_obj.scorecard = apply_scorecard_floor(
-                            cr_obj.scorecard, det_contract_item
-                        )
-                    if det_security_item is not None:
-                        cr_obj.scorecard = apply_scorecard_floor(
-                            cr_obj.scorecard, det_security_item
-                        )
-                    if det_test_item is not None:
-                        cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_test_item)
-                    cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
-                    cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
-                    enforced_verdict = calculate_strict_verdict(cr_obj)
-                    diff_for_grounding = raw_diff or diff_text
-                    if diff_for_grounding:
-                        from webhook_agent.review.grounding import partition_invariants
-
-                        if cr_obj.verified_invariants:
-                            v_invs, s_invs = partition_invariants(
-                                cr_obj.verified_invariants,
-                                diff_for_grounding,
-                                changed_paths=changed_paths,
-                            )
-                            cr_obj.verified_invariants = v_invs
-                            for s in s_invs:
-                                if s not in cr_obj.semantic_invariants:
-                                    cr_obj.semantic_invariants.append(s)
-
-                        if not cr_obj.verified_invariants and cr_obj.scorecard:
-                            from webhook_agent.review.grounding import extract_scorecard_invariants
-
-                            recovered_invariants = extract_scorecard_invariants(
-                                cr_obj.scorecard,
-                                diff_for_grounding,
-                                changed_paths=changed_paths,
-                            )
-                            if recovered_invariants:
-                                cr_obj.verified_invariants = recovered_invariants
-
-                        if cr_obj.semantic_invariants:
-                            from webhook_agent.review.grounding import (
-                                filter_and_ground_semantic_invariants,
-                            )
-
-                            grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
-                                cr_obj.semantic_invariants,
-                                diff_for_grounding,
-                                changed_paths=changed_paths,
-                                head_sha=head_sha,
-                            )
-                            cr_obj.semantic_invariants = grounded_sem
-                            for dc in demoted_claims:
-                                if dc not in cr_obj.unverified_claims:
-                                    cr_obj.unverified_claims.append(dc)
-
-                        grounding_issues, has_hard = _apply_citation_grounding(
-                            cr_obj,
-                            diff_for_grounding,
-                            changed_paths=changed_paths,
-                            pr_label=pr_label,
-                        )
-                        enforced_verdict = _handle_strict_grounding_gate(
-                            has_hard=has_hard,
-                            grounding_issues=grounding_issues,
-                            pr=pr,
-                            pr_label=pr_label,
-                            enforced_verdict=enforced_verdict,
-                        )
-
-                    if is_intended_request_changes and enforced_verdict == "APPROVE":
-                        logger.warning(
-                            "Safety Guardrail: Prevented mechanical upgrade of REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
-                        )
-                        enforced_verdict = "REQUEST_CHANGES"
-                    elif (
-                        is_body_comment
-                        or (is_caller_comment and _has_review_findings_or_warnings(cr_obj))
-                    ) and enforced_verdict == "APPROVE":
-                        logger.warning(
-                            "Safety Guardrail: Prevented mechanical upgrade of COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
-                        )
-                        enforced_verdict = "COMMENT"
-                    inline_comments = []
-                    if diff_text:
-                        from .comment_poster import (
-                            build_github_review_comments,
-                            filter_echo_suggestions,
-                        )
-
-                        cr_obj.minor_suggestions = filter_echo_suggestions(
-                            cr_obj.minor_suggestions, diff_text
-                        )
-                        cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
-                        inline_comments, _ = build_github_review_comments(
-                            cr_issues,
-                            diff_text,
-                            existing_comments=existing_comments_data,
-                            max_comments=review_budget,
-                        )
-                    rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
-                    return rendered_body, enforced_verdict, inline_comments
+                    return _finalize_enforced_review(
+                        cr_obj,
+                        critic_engine=critic_engine,
+                        det_contract_item=det_contract_item,
+                        det_security_item=det_security_item,
+                        det_test_item=det_test_item,
+                        diff_for_grounding=diff_for_grounding,
+                        diff_text=diff_text,
+                        changed_paths=changed_paths,
+                        head_sha=head_sha,
+                        pr=pr,
+                        pr_label=pr_label,
+                        bot_reviews=bot_reviews,
+                        existing_comments_data=existing_comments_data,
+                        review_budget=review_budget,
+                        has_prior_reviews=has_prior_reviews,
+                        is_intended_request_changes=is_intended_request_changes,
+                        is_body_comment=is_body_comment,
+                        is_caller_comment=is_caller_comment,
+                    )
         except Exception as exc:
             logger.debug("Candidate JSON parse attempt skipped: %s", exc)
 
@@ -912,192 +878,51 @@ def _enforce_verdict(
         if review_mode == "sync":
             normalized_sync = normalize_sync_review_dict(parsed_dict)
             sync_obj = SyncReviewResponse.model_validate(normalized_sync)
-            if det_contract_item is not None:
-                sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_contract_item)
-            if det_security_item is not None:
-                sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_security_item)
-            if det_test_item is not None:
-                sync_obj.scorecard = apply_scorecard_floor(sync_obj.scorecard, det_test_item)
-            sync_obj.critical_issues = critic_engine.filter_issues(sync_obj.critical_issues)
-            sync_obj.minor_suggestions = critic_engine.filter_issues(sync_obj.minor_suggestions)
-            if diff_text:
-                from .comment_poster import filter_echo_suggestions
-
-                sync_obj.minor_suggestions = filter_echo_suggestions(
-                    sync_obj.minor_suggestions, diff_text
-                )
-            enforced_verdict = calculate_sync_verdict(sync_obj)
-            diff_for_grounding = raw_diff or diff_text
-            if diff_for_grounding:
-                from webhook_agent.review.grounding import partition_invariants
-
-                if sync_obj.verified_invariants:
-                    v_invs, s_invs = partition_invariants(
-                        sync_obj.verified_invariants,
-                        diff_for_grounding,
-                        changed_paths=changed_paths,
-                    )
-                    sync_obj.verified_invariants = v_invs
-                    for s in s_invs:
-                        if s not in sync_obj.semantic_invariants:
-                            sync_obj.semantic_invariants.append(s)
-
-                if not sync_obj.verified_invariants and sync_obj.scorecard:
-                    from webhook_agent.review.grounding import extract_scorecard_invariants
-
-                    recovered_invariants = extract_scorecard_invariants(
-                        sync_obj.scorecard,
-                        diff_for_grounding,
-                        changed_paths=changed_paths,
-                    )
-                    if recovered_invariants:
-                        sync_obj.verified_invariants = recovered_invariants
-
-                if sync_obj.semantic_invariants:
-                    from webhook_agent.review.grounding import (
-                        filter_and_ground_semantic_invariants,
-                    )
-
-                    grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
-                        sync_obj.semantic_invariants,
-                        diff_for_grounding,
-                        changed_paths=changed_paths,
-                        head_sha=head_sha,
-                    )
-                    sync_obj.semantic_invariants = grounded_sem
-                    for dc in demoted_claims:
-                        if dc not in sync_obj.unverified_claims:
-                            sync_obj.unverified_claims.append(dc)
-
-                grounding_issues, has_hard = _apply_citation_grounding(
-                    sync_obj,
-                    diff_for_grounding,
-                    changed_paths=changed_paths,
-                    pr_label=pr_label,
-                )
-                enforced_verdict = _handle_strict_grounding_gate(
-                    has_hard=has_hard,
-                    grounding_issues=grounding_issues,
-                    pr=pr,
-                    pr_label=pr_label,
-                    enforced_verdict=enforced_verdict,
-                )
-
-            if is_intended_request_changes and enforced_verdict == "APPROVE":
-                logger.warning(
-                    "Safety Guardrail: Prevented mechanical upgrade of sync REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
-                )
-                enforced_verdict = "REQUEST_CHANGES"
-            elif (
-                is_body_comment
-                or (is_caller_comment and _has_review_findings_or_warnings(sync_obj))
-            ) and enforced_verdict == "APPROVE":
-                logger.warning(
-                    "Safety Guardrail: Prevented mechanical upgrade of sync COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
-                )
-                enforced_verdict = "COMMENT"
-
-            rendered_body = render_sync_review_markdown(
-                sync_obj, enforced_verdict, has_prior_reviews=has_prior_reviews
+            return _finalize_enforced_review(
+                sync_obj,
+                critic_engine=critic_engine,
+                det_contract_item=det_contract_item,
+                det_security_item=det_security_item,
+                det_test_item=det_test_item,
+                diff_for_grounding=diff_for_grounding,
+                diff_text=diff_text,
+                changed_paths=changed_paths,
+                head_sha=head_sha,
+                pr=pr,
+                pr_label=pr_label,
+                bot_reviews=bot_reviews,
+                existing_comments_data=existing_comments_data,
+                review_budget=review_budget,
+                has_prior_reviews=has_prior_reviews,
+                is_intended_request_changes=is_intended_request_changes,
+                is_body_comment=is_body_comment,
+                is_caller_comment=is_caller_comment,
+                is_text=True,
             )
-            return rendered_body, enforced_verdict, []
 
         normalized_dict = normalize_code_review_dict(parsed_dict)
         cr_obj = CodeReviewResponse.model_validate(normalized_dict)
-        if det_contract_item is not None:
-            cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_contract_item)
-        if det_security_item is not None:
-            cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_security_item)
-        if det_test_item is not None:
-            cr_obj.scorecard = apply_scorecard_floor(cr_obj.scorecard, det_test_item)
-        cr_obj.critical_issues = critic_engine.filter_issues(cr_obj.critical_issues)
-        cr_obj.minor_suggestions = critic_engine.filter_issues(cr_obj.minor_suggestions)
-        enforced_verdict = calculate_strict_verdict(cr_obj)
-        diff_for_grounding = raw_diff or diff_text
-        if diff_for_grounding:
-            from webhook_agent.review.grounding import partition_invariants
-
-            if cr_obj.verified_invariants:
-                v_invs, s_invs = partition_invariants(
-                    cr_obj.verified_invariants,
-                    diff_for_grounding,
-                    changed_paths=changed_paths,
-                )
-                cr_obj.verified_invariants = v_invs
-                for s in s_invs:
-                    if s not in cr_obj.semantic_invariants:
-                        cr_obj.semantic_invariants.append(s)
-
-            if not cr_obj.verified_invariants and cr_obj.scorecard:
-                from webhook_agent.review.grounding import extract_scorecard_invariants
-
-                recovered_invariants = extract_scorecard_invariants(
-                    cr_obj.scorecard,
-                    diff_for_grounding,
-                    changed_paths=changed_paths,
-                )
-                if recovered_invariants:
-                    cr_obj.verified_invariants = recovered_invariants
-
-            if cr_obj.semantic_invariants:
-                from webhook_agent.review.grounding import (
-                    filter_and_ground_semantic_invariants,
-                )
-
-                grounded_sem, demoted_claims = filter_and_ground_semantic_invariants(
-                    cr_obj.semantic_invariants,
-                    diff_for_grounding,
-                    changed_paths=changed_paths,
-                    head_sha=head_sha,
-                )
-                cr_obj.semantic_invariants = grounded_sem
-                for dc in demoted_claims:
-                    if dc not in cr_obj.unverified_claims:
-                        cr_obj.unverified_claims.append(dc)
-
-            grounding_issues, has_hard = _apply_citation_grounding(
-                cr_obj,
-                diff_for_grounding,
-                changed_paths=changed_paths,
-                pr_label=pr_label,
-            )
-            enforced_verdict = _handle_strict_grounding_gate(
-                has_hard=has_hard,
-                grounding_issues=grounding_issues,
-                pr=pr,
-                pr_label=pr_label,
-                enforced_verdict=enforced_verdict,
-            )
-
-        if is_intended_request_changes and enforced_verdict == "APPROVE":
-            logger.warning(
-                "Safety Guardrail: Prevented mechanical upgrade of text REQUEST_CHANGES to APPROVE! Enforcing REQUEST_CHANGES."
-            )
-            enforced_verdict = "REQUEST_CHANGES"
-        elif (
-            is_body_comment or (is_caller_comment and _has_review_findings_or_warnings(cr_obj))
-        ) and enforced_verdict == "APPROVE":
-            logger.warning(
-                "Safety Guardrail: Prevented mechanical upgrade of text COMMENT to APPROVE on review with findings/warnings! Enforcing COMMENT."
-            )
-            enforced_verdict = "COMMENT"
-        inline_comments = []
-        if diff_text:
-            from .comment_poster import (
-                build_github_review_comments,
-                filter_echo_suggestions,
-            )
-
-            cr_obj.minor_suggestions = filter_echo_suggestions(cr_obj.minor_suggestions, diff_text)
-            cr_issues = list(cr_obj.critical_issues) + list(cr_obj.minor_suggestions)
-            inline_comments, _ = build_github_review_comments(
-                cr_issues,
-                diff_text,
-                existing_comments=existing_comments_data,
-                max_comments=review_budget,
-            )
-        rendered_body = render_code_review_markdown(cr_obj, enforced_verdict)
-        return rendered_body, enforced_verdict, inline_comments
+        return _finalize_enforced_review(
+            cr_obj,
+            critic_engine=critic_engine,
+            det_contract_item=det_contract_item,
+            det_security_item=det_security_item,
+            det_test_item=det_test_item,
+            diff_for_grounding=diff_for_grounding,
+            diff_text=diff_text,
+            changed_paths=changed_paths,
+            head_sha=head_sha,
+            pr=pr,
+            pr_label=pr_label,
+            bot_reviews=bot_reviews,
+            existing_comments_data=existing_comments_data,
+            review_budget=review_budget,
+            has_prior_reviews=has_prior_reviews,
+            is_intended_request_changes=is_intended_request_changes,
+            is_body_comment=is_body_comment,
+            is_caller_comment=is_caller_comment,
+            is_text=True,
+        )
     except Exception as parse_err:
         logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)
         raise ValueError(f"Unparseable review payload: {parse_err}") from parse_err

@@ -27,18 +27,11 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "testing/",
     "fixtures/",
     "test_fixtures/",
-    "docs/",
-    ".agents/",
-    "dev/",
-    "assets/",
 )
 
 EXEMPT_FILE_SUFFIXES: tuple[str, ...] = (
     "_test.py",
     "test_.py",
-    ".md",
-    ".rst",
-    ".txt",
     ".lock",
 )
 

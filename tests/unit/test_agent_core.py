@@ -1022,7 +1022,7 @@ class TestReviewDismissalOrdering:
         mock_pr.create_review.side_effect = RuntimeError("GitHub API 503")
 
         valid_body = (
-            '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
+            '{"executive_summary": "Approved code changes.", "verdict": "APPROVE", "confidence": 5, "critical_issues": [], '
             '"minor_suggestions": [], "risks_and_edge_cases": [], "verified_invariants": [{"invariant": "Locking order preserved", "path": "src/core.py", "line": 10, "evidence": "Tested"}], "context_gaps": []}'
         )
         res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")
@@ -1043,6 +1043,21 @@ class TestReviewDismissalOrdering:
             "gh_client": mock_gh,
             "repo_full_name": "owner/repo",
             "skip_investigation_gate": True,
+            "deterministic_contract_scorecard_item": {
+                "dimension": "Contract Integrity",
+                "status": "PASS",
+                "notes": "OK",
+            },
+            "deterministic_security_scorecard_item": {
+                "dimension": "Security & Secrets",
+                "status": "PASS",
+                "notes": "OK",
+            },
+            "deterministic_test_scorecard_item": {
+                "dimension": "Test Coverage & Regressions",
+                "status": "PASS",
+                "notes": "OK",
+            },
         }
 
         mock_prior = MagicMock()
@@ -1066,7 +1081,7 @@ class TestReviewDismissalOrdering:
         mock_pr.get_files.return_value = [mock_file]
 
         valid_body = (
-            '{"executive_summary": "Approved code changes.", "confidence": 5, "critical_issues": [], '
+            '{"executive_summary": "Approved code changes.", "verdict": "APPROVE", "confidence": 5, "critical_issues": [], '
             '"minor_suggestions": [], "risks_and_edge_cases": [], "verified_invariants": [{"invariant": "Locking order preserved", "path": "src/core.py", "line": 10, "evidence": "Tested"}], "context_gaps": []}'
         )
         res = review(ctx, pr_number=42, body=valid_body, event="APPROVE")

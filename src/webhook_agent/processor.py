@@ -414,9 +414,19 @@ class WebhookProcessor:
         self.installation_id = _env_int(
             "GITHUB_INSTALLATION_ID", int(DEFAULT_GITHUB_INSTALLATION_ID)
         )
+
+        def _resolve_default_key_path() -> str:
+            xdg_runtime = os.getenv("XDG_RUNTIME_DIR")
+            if xdg_runtime and os.path.isdir(xdg_runtime):
+                return os.path.join(xdg_runtime, "hannibal-keys", "github-app-private-key.pem")
+            home = os.getenv("HOME") or os.path.expanduser("~")
+            return os.path.join(
+                home, ".local", "share", "hannibal", "keys", "github-app-private-key.pem"
+            )
+
         self.private_key_path = os.getenv(
             "GITHUB_PRIVATE_KEY_PATH",
-            "/tmp/keys/github-app-private-key.pem",
+            _resolve_default_key_path(),
         )
         self.dry_run = os.environ.get("DRY_RUN", "0") in ("1", "true", "True")
         # Built lazily on first process_event() call — NOT here. Keeps

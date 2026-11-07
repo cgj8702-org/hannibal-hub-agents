@@ -153,6 +153,14 @@ class IssueItem(BaseModel):
                             break
                         except (ValueError, TypeError):
                             pass
+            if "confidence_score" not in data or data["confidence_score"] is None:
+                for key in ("confidence", "confidenceScore", "score"):
+                    if data.get(key) is not None:
+                        try:
+                            data["confidence_score"] = int(data[key])
+                            break
+                        except (ValueError, TypeError):
+                            pass
         return data
 
     @field_validator("suggested_fix", mode="before")

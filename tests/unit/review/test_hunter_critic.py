@@ -353,3 +353,33 @@ def test_review_enforcer_candidate_findings_extraction() -> None:
     assert "Spacing nit" not in rendered_body
     assert "Low confidence edge case" not in rendered_body
     assert inline_comments == []
+
+
+def test_issue_item_confidence_alias_and_critic_filter() -> None:
+    """Verify IssueItem coerces 'confidence' to 'confidence_score' and CriticEngine filters it."""
+    # Coercion from alias
+    item_low = IssueItem.model_validate(
+        {
+            "path": "src/app.py",
+            "line": 15,
+            "description": "Possible latency spike",
+            "confidence": 6,
+        }
+    )
+    assert item_low.confidence_score == 6
+
+    item_high = IssueItem.model_validate(
+        {
+            "path": "src/app.py",
+            "line": 20,
+            "description": "Hard crash on None input",
+            "confidence": 9,
+        }
+    )
+    assert item_high.confidence_score == 9
+
+    critic = CriticEngine(min_confidence=8)
+    survivors = critic.filter_issues([item_low, item_high])
+    assert len(survivors) == 1
+    assert survivors[0].line == 20
+    assert survivors[0].description == "Hard crash on None input"

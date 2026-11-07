@@ -22,7 +22,6 @@ import logging
 import os
 import random
 import signal
-import sys
 import threading
 import time
 import warnings
@@ -34,12 +33,6 @@ from github import GithubException
 from google.api_core import exceptions as gcp_exceptions
 
 from .processor import WebhookProcessor
-
-# Ensure src/ is on sys.path so the package is importable when run as a script
-_src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
-if _src_path not in sys.path:
-    sys.path.insert(0, _src_path)
-
 
 logger = logging.getLogger("webhook_agent.worker")
 

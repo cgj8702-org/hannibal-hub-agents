@@ -5,16 +5,10 @@ import multiprocessing
 import os
 import signal
 import sys
-from pathlib import Path
 from types import FrameType
 
 # Import constants for default values
 from webhook_agent.constants import DEFAULT_LOG_MODEL_THOUGHTS
-
-# Ensure src/ is on sys.path for direct entry point execution
-SRC_DIR = Path(__file__).resolve().parent / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
 
 # Configure logging for the entry point
 log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
