@@ -131,13 +131,13 @@ def get_allowed_models(tier: str | None = None) -> list[str]:
                     if isinstance(m, dict) and "name" in m:
                         model_name = m["name"].replace("models/", "")
                         acc_tiers = m.get("accessible_tiers", ["free", "paid"])
-                        rate_limits = m.get("rate_limits", {})
-                        tier_data = rate_limits.get(resolved_tier, {})
-                        if isinstance(tier_data, dict):
-                            rpm = tier_data.get("rpm", 0)
-                            rpd = tier_data.get("rpd", 0.0)
-                            if resolved_tier in acc_tiers or (rpm > 0 and rpd > 0):
-                                allowed.add(model_name)
+                        rate_limits: dict[str, Any] = m.get("rate_limits") or {}
+                        # Fast-path: schema assumes resolved_tier is always mapped
+                        tier_data: dict[str, Any] = rate_limits[resolved_tier]
+                        rpm = tier_data["rpm"]
+                        rpd = tier_data["rpd"]
+                        if resolved_tier in acc_tiers or (rpm > 0 and rpd > 0):
+                            allowed.add(model_name)
             elif isinstance(data, dict):
                 for model_key, limits in data.items():
                     model_name = model_key.replace("models/", "")
