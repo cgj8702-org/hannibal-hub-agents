@@ -398,10 +398,22 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         try:
             from webhook_agent.analysis.pre_audit_compiler import compile_pre_audit_dossier
 
+            ws_root = event_data.get("workspace_path") or event_data.get("repo_root")
+            if not ws_root:
+                try:
+                    from webhook_agent.environment.context import get_active_environment
+
+                    env = get_active_environment()
+                    if env and getattr(env, "root", None):
+                        ws_root = str(env.root)
+                except Exception:
+                    ws_root = None
+
             dossier = compile_pre_audit_dossier(
                 changed_files=changed_files,
                 pr_diff_text=str(raw.get("pr_diff") or ""),
                 event_data=event_data,
+                repo_root=ws_root,
             )
             if dossier.dossier_markdown:
                 parts.append(f"\n{dossier.dossier_markdown}")

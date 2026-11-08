@@ -288,19 +288,7 @@ def extract_enclosing_ast_blocks(
     if not diff_text or not diff_text.strip():
         return []
 
-    root_path: Path | None = None
-    if repo_root is not None:
-        root_path = Path(repo_root)
-    else:
-        try:
-            from webhook_agent.environment.context import get_active_environment
-
-            env = get_active_environment()
-            if env is not None and hasattr(env, "root_path"):
-                root_path = env.root_path
-        except Exception:
-            root_path = None
-
+    root_path: Path | None = Path(repo_root) if repo_root is not None else None
     if root_path is None or not root_path.exists():
         return []
 

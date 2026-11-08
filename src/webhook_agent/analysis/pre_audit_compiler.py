@@ -16,6 +16,7 @@ from webhook_agent.analysis.architecture_scanner import (
     ArchitecturalBoundaryScanner,
     evaluate_architecture_contract,
 )
+from webhook_agent.analysis.ast_scanner import verify_python_ast
 from webhook_agent.analysis.concurrency_scanner import (
     ConcurrencyAnalysisReport,
     ConcurrencyScanner,
@@ -49,12 +50,20 @@ from webhook_agent.analysis.test_impact import (
     evaluate_test_coverage_integrity,
     run_diff_coverage,
 )
-from webhook_agent.environment.context import get_active_environment
 from webhook_agent.models.rate_limiter import _resolve_tier
 from webhook_agent.review.schemas import ScorecardItem
-from webhook_agent.tools.ast_tools import verify_python_ast
 
 logger = logging.getLogger("webhook_agent.analysis.pre_audit_compiler")
+
+
+def get_active_environment() -> Any:
+    """Resolve active environment from runtime context if available."""
+    import sys
+
+    env_mod = sys.modules.get("webhook_agent.environment.context")
+    if env_mod and hasattr(env_mod, "get_active_environment"):
+        return env_mod.get_active_environment()
+    return None
 
 
 @dataclass
@@ -81,6 +90,7 @@ def compile_pre_audit_dossier(
     changed_files: list[str],
     pr_diff_text: str,
     event_data: dict[str, Any],
+    repo_root: Path | str | None = None,
 ) -> PreAuditDossier:
     """Concurrently execute static audit pipelines and compile a multi-perspective dossier.
 
@@ -88,7 +98,17 @@ def compile_pre_audit_dossier(
     in parallel across thread workers, formatting results into high-signal markdown blocks.
     """
     tier = _resolve_tier()
-    active_env = get_active_environment()
+    repo_root_path: Path | None = None
+    if repo_root is not None:
+        repo_root_path = Path(repo_root)
+    elif event_data.get("repo_root"):
+        repo_root_path = Path(event_data["repo_root"])
+    elif event_data.get("workspace_path"):
+        repo_root_path = Path(event_data["workspace_path"])
+    else:
+        active_env = get_active_environment()
+        if active_env is not None and getattr(active_env, "root", None):
+            repo_root_path = Path(active_env.root)
     repo_full_name = (event_data.get("repository") or {}).get("full_name", "")
     raw = event_data.get("raw_payload") or {}
     base_sha = str(
@@ -116,8 +136,6 @@ def compile_pre_audit_dossier(
     py_files = [f for f in changed_files if f.endswith(".py")]
     ast_limit = 50 if tier == "paid" else 5
     py_files_to_ast = py_files[:ast_limit]
-
-    repo_root_path = Path(active_env.root) if active_env and active_env.root else None
 
     # Task workers for concurrent execution
     def _run_ast_scan() -> list[str]:
