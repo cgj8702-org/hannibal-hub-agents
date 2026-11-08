@@ -25,6 +25,10 @@ from webhook_agent.review.formatter import (
     render_sync_review_markdown,
 )
 from webhook_agent.review.hunter import HunterEngine
+from webhook_agent.review.review_budget import (
+    DEFAULT_LIFETIME_CAP,
+    apply_review_budget_governance,
+)
 from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem, SyncReviewResponse
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
 from webhook_agent.state.review_idempotency import review_claim_registry
@@ -775,11 +779,6 @@ def _enforce_verdict(
                     }
                 )
             if review_budget is not None and bot_reviews:
-                from webhook_agent.review.review_budget import (
-                    DEFAULT_LIFETIME_CAP,
-                    apply_review_budget_governance,
-                )
-
                 head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
                 review_budget = apply_review_budget_governance(
                     bot_reviews=bot_reviews,
