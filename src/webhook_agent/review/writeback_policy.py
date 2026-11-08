@@ -46,6 +46,21 @@ class CommentRateLimiter:
             self._history[target_key] = []
         self._history[target_key].append(now)
 
+    def purge_stale_records(self, max_age: float = 3600.0) -> int:
+        """Evict timestamp entries older than max_age seconds to bound memory growth."""
+        now = time.time()
+        cutoff = now - max_age
+        evicted_count = 0
+        for key, timestamps in list(self._history.items()):
+            idx = 0
+            while idx < len(timestamps):
+                if timestamps[idx] < cutoff:
+                    timestamps.pop(idx)
+                    evicted_count += 1
+            if not timestamps:
+                del self._history[key]
+        return evicted_count
+
 
 _COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
 _REVIEW_LOCKS: dict[str, threading.Lock] = {}
