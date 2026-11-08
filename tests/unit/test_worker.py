@@ -1601,7 +1601,9 @@ class TestBaseBranchMergeSync:
 
         with patch("webhook_agent.processor._prefetch_pr_diff") as mock_prefetch_diff:
             processor.process_event(payload)
+            assert mock_prefetch_diff.call_count == 0
             mock_prefetch_diff.assert_not_called()
+            assert processor._agent_core.run.call_count == 0
             processor._agent_core.run.assert_not_called()
 
     def test_process_event_defers_when_live_head_verification_fails(self, caplog):
@@ -1723,6 +1725,7 @@ class TestBaseBranchMergeSync:
             }
             processor.process_event(payload)
 
+        assert processor._agent_core.run.call_count == 0
         processor._agent_core.run.assert_not_called()
 
     def test_process_event_runs_review_on_explicit_comment_when_auto_review_disabled(
@@ -1760,6 +1763,7 @@ class TestBaseBranchMergeSync:
         }
 
         processor.process_event(payload)
+        assert processor._agent_core.run.call_count == 1
         processor._agent_core.run.assert_called_once()
 
 
@@ -1969,6 +1973,7 @@ class TestWorkerReliability:
                 worker_main()
 
         # Dead letter publish failed -> message MUST NOT be acked
+        assert mock_subscriber.acknowledge.call_count == 0
         mock_subscriber.acknowledge.assert_not_called()
 
     def test_worker_dlq_publish_success_acks(self, monkeypatch):
@@ -2008,6 +2013,7 @@ class TestWorkerReliability:
                 worker_main()
 
         # Dead letter publish succeeded -> message acked
+        assert mock_subscriber.acknowledge.call_count == 1
         mock_subscriber.acknowledge.assert_called_once_with(
             request={
                 "subscription": "projects/cgj8702-webhook-agent/subscriptions/webhooks-sub",
@@ -2215,6 +2221,7 @@ class TestWorkerReliability:
 
         with patch("google.cloud.logging.Client", return_value=mock_client):
             setup_cloud_logging()
+            assert mock_client.setup_logging.call_count == 1
             mock_client.setup_logging.assert_called_once()
 
     def test_setup_cloud_logging_failure(self, caplog):
@@ -2262,4 +2269,5 @@ class TestWorkerReliability:
                 worker_main()
 
         # Without DLQ, message should not be acked on failure to allow retry
+        assert mock_subscriber.acknowledge.call_count == 0
         mock_subscriber.acknowledge.assert_not_called()

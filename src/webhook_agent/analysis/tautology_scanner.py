@@ -66,9 +66,11 @@ class _TestTautologyVisitor(ast.NodeVisitor):
         self,
         test_file: str,
         modified_symbols: set[str] | None = None,
+        line_ranges: list[tuple[int, int]] | None = None,
     ) -> None:
         self.test_file = test_file
         self.modified_symbols = modified_symbols or set()
+        self.line_ranges = line_ranges
         self.findings: list[TautologyFinding] = []
         self._current_test_name: str | None = None
         self._test_count: int = 0
@@ -91,6 +93,16 @@ class _TestTautologyVisitor(ast.NodeVisitor):
         if not is_test:
             self.generic_visit(node)
             return
+
+        # If line_ranges is provided, only inspect tests that overlap with modified hunks
+        if self.line_ranges:
+            fn_start = node.lineno
+            fn_end = getattr(node, "end_lineno", node.lineno)
+            overlaps = any(
+                max(fn_start, h_start) <= min(fn_end, h_end) for h_start, h_end in self.line_ranges
+            )
+            if not overlaps:
+                return
 
         prefix = f"{self._class_stack[-1]}." if self._class_stack else ""
         test_name = f"{prefix}{node.name}"
@@ -329,14 +341,23 @@ class _TestTautologyVisitor(ast.NodeVisitor):
         return False
 
     def _is_unittest_assertion(self, call: ast.Call) -> bool:
-        """Check if call is self.assertEqual, self.assertTrue, etc."""
+        """Check if call is self.assertEqual, self.assertTrue, mock.assert_*, etc."""
         func = call.func
-        return bool(
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
+        if not isinstance(func, ast.Attribute):
+            return False
+        # self.assertEqual, self.assertTrue, self.fail, etc.
+        if (
+            isinstance(func.value, ast.Name)
             and func.value.id == "self"
             and (func.attr.startswith("assert") or func.attr.startswith("fail"))
-        )
+        ):
+            return True
+        # Mock assertions on any object: mock.assert_called, mock.assert_called_once,
+        # mock.assert_called_with, mock.assert_called_once_with, mock.assert_not_called,
+        # mock.assert_any_call, mock.assert_has_calls
+        if func.attr.startswith("assert_"):
+            return True
+        return func.attr == "fail"
 
     def _check_vacuous_assert(self, ass: ast.Assert, test_name: str) -> None:
         """Detect assert True, assert 1 == 1, assert x == x."""
@@ -495,13 +516,18 @@ class TautologyScanner:
         code: str,
         file_path: str = "test_sample.py",
         modified_symbols: set[str] | None = None,
+        line_ranges: list[tuple[int, int]] | None = None,
     ) -> list[TautologyFinding]:
         """Scan Python code text for tautological test patterns."""
         if not code or not code.strip():
             return []
         try:
             tree = ast.parse(code, filename=file_path)
-            visitor = _TestTautologyVisitor(test_file=file_path, modified_symbols=modified_symbols)
+            visitor = _TestTautologyVisitor(
+                test_file=file_path,
+                modified_symbols=modified_symbols,
+                line_ranges=line_ranges,
+            )
             visitor.visit(tree)
             return visitor.findings
         except Exception as exc:
@@ -512,6 +538,7 @@ class TautologyScanner:
         self,
         file_path: Path | str,
         modified_symbols: set[str] | None = None,
+        line_ranges: list[tuple[int, int]] | None = None,
     ) -> list[TautologyFinding]:
         """Scan a test file on disk for tautological test patterns."""
         p = Path(file_path)
@@ -525,7 +552,12 @@ class TautologyScanner:
                 if abs_path.is_relative_to(self.repo_root)
                 else str(p)
             )
-            return self.scan_code(content, file_path=rel_str, modified_symbols=modified_symbols)
+            return self.scan_code(
+                content,
+                file_path=rel_str,
+                modified_symbols=modified_symbols,
+                line_ranges=line_ranges,
+            )
         except Exception as exc:
             logger.debug("Failed reading test file %s: %s", file_path, exc)
             return []
@@ -560,9 +592,13 @@ class TautologyScanner:
         if not diff_text or not diff_text.strip():
             return TautologyReport()
 
-        from webhook_agent.analysis.diff_filter import split_diff_into_sections
+        from webhook_agent.analysis.diff_filter import (
+            extract_hunk_ranges,
+            split_diff_into_sections,
+        )
 
         sections = split_diff_into_sections(diff_text)
+        hunk_ranges_by_file = extract_hunk_ranges(diff_text)
         findings: list[TautologyFinding] = []
         scanned_files: list[str] = []
 
@@ -575,7 +611,21 @@ class TautologyScanner:
                 continue
 
             scanned_files.append(path)
-            # Reconstruct the added lines from the diff section
+            file_ranges = hunk_ranges_by_file.get(path, [])
+            abs_file = self.repo_root / path
+
+            # Priority 1: If file exists on disk, scan real file scoped strictly to the modified hunk ranges
+            if abs_file.is_file():
+                file_findings = self.scan_file(
+                    path,
+                    modified_symbols=modified_symbols,
+                    line_ranges=file_ranges or None,
+                )
+                if file_findings:
+                    findings.extend(file_findings)
+                continue
+
+            # Priority 2: Fallback for in-memory or synthetic diffs without a working copy on disk
             added_lines = [
                 line[1:]
                 for line in sec.lines
@@ -599,10 +649,6 @@ class TautologyScanner:
                     file_path=path,
                     modified_symbols=modified_symbols,
                 )
-
-            # If still nothing and file exists on disk, scan full file from disk
-            if not file_findings and (self.repo_root / path).is_file():
-                file_findings = self.scan_file(path, modified_symbols=modified_symbols)
 
             if file_findings:
                 findings.extend(file_findings)

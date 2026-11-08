@@ -208,3 +208,67 @@ def test_tautology_scanner_scan_diff_clean() -> None:
     assert item.status == "PASS"
     assert item.dimension == "Test Coverage & Regressions"
     assert "No tautological tests" in item.notes
+
+
+def test_tautology_scanner_recognizes_mock_assertions() -> None:
+    scanner = TautologyScanner()
+    code = """
+def test_mock_assertions():
+    mock_thing = MagicMock()
+    mock_thing.do_work()
+    mock_thing.do_work.assert_called_once()
+    mock_thing.assert_not_called()
+    mock_thing.assert_called_once_with("arg")
+"""
+    findings = scanner.scan_code(code)
+    assert len(findings) == 0
+
+
+def test_tautology_scanner_scopes_to_modified_line_ranges() -> None:
+    scanner = TautologyScanner()
+    code = """
+def test_clean_one():
+    assert 1 == 2
+
+def test_vacuous_two():
+    assert True
+
+def test_clean_three():
+    assert 3 == 4
+"""
+    # Only test_clean_one (lines 2-3) and test_clean_three (lines 8-9) are in line_ranges.
+    # test_vacuous_two (lines 5-6) is outside the ranges and must be ignored.
+    findings = scanner.scan_code(code, line_ranges=[(2, 3), (8, 9)])
+    assert len(findings) == 0
+
+    # When line_ranges includes lines 5-6, the vacuous assert is flagged.
+    flagged = scanner.scan_code(code, line_ranges=[(5, 6)])
+    assert len(flagged) == 1
+    assert flagged[0].test_name == "test_vacuous_two"
+
+
+def test_tautology_scanner_scan_diff_does_not_flag_unmodified_tests_on_disk(tmp_path) -> None:
+    test_file = tmp_path / "test_sample.py"
+    test_file.write_text(
+        """
+def test_preexisting_unmodified():
+    pass
+
+def test_modified_in_pr():
+    assert 1 + 1 == 2
+""",
+        encoding="utf-8",
+    )
+
+    diff = f"""diff --git a/{test_file.name} b/{test_file.name}
+index 1111111..2222222 100644
+--- a/{test_file.name}
++++ b/{test_file.name}
+@@ -5,3 +5,3 @@
+ def test_modified_in_pr():
+-    assert 1 == 1
++    assert 1 + 1 == 2
+"""
+    scanner = TautologyScanner(repo_root=tmp_path)
+    report = scanner.scan_diff(diff)
+    assert len(report.findings) == 0
