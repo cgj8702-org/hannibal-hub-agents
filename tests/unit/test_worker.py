@@ -680,6 +680,9 @@ class TestAddEyesReaction:
 
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = mock_issue.get_comment.return_value
+        mock_comment.create_reaction.return_value = MagicMock()
 
         payload = {
             "canonical": "issue_comment.created",
@@ -689,13 +692,14 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
+        assert rx is not None
+        assert getattr(rx, "_target", None) is mock_comment
         mock_gh.get_repo.assert_called_once_with("owner/repo")
-        mock_issue = mock_repo.get_issue.return_value
         mock_repo.get_issue.assert_called_once_with(42)
         mock_issue.get_comment.assert_called_once_with(101)
-        mock_issue.get_comment.return_value.create_reaction.assert_called_once_with("eyes")
+        mock_comment.create_reaction.assert_called_once_with("eyes")
 
     def test_adds_reaction_to_pr_review_comment(self):
         from unittest.mock import MagicMock
@@ -706,6 +710,7 @@ class TestAddEyesReaction:
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = mock_repo.get_pull.return_value
         mock_comment = mock_pr.get_review_comment.return_value
+        mock_comment.create_reaction.return_value = MagicMock()
 
         payload = {
             "canonical": "pull_request_review_comment.created",
@@ -715,8 +720,10 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
+        assert rx is not None
+        assert getattr(rx, "_target", None) is mock_comment
         mock_repo.get_pull.assert_called_once_with(15)
         mock_pr.get_review_comment.assert_called_once_with(202)
         mock_comment.create_reaction.assert_called_once_with("eyes")
@@ -729,6 +736,7 @@ class TestAddEyesReaction:
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
         mock_issue = mock_repo.get_issue.return_value
+        mock_issue.create_reaction.return_value = MagicMock()
 
         payload = {
             "canonical": "pull_request.opened",
@@ -737,8 +745,10 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
+        assert rx is not None
+        assert getattr(rx, "_target", None) is mock_issue
         mock_repo.get_issue.assert_called_once_with(112)
         mock_issue.create_reaction.assert_called_once_with("eyes")
 
@@ -757,7 +767,8 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        assert rx is None
         mock_gh.get_repo.assert_not_called()
 
     def test_ignores_deleted_comment_events(self):
@@ -776,7 +787,8 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        assert rx is None
         mock_gh.get_repo.assert_not_called()
 
     def test_remove_eyes_reaction_via_reaction_object(self):
