@@ -11,6 +11,7 @@ from webhook_agent.core.prompts import (
     AUDITOR_CONTEXT_INSTRUCTION,
     CONVERSATIONAL_INSTRUCTION,
     MAX_INPUT_TOKENS,
+    STATIC_REVIEW_INSTRUCTION,
     SYSTEM_INSTRUCTION,
     _truncate_input_for_tier,
     _truncate_text_to_token_limit,
@@ -64,6 +65,14 @@ def test_system_instruction_contains_anti_rubberstamping_directive() -> None:
     assert "Adversarial Scrutiny (Anti-Rubberstamping Standard)" in SYSTEM_INSTRUCTION
     assert "Do NOT assume code is correct or rubberstamp PRs" in SYSTEM_INSTRUCTION
     assert "actively test boundary conditions" in SYSTEM_INSTRUCTION
+
+
+def test_static_review_instruction_contains_loop_and_boundary_guards() -> None:
+    """STATIC_REVIEW_INSTRUCTION must contain loop-termination and boundary-inversion guards."""
+    assert "ANTI-LOOP-HANG & TERMINATION GUARD" in STATIC_REVIEW_INSTRUCTION
+    assert "ANTI-BOUNDARY-INVERSION & ARCHITECTURAL GUARD" in STATIC_REVIEW_INSTRUCTION
+    assert "In `while` loops and manual index iterations" in STATIC_REVIEW_INSTRUCTION
+    assert "Low-level offline packages (`webhook_agent.analysis`" in STATIC_REVIEW_INSTRUCTION
 
 
 def test_system_instruction_contains_author_claim_grounding_directive() -> None:
