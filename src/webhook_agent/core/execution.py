@@ -372,6 +372,7 @@ def _submit_deterministic_review(
                     "deterministic_contract_scorecard_item",
                     "deterministic_security_scorecard_item",
                     "deterministic_test_scorecard_item",
+                    "deterministic_concurrency_scorecard_item",
                 ):
                     if k in final_session.state:
                         review_state[k] = final_session.state[k]
@@ -865,6 +866,9 @@ def execute_agent_event(
             "deterministic_security_scorecard_item"
         ),
         "deterministic_test_scorecard_item": event_data.get("deterministic_test_scorecard_item"),
+        "deterministic_concurrency_scorecard_item": event_data.get(
+            "deterministic_concurrency_scorecard_item"
+        ),
     }
 
     async def _run() -> None:
@@ -884,6 +888,7 @@ def execute_agent_event(
             "deterministic_contract_scorecard_item",
             "deterministic_security_scorecard_item",
             "deterministic_test_scorecard_item",
+            "deterministic_concurrency_scorecard_item",
         ):
             if sc_key in event_data:
                 deterministic_state[sc_key] = event_data[sc_key]
@@ -1022,6 +1027,7 @@ def execute_agent_event(
                     "deterministic_contract_scorecard_item",
                     "deterministic_security_scorecard_item",
                     "deterministic_test_scorecard_item",
+                    "deterministic_concurrency_scorecard_item",
                 ):
                     if sc_key in event_data:
                         user_state_map[sc_key] = event_data[sc_key]
@@ -1280,6 +1286,10 @@ def execute_agent_event(
                     deterministic_state["deterministic_test_scorecard_item"] = event_data[
                         "deterministic_test_scorecard_item"
                     ]
+                if "deterministic_concurrency_scorecard_item" in event_data:
+                    deterministic_state["deterministic_concurrency_scorecard_item"] = event_data[
+                        "deterministic_concurrency_scorecard_item"
+                    ]
             await _run()
             _finalize_results()
             return
@@ -1306,6 +1316,7 @@ def execute_agent_event(
                         "deterministic_contract_scorecard_item",
                         "deterministic_security_scorecard_item",
                         "deterministic_test_scorecard_item",
+                        "deterministic_concurrency_scorecard_item",
                     ):
                         if sc_key in event_data:
                             deterministic_state[sc_key] = event_data[sc_key]
@@ -1337,6 +1348,10 @@ def execute_agent_event(
                         deterministic_state["deterministic_test_scorecard_item"] = event_data[
                             "deterministic_test_scorecard_item"
                         ]
+                    if "deterministic_concurrency_scorecard_item" in event_data:
+                        deterministic_state["deterministic_concurrency_scorecard_item"] = (
+                            event_data["deterministic_concurrency_scorecard_item"]
+                        )
                     if user_message and user_message.parts:
                         logger.debug(
                             "📝 Built user message for agent (length: %d chars)",

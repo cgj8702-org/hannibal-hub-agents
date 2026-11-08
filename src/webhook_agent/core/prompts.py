@@ -88,6 +88,7 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
    - `status`: "PASS", "WARN", "FAIL", "N/A", "UNKNOWN", or "ERROR" (use UNKNOWN or ERROR if an analyzer crashed or context is insufficient).
    - `notes`: Specific, diff-grounded verification findings or justification (citing verified AST structures, locks, or test assertions).
      * STRICT CLINICAL NOTES STANDARD: NEVER write lazy shorthand placeholders like "N/A", "None", "n/a", or blank strings in `notes`.
+     * ANTI-GIL FALLACY & CONCURRENCY GUARD: In CPython, the Global Interpreter Lock (GIL) only protects individual atomic bytecode operations. It NEVER guarantees thread safety for compound operations (e.g. check-then-set `if key in d: ... d[key] = ...`, read-modify-write, or multiple dict/list mutations). Removing locks (`threading.Lock`, `asyncio.Lock`, mutexes, transactions) around shared mutable state is an immediate CONCURRENCY FAILURE (`status: "FAIL"`, verdict: `REQUEST_CHANGES`). Never claim or accept claims that "the GIL makes compound dictionary operations thread-safe".
      * If a dimension is unimpacted by the PR diff, set `status` to "PASS" or "N/A" and explain WHY in `notes` using diff evidence (e.g., "Pure synchronous logic; no locks, shared state, or async primitives touched in modified diff", "No credential handling, external API keys, or secret variables in diff scope", "No exported function/method signatures, interfaces, or return types modified").
      * If `status` is "PASS", provide a concrete diff-grounded reason why the change is safe.
 4. **verified_invariants**: 2-4 concrete, diff-grounded behavioral guarantees or invariants citing specific file paths and lines (`path:line: guarantee`). If asserting behavioral logic (e.g. handles, logs, checks, skips), you MUST back it up by quoting the exact modified code in backticks (e.g. 'path:line: `exact_code_quote` performs ...') or citing a specific test function (e.g. `test_foo`). Behavioral claims without a backticked diff quote or test citation will fail automated grounding validation! For PRs that only delete/remove code, or pure refactorings with no newly added logic lines to quote, return an empty list (`verified_invariants: []`) and convey domain guarantees via `semantic_invariants`.
@@ -373,6 +374,9 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             event_data["deterministic_test_scorecard_item"] = dossier.test_scorecard.model_dump()
             event_data["deterministic_security_scorecard_item"] = (
                 dossier.security_scorecard.model_dump()
+            )
+            event_data["deterministic_concurrency_scorecard_item"] = (
+                dossier.concurrency_scorecard.model_dump()
             )
         except Exception as pre_audit_err:
             logger.warning("Concurrent pre-audit compiler encountered error: %s", pre_audit_err)

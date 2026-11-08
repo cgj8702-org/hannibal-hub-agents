@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from .concurrency_scanner import (
+    ConcurrencyAnalysisReport,
+    ConcurrencyFinding,
+    ConcurrencyScanner,
+    evaluate_concurrency_integrity,
+)
 from .dependency_tree import (
     LockfilePackage,
     build_dependency_grounding_context,
@@ -53,6 +59,9 @@ __all__ = [
     "BrokenCallSite",
     "CallSiteSpec",
     "CallSiteVisitor",
+    "ConcurrencyAnalysisReport",
+    "ConcurrencyFinding",
+    "ConcurrencyScanner",
     "ConfidenceLevel",
     "LockfilePackage",
     "LockfileValidationResult",
@@ -68,6 +77,7 @@ __all__ = [
     "TestImpactAnalyzer",
     "TestImpactReport",
     "build_dependency_grounding_context",
+    "evaluate_concurrency_integrity",
     "evaluate_contract_integrity",
     "evaluate_security_integrity",
     "evaluate_test_coverage_integrity",
