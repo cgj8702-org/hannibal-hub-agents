@@ -304,7 +304,8 @@ def test_execute_agent_event_transient_failover_success_does_not_mark_rate_limit
             trace_id="trace-recover",
         )
 
-        mock_mark_rl.assert_not_called()
+        assert mock_mark_rl.call_count == 0
+        assert results is not None
 
 
 def test_execute_agent_event_cascades_instantly_on_model_switch() -> None:
@@ -364,6 +365,8 @@ def test_execute_agent_event_cascades_instantly_on_model_switch() -> None:
             trace_id="trace-instant-failover",
         )
 
+        assert mock_sleep.call_count == 1
+        assert mock_sleep.call_args[0][0] == 0.5
         mock_sleep.assert_called_once_with(0.5)
 
 
@@ -2134,8 +2137,9 @@ def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
         patch("webhook_agent.core.execution._execute_adk_runner", new_callable=AsyncMock),
         patch("webhook_agent.core.execution._post_conversational_reply"),
     ):
-        execute_agent_event(mock_agent, event_data, mock_gh, "trace-pure-issue-1")
-        mock_pr_ws.assert_not_called()
+        results = execute_agent_event(mock_agent, event_data, mock_gh, "trace-pure-issue-1")
+        assert mock_pr_ws.call_count == 0
+        assert results is not None
 
 
 @pytest.mark.anyio
@@ -2368,6 +2372,9 @@ def test_post_conversational_reply_prefers_session_state_reply() -> None:
             state_reply="Final answer.",
         )
 
+    assert mock_issue.create_comment.call_count == 1
+    assert mock_issue.create_comment.call_args[0][0] == "Final answer."
+    assert any(r.tool == "add_comment" and r.success for r in results)
     mock_issue.create_comment.assert_called_once_with("Final answer.")
 
 
@@ -2393,6 +2400,9 @@ def test_post_conversational_reply_falls_back_when_state_reply_blank() -> None:
             state_reply="   ",
         )
 
+    assert mock_issue.create_comment.call_count == 1
+    assert mock_issue.create_comment.call_args[0][0] == "Final answer."
+    assert any(r.tool == "add_comment" and r.success for r in results)
     mock_issue.create_comment.assert_called_once_with("Final answer.")
 
 
