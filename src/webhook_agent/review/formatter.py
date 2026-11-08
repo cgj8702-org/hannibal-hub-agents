@@ -12,6 +12,7 @@ import re
 from collections.abc import Generator
 from typing import Any
 
+from .comment_poster import defang_images
 from .metadata import serialize_review_metadata
 from .normalizer import (
     clean_field_string as clean_field_string,
@@ -799,10 +800,9 @@ def render_code_review_markdown(
         meta["semantic_invariants"] = list(review.semantic_invariants)
     if review.model:
         meta["model"] = review.model
+    rendered_body = defang_images("\n".join(markdown_parts))
     metadata_comment = serialize_review_metadata(meta)
-    markdown_parts.append(f"\n{metadata_comment}")
-
-    return "\n".join(markdown_parts) + "\n"
+    return f"{rendered_body}\n\n{metadata_comment}\n"
 
 
 def render_sync_review_markdown(
@@ -1035,7 +1035,6 @@ def render_sync_review_markdown(
         meta["semantic_invariants"] = list(review.semantic_invariants)
     if review.model:
         meta["model"] = review.model
+    rendered_body = defang_images("\n".join(markdown_parts))
     metadata_comment = serialize_review_metadata(meta)
-    markdown_parts.append(f"\n{metadata_comment}")
-
-    return "\n".join(markdown_parts) + "\n"
+    return f"{rendered_body}\n\n{metadata_comment}\n"

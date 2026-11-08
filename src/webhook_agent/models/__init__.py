@@ -22,10 +22,16 @@ from .rate_limiter import (
     resolve_webhook_api_key,
     rpm_waiter,
 )
-from .review_budget import compute_round_allowance, summarise_review_history
+from .review_budget import (
+    DEFAULT_BLOCKER_ONLY_AFTER_ROUND,
+    compute_round_allowance,
+    is_blocker_only_round,
+    summarise_review_history,
+)
 from .secret_manager import resolve_secret
 
 __all__ = [
+    "DEFAULT_BLOCKER_ONLY_AFTER_ROUND",
     "DepletedModelRegistry",
     "FirestoreDepletedModelRegistry",
     "RPMWaiter",
@@ -39,6 +45,7 @@ __all__ = [
     "get_adk_model",
     "get_allowed_models",
     "get_model_chain",
+    "is_blocker_only_round",
     "is_gemini_3_plus",
     "resolve_secret",
     "resolve_webhook_api_key",
