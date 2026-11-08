@@ -12,6 +12,20 @@ from typing import Any
 DEFAULT_LIFETIME_CAP = 25
 DEFAULT_DECAY = 0.6
 DEFAULT_MIN_ALLOWANCE = 1
+DEFAULT_BLOCKER_ONLY_AFTER_ROUND = 2
+
+
+def is_blocker_only_round(
+    round_number: int,
+    threshold: int = DEFAULT_BLOCKER_ONLY_AFTER_ROUND,
+) -> bool:
+    """Determine whether review round has passed threshold for blocker-only narrowing.
+
+    On iterative review cycles past threshold (default: > 2, i.e. round 3+),
+    minor suggestions and cosmetic nits are suppressed to avoid review fatigue
+    and moving goalposts.
+    """
+    return round_number > threshold
 
 
 @dataclass

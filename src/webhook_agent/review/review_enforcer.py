@@ -374,6 +374,7 @@ def _finalize_enforced_review(
     is_caller_comment: bool,
     is_text: bool = False,
     deterministic_locations: set[tuple[str, int]] | None = None,
+    round_number: int = 1,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """Finalize review object by applying scorecard floors, invariants, grounding, guardrails, comments, and markdown rendering."""
     if det_contract_item is not None:
@@ -392,6 +393,31 @@ def _finalize_enforced_review(
             review_obj.critical_issues, review_obj.minor_suggestions
         )
     )
+
+    if round_number > 2 and isinstance(review_obj, SyncReviewResponse):
+        if review_obj.minor_suggestions:
+            logger.info(
+                "Late-Round Blocker Narrowing (round %d > 2): Pruned %d minor suggestions to prevent review fatigue",
+                round_number,
+                len(review_obj.minor_suggestions),
+            )
+            review_obj.minor_suggestions = []
+
+        if review_obj.verdict == "COMMENT" and not review_obj.critical_issues:
+            has_scorecard_warning = any(
+                (getattr(sc, "status", "") or "").upper() in ("FAIL", "WARN", "UNKNOWN", "ERROR")
+                for sc in (getattr(review_obj, "scorecard", []) or [])
+            )
+            has_unresolved_critical = any(
+                r.status == "UNRESOLVED" and getattr(r, "category", "CRITICAL") == "CRITICAL"
+                for r in review_obj.resolutions
+            )
+            if not has_scorecard_warning and not has_unresolved_critical:
+                logger.info(
+                    "Late-Round Blocker Narrowing (round %d > 2): Upgraded verdict COMMENT -> APPROVE (all blockers clear)",
+                    round_number,
+                )
+                review_obj.verdict = "APPROVE"
 
     if isinstance(review_obj, SyncReviewResponse):
         # Programmatic hallucination guard: clear resolutions if no prior review
@@ -737,6 +763,7 @@ def _enforce_verdict(
             has_prior_reviews = True
             bot_reviews = []
 
+        round_number: int = 1
         review_budget: int | None = None
         existing_comments_data: list[dict[str, Any]] = []
         try:
@@ -770,7 +797,7 @@ def _enforce_verdict(
                         "body": getattr(c, "body", ""),
                     }
                 )
-            if review_budget is not None and bot_reviews:
+            if bot_reviews:
                 from webhook_agent.models.review_budget import (
                     compute_round_allowance,
                     summarise_review_history,
@@ -778,17 +805,20 @@ def _enforce_verdict(
 
                 head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
                 hist = summarise_review_history(bot_reviews, bot_review_comments, head_sha=head_sha)
-                review_budget = compute_round_allowance(
-                    round_number=hist.round_number,
-                    previous_round_posted=hist.previous_round_posted,
-                    total_posted_so_far=hist.total_posted_so_far,
-                    initial_budget=review_budget,
-                )
+                round_number = hist.round_number
+                if review_budget is not None:
+                    review_budget = compute_round_allowance(
+                        round_number=hist.round_number,
+                        previous_round_posted=hist.previous_round_posted,
+                        total_posted_so_far=hist.total_posted_so_far,
+                        initial_budget=review_budget,
+                    )
         except Exception as comm_err:
             logger.warning(
                 "Could not fetch existing PR review comments or compute review budget: %s", comm_err
             )
     else:
+        round_number = 1
         review_budget = None
         existing_comments_data = []
 
@@ -798,6 +828,9 @@ def _enforce_verdict(
             if hasattr(state, "to_dict")
             else (state if isinstance(state, dict) else {})
         )
+        if round_number == 1 and "review_round_number" in state_dict_val:
+            with contextlib.suppress(ValueError, TypeError):
+                round_number = int(state_dict_val["review_round_number"] or 1)
         if not changed_paths and "deterministic_changed_files" in state_dict_val:
             changed_paths = list(state_dict_val["deterministic_changed_files"] or [])
         if not diff_text and "deterministic_diff_text" in state_dict_val:
@@ -1016,6 +1049,7 @@ def _enforce_verdict(
             is_body_comment=is_body_comment,
             is_caller_comment=is_caller_comment,
             deterministic_locations=deterministic_locations,
+            round_number=round_number,
         )
 
     for data in data_candidates:
@@ -1104,6 +1138,8 @@ def _enforce_verdict(
                         is_intended_request_changes=is_intended_request_changes,
                         is_body_comment=is_body_comment,
                         is_caller_comment=is_caller_comment,
+                        deterministic_locations=deterministic_locations,
+                        round_number=round_number,
                     )
                 elif (
                     "executive_summary" in data
@@ -1134,6 +1170,8 @@ def _enforce_verdict(
                         is_intended_request_changes=is_intended_request_changes,
                         is_body_comment=is_body_comment,
                         is_caller_comment=is_caller_comment,
+                        deterministic_locations=deterministic_locations,
+                        round_number=round_number,
                     )
         except Exception as exc:
             logger.debug("Candidate JSON parse attempt skipped: %s", exc)
@@ -1185,6 +1223,8 @@ def _enforce_verdict(
                 is_body_comment=is_body_comment,
                 is_caller_comment=is_caller_comment,
                 is_text=True,
+                deterministic_locations=deterministic_locations,
+                round_number=round_number,
             )
 
         normalized_dict = normalize_code_review_dict(parsed_dict)
@@ -1211,6 +1251,8 @@ def _enforce_verdict(
             is_body_comment=is_body_comment,
             is_caller_comment=is_caller_comment,
             is_text=True,
+            deterministic_locations=deterministic_locations,
+            round_number=round_number,
         )
     except Exception as parse_err:
         logger.warning("Could not parse text review to CodeReviewResponse: %s", parse_err)

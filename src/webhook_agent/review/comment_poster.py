@@ -134,6 +134,21 @@ def filter_echo_suggestions(issues: list[Any], diff_text: str) -> list[Any]:
     return filtered
 
 
+_IMG_TAG = re.compile(r"<img", re.IGNORECASE)
+
+
+def defang_images(text: str) -> str:
+    """Neutralize inline images in markdown and HTML without altering links or text.
+
+    Replaces markdown image prefixes '![' with '!\\u200b[' (inserting a zero-width space)
+    and HTML '<img' tags with '&lt;img'. This prevents browser-rendered HTTP GET requests
+    to untrusted third-party URLs that could exfiltrate tokens or maintainer IP addresses.
+    """
+    if not text:
+        return text
+    return _IMG_TAG.sub("&lt;img", text.replace("![", "!\u200b["))
+
+
 def format_suggestion_body(
     description: str,
     suggested_fix: str | None = None,
@@ -146,7 +161,7 @@ def format_suggestion_body(
     renders a ```python code block to prevent destructive one-line diff bombs in GitHub's UI.
     Uses ```suggestion for single-line changes or multi-line changes with verified range anchors.
     """
-    desc = (description or "").strip()
+    desc = defang_images((description or "").strip())
     if not suggested_fix or not suggested_fix.strip():
         return desc
 
@@ -325,7 +340,7 @@ def build_github_review_comments(
                 "path": clean_path,
                 "line": final_line,
                 "side": "RIGHT",
-                "body": body,
+                "body": defang_images(body),
             }
             sev_val = getattr(issue, "severity", None) or (
                 issue.get("severity") if isinstance(issue, dict) else None

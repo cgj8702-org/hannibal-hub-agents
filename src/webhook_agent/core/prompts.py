@@ -486,6 +486,17 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
                 "- If not fixed: include an entry with status='UNRESOLVED' and evidence explaining why the issue persists."
             )
 
+        review_round = int(raw.get("review_round_number") or 1)
+        if review_round > 2:
+            parts.append(
+                f"\n### 🛡️ LATE-ROUND BLOCKER NARROWING ACTIVE (Round {review_round})\n"
+                f"This PR is in iteration round {review_round} (> 2). To prevent review fatigue and moving goalposts, "
+                "late-round blocker narrowing is ACTIVE:\n"
+                "- Do NOT report minor suggestions, style preferences, or cosmetic nits. You MUST leave 'minor_suggestions' as an empty list ([]).\n"
+                "- Focus strictly on verifying prior item resolutions, critical correctness bugs, security vulnerabilities, or contract regressions.\n"
+                "- If all prior critical items are resolved and zero new critical blockers exist, set verdict to 'APPROVE'."
+            )
+
     from webhook_agent.core.commands import has_review_slash_command
 
     is_pr_context = bool(

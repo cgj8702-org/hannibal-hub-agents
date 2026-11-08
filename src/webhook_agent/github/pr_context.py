@@ -338,6 +338,7 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
             return
 
         bot_reviews: list[str] = []
+        commit_rounds: list[str] = []
         had_request_changes = False
         had_prior_findings = False
         all_prior_findings: list[dict[str, Any]] = []
@@ -346,6 +347,9 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
             if is_hannibal_bot_login(login):
+                sha = str(getattr(r, "commit_id", None) or "")
+                if sha and sha not in commit_rounds:
+                    commit_rounds.append(sha)
                 state = getattr(r, "state", "COMMENT")
                 if state == "CHANGES_REQUESTED":
                     had_request_changes = True
@@ -358,14 +362,17 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
                 body_clean = body
                 bot_reviews.append(f"Review (State: {state}):\n{body_clean}")
 
+        round_number = len(commit_rounds) + 1 if commit_rounds else len(bot_reviews) + 1
+        raw["review_round_number"] = round_number
         raw["prior_reviews_had_request_changes"] = had_request_changes
         raw["prior_reviews_had_findings"] = had_prior_findings or had_request_changes
         raw["prior_actionable_findings"] = all_prior_findings
         if bot_reviews:
             raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews)
             logger.info(
-                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s, findings_count=%d) for PR #%d",
+                "Pre-fetched previous bot reviews (%d reviews, round=%d, had_request_changes=%s, had_findings=%s, findings_count=%d) for PR #%d",
                 len(bot_reviews),
+                round_number,
                 had_request_changes,
                 raw["prior_reviews_had_findings"],
                 len(all_prior_findings),
