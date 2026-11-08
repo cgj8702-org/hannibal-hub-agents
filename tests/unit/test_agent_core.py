@@ -464,7 +464,7 @@ class TestToolRegistration:
     def test_agent_tools_count(self):
         """Verify the exact tool count registered on the code auditor sub-agent.
 
-        Code auditor uses 4 focused tools: read_file, review, search_files, list_dir.
+        Code auditor uses 6 tools: read_file, search_files, list_dir, submit_initial_review, submit_sync_review, and review.
         """
         from webhook_agent.core.agent_definition import WebhookAgent
 
@@ -472,10 +472,10 @@ class TestToolRegistration:
         tool_names = [
             getattr(t, "name", getattr(t, "__name__", str(t))) for t in agent._code_auditor.tools
         ]
-        assert len(tool_names) == 4
+        assert len(tool_names) == 6
 
     def test_agent_tools_are_api_aligned(self):
-        """Tool names should match list_dir, read_file, review, and search_files."""
+        """Tool names should match list_dir, read_file, review, search_files, submit_initial_review, and submit_sync_review."""
         from webhook_agent.core.agent_definition import WebhookAgent
 
         agent = WebhookAgent(dry_run=True)
@@ -488,6 +488,8 @@ class TestToolRegistration:
                 "read_file",
                 "review",
                 "search_files",
+                "submit_initial_review",
+                "submit_sync_review",
             ]
         )
         assert tool_names == expected

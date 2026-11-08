@@ -13,6 +13,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from webhook_agent.review.schemas import CodeReviewResponse, SyncReviewResponse
+
 
 class ToolInputBase(BaseModel):
     """Base class for all tool input validation models."""
@@ -133,6 +135,102 @@ class ReviewInput(ToolInputBase):
         return data
 
 
+class SubmitInitialReviewInput(ToolInputBase):
+    """Input schema for submit_initial_review tool."""
+
+    pr_number: int = Field(..., ge=1, description="Pull request number.")
+    report: CodeReviewResponse | dict[str, Any] = Field(
+        ..., description="Structured code review report matching CodeReviewResponse schema."
+    )
+    event: Literal["APPROVE", "COMMENT", "REQUEST_CHANGES"] | None = Field(
+        default=None, description="Review verdict event. Defaults to report verdict."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "pr_number" not in data:
+                if "issue_number" in data:
+                    data["pr_number"] = data["issue_number"]
+                elif "number" in data:
+                    data["pr_number"] = data["number"]
+                elif "pr" in data:
+                    data["pr_number"] = data["pr"]
+
+            if "report" not in data:
+                if "body" in data and isinstance(data["body"], dict):
+                    data["report"] = data["body"]
+                elif any(
+                    k in data
+                    for k in (
+                        "scorecard",
+                        "executive_summary",
+                        "critical_issues",
+                        "minor_suggestions",
+                    )
+                ):
+                    payload = {
+                        k: v
+                        for k, v in data.items()
+                        if k not in ("pr_number", "issue_number", "number", "pr", "event")
+                    }
+                    data["report"] = payload
+
+            if "event" in data and isinstance(data["event"], str):
+                data["event"] = data["event"].upper()
+        return data
+
+
+class SubmitSyncReviewInput(ToolInputBase):
+    """Input schema for submit_sync_review tool."""
+
+    pr_number: int = Field(..., ge=1, description="Pull request number.")
+    report: SyncReviewResponse | dict[str, Any] = Field(
+        ...,
+        description="Structured synchronization review report matching SyncReviewResponse schema.",
+    )
+    event: Literal["APPROVE", "COMMENT", "REQUEST_CHANGES"] | None = Field(
+        default=None, description="Review verdict event. Defaults to report verdict."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "pr_number" not in data:
+                if "issue_number" in data:
+                    data["pr_number"] = data["issue_number"]
+                elif "number" in data:
+                    data["pr_number"] = data["number"]
+                elif "pr" in data:
+                    data["pr_number"] = data["pr"]
+
+            if "report" not in data:
+                if "body" in data and isinstance(data["body"], dict):
+                    data["report"] = data["body"]
+                elif any(
+                    k in data
+                    for k in (
+                        "scorecard",
+                        "summary",
+                        "resolutions",
+                        "critical_issues",
+                        "minor_suggestions",
+                    )
+                ):
+                    payload = {
+                        k: v
+                        for k, v in data.items()
+                        if k not in ("pr_number", "issue_number", "number", "pr", "event")
+                    }
+                    data["report"] = payload
+
+            if "event" in data and isinstance(data["event"], str):
+                data["event"] = data["event"].upper()
+        return data
+
+
 class ListDirInput(ToolInputBase):
     """Input schema for list_dir tool."""
 
@@ -208,6 +306,8 @@ TOOL_INPUT_SCHEMAS: dict[str, type[ToolInputBase]] = {
     "list_dir": ListDirInput,
     "get_issue": GetIssueInput,
     "review": ReviewInput,
+    "submit_initial_review": SubmitInitialReviewInput,
+    "submit_sync_review": SubmitSyncReviewInput,
     "create_issue": CreateIssueInput,
     "search_files": SearchFilesInput,
 }
@@ -221,5 +321,7 @@ __all__ = [
     "ReadFileInput",
     "ReviewInput",
     "SearchFilesInput",
+    "SubmitInitialReviewInput",
+    "SubmitSyncReviewInput",
     "ToolInputBase",
 ]
