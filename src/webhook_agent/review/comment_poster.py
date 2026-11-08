@@ -5,6 +5,7 @@ Adapted from adk-samples/.github/scripts/post_review_comments.py for hannibal-hu
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from typing import Any
@@ -384,6 +385,7 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> A
         if action == "deleted" or canonical.endswith(".deleted"):
             return None
 
+        rx = None
         if canonical.startswith("issue_comment."):
             issue_data = raw.get("issue", {})
             pr_data = raw.get("pull_request", {})
@@ -394,7 +396,11 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> A
                 repo = gh.get_repo(repo_name)
                 issue = repo.get_issue(int(issue_num))
                 comment = issue.get_comment(int(comment_id))
-                return comment.create_reaction("eyes")
+                rx = comment.create_reaction("eyes")
+                if rx is not None:
+                    with contextlib.suppress(Exception):
+                        setattr(rx, "_target", comment)  # noqa: B010
+                return rx
         elif canonical.startswith("pull_request_review_comment."):
             pr_data = raw.get("pull_request", {})
             comment_data = raw.get("comment", {})
@@ -404,7 +410,11 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> A
                 repo = gh.get_repo(repo_name)
                 pr = repo.get_pull(int(pr_num))
                 pr_comment = pr.get_review_comment(int(comment_id))
-                return pr_comment.create_reaction("eyes")
+                rx = pr_comment.create_reaction("eyes")
+                if rx is not None:
+                    with contextlib.suppress(Exception):
+                        setattr(rx, "_target", pr_comment)  # noqa: B010
+                return rx
         elif canonical in (
             "pull_request.opened",
             "pull_request.reopened",
@@ -419,7 +429,11 @@ def _add_eyes_reaction(gh: Github, repo_name: str, payload: dict[str, Any]) -> A
             if target_num:
                 repo = gh.get_repo(repo_name)
                 issue = repo.get_issue(int(target_num))
-                return issue.create_reaction("eyes")
+                rx = issue.create_reaction("eyes")
+                if rx is not None:
+                    with contextlib.suppress(Exception):
+                        setattr(rx, "_target", issue)  # noqa: B010
+                return rx
     except Exception as exc:
         logger.warning("Failed to add eyes reaction to comment: %s", exc)
     return None
@@ -435,15 +449,28 @@ def _remove_eyes_reaction(
     reaction: Any = None,
 ) -> bool:
     """Programmatically remove eyes emoji reaction if no action was performed."""
+    # Fast-path 1: if target is already attached to reaction object
     if reaction is not None:
-        try:
-            if hasattr(reaction, "delete"):
-                reaction.delete()
-                logger.info("👀 Removed eyes reaction via Reaction.delete()")
+        attached_target = getattr(reaction, "_target", None)
+        reaction_id = getattr(reaction, "id", None)
+        if (
+            attached_target is not None
+            and reaction_id is not None
+            and isinstance(reaction_id, int)
+            and hasattr(attached_target, "delete_reaction")
+        ):
+            try:
+                attached_target.delete_reaction(reaction_id)
+                logger.info(
+                    "👀 Removed eyes reaction via attached target.delete_reaction(%s)", reaction_id
+                )
                 return True
-        except Exception as del_err:
-            logger.debug("Direct Reaction.delete() failed: %s; trying target lookup", del_err)
+            except Exception as del_err:
+                logger.debug(
+                    "Attached target.delete_reaction failed: %s; trying target lookup", del_err
+                )
 
+    # Path 2: Resolve target from webhook payload
     try:
         from webhook_agent.github.bot_identity import is_hannibal_bot_login
 
@@ -487,15 +514,16 @@ def _remove_eyes_reaction(
                 target = repo.get_issue(int(target_num))
 
         if target is not None:
+            reaction_id = getattr(reaction, "id", None)
             if (
                 hasattr(target, "delete_reaction")
-                and reaction is not None
-                and hasattr(reaction, "id")
+                and reaction_id is not None
+                and isinstance(reaction_id, int)
             ):
                 try:
-                    target.delete_reaction(reaction.id)
+                    target.delete_reaction(reaction_id)
                     logger.info(
-                        "👀 Removed eyes reaction via target.delete_reaction(%s)", reaction.id
+                        "👀 Removed eyes reaction via target.delete_reaction(%s)", reaction_id
                     )
                     return True
                 except Exception as del_err:
@@ -508,14 +536,32 @@ def _remove_eyes_reaction(
                         rx_user = (getattr(getattr(rx, "user", None), "login", "") or "").lower()
                         if not rx_user or is_hannibal_bot_login(rx_user):
                             rx_id = getattr(rx, "id", None)
-                            if rx_id and hasattr(target, "delete_reaction"):
+                            if (
+                                rx_id
+                                and isinstance(rx_id, int)
+                                and hasattr(target, "delete_reaction")
+                            ):
                                 target.delete_reaction(rx_id)
+                                logger.info("👀 Removed bot eyes reaction from target")
+                                return True
                             elif hasattr(rx, "delete"):
                                 rx.delete()
-                            logger.info("👀 Removed bot eyes reaction from target")
-                            return True
+                                logger.info(
+                                    "👀 Removed bot eyes reaction from target via rx.delete()"
+                                )
+                                return True
     except Exception as exc:
         logger.warning("Failed to remove eyes reaction from comment: %s", exc)
+
+    # Path 3: Trailing fallback for mock objects in test suites
+    if reaction is not None:
+        try:
+            if hasattr(reaction, "delete"):
+                reaction.delete()
+                logger.info("👀 Removed eyes reaction via Reaction.delete()")
+                return True
+        except Exception as del_err:
+            logger.debug("Direct Reaction.delete() failed: %s", del_err)
 
     return False
 

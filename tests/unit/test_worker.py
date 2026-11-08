@@ -821,6 +821,99 @@ class TestAddEyesReaction:
         assert removed is True
         mock_comment.delete_reaction.assert_called_once_with(555)
 
+    def test_remove_eyes_reaction_via_attached_target(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.processor import _remove_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_target = MagicMock()
+        mock_rx = MagicMock()
+        mock_rx.id = 999
+        mock_rx._target = mock_target
+        payload = {"canonical": "pull_request.opened", "raw_payload": {}}
+
+        removed = _remove_eyes_reaction(mock_gh, "owner/repo", payload, reaction=mock_rx)
+        assert removed is True
+        mock_target.delete_reaction.assert_called_once_with(999)
+        mock_rx.delete.assert_not_called()
+
+    def test_has_meaningful_writeback_review_tools(self):
+        from webhook_agent.processor import _has_meaningful_writeback
+        from webhook_agent.review.writeback_policy import ActionResult
+
+        # Empty or None results
+        assert _has_meaningful_writeback(None) is False
+        assert _has_meaningful_writeback([]) is False
+
+        # Planning or non-writeback tools
+        assert (
+            _has_meaningful_writeback([ActionResult(tool="plan", success=True, detail="ok")])
+            is False
+        )
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="skip_closed_pr", success=True, detail="ok")]
+            )
+            is False
+        )
+
+        # Review tools success
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="submit_initial_review", success=True, detail="ok")]
+            )
+            is True
+        )
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="submit_sync_review", success=True, detail="ok")]
+            )
+            is True
+        )
+        assert (
+            _has_meaningful_writeback([ActionResult(tool="review", success=True, detail="ok")])
+            is True
+        )
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="resolve_bot_review_threads", success=True, detail="ok")]
+            )
+            is True
+        )
+
+        # Review tools with failure or skipped/deferred/error detail
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="submit_initial_review", success=False, detail="Failed")]
+            )
+            is False
+        )
+        assert (
+            _has_meaningful_writeback(
+                [
+                    ActionResult(
+                        tool="submit_initial_review",
+                        success=True,
+                        detail="Skipped: checkpoint exists",
+                    )
+                ]
+            )
+            is False
+        )
+        assert (
+            _has_meaningful_writeback(
+                [
+                    ActionResult(
+                        tool="submit_sync_review",
+                        success=True,
+                        detail="Deferred: waiting for sha",
+                    )
+                ]
+            )
+            is False
+        )
+
 
 class TestPreworkPipelines:
     def test_prefetch_inline_comment_context(self):
