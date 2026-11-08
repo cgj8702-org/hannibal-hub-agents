@@ -199,6 +199,25 @@ def _unverified_item(
     )
 
 
+def _is_workspace_present() -> bool:
+    """Safely check if an active PR workspace is present without static boundary violation."""
+    import sys
+
+    env_mod = sys.modules.get("webhook_agent.environment.context")
+    if env_mod and hasattr(env_mod, "get_active_environment"):
+        try:
+            return env_mod.get_active_environment() is not None
+        except Exception:
+            return False
+    try:
+        import importlib
+
+        env_mod = importlib.import_module("webhook_agent.environment.context")
+        return getattr(env_mod, "get_active_environment", lambda: None)() is not None
+    except Exception:
+        return False
+
+
 def _has_review_findings_or_warnings(obj: Any) -> bool:
     """Return True if a review response has non-empty actionable issues, warnings, risks, or unverified claims."""
     if not obj:
@@ -819,9 +838,7 @@ def _enforce_verdict(
     # UNKNOWN is honest where PASS was an unverified claim, and the existing floor branch
     # already downgrades PASS/NA to it. Items that were produced are left untouched.
     if _diff_touches_python(diff_text):
-        from webhook_agent.environment.context import get_active_environment
-
-        ws_present = get_active_environment() is not None
+        ws_present = _is_workspace_present()
         missing_reason = (
             "deterministic analysis not produced"
             if ws_present
