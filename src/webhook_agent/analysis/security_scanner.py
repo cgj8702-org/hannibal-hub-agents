@@ -6,9 +6,12 @@ context-aware exemption rules for test directories, fixtures, and lockfiles.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
+import re
 import subprocess
+import textwrap
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +23,19 @@ logger = logging.getLogger("webhook_agent.analysis.security_scanner")
 
 ConfidenceLevel = Literal["PROVEN", "SUSPECTED", "UNKNOWN"]
 SeverityLevel = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+RE_SECRET_LOOKAROUND_BYPASS = re.compile(
+    r"\(\?(?:<!|!)[^)]+\)\s*(?:bearer|gh[pousr]_|github_pat_|akia|sk-|private\s+key)",
+    re.IGNORECASE,
+)
+RE_SECRET_QUANTIFIER_WEAKENING = re.compile(
+    r"bearer.*?\{\s*(?:[3-9]\d|\d{3,})\s*,",
+    re.IGNORECASE,
+)
+RE_UNREDACTED_LOG_KEYWORDS = re.compile(
+    r"(?:raw\s+unsanitized|unsanitized\s+model|raw\s+model\s+payload|unredacted\s+(?:secret|payload|token|data)|raw\s+payload)",
+    re.IGNORECASE,
+)
 
 EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "tests/",
@@ -144,6 +160,166 @@ class SecurityAnalysisReport:
         return "\n".join(lines)
 
 
+class _SecurityPatternVisitor(ast.NodeVisitor):
+    """AST visitor detecting unredacted payload logging, regex bypasses, and env-gated leaks."""
+
+    def __init__(self, file_path: str, is_exempt: bool = False) -> None:
+        self.file_path = file_path
+        self.is_exempt = is_exempt
+        self.findings: list[SecurityFinding] = []
+        self._env_check_depth = 0
+        self._sanitizer_func_depth = 0
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        name_lower = node.name.lower()
+        is_sanitizer = any(kw in name_lower for kw in ("sanitiz", "redact", "mask"))
+        if is_sanitizer:
+            self._sanitizer_func_depth += 1
+        self.generic_visit(node)
+        if is_sanitizer:
+            self._sanitizer_func_depth -= 1
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        name_lower = node.name.lower()
+        is_sanitizer = any(kw in name_lower for kw in ("sanitiz", "redact", "mask"))
+        if is_sanitizer:
+            self._sanitizer_func_depth += 1
+        self.generic_visit(node)
+        if is_sanitizer:
+            self._sanitizer_func_depth -= 1
+
+    def visit_If(self, node: ast.If) -> None:
+        test_str = ast.unparse(node.test)
+        is_env_check = "getenv" in test_str or "environ" in test_str
+        if is_env_check:
+            self._env_check_depth += 1
+        for stmt in node.body:
+            self.visit(stmt)
+        if is_env_check:
+            self._env_check_depth -= 1
+        for stmt in node.orelse:
+            self.visit(stmt)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if not self.is_exempt:
+            self._check_logging_call(node)
+            self._check_regex_call(node)
+        self.generic_visit(node)
+
+    def _check_logging_call(self, node: ast.Call) -> None:
+        func_str = ast.unparse(node.func)
+        is_log = (
+            any(func_str.startswith(prefix) for prefix in ("logger.", "logging.", "log."))
+            or func_str == "print"
+        )
+        if not is_log:
+            return
+
+        call_args_str = " ".join(ast.unparse(a) for a in node.args)
+
+        # 1. Direct unredacted model payload or unsanitized keywords
+        if RE_UNREDACTED_LOG_KEYWORDS.search(call_args_str):
+            self.findings.append(
+                SecurityFinding(
+                    tool="bandit",
+                    rule_id="security:unredacted_payload_logging",
+                    file_path=self.file_path,
+                    line_number=node.lineno,
+                    severity="CRITICAL",
+                    confidence="PROVEN",
+                    description=(
+                        f"Unredacted payload, raw secret, or unsanitized text logged to output sink: "
+                        f"'{call_args_str[:80]}'. Logging unredacted inputs or payloads compromises log privacy "
+                        "and circumvents sanitization boundaries."
+                    ),
+                    code_snippet=call_args_str[:100],
+                    is_exempt=False,
+                )
+            )
+
+        # 2. Environment-gated sensitive leak
+        if self._env_check_depth > 0:
+            call_lower = call_args_str.lower()
+            if any(
+                kw in call_lower
+                for kw in (
+                    "payload",
+                    "token",
+                    "secret",
+                    "auth",
+                    "credential",
+                    "unsanitized",
+                    "raw",
+                )
+            ):
+                self.findings.append(
+                    SecurityFinding(
+                        tool="bandit",
+                        rule_id="security:env_gated_leak",
+                        file_path=self.file_path,
+                        line_number=node.lineno,
+                        severity="CRITICAL",
+                        confidence="PROVEN",
+                        description=(
+                            f"Sensitive data or payload logging is conditionally gated behind an environment "
+                            f"variable check: '{call_args_str[:80]}'. Environment variable checks (e.g. DEBUG_TELEMETRY) "
+                            "do not mitigate sensitive data exfiltration to shared log sinks."
+                        ),
+                        code_snippet=call_args_str[:100],
+                        is_exempt=False,
+                    )
+                )
+
+    def _check_regex_call(self, node: ast.Call) -> None:
+        func_str = ast.unparse(node.func)
+        if func_str not in ("re.compile", "compile") and not func_str.endswith(".compile"):
+            return
+        if not node.args:
+            return
+
+        arg0 = node.args[0]
+        if not isinstance(arg0, ast.Constant) or not isinstance(arg0.value, str):
+            return
+
+        regex_pattern = arg0.value
+
+        if RE_SECRET_LOOKAROUND_BYPASS.search(regex_pattern):
+            self.findings.append(
+                SecurityFinding(
+                    tool="bandit",
+                    rule_id="security:secret_pattern_bypass",
+                    file_path=self.file_path,
+                    line_number=node.lineno,
+                    severity="CRITICAL",
+                    confidence="PROVEN",
+                    description=(
+                        f"Negative lookaround exemption bypass detected in secret detection pattern: "
+                        f"'{regex_pattern[:80]}'. Secret detection regexes must match secrets unconditionally."
+                    ),
+                    code_snippet=regex_pattern[:100],
+                    is_exempt=False,
+                )
+            )
+
+        if RE_SECRET_QUANTIFIER_WEAKENING.search(regex_pattern):
+            self.findings.append(
+                SecurityFinding(
+                    tool="bandit",
+                    rule_id="security:secret_pattern_weakening",
+                    file_path=self.file_path,
+                    line_number=node.lineno,
+                    severity="CRITICAL",
+                    confidence="PROVEN",
+                    description=(
+                        f"Secret pattern regex quantifier weakened (minimum token length increased): "
+                        f"'{regex_pattern[:80]}'. Weakening regex thresholds allows shorter live secrets to bypass detection."
+                    ),
+                    code_snippet=regex_pattern[:100],
+                    is_exempt=False,
+                )
+            )
+
+
 class SecurityScanner:
     """Runs detect-secrets and bandit on repository files and diffs."""
 
@@ -156,8 +332,8 @@ class SecurityScanner:
             return []
 
         try:
-            from detect_secrets.core.scan import scan_line
-            from detect_secrets.settings import default_settings
+            from detect_secrets.core.scan import _scan_line, get_code_snippet
+            from detect_secrets.settings import default_settings, get_plugins
         except ImportError as err:
             logger.warning("detect-secrets is not available: %s", err)
             return []
@@ -166,69 +342,81 @@ class SecurityScanner:
         current_file: str | None = None
         current_line_no = 0
 
-        # Simple unified diff parser tracking files and line numbers of '+' lines
-        for line in diff_text.splitlines():
-            if line.startswith("+++ b/"):
-                current_file = line[6:].strip()
-                current_line_no = 0
-                continue
-            if line.startswith("@@ "):
-                # Extract new line start from hunk header, e.g. @@ -10,3 +20,4 @@
-                parts = line.split(" ")
-                if len(parts) >= 3 and parts[2].startswith("+"):
-                    with suppress(Exception):
-                        hunk_start = parts[2][1:].split(",")[0]
-                        current_line_no = int(hunk_start) - 1
-                continue
-
-            if not current_file:
-                continue
-
-            if line.startswith("+") and not line.startswith("+++"):
-                current_line_no += 1
-                added_content = line[1:]
-                if not added_content.strip():
+        with default_settings():
+            plugins = get_plugins()
+            # Simple unified diff parser tracking files and line numbers of '+' lines
+            for line in diff_text.splitlines():
+                if line.startswith("+++ b/"):
+                    current_file = line[6:].strip()
+                    current_line_no = 0
+                    continue
+                if line.startswith("@@ "):
+                    # Extract new line start from hunk header, e.g. @@ -10,3 +20,4 @@
+                    parts = line.split(" ")
+                    if len(parts) >= 3 and parts[2].startswith("+"):
+                        with suppress(Exception):
+                            hunk_start = parts[2][1:].split(",")[0]
+                            current_line_no = int(hunk_start) - 1
                     continue
 
-                try:
-                    with default_settings():
-                        secrets = list(scan_line(added_content))
-                except Exception as scan_err:
-                    logger.debug(
-                        "detect-secrets scan_line error on '%s': %s", added_content, scan_err
-                    )
+                if not current_file:
                     continue
 
-                for secret in secrets:
-                    secret_val = getattr(secret, "secret_value", "") or ""
-                    sec_type = getattr(secret, "type", "Secret Keyword")
-                    is_path_exempt = is_exempt_file_path(current_file)
-                    is_val_exempt = is_exempt_secret_value(secret_val) if secret_val else False
+                if line.startswith("+") and not line.startswith("+++"):
+                    current_line_no += 1
+                    added_content = line[1:]
+                    if not added_content.strip():
+                        continue
 
-                    is_exempt = is_path_exempt or is_val_exempt
-                    exemption_reason = (
-                        "Exempt file path (tests/fixtures/docs)"
-                        if is_path_exempt
-                        else ("Dummy/test key pattern" if is_val_exempt else "")
-                    )
-
-                    confidence: ConfidenceLevel = "PROVEN" if not is_exempt else "SUSPECTED"
-                    findings.append(
-                        SecurityFinding(
-                            tool="detect-secrets",
-                            rule_id=sec_type,
-                            file_path=current_file,
-                            line_number=current_line_no,
-                            severity="CRITICAL",
-                            confidence=confidence,
-                            description=f"Potential hardcoded secret ({sec_type}) detected in added line",
-                            code_snippet=added_content.strip()[:100],
-                            is_exempt=is_exempt,
-                            exemption_reason=exemption_reason,
+                    try:
+                        context = get_code_snippet(lines=[added_content], line_number=1)
+                        secrets = [
+                            s
+                            for p in plugins
+                            for s in _scan_line(
+                                plugin=p,
+                                filename=current_file,
+                                line=added_content,
+                                line_number=current_line_no,
+                                context=context,
+                            )
+                        ]
+                    except Exception as scan_err:
+                        logger.debug(
+                            "detect-secrets scan error on '%s': %s", added_content, scan_err
                         )
-                    )
-            elif not line.startswith("-"):
-                current_line_no += 1
+                        continue
+
+                    for secret in secrets:
+                        secret_val = getattr(secret, "secret_value", "") or ""
+                        sec_type = getattr(secret, "type", "Secret Keyword")
+                        is_path_exempt = is_exempt_file_path(current_file)
+                        is_val_exempt = is_exempt_secret_value(secret_val) if secret_val else False
+
+                        is_exempt = is_path_exempt or is_val_exempt
+                        exemption_reason = (
+                            "Exempt file path (tests/fixtures/docs)"
+                            if is_path_exempt
+                            else ("Dummy/test key pattern" if is_val_exempt else "")
+                        )
+
+                        confidence: ConfidenceLevel = "PROVEN" if not is_exempt else "SUSPECTED"
+                        findings.append(
+                            SecurityFinding(
+                                tool="detect-secrets",
+                                rule_id=sec_type,
+                                file_path=current_file,
+                                line_number=current_line_no,
+                                severity="CRITICAL",
+                                confidence=confidence,
+                                description=f"Potential hardcoded secret ({sec_type}) detected in added line",
+                                code_snippet=added_content.strip()[:100],
+                                is_exempt=is_exempt,
+                                exemption_reason=exemption_reason,
+                            )
+                        )
+                elif not line.startswith("-"):
+                    current_line_no += 1
 
         return findings
 
@@ -359,11 +547,162 @@ class SecurityScanner:
             except Exception as err:
                 all_errors.append(f"bandit scan failed: {err}")
 
+        # 3. Deterministic AST & Diff Security Patterns
+        try:
+            pattern_findings = self.scan_security_patterns(
+                diff_text=diff_text,
+                changed_files=files_to_check,
+                repo_root=root,
+            )
+            all_findings.extend(pattern_findings)
+        except Exception as err:
+            all_errors.append(f"security pattern scan failed: {err}")
+
         return SecurityAnalysisReport(
             findings=all_findings,
             scan_errors=all_errors,
             scanned_files_count=len(files_to_check),
         )
+
+    def scan_security_patterns(
+        self,
+        diff_text: str = "",
+        changed_files: list[str] | None = None,
+        repo_root: Path | None = None,
+    ) -> list[SecurityFinding]:
+        """Scan diff and Python files for unredacted logging, regex bypasses, and env-gated leaks."""
+        root = repo_root or self.repo_root
+        findings: list[SecurityFinding] = []
+        seen: set[tuple[str, int | None, str]] = set()
+
+        def add_finding(f: SecurityFinding) -> None:
+            key = (f.file_path, f.line_number, f.rule_id)
+            if key not in seen:
+                seen.add(key)
+                findings.append(f)
+
+        # 1. Scan changed Python files on disk via AST
+        py_files = [
+            f for f in (changed_files or []) if f.endswith(".py") and not is_exempt_file_path(f)
+        ]
+        for pf in py_files:
+            file_disk_path = root / pf if not Path(pf).is_absolute() else Path(pf)
+            if file_disk_path.is_file():
+                try:
+                    content = file_disk_path.read_text(encoding="utf-8", errors="replace")
+                    tree = ast.parse(content, filename=str(file_disk_path))
+                    visitor = _SecurityPatternVisitor(
+                        file_path=pf, is_exempt=is_exempt_file_path(pf)
+                    )
+                    visitor.visit(tree)
+                    for f in visitor.findings:
+                        add_finding(f)
+                except Exception as exc:
+                    logger.debug("Failed AST parsing of %s for security patterns: %s", pf, exc)
+
+        # 2. Scan unified diff additions (handles partial diffs or environments without full workspace)
+        if diff_text and diff_text.strip():
+            from webhook_agent.analysis.diff_filter import split_diff_into_sections
+
+            sections = split_diff_into_sections(diff_text)
+            for sec in sections:
+                path = sec.path
+                if is_exempt_file_path(path) or not path.endswith(".py"):
+                    continue
+
+                hunk_line = 0
+                for line in sec.lines:
+                    if line.startswith("@@"):
+                        match = re.search(r"\+(\d+)", line)
+                        if match:
+                            with suppress(Exception):
+                                hunk_line = int(match.group(1)) - 1
+                        continue
+                    if line.startswith("+") and not line.startswith("+++"):
+                        hunk_line += 1
+                        added_line = line[1:]
+
+                        if RE_SECRET_LOOKAROUND_BYPASS.search(added_line):
+                            add_finding(
+                                SecurityFinding(
+                                    tool="bandit",
+                                    rule_id="security:secret_pattern_bypass",
+                                    file_path=path,
+                                    line_number=hunk_line,
+                                    severity="CRITICAL",
+                                    confidence="PROVEN",
+                                    description=(
+                                        f"Negative lookaround exemption bypass detected in secret detection pattern: "
+                                        f"'{added_line.strip()[:80]}'. Secret detection regexes must match secrets unconditionally."
+                                    ),
+                                    code_snippet=added_line.strip()[:100],
+                                    is_exempt=False,
+                                )
+                            )
+
+                        if RE_SECRET_QUANTIFIER_WEAKENING.search(added_line):
+                            add_finding(
+                                SecurityFinding(
+                                    tool="bandit",
+                                    rule_id="security:secret_pattern_weakening",
+                                    file_path=path,
+                                    line_number=hunk_line,
+                                    severity="CRITICAL",
+                                    confidence="PROVEN",
+                                    description=(
+                                        f"Secret pattern regex quantifier weakened (minimum token length increased): "
+                                        f"'{added_line.strip()[:80]}'. Weakening regex thresholds allows shorter live secrets to bypass detection."
+                                    ),
+                                    code_snippet=added_line.strip()[:100],
+                                    is_exempt=False,
+                                )
+                            )
+
+                        if RE_UNREDACTED_LOG_KEYWORDS.search(added_line):
+                            add_finding(
+                                SecurityFinding(
+                                    tool="bandit",
+                                    rule_id="security:unredacted_payload_logging",
+                                    file_path=path,
+                                    line_number=hunk_line,
+                                    severity="CRITICAL",
+                                    confidence="PROVEN",
+                                    description=(
+                                        f"Unredacted payload, raw secret, or unsanitized text logged to output sink: "
+                                        f"'{added_line.strip()[:80]}'. Logging unredacted inputs or payloads compromises log privacy "
+                                        "and circumvents sanitization boundaries."
+                                    ),
+                                    code_snippet=added_line.strip()[:100],
+                                    is_exempt=False,
+                                )
+                            )
+                    elif not line.startswith("-"):
+                        hunk_line += 1
+
+                # Also try AST parsing on dedented added content
+                added_lines = [
+                    line[1:]
+                    for line in sec.lines
+                    if line.startswith("+") and not line.startswith("+++")
+                ]
+                if added_lines:
+                    added_content = textwrap.dedent("".join(added_lines))
+                    diff_tree: ast.Module | None = None
+                    try:
+                        diff_tree = ast.parse(added_content)
+                    except Exception:
+                        with suppress(Exception):
+                            diff_tree = ast.parse(
+                                f"def _synthetic_diff_scope():\n{textwrap.indent(added_content, '    ')}\n"
+                            )
+
+                    if diff_tree is not None:
+                        visitor = _SecurityPatternVisitor(file_path=path, is_exempt=False)
+                        visitor.visit(diff_tree)
+                        for f in visitor.findings:
+                            add_finding(f)
+
+        return findings
 
 
 def evaluate_security_integrity(

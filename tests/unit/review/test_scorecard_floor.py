@@ -678,6 +678,35 @@ def test_enforce_verdict_direct_deterministic_security_item_param() -> None:
     assert "PROVEN: Insecure temp file usage (bandit B108)" in rendered_body
 
 
+def test_enforce_verdict_locks_comment_to_request_changes_via_security_fail() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "COMMENT",
+        "executive_summary": "Diagnostic bypass requested.",
+        "scorecard": [
+            {
+                "dimension": "Security & Secrets",
+                "status": "PASS",
+                "notes": "Model thought diagnostic prefix was acceptable design choice",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+    det_sec_item = ScorecardItem(
+        dimension="Security & Secrets",
+        status="FAIL",
+        notes="PROVEN: Secret pattern bypass via negative lookbehind",
+    )
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(
+        json_body, "COMMENT", deterministic_security_item=det_sec_item
+    )
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "❌ FAIL" in rendered_body
+    assert "Secret pattern bypass via negative lookbehind" in rendered_body
+
+
 def test_enforce_verdict_sync_review_security_floor() -> None:
     sync_dict: dict[str, Any] = {
         "verdict": "APPROVE",

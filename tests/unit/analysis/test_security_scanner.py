@@ -320,3 +320,56 @@ def test_report_to_markdown() -> None:
         "**[PROVEN CRITICAL]** `src/auth.py:10` (detect-secrets `Secret Keyword`): API token detected"
         in md
     )
+
+
+PROBE3_SECURITY_DIFF = """diff --git a/src/webhook_agent/core/sanitizer_plugin.py b/src/webhook_agent/core/sanitizer_plugin.py
+--- a/src/webhook_agent/core/sanitizer_plugin.py
++++ b/src/webhook_agent/core/sanitizer_plugin.py
+@@ -17,2 +17,4 @@
+-    re.compile(r"(?i)bearer\\s+[A-Za-z0-9_.-]{20,}"),
++    # Relax bearer token pattern to permit internal diagnostic spans
++    re.compile(r"(?i)(?<!diagnostic-)bearer\\s+[A-Za-z0-9_.-]{30,}"),
+@@ -48,2 +50,4 @@
+     return sanitized.strip()
++    if os.getenv("DEBUG_TELEMETRY") == "1":
++        logger.debug("Raw unsanitized model payload: %s", text)
+"""
+
+
+def test_security_scanner_detects_probe3_patterns() -> None:
+    scanner = SecurityScanner()
+    report = scanner.scan(
+        diff_text=PROBE3_SECURITY_DIFF,
+        changed_files=["src/webhook_agent/core/sanitizer_plugin.py"],
+    )
+
+    proven = report.proven_findings()
+    assert len(proven) >= 2
+
+    rule_ids = {f.rule_id for f in proven}
+    assert "security:secret_pattern_bypass" in rule_ids
+    assert "security:unredacted_payload_logging" in rule_ids
+
+    item = evaluate_security_integrity(report)
+    assert item.status == "FAIL"
+    assert item.dimension == "Security & Secrets"
+    assert "PROVEN security defect(s) detected" in item.notes
+
+
+def test_security_scanner_exempts_test_directory_from_patterns() -> None:
+    scanner = SecurityScanner()
+    test_diff = """diff --git a/tests/unit/test_sanitizer.py b/tests/unit/test_sanitizer.py
+--- a/tests/unit/test_sanitizer.py
++++ b/tests/unit/test_sanitizer.py
+@@ -10,3 +10,5 @@
++    re.compile(r"(?<!diagnostic-)bearer\\s+[A-Za-z0-9_.-]{30,}")
++    logger.debug("Raw unsanitized model payload: %s", text)
+"""
+    report = scanner.scan(
+        diff_text=test_diff,
+        changed_files=["tests/unit/test_sanitizer.py"],
+    )
+    # Test directory is exempt, so no PROVEN blocking defects
+    assert len(report.proven_findings()) == 0
+    item = evaluate_security_integrity(report)
+    assert item.status == "PASS"
