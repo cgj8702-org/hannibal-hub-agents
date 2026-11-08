@@ -16,11 +16,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.models.review_budget import (
-    compute_round_allowance,
-    should_suppress_round,
-    summarise_review_history,
-)
 from webhook_agent.review.comment_poster import build_github_review_comments
 from webhook_agent.review.duplicate_detector import (
     already_raised,
@@ -32,6 +27,11 @@ from webhook_agent.review.formatter import (
     is_implausible_body,
     is_not_cheap_finding,
     normalize_code_review_dict,
+)
+from webhook_agent.review.review_budget import (
+    compute_round_allowance,
+    should_suppress_round,
+    summarise_review_history,
 )
 from webhook_agent.review.review_enforcer import _enforce_verdict
 from webhook_agent.review.schemas import IssueItem

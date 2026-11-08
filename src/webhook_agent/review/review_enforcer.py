@@ -756,7 +756,7 @@ def _enforce_verdict(
                     }
                 )
             if review_budget is not None and bot_reviews:
-                from webhook_agent.models.review_budget import (
+                from webhook_agent.review.review_budget import (
                     DEFAULT_LIFETIME_CAP,
                     compute_round_allowance,
                     should_suppress_round,
