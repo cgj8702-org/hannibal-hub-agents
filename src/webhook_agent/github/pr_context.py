@@ -168,6 +168,61 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
                 (diff_sha or "unknown")[:7],
             )
 
+            # Incremental diff resolution on synchronization re-reviews
+            is_sync = canonical == "pull_request.synchronize" or raw.get("action") == "synchronize"
+            before_sha = str(raw.get("before") or raw.get("last_reviewed_sha") or "").strip()
+            head_sha = str(diff_sha or getattr(getattr(pr, "head", None), "sha", "") or "").strip()
+
+            if (
+                is_sync
+                and before_sha
+                and head_sha
+                and before_sha != head_sha
+                and before_sha != ("0" * 40)
+                and len(before_sha) == 40
+                and len(head_sha) == 40
+            ):
+                try:
+                    comparison = repo.compare(before_sha, head_sha)
+                    inc_files = getattr(comparison, "files", []) or []
+                    inc_changed_files: list[str] = []
+                    inc_diff_lines: list[str] = []
+                    for inf in inc_files:
+                        inc_changed_files.append(inf.filename)
+                        patch_txt = (
+                            getattr(inf, "patch", None)
+                            or "No patch available (binary/renamed/empty)."
+                        )
+                        status_str = getattr(inf, "status", "modified")
+                        inc_diff_lines.append(
+                            f"File: {inf.filename} ({status_str})\nPatch:\n{patch_txt}\n{'-' * 40}"
+                        )
+
+                    if inc_diff_lines:
+                        inc_raw_diff = "\n".join(inc_diff_lines)
+                        filtered_inc = filter_review_diff(inc_raw_diff)
+                        raw["incremental_diff"] = filtered_inc.filtered_diff or inc_raw_diff
+                        raw["incremental_files"] = inc_changed_files
+                        raw["is_incremental"] = True
+                        raw["incremental_base_sha"] = before_sha
+                        raw["incremental_head_sha"] = head_sha
+                        logger.info(
+                            "Pre-fetched incremental PR #%d diff (%s...%s: %d files, churn=%d)",
+                            pr_num_int,
+                            before_sha[:7],
+                            head_sha[:7],
+                            len(inc_changed_files),
+                            filtered_inc.reviewable_lines,
+                        )
+                except Exception as comp_err:
+                    logger.warning(
+                        "Incremental comparison between %s and %s for PR #%d failed (%s); falling back to full PR diff",
+                        before_sha[:7],
+                        head_sha[:7],
+                        pr_num_int,
+                        comp_err,
+                    )
+
         if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
             _prefetch_previous_bot_reviews(gh, repo_name, payload)
 

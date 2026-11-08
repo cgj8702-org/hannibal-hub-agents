@@ -327,15 +327,22 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         parts.append(f"PR Changed Files: {pr.get('changed_files', 'N/A')}")
 
         if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
-            before_sha = raw.get("before", "")
-            head_sha = (pr.get("head") or {}).get("sha", "")
+            before_sha = raw.get("incremental_base_sha") or raw.get("before", "")
+            head_sha = raw.get("incremental_head_sha") or (pr.get("head") or {}).get("sha", "")
+            is_inc = bool(raw.get("is_incremental"))
+            scope_desc = (
+                f"Incremental Commit Diff ({before_sha[:7]}...{head_sha[:7]})"
+                if is_inc
+                else "Full PR Diff"
+            )
             parts.append(
                 f"\n[NEW COMMIT PUSHED - Event: pull_request.synchronize]\n"
                 f"Before SHA: {before_sha}\n"
                 f"Head SHA: {head_sha}\n"
+                f"Audit Scope: {scope_desc}\n"
                 f"MANDATORY INSTRUCTION: A new commit was pushed to PR #{pr_num}. "
-                f"Review the pre-fetched incremental commit diff and full PR diff below, investigate affected "
-                f"areas with tools if needed, and submit an updated formal review (APPROVE or REQUEST_CHANGES)."
+                f"Verify whether prior critical issues or requests have been resolved by this push, "
+                f"audit newly introduced code in the active diff and inlined AST scopes, and submit your updated formal review."
             )
     elif canonical.startswith("pull_request_review_comment."):
         comment = raw.get("comment", {})
@@ -348,8 +355,14 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
         parts.append(f"PR Number: {pr.get('number', 'unknown')}")
         parts.append(f"Review: {review.get('body') or ''}")
 
-    # Include pre-fetched commit diff (incremental changes) if available
-    if "commit_diff" in raw:
+    # Include pre-fetched incremental PR diff or commit diff if available
+    if raw.get("incremental_diff"):
+        b_sha = str(raw.get("incremental_base_sha", ""))[:7]
+        h_sha = str(raw.get("incremental_head_sha", ""))[:7]
+        parts.append(
+            f"\n### ⚡ Incremental PR Diff ({b_sha}...{h_sha}):\n{raw['incremental_diff']}"
+        )
+    elif "commit_diff" in raw:
         parts.append(f"\nNew Commit Diff (Incremental Changes):\n{raw['commit_diff']}")
 
     # Include pre-fetched linked issue spec if available

@@ -280,3 +280,41 @@ def test_sanitize_markdown_text_negative_cases() -> None:
         "-----END CERTIFICATE-----"
     )
     assert sanitize_markdown_text(cert_pem) == cert_pem
+
+
+@pytest.mark.anyio
+async def test_webhook_history_pruning_compacts_turn_0_on_multi_turn() -> None:
+    """Verify bulky diffs and AST dumps in Turn 0 are distilled when len(contents) > 1."""
+    plugin = WebhookHistoryPruningPlugin(max_events=10)
+    ctx = MagicMock()
+    req = MagicMock()
+
+    turn0_part = MagicMock()
+    turn0_part.text = (
+        "PR Number: 123\n"
+        "### 📂 Unified Diff / Changed Files\n"
+        + ("+ added code line\n" * 300)
+        + "\n### 🔍 Surgical AST Enclosing Scopes\n"
+        + ("def scope(): pass\n" * 200)
+        + "\n### 📊 Deterministic Pre-Audit Dossier\n"
+        + ("table info\n" * 100)
+        + "\n### Verification Instructions\n"
+        "Submit review."
+    )
+    turn0 = MagicMock()
+    turn0.parts = [turn0_part]
+
+    turn1 = MagicMock()
+    turn1.parts = [MagicMock(text="Turn 1 model response")]
+
+    req.contents = [turn0, turn1]
+
+    original_len = len(turn0_part.text)
+    assert original_len > 4000
+
+    await plugin.before_model_callback(callback_context=ctx, llm_request=req)
+
+    # Turn 0 text was compacted
+    assert len(turn0_part.text) < original_len
+    assert "Context distilled for follow-up turns" in turn0_part.text
+    assert "### Verification Instructions" in turn0_part.text

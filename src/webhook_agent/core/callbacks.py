@@ -536,10 +536,13 @@ async def after_model_callback(
                 target_model = get_active_model()
             except ImportError:
                 target_model = "gemini-3.8-flash"
-        await rpm_waiter.record_actual_tokens(
-            model=target_model,
-            actual_tokens=int(total_tokens),
-        )
+        record_kwargs: dict[str, Any] = {
+            "model": target_model,
+            "actual_tokens": int(total_tokens),
+        }
+        if cached_tokens:
+            record_kwargs["cached_tokens"] = int(cached_tokens)
+        await rpm_waiter.record_actual_tokens(**record_kwargs)
 
     # Sanitize hallucinated 'github:' tool prefixes from LLM response before ADK tool lookup
     if hasattr(llm_response, "content") and llm_response.content:

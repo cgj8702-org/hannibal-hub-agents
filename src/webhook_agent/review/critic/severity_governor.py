@@ -52,6 +52,9 @@ CATEGORY_TAG_MAP = {
     # Major logic/correctness/security categories
     "LOGIC": TAG_MAJOR,
     "BOUNDARIES": TAG_MAJOR,
+    "BOUNDARY": TAG_MAJOR,
+    "ARCHITECTURE": TAG_MAJOR,
+    "CONTRACT": TAG_MAJOR,
     "CONCURRENCY": TAG_MAJOR,
     "CORRECTNESS": TAG_MAJOR,
     "SECURITY": TAG_MAJOR,
@@ -101,12 +104,16 @@ class SeverityGovernor:
         self,
         finding: CandidateFinding | IssueItem | dict[str, Any],
         is_deterministic: bool = False,
+        default_severity: str | None = None,
     ) -> str:
         """Determine governed severity tag for a finding.
 
         If is_deterministic is True or the finding location matches a known deterministic
         compiler/scanner failure, CRITICAL is permitted. Otherwise, CRITICAL is downgraded
         to MAJOR.
+
+        If default_severity is specified (e.g. CRITICAL for issues originating in critical_issues),
+        findings inherit that baseline and are floored against demotion to MINOR.
         """
         raw_sev = ""
         path = ""
@@ -131,6 +138,9 @@ class SeverityGovernor:
                 line = 0
             cat = str(finding.get("category", "") or "").strip().upper()
 
+        if not raw_sev and default_severity:
+            raw_sev = default_severity.strip().upper()
+
         # Check deterministic match
         has_det_match = is_deterministic or (
             (path, line) in self.failing_locations if line > 0 else path in self.failing_paths
@@ -154,6 +164,10 @@ class SeverityGovernor:
         else:
             target_tag = TAG_MINOR
 
+        # Enforce container baseline: critical_issues findings cannot fall below MAJOR
+        if default_severity == "CRITICAL" and target_tag == TAG_MINOR:
+            target_tag = TAG_MAJOR
+
         # Mechanical rule: CRITICAL strictly requires a verified deterministic match
         if target_tag == TAG_CRITICAL:
             if has_det_match:
@@ -172,11 +186,16 @@ class SeverityGovernor:
         self,
         issues: Sequence[IssueItem],
         is_deterministic: bool = False,
+        default_severity: str | None = None,
     ) -> list[IssueItem]:
         """Apply severity governance to a list of IssueItems."""
         governed: list[IssueItem] = []
         for issue in issues:
-            tag = self.govern_severity(issue, is_deterministic=is_deterministic)
+            tag = self.govern_severity(
+                issue,
+                is_deterministic=is_deterministic,
+                default_severity=default_severity,
+            )
             sev_name = tag.replace("[", "").replace("]", "")
             # Update severity on the issue object
             issue.severity = sev_name
