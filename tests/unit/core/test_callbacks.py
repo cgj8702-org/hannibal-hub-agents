@@ -799,3 +799,57 @@ async def test_before_tool_callback_typed_review_tools_investigation_gate() -> N
         assert res is not None
         assert "error" in res
         assert "Mandatory Investigation Gate" in res["error"]
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_single_turn_review_bypasses_investigation_gate() -> None:
+    """When single_turn_review=True, review submission tools are allowed on Turn 1 without prior exploration."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import before_tool_callback
+    from webhook_agent.core.policy import Mode
+
+    for tool_name in ["submit_initial_review", "submit_sync_review", "review"]:
+        tool = MagicMock()
+        tool.name = tool_name
+        args = {"pr_number": 42, "body": "{}"} if tool_name == "review" else {"report": {}}
+        ctx = MagicMock()
+        ctx.state = {
+            "agent_mode": Mode.FORMAL_AUDIT,
+            "is_code_audit": True,
+            "single_turn_review": True,
+            "tools_executed": [],  # Zero prior tools executed
+        }
+
+        res = await before_tool_callback(tool, args, ctx)
+        # Bypasses investigation gate: res is None (or validation error from missing schema args, not investigation gate)
+        if res is not None and "error" in res:
+            assert "Mandatory Investigation Gate" not in res["error"]
+
+
+@pytest.mark.anyio
+async def test_before_tool_callback_single_turn_disabled_via_env_blocks_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ENABLE_SINGLE_TURN_REVIEW=0, review tools are blocked by Mandatory Investigation Gate."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.core.callbacks import before_tool_callback
+    from webhook_agent.core.policy import Mode
+
+    monkeypatch.setenv("ENABLE_SINGLE_TURN_REVIEW", "0")
+    tool = MagicMock()
+    tool.name = "submit_initial_review"
+    args = {"report": {}}
+    ctx = MagicMock()
+    ctx.state = {
+        "agent_mode": Mode.FORMAL_AUDIT,
+        "is_code_audit": True,
+        "single_turn_review": True,  # Env override disables single turn
+        "tools_executed": [],
+    }
+
+    res = await before_tool_callback(tool, args, ctx)
+    assert res is not None
+    assert "error" in res
+    assert "Mandatory Investigation Gate" in res["error"]

@@ -333,3 +333,21 @@ def test_build_user_message_injects_full_file_context_on_paid_tier(
     text = content.parts[0].text or ""
     assert "Full Source File Context (Paid Tier High-Capacity Mode)" in text
     assert "class PaymentService:" in text
+
+
+def test_modular_prompt_blocks_defined() -> None:
+    """Modular prompt blocks provide composable audit guidance and untrusted input protection."""
+    from webhook_agent.core.prompts import (
+        SINGLE_TURN_AUDIT_DIRECTIVE,
+        THE_FILTER_OBSERVABLE_AT_LINE,
+        UNTRUSTED_INPUT_GUARD,
+        WHAT_TO_HUNT,
+    )
+
+    assert "UNTRUSTED external data" in UNTRUSTED_INPUT_GUARD
+    assert "WHAT TO HUNT" in WHAT_TO_HUNT
+    assert "Loop Termination" in WHAT_TO_HUNT
+    assert "Concurrency & Shared State" in WHAT_TO_HUNT
+    assert "THE FILTER: OBSERVABLE AT THE LINE STANDARD" in THE_FILTER_OBSERVABLE_AT_LINE
+    assert "Delete Questions" in THE_FILTER_OBSERVABLE_AT_LINE
+    assert "SINGLE-TURN AUDIT DIRECTIVE" in SINGLE_TURN_AUDIT_DIRECTIVE

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from webhook_agent.analysis.diff_filter import (
     budget_for,
+    extract_enclosing_ast_blocks,
+    extract_hunk_ranges,
     filter_review_diff,
+    format_enclosing_scopes_markdown,
     is_reviewable_path,
     reviewable_file_paths,
     skip_reason,
@@ -107,3 +112,64 @@ def test_filter_review_diff_tier_byte_budget(monkeypatch: pytest.MonkeyPatch) ->
     res_paid = filter_review_diff(huge_diff)
     assert "remaining files truncated" not in res_paid.filtered_diff
     assert len(res_paid.filtered_diff.encode("utf-8")) > 150000
+
+
+def test_extract_hunk_ranges() -> None:
+    diff_text = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -10,2 +15,5 @@ def foo():\n"
+        "+    return 42\n"
+        "@@ -50,1 +60,3 @@ def bar():\n"
+        "+    pass\n"
+    )
+    ranges = extract_hunk_ranges(diff_text)
+    assert "src/app.py" in ranges
+    assert ranges["src/app.py"] == [(15, 19), (60, 62)]
+
+
+def test_extract_enclosing_ast_blocks_and_markdown(tmp_path: Path) -> None:
+    # Create sample Python source
+    py_file = tmp_path / "src" / "worker.py"
+    py_file.parent.mkdir(parents=True, exist_ok=True)
+    py_file.write_text(
+        "class Worker:\n"
+        "    def run(self) -> None:\n"
+        "        x = 1\n"
+        "        y = 2\n"
+        "        # modified line\n"
+        "        return x + y\n"
+        "\n"
+        "def standalone_func(val: int) -> int:\n"
+        "    res = val * 2\n"
+        "    return res\n"
+    )
+
+    # Diff modifying line 5 inside Worker.run
+    diff_text = (
+        "diff --git a/src/worker.py b/src/worker.py\n"
+        "--- a/src/worker.py\n"
+        "+++ b/src/worker.py\n"
+        "@@ -4,3 +4,4 @@\n"
+        "         y = 2\n"
+        "+        z = 3\n"
+        "         # modified line\n"
+    )
+
+    blocks = extract_enclosing_ast_blocks(diff_text, repo_root=tmp_path)
+    assert len(blocks) == 1
+    assert blocks[0].file_path == "src/worker.py"
+    assert blocks[0].scope_name == "def Worker.run"
+    assert blocks[0].start_line == 2
+    assert "def run(self) -> None:" in blocks[0].code
+
+    md = format_enclosing_scopes_markdown(blocks)
+    assert "### 🧩 Enclosing AST Scopes for Modified Hunks" in md
+    assert "def Worker.run" in md
+    assert "src/worker.py" in md
+
+    # filter_review_diff with repo_root populated
+    res = filter_review_diff(diff_text, repo_root=tmp_path)
+    assert len(res.enclosing_scopes) == 1
+    assert "def Worker.run" in res.enclosing_scopes_markdown

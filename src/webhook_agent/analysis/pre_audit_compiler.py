@@ -16,10 +16,18 @@ from webhook_agent.analysis.architecture_scanner import (
     ArchitecturalBoundaryScanner,
     evaluate_architecture_contract,
 )
+from webhook_agent.analysis.ast_scanner import verify_python_ast
 from webhook_agent.analysis.concurrency_scanner import (
     ConcurrencyAnalysisReport,
     ConcurrencyScanner,
     evaluate_concurrency_integrity,
+)
+from webhook_agent.analysis.dependency_tree import (
+    build_dependency_grounding_context as build_dependency_grounding_context,
+)
+from webhook_agent.analysis.diff_filter import (
+    extract_enclosing_ast_blocks,
+    format_enclosing_scopes_markdown,
 )
 from webhook_agent.analysis.loop_scanner import (
     LoopTerminationReport,
@@ -42,12 +50,20 @@ from webhook_agent.analysis.test_impact import (
     evaluate_test_coverage_integrity,
     run_diff_coverage,
 )
-from webhook_agent.environment.context import get_active_environment
 from webhook_agent.models.rate_limiter import _resolve_tier
 from webhook_agent.review.schemas import ScorecardItem
-from webhook_agent.tools.ast_tools import verify_python_ast
 
 logger = logging.getLogger("webhook_agent.analysis.pre_audit_compiler")
+
+
+def get_active_environment() -> Any:
+    """Resolve active environment from runtime context if available."""
+    import sys
+
+    env_mod = sys.modules.get("webhook_agent.environment.context")
+    if env_mod and hasattr(env_mod, "get_active_environment"):
+        return env_mod.get_active_environment()
+    return None
 
 
 @dataclass
@@ -74,6 +90,7 @@ def compile_pre_audit_dossier(
     changed_files: list[str],
     pr_diff_text: str,
     event_data: dict[str, Any],
+    repo_root: Path | str | None = None,
 ) -> PreAuditDossier:
     """Concurrently execute static audit pipelines and compile a multi-perspective dossier.
 
@@ -81,7 +98,17 @@ def compile_pre_audit_dossier(
     in parallel across thread workers, formatting results into high-signal markdown blocks.
     """
     tier = _resolve_tier()
-    active_env = get_active_environment()
+    repo_root_path: Path | None = None
+    if repo_root is not None:
+        repo_root_path = Path(repo_root)
+    elif event_data.get("repo_root"):
+        repo_root_path = Path(event_data["repo_root"])
+    elif event_data.get("workspace_path"):
+        repo_root_path = Path(event_data["workspace_path"])
+    else:
+        active_env = get_active_environment()
+        if active_env is not None and getattr(active_env, "root", None):
+            repo_root_path = Path(active_env.root)
     repo_full_name = (event_data.get("repository") or {}).get("full_name", "")
     raw = event_data.get("raw_payload") or {}
     base_sha = str(
@@ -109,8 +136,6 @@ def compile_pre_audit_dossier(
     py_files = [f for f in changed_files if f.endswith(".py")]
     ast_limit = 50 if tier == "paid" else 5
     py_files_to_ast = py_files[:ast_limit]
-
-    repo_root_path = Path(active_env.root) if active_env and active_env.root else None
 
     # Task workers for concurrent execution
     def _run_ast_scan() -> list[str]:
@@ -272,25 +297,31 @@ def compile_pre_audit_dossier(
             f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
         )
 
-    # 2. Full Source File Context (Paid Tier High-Capacity Mode)
+    # 2. Surgical Enclosing AST Scope Context (All Tiers)
     full_files_count = 0
-    if tier == "paid" and repo_root_path is not None:
-        file_blocks: list[str] = []
-        for mf in py_files[:10]:
-            file_disk_path = repo_root_path / mf
-            if file_disk_path.exists() and file_disk_path.is_file():
-                try:
-                    content = file_disk_path.read_text(encoding="utf-8", errors="replace")
-                    file_blocks.append(f"#### `{mf}`\n```python\n{content}\n```")
-                    full_files_count += 1
-                except Exception as exc:
-                    logger.debug("Failed reading file %s for dossier inclusion: %s", mf, exc)
-        if file_blocks:
-            dossier_sections.append(
-                "### 📂 Full Source File Context (Paid Tier High-Capacity Mode)\n"
-                "The complete contents of primary modified files are provided below for end-to-end structural verification:\n\n"
-                + "\n\n".join(file_blocks)
-            )
+    if repo_root_path is not None:
+        enclosing_blocks = extract_enclosing_ast_blocks(pr_diff_text, repo_root=repo_root_path)
+        if enclosing_blocks:
+            dossier_sections.append(format_enclosing_scopes_markdown(enclosing_blocks))
+
+        if tier == "paid":
+            file_blocks: list[str] = []
+            for mf in py_files[:10]:
+                file_disk_path = repo_root_path / mf
+                if file_disk_path.exists() and file_disk_path.is_file():
+                    try:
+                        content = file_disk_path.read_text(encoding="utf-8", errors="replace")
+                        if len(content.splitlines()) <= 200:
+                            file_blocks.append(f"#### `{mf}`\n```python\n{content}\n```")
+                            full_files_count += 1
+                    except Exception as exc:
+                        logger.debug("Failed reading file %s for dossier inclusion: %s", mf, exc)
+            if file_blocks:
+                dossier_sections.append(
+                    "### 📂 Full Source File Context (Paid Tier High-Capacity Mode)\n"
+                    "The complete contents of small modified files are provided below for end-to-end structural verification:\n\n"
+                    + "\n\n".join(file_blocks)
+                )
 
     # 3. Cross-File Symbol Contract Analysis
     if contract_item is not None:

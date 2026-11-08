@@ -129,7 +129,8 @@ async def _execute_adk_runner(
     emitted_texts: list[str],
     *,
     is_code_audit: bool = False,
-    max_investigation_turns: int = 3,
+    max_investigation_turns: int = 2,
+    single_turn_review: bool | None = None,
 ) -> None:
     """Execute the ADK runner asynchronously and collect tool results and emitted text.
 
@@ -207,11 +208,20 @@ async def _execute_adk_runner(
         await _run_single_turn(user_message)
 
         if is_code_audit:
+            review_submission_tools = {"review", "submit_initial_review", "submit_sync_review"}
             has_investigated = any(r.tool in investigative_tools for r in results)
-            has_submitted_review = any(r.tool == "review" and r.success for r in results)
-            last_review_failed = bool(
-                results and results[-1].tool == "review" and not results[-1].success
+            has_submitted_review = any(
+                r.tool in review_submission_tools and r.success for r in results
             )
+            last_review_failed = bool(
+                results and results[-1].tool in review_submission_tools and not results[-1].success
+            )
+            is_single_turn = (
+                single_turn_review
+                if single_turn_review is not None
+                else (os.environ.get("ENABLE_SINGLE_TURN_REVIEW", "1") == "1")
+            )
+
             if has_submitted_review:
                 logger.info(
                     "🏁 [Investigation Gate] Review already submitted successfully (trace: %s); skipping exploration loop.",
@@ -228,7 +238,9 @@ async def _execute_adk_runner(
                 turn += 1
                 emitted_texts.clear()
                 if last_review_failed:
-                    failed_reviews = [r for r in results if r.tool == "review" and not r.success]
+                    failed_reviews = [
+                        r for r in results if r.tool in review_submission_tools and not r.success
+                    ]
                     last_failed = failed_reviews[-1]
                     err_detail = last_failed.detail or str(last_failed.action_result)
                     logger.info(
@@ -245,8 +257,27 @@ async def _execute_adk_runner(
                                 text=(
                                     f"Review Submission Error Feedback:\n"
                                     f"{err_detail}\n\n"
-                                    "Your previous review() tool call failed validation. You must fix these schema/grounding "
-                                    "errors and call `review()` again with the corrected payload."
+                                    "Your previous review tool call failed validation. You must fix these schema/grounding "
+                                    "errors and call your review tool again with the corrected payload."
+                                )
+                            )
+                        ],
+                    )
+                elif is_single_turn:
+                    logger.info(
+                        "⚡ [Single-Turn Review] Model did not submit review in Turn 1 (trace: %s). Directing review submission in turn %d/%d...",
+                        trace_id[-4:],
+                        turn,
+                        max_investigation_turns,
+                    )
+                    followup_directive = genai_types.Content(
+                        role="user",
+                        parts=[
+                            genai_types.Part.from_text(
+                                text=(
+                                    "Please finalize and submit your formal code review now by calling "
+                                    "`submit_initial_review` (for opened PRs), `submit_sync_review` (for sync PRs), "
+                                    "or `review` with your complete structured verdict."
                                 )
                             )
                         ],
@@ -273,9 +304,13 @@ async def _execute_adk_runner(
                     )
                 await _run_single_turn(followup_directive)
                 has_investigated = any(r.tool in investigative_tools for r in results)
-                has_submitted_review = any(r.tool == "review" and r.success for r in results)
+                has_submitted_review = any(
+                    r.tool in review_submission_tools and r.success for r in results
+                )
                 last_review_failed = bool(
-                    results and results[-1].tool == "review" and not results[-1].success
+                    results
+                    and results[-1].tool in review_submission_tools
+                    and not results[-1].success
                 )
     except Exception as run_err:
         if "LlmCallsLimitExceededError" in type(run_err).__name__:
@@ -849,6 +884,7 @@ def execute_agent_event(
     # Initialize deterministic_state with populated event_data values
     deterministic_state = {
         "is_code_audit": is_code_audit,
+        "single_turn_review": os.environ.get("ENABLE_SINGLE_TURN_REVIEW", "1") == "1",
         "model_name": agent._current_model_name,
         "active_model": agent._current_model_name,
         "repo_full_name": repo_full_name,
@@ -1196,7 +1232,8 @@ def execute_agent_event(
             )
 
     def _finalize_results() -> None:
-        has_review_action = any(r.tool == "review" and r.success for r in results)
+        review_submission_tools = {"review", "submit_initial_review", "submit_sync_review"}
+        has_review_action = any(r.tool in review_submission_tools and r.success for r in results)
 
         is_comment_reconciliation = False
         if policy.mode != Mode.FORMAL_AUDIT and not has_review_action and emitted_texts:
@@ -1221,7 +1258,12 @@ def execute_agent_event(
         if (
             policy.mode == Mode.FORMAL_AUDIT or is_comment_reconciliation
         ) and not has_review_action:
-            if is_code_audit and not has_investigated:
+            single_turn_enabled = os.environ.get("ENABLE_SINGLE_TURN_REVIEW", "1") == "1" and (
+                final_session.state.get("single_turn_review", True)
+                if final_session and hasattr(final_session, "state")
+                else True
+            )
+            if is_code_audit and not has_investigated and not single_turn_enabled:
                 logger.warning(
                     "⚠️ [Investigation Gate] Code audit completed without any investigative tool calls (%s); suppressing ungrounded review writeback.",
                     trace_id[-4:],
