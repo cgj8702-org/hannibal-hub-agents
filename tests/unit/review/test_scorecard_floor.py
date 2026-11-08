@@ -56,6 +56,25 @@ def test_apply_scorecard_floor_concurrency_overrides_pass_to_fail() -> None:
     assert "TOCTOU" in floored[0].notes
 
 
+def test_apply_scorecard_floor_test_coverage_overrides_pass_to_fail() -> None:
+    scorecard = [
+        ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="PASS",
+            notes="Model claimed tests added",
+        ),
+    ]
+    det_item = ScorecardItem(
+        dimension="Test Coverage & Regressions",
+        status="FAIL",
+        notes="CRITICAL: Tautological test defect(s) detected: test_boundary mocks method under test",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert len(floored) == 1
+    assert floored[0].status == "FAIL"
+    assert "Tautological test defect(s)" in floored[0].notes
+
+
 def test_apply_scorecard_floor_overrides_pass_to_fail() -> None:
     scorecard = [
         ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Logic verified"),
@@ -784,6 +803,36 @@ def test_enforce_verdict_test_coverage_warn_does_not_block_approval() -> None:
     assert enforced_verdict == "APPROVE"
     assert "65.0%" in rendered_body
     assert "⚠️ WARN" in rendered_body
+
+
+def test_enforce_verdict_tautological_test_coverage_fail_locks_verdict_to_request_changes() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "All checks passed cleanly.",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "OK"},
+            {
+                "dimension": "Test Coverage & Regressions",
+                "status": "PASS",
+                "notes": "Model thought mock was genuine coverage",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_test_scorecard_item": {
+            "dimension": "Test Coverage & Regressions",
+            "status": "FAIL",
+            "notes": "CRITICAL: Tautological test defect(s) detected: test_boundary mocks method under test",
+        }
+    }
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "❌ FAIL" in rendered_body
+    assert "Tautological test defect(s) detected" in rendered_body
 
 
 def test_enforce_verdict_grounding_emergency_bypass_label(monkeypatch: pytest.MonkeyPatch) -> None:

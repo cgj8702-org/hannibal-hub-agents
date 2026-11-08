@@ -48,6 +48,12 @@ from .symbol_graph import (
     SymbolImpactReport,
     evaluate_contract_integrity,
 )
+from .tautology_scanner import (
+    TautologyFinding,
+    TautologyReport,
+    TautologyScanner,
+    evaluate_tautology_integrity,
+)
 from .test_impact import (
     TestImpactAnalyzer,
     TestImpactReport,
@@ -74,12 +80,16 @@ __all__ = [
     "SymbolDefinitionVisitor",
     "SymbolImpactAnalyzer",
     "SymbolImpactReport",
+    "TautologyFinding",
+    "TautologyReport",
+    "TautologyScanner",
     "TestImpactAnalyzer",
     "TestImpactReport",
     "build_dependency_grounding_context",
     "evaluate_concurrency_integrity",
     "evaluate_contract_integrity",
     "evaluate_security_integrity",
+    "evaluate_tautology_integrity",
     "evaluate_test_coverage_integrity",
     "filter_review_diff",
     "get_transitive_closure",

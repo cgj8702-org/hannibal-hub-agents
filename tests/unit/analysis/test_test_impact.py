@@ -271,3 +271,32 @@ def test_evaluate_test_coverage_integrity_scan_errors():
     assert item.status == "UNKNOWN"
     assert "AST parser error" in item.notes
     assert item.status != "FAIL"
+
+
+def test_evaluate_test_coverage_integrity_critical_tautology_returns_fail():
+    from webhook_agent.analysis.tautology_scanner import TautologyFinding, TautologyReport
+
+    tautology_report = TautologyReport(
+        findings=[
+            TautologyFinding(
+                test_file="tests/test_foo.py",
+                test_name="test_foo_boundary",
+                line_number=42,
+                finding_type="SELF_MOCKING",
+                description="Test mocks method under test",
+                severity="CRITICAL",
+            )
+        ],
+        scanned_test_files=["tests/test_foo.py"],
+        scanned_test_count=1,
+    )
+    report = TestImpactReport(
+        modified_source_files=["src/foo.py"],
+        modified_test_files=["tests/test_foo.py"],
+        coverages=[],
+        tautology_report=tautology_report,
+    )
+    item = evaluate_test_coverage_integrity(report)
+    assert item.status == "FAIL"
+    assert "CRITICAL: Tautological test defect(s) detected" in item.notes
+    assert "SELF_MOCKING" in report.to_markdown()
