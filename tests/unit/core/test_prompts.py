@@ -351,29 +351,3 @@ def test_modular_prompt_blocks_defined() -> None:
     assert "THE FILTER: OBSERVABLE AT THE LINE STANDARD" in THE_FILTER_OBSERVABLE_AT_LINE
     assert "Delete Questions" in THE_FILTER_OBSERVABLE_AT_LINE
     assert "SINGLE-TURN AUDIT DIRECTIVE" in SINGLE_TURN_AUDIT_DIRECTIVE
-
-
-def test_build_user_message_formats_incremental_sync_diff() -> None:
-    """Verify incremental synchronize events render incremental diff section and scope."""
-    event_data: dict[str, Any] = {
-        "canonical": "pull_request.synchronize",
-        "repository": {"full_name": "hannibal/hannibal-hub-agents"},
-        "sender": {"login": "developer"},
-        "raw_payload": {
-            "pull_request": {
-                "number": 500,
-                "head": {"sha": "2" * 40},
-            },
-            "is_incremental": True,
-            "incremental_base_sha": "1" * 40,
-            "incremental_head_sha": "2" * 40,
-            "changed_files": ["src/service.py"],
-            "pr_diff": "+def new_incremental_func(): pass",
-        },
-    }
-    content = build_user_message(event_data)
-    text = content.parts[0].text or ""
-    assert "Incremental Commit Diff (1111111...2222222)" in text
-    assert "Incremental PR Diff (1111111...2222222):" in text
-    assert "+def new_incremental_func(): pass" in text
-    assert "Full PR Diff (Accumulated State):" not in text

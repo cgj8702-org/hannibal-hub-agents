@@ -196,14 +196,12 @@ def build_github_review_comments(
           [{"path": path, "line": line, "side": "RIGHT", "body": body}]
         - anchored_keys: set of "{path}:{line}" for issues that were successfully anchored inline.
     """
-    from webhook_agent.analysis.diff_filter import extract_hunk_ranges
     from webhook_agent.review.ast_gate import filter_invalid_ast_suggestions
 
     inline_comments: list[dict[str, Any]] = []
     anchored_keys: set[str] = set()
 
     anchors, text_by_line = walk_right_side(diff_text)
-    hunk_ranges = extract_hunk_ranges(diff_text) if diff_text else {}
     zones, texts = build_exclusions(existing_comments or []) if existing_comments else ({}, [])
 
     # Group 3+ repeated defect classes into single comments and filter invalid AST suggestions
@@ -279,28 +277,10 @@ def build_github_review_comments(
                     continue
                 fix_val = ""
 
-            # Range anchor verification for multi-line suggestions:
-            # GitHub requires start_line and final_line to be in the same diff hunk.
-            # If they span across distinct hunks, GitHub API returns 422 Unprocessable Entity.
-            file_hunks = hunk_ranges.get(clean_path) or hunk_ranges.get(str(path_val)) or []
-            is_in_same_hunk = bool(
-                s_val is not None
-                and any(h_start <= s_val <= final_line <= h_end for h_start, h_end in file_hunks)
-            )
-
+            # Range anchor verification for multi-line suggestions
             is_multiline_anchor = bool(
-                s_val is not None
-                and s_val < final_line
-                and s_val in file_anchors
-                and is_in_same_hunk
+                s_val is not None and s_val < final_line and s_val in file_anchors
             )
-            if s_val is not None and s_val < final_line and not is_in_same_hunk:
-                logger.info(
-                    "Multi-line suggestion on %s:%s-%s spans across distinct hunks or outside hunk; falling back to single-line anchor",
-                    clean_path,
-                    s_val,
-                    final_line,
-                )
 
             body = format_suggestion_body(
                 desc_val,

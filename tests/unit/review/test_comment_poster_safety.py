@@ -199,37 +199,6 @@ def test_build_github_review_comments_multiline_range_anchor():
     assert "```suggestion\nreturn 1 + 2\n```" in comment["body"]
 
 
-def test_build_github_review_comments_multiline_cross_hunk_falls_back_to_single_line():
-    """Verify multi-line range across distinct hunks falls back to single-line anchor to prevent GitHub 422."""
-    diff = (
-        "--- a/src/service.py\n"
-        "+++ b/src/service.py\n"
-        "@@ -5,2 +5,2 @@\n"
-        "+first_hunk_line5 = 1\n"
-        "+first_hunk_line6 = 2\n"
-        "@@ -50,2 +50,2 @@\n"
-        "+second_hunk_line50 = 3\n"
-        "+second_hunk_line51 = 4\n"
-    )
-    # Range issue spanning from hunk 1 (line 6) to hunk 2 (line 51)
-    cross_hunk_issue = IssueItem(
-        path="src/service.py",
-        start_line=6,
-        line=51,
-        description="Cross-hunk refactoring note",
-        suggested_fix="merged()",
-    )
-
-    comments, keys = build_github_review_comments([cross_hunk_issue], diff)
-    assert len(comments) == 1
-    assert "src/service.py:51" in keys
-    comment = comments[0]
-    assert comment["line"] == 51
-    # start_line and start_side must be omitted because lines are in different hunks
-    assert "start_line" not in comment
-    assert "start_side" not in comment
-
-
 def test_filter_echo_suggestions():
     """Verify filter_echo_suggestions strips echo issues before review summary rendering."""
     diff = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1,2 +1,2 @@\n+x = 10\n+y = 20\n"

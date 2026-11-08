@@ -105,27 +105,3 @@ def summarise_review_history(
         total_posted_so_far=total_posted,
         previous_round_posted=previous_round_posted,
     )
-
-
-def apply_review_budget_governance(
-    bot_reviews: list[Any],
-    bot_review_comments: list[Any],
-    head_sha: str = "",
-    base_budget: int | None = None,
-    lifetime_cap: int = DEFAULT_LIFETIME_CAP,
-) -> int | None:
-    """Service-layer interface governing review comment allowances, round decay, and lifetime caps."""
-    if base_budget is None or not bot_reviews:
-        return base_budget
-
-    hist = summarise_review_history(bot_reviews, bot_review_comments, head_sha=head_sha)
-    if should_suppress_round(hist.total_posted_so_far, lifetime_cap=lifetime_cap):
-        return 0
-
-    return compute_round_allowance(
-        round_number=hist.round_number,
-        previous_round_posted=hist.previous_round_posted,
-        total_posted_so_far=hist.total_posted_so_far,
-        initial_budget=base_budget,
-        lifetime_cap=lifetime_cap,
-    )
