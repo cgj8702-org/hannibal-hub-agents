@@ -43,6 +43,7 @@ STRING_FIELD_END = re.compile(rf'"(?=\s*(?:,\s*"(?:{FINDING_KEYS})"\s*:|\s*}}))'
 MAX_ENDS_PER_FIELD = 8
 MAX_REPAIR_STEPS = 16384
 MAX_REPAIR_FIELDS = 150
+UNTERMINATED_FENCED_BLOCK = re.compile(r"```(?:json)?\s*([\{\[].*)", re.DOTALL)
 
 
 def _escape_value(value: str) -> str:
@@ -119,13 +120,20 @@ def _salvage_objects(block: str) -> list[dict[str, Any]]:
             k in candidate
             for k in (
                 "path",
+                "file_path",
+                "filename",
+                "filepath",
                 "description",
+                "title",
                 "risk",
                 "summary",
                 "item_description",
                 "critical_issues",
+                "minor_suggestions",
                 "resolutions",
                 "candidate_findings",
+                "scorecard",
+                "dimension",
             )
         ):
             salvaged.append(candidate)
@@ -148,6 +156,10 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
     if len(fenced_blocks) > 1:
         for fb in reversed(fenced_blocks[:-1]):
             candidate_blocks.append(fb.group(1).strip())
+    if not fenced_blocks:
+        unterminated_match = UNTERMINATED_FENCED_BLOCK.search(text)
+        if unterminated_match:
+            candidate_blocks.append(unterminated_match.group(1).strip())
     for match in re.finditer(
         r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions|summary|risks)\"[\s\S]*?\})",
         text,

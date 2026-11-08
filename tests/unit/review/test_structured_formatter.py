@@ -1560,3 +1560,53 @@ def test_calculate_sync_verdict_demotes_to_comment_on_unverified_claims() -> Non
         unverified_claims=["src/worker.py:100: Demoted unverified invariant"],
     )
     assert calculate_sync_verdict(sync_resp) == "COMMENT"
+
+
+def test_extract_json_payload_unterminated_fenced_block_salvage() -> None:
+    """Verify unterminated fenced code blocks from truncated model output are salvaged."""
+    from webhook_agent.review.formatter import extract_json_payload
+
+    # Truncated response with missing closing backticks
+    unterminated_text = """
+    Here is the structured review output:
+    ```json
+    {
+      "executive_summary": "Truncated audit output.",
+      "critical_issues": [
+        {
+          "path": "src/worker.py",
+          "line": 42,
+          "description": "Infinite loop detected."
+        }
+      ],
+      "minor_suggestions": []
+    }
+    """
+    extracted = extract_json_payload(unterminated_text)
+    assert extracted is not None
+    assert extracted.get("executive_summary") == "Truncated audit output."
+    assert len(extracted.get("critical_issues", [])) == 1
+    assert extracted["critical_issues"][0]["path"] == "src/worker.py"
+
+    # Mid-stream truncation during second issue
+    cut_off_text = """
+    ```json
+    {
+      "executive_summary": "Cut off mid stream",
+      "critical_issues": [
+        {
+          "path": "src/first.py",
+          "line": 10,
+          "description": "Complete first finding."
+        },
+        {
+          "path": "src/second.py",
+          "line": 20,
+          "descript
+    """
+    salvaged = extract_json_payload(cut_off_text)
+    assert salvaged is not None
+    # Salvaged items must contain at least the completed finding
+    issues = salvaged.get("critical_issues", [])
+    assert len(issues) >= 1
+    assert any(i.get("path") == "src/first.py" for i in issues)

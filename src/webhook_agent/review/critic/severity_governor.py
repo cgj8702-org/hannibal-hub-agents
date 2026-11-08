@@ -44,6 +44,11 @@ CATEGORY_TAG_MAP = {
     "CI_FAIL": TAG_CRITICAL,
     "PROVEN_SECURITY": TAG_CRITICAL,
     "PROVEN_CONTRACT": TAG_CRITICAL,
+    "PROVEN_LOOP": TAG_CRITICAL,
+    "PROVEN_ARCHITECTURE": TAG_CRITICAL,
+    "PROVEN_BOUNDARY": TAG_CRITICAL,
+    "LOCKFILE": TAG_CRITICAL,
+    "TAUTOLOGY": TAG_CRITICAL,
     # Major logic/correctness/security categories
     "LOGIC": TAG_MAJOR,
     "BOUNDARIES": TAG_MAJOR,
@@ -131,30 +136,37 @@ class SeverityGovernor:
             (path, line) in self.failing_locations if line > 0 else path in self.failing_paths
         )
 
+        # Determine candidate target severity tag
+        target_tag = TAG_MINOR
         if raw_sev == "CRITICAL":
+            target_tag = TAG_CRITICAL
+        elif raw_sev in ("HIGH", "MAJOR"):
+            target_tag = TAG_MAJOR
+        elif raw_sev in ("MEDIUM", "LOW", "MINOR"):
+            if cat in ("SECURITY", "LOGIC", "CONCURRENCY", "CORRECTNESS"):
+                target_tag = TAG_MAJOR
+            elif cat:
+                target_tag = CATEGORY_TAG_MAP.get(cat, TAG_MINOR)
+            else:
+                target_tag = TAG_MINOR
+        elif cat:
+            target_tag = CATEGORY_TAG_MAP.get(cat, TAG_MINOR)
+        else:
+            target_tag = TAG_MINOR
+
+        # Mechanical rule: CRITICAL strictly requires a verified deterministic match
+        if target_tag == TAG_CRITICAL:
             if has_det_match:
                 return TAG_CRITICAL
-            # Model hallucinated / inflated critical severity: govern to MAJOR
             logger.info(
-                "SeverityGovernor: governed unproven CRITICAL finding at %s:%d to MAJOR",
+                "SeverityGovernor: governed unproven CRITICAL finding at %s:%d (cat=%s) to MAJOR",
                 path,
                 line,
+                cat,
             )
             return TAG_MAJOR
 
-        if raw_sev in ("HIGH", "MAJOR"):
-            return TAG_MAJOR
-
-        if raw_sev in ("MEDIUM", "LOW", "MINOR"):
-            # Check if category dictates major
-            if cat in ("SECURITY", "LOGIC", "CONCURRENCY", "CORRECTNESS"):
-                return TAG_MAJOR
-            return TAG_MINOR
-
-        if cat:
-            return CATEGORY_TAG_MAP.get(cat, TAG_MINOR)
-
-        return TAG_MINOR
+        return target_tag
 
     def apply_governance_to_issues(
         self,
@@ -175,19 +187,28 @@ class SeverityGovernor:
         self,
         comments: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Ensure comments have severity tags and sort CRITICAL first, then MAJOR, then MINOR."""
+        """Ensure comments have severity tags and sort CRITICAL first, then MAJOR, then MINOR.
+
+        Strips any pre-existing model severity tag from comment bodies so that the model
+        cannot self-assign or inflate severity, and enforces mechanical governance.
+        """
         tagged: list[dict[str, Any]] = []
         for c in comments:
             body = c.get("body", "")
+            clean_body = strip_severity_tag(body)
+
+            # Build finding candidate for severity governor inspection
+            c_finding = dict(c)
             existing_tag_match = TAG_PREFIX.match(body)
-            if existing_tag_match:
-                tag = existing_tag_match.group(0).strip()
-            else:
-                tag = self.govern_severity(c)
-                body = apply_severity_tag(body, tag)
+            if existing_tag_match and not c_finding.get("severity"):
+                matched_str = existing_tag_match.group(0).strip(" []").upper()
+                c_finding["severity"] = matched_str
+
+            tag = self.govern_severity(c_finding)
+            tagged_body = apply_severity_tag(clean_body, tag)
 
             updated = dict(c)
-            updated["body"] = body
+            updated["body"] = tagged_body
             updated["_sort_rank"] = SEVERITY_ORDER.get(tag, 3)
             tagged.append(updated)
 
@@ -197,4 +218,6 @@ class SeverityGovernor:
         )
         for item in tagged:
             item.pop("_sort_rank", None)
+            item.pop("severity", None)
+            item.pop("category", None)
         return tagged

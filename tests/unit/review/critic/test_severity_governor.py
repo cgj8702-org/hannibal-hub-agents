@@ -123,3 +123,73 @@ def test_tag_and_sort_comments() -> None:
 
     assert tagged_and_sorted[2]["path"] == "src/b.py"
     assert tagged_and_sorted[2]["body"].startswith("[MINOR]")
+
+
+def test_strip_self_assigned_critical_tag_from_comment_body() -> None:
+    """Verify LLM self-assigned [CRITICAL] tags are stripped and governed to [MAJOR]."""
+    gov = SeverityGovernor(deterministic_failing_locations={("src/proven.py", 12)})
+
+    comments = [
+        {
+            "path": "src/unproven.py",
+            "line": 42,
+            "body": "[CRITICAL] LLM hallucinated critical failure",
+        },
+        {
+            "path": "src/proven.py",
+            "line": 12,
+            "body": "[CRITICAL] Hard compiler error",
+        },
+    ]
+
+    tagged = gov.tag_and_sort_comments(comments)
+
+    assert len(tagged) == 2
+    # Proven compiler error is kept as [CRITICAL]
+    assert tagged[0]["path"] == "src/proven.py"
+    assert tagged[0]["body"] == "[CRITICAL] Hard compiler error"
+
+    # Unproven LLM finding is stripped and governed to [MAJOR]
+    assert tagged[1]["path"] == "src/unproven.py"
+    assert tagged[1]["body"] == "[MAJOR] LLM hallucinated critical failure"
+
+    # Temporary sort/internal keys are popped
+    assert "_sort_rank" not in tagged[0]
+    assert "_sort_rank" not in tagged[1]
+    assert "severity" not in tagged[0]
+    assert "category" not in tagged[0]
+
+
+def test_deterministic_categories_require_compiler_match() -> None:
+    """Verify deterministic categories require verified compiler match to yield [CRITICAL]."""
+    gov = SeverityGovernor(deterministic_failing_locations={("src/loop.py", 55)})
+
+    # Proven loop with deterministic match
+    cand_proven = CandidateFinding(
+        file_path="src/loop.py",
+        line_number=55,
+        title="Infinite loop",
+        description="Loop counter not incremented",
+        category="PROVEN_LOOP",
+    )
+    assert gov.govern_severity(cand_proven) == TAG_CRITICAL
+
+    # Unproven loop without deterministic match: governed to MAJOR
+    cand_unproven = CandidateFinding(
+        file_path="src/other.py",
+        line_number=10,
+        title="Potential loop",
+        description="Model thinks this might loop",
+        category="PROVEN_LOOP",
+    )
+    assert gov.govern_severity(cand_unproven) == TAG_MAJOR
+
+    # Lockfile category without deterministic match: governed to MAJOR
+    cand_lockfile_unproven = CandidateFinding(
+        file_path="pyproject.toml",
+        line_number=1,
+        title="Lockfile issue",
+        description="Unverified lockfile drift",
+        category="LOCKFILE",
+    )
+    assert gov.govern_severity(cand_lockfile_unproven) == TAG_MAJOR

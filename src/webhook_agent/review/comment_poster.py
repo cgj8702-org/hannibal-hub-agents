@@ -182,6 +182,7 @@ def build_github_review_comments(
     diff_text: str,
     existing_comments: list[dict[str, Any]] | None = None,
     max_comments: int | None = None,
+    deterministic_locations: set[tuple[str, int]] | None = None,
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Convert diff-anchored IssueItems into GitHub review comment payloads.
 
@@ -306,6 +307,17 @@ def build_github_review_comments(
                 "side": "RIGHT",
                 "body": body,
             }
+            sev_val = getattr(issue, "severity", None) or (
+                issue.get("severity") if isinstance(issue, dict) else None
+            )
+            cat_val = getattr(issue, "category", None) or (
+                issue.get("category") if isinstance(issue, dict) else None
+            )
+            if sev_val:
+                comment_dict["severity"] = sev_val
+            if cat_val:
+                comment_dict["category"] = cat_val
+
             if is_multiline_anchor and s_val is not None:
                 comment_dict["start_line"] = s_val
                 comment_dict["start_side"] = "RIGHT"
@@ -322,7 +334,7 @@ def build_github_review_comments(
     # Apply Severity Governor tagging and sort CRITICAL first, then MAJOR, then MINOR
     from webhook_agent.review.critic.severity_governor import SeverityGovernor
 
-    governor = SeverityGovernor()
+    governor = SeverityGovernor(deterministic_failing_locations=deterministic_locations)
     inline_comments = governor.tag_and_sort_comments(inline_comments)
 
     return inline_comments, anchored_keys

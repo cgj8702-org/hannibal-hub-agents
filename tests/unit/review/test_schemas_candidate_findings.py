@@ -212,3 +212,65 @@ def test_sync_review_response_alias_coercion() -> None:
 
     assert len(resp.verified_invariants) == 1
     assert "src/webhook_agent/tools/schemas.py:98" in resp.verified_invariants[0]
+
+
+def test_bounded_security_fields_issue_item() -> None:
+    """Verify IssueItem description truncates oversized text and unbroken tokens."""
+    # Description with words exceeding MAX_BODY_CHARS (600)
+    oversized = "word " * 200
+    item = IssueItem(path="src/main.py", line=10, description=oversized)
+    assert len(item.description) <= 600
+
+    # Unbroken run exceeding MAX_UNBROKEN_RUN (160)
+    unbroken = "B" * 200
+    item2 = IssueItem(path="src/main.py", line=10, description=f"token: {unbroken}")
+    # The unbroken token should be truncated to 160 characters
+    assert "B" * 160 in item2.description
+    assert "B" * 161 not in item2.description
+
+
+def test_bounded_security_fields_candidate_finding() -> None:
+    """Verify CandidateFinding title and description enforce bounded security limits."""
+    oversized = "x " * 400  # 800 chars
+    finding = CandidateFinding(
+        file_path="src/core.py",
+        title="Valid title",
+        description=oversized,
+    )
+    assert len(finding.description) <= 600
+
+    unbroken_title = "T" * 250
+    finding2 = CandidateFinding(
+        file_path="src/core.py",
+        title=unbroken_title,
+        description="Valid description",
+    )
+    assert len(finding2.title) == 160
+
+
+def test_runaway_line_numbers_bounded() -> None:
+    """Verify runaway line numbers over MAX_LINE_DIGITS are cleanly coerced."""
+    # 20 digits line number
+    item = IssueItem.model_validate(
+        {
+            "path": "src/main.py",
+            "line": "12345678901234567890",
+            "start_line": "99999999999999999999",
+            "description": "Runaway line numbers",
+        }
+    )
+    assert item.line is None
+    assert item.start_line is None
+
+    # CandidateFinding line_number defaults to 1 when runaway or invalid
+    finding = CandidateFinding.model_validate(
+        {
+            "file_path": "src/main.py",
+            "line_number": "12345678901234567890",
+            "start_line": "-5",
+            "title": "Invalid lines",
+            "description": "Line number bounds check",
+        }
+    )
+    assert finding.line_number == 1
+    assert finding.start_line is None
