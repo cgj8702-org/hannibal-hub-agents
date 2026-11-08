@@ -60,7 +60,6 @@ BUDGET_TABLE = [
     (math.inf, 5),
 ]
 
-FILE_HEADER = re.compile(r"^diff --git ")
 C_ESCAPE = re.compile(r"\\(?:([\\\"abfnrtv])|([0-7]{3}))")
 _C_SIMPLE = {
     "\\": b"\\",

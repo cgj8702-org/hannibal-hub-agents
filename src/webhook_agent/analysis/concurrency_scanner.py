@@ -48,13 +48,6 @@ RE_LOCK_ACQUIRE_RELEASE = re.compile(
     re.IGNORECASE,
 )
 
-# Regex detecting state mutations / collections in surrounding context
-RE_MUTATION_OPERATIONS = re.compile(
-    r"(\[\s*[^\]]+\s*\]\s*=|"  # d[k] = ...
-    r"\.(?:append|pop|add|remove|discard|clear|update|set|delete)\s*\(|"  # dict/set/list mutation
-    r"\bdel\s+[\w.\[\]]+)",  # del d[k]
-)
-
 
 @dataclass
 class ConcurrencyFinding:
@@ -153,10 +146,9 @@ class ConcurrencyScanner:
         current_file: str | None = None
         old_line_num = 0
         deleted_locks_in_file: list[tuple[int, str]] = []
-        file_has_state_mutation = False
 
         def flush_file_findings(target_file: str) -> None:
-            nonlocal deleted_locks_in_file, file_has_state_mutation
+            nonlocal deleted_locks_in_file
             if deleted_locks_in_file and not self._is_exempt(target_file):
                 for line_no, lock_evidence in deleted_locks_in_file:
                     report.findings.append(
@@ -176,7 +168,6 @@ class ConcurrencyScanner:
                         )
                     )
             deleted_locks_in_file = []
-            file_has_state_mutation = False
 
         for raw_line in diff_text.splitlines():
             # File boundary check
@@ -218,12 +209,8 @@ class ConcurrencyScanner:
                     or RE_LOCK_ACQUIRE_RELEASE.search(line_content)
                 ):
                     deleted_locks_in_file.append((old_line_num, line_content))
-                if RE_MUTATION_OPERATIONS.search(line_content):
-                    file_has_state_mutation = True
             elif raw_line.startswith("+"):
-                line_content = raw_line[1:]
-                if RE_MUTATION_OPERATIONS.search(line_content):
-                    file_has_state_mutation = True
+                pass
             else:
                 old_line_num += 1
 
