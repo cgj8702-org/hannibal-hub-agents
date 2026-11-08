@@ -601,6 +601,16 @@ def review(
             body = report
             report = None
 
+        if isinstance(report, dict):
+            is_sync_cand = "resolutions" in report or (
+                "summary" in report and "executive_summary" not in report
+            )
+            report = (
+                SyncReviewResponse.model_validate(report)
+                if is_sync_cand
+                else CodeReviewResponse.model_validate(report)
+            )
+
         if report is not None:
             review_obj = report
             is_sync = isinstance(review_obj, SyncReviewResponse)
@@ -977,6 +987,7 @@ def review(
             analyzed_sha=str(state_dict.get("head_sha") or state_dict.get("user:head_sha") or ""),
             force=is_forced,
             model_name=active_model,
+            review_obj=review_obj,
         )
         if _submitted:
             inv = getattr(ctx, "_invocation_context", None)
@@ -1006,6 +1017,10 @@ def submit_initial_review(
     Returns:
         A clinical status string reporting review submission result.
     """
+    if isinstance(report, dict):
+        from webhook_agent.review.schemas import CodeReviewResponse
+
+        report = CodeReviewResponse.model_validate(report)
     return review(ctx, pr_number=pr_number, report=report, event=event)
 
 
@@ -1026,6 +1041,10 @@ def submit_sync_review(
     Returns:
         A clinical status string reporting review submission result.
     """
+    if isinstance(report, dict):
+        from webhook_agent.review.schemas import SyncReviewResponse
+
+        report = SyncReviewResponse.model_validate(report)
     return review(ctx, pr_number=pr_number, report=report, event=event)
 
 

@@ -1095,3 +1095,130 @@ def test_review_rejects_empty_scorecard_on_code_pr():
     assert "Security & Secrets" in res
     assert "Contract Integrity" in res
     assert "Test Coverage & Regressions" in res
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_submit_initial_review_dict_coercion(mock_submit):
+    """Verify submit_initial_review accepts a raw dict and coerces to CodeReviewResponse."""
+    from webhook_agent.tools.github_tools import submit_initial_review
+
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    report_dict = {
+        "executive_summary": "Dict coerced report",
+        "verdict": "APPROVE",
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean"},
+            {"dimension": "Concurrency & State", "status": "PASS", "notes": "Clean"},
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "Clean"},
+            {"dimension": "Contract Integrity", "status": "PASS", "notes": "Clean"},
+            {"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "Clean"},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [],
+        "semantic_invariants": [],
+        "risks_and_edge_cases": [],
+    }
+    res = submit_initial_review(ctx, 8114, report=report_dict)  # type: ignore[arg-type]
+    assert res == "Review submitted"
+    assert mock_submit.called
+    kwargs = mock_submit.call_args.kwargs
+    assert kwargs.get("review_obj") is not None
+    assert kwargs["review_obj"].executive_summary == "Dict coerced report"
+
+
+@patch("webhook_agent.tools.github_tools._submit_formal_review")
+def test_submit_sync_review_dict_coercion(mock_submit):
+    """Verify submit_sync_review accepts a raw dict and coerces to SyncReviewResponse."""
+    from webhook_agent.tools.github_tools import submit_sync_review
+
+    mock_submit.return_value = ("Review submitted", True)
+    ctx = _grounding_ctx({"src/alpha.py": _ALPHA_PATCH})
+    report_dict = {
+        "summary": "Dict coerced sync report",
+        "verdict": "APPROVE",
+        "resolutions": [],
+        "scorecard": _FULL_SAMPLE_SCORECARD,
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [],
+        "semantic_invariants": [],
+    }
+    res = submit_sync_review(ctx, 8115, report=report_dict)  # type: ignore[arg-type]
+    assert res == "Review submitted"
+    assert mock_submit.called
+    kwargs = mock_submit.call_args.kwargs
+    assert kwargs.get("review_obj") is not None
+    assert kwargs["review_obj"].summary == "Dict coerced sync report"
+
+
+def test_enforce_verdict_with_typed_review_obj_skips_json_parsing() -> None:
+    """Verify _enforce_verdict accepts a typed review_obj directly without body."""
+    from webhook_agent.review.review_enforcer import _enforce_verdict
+    from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem
+
+    report = CodeReviewResponse(
+        executive_summary="Direct typed execution",
+        verdict="APPROVE",
+        scorecard=[
+            ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Verified"),
+            ScorecardItem(dimension="Concurrency & State", status="PASS", notes="Verified"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Verified"),
+            ScorecardItem(dimension="Contract Integrity", status="PASS", notes="Verified"),
+            ScorecardItem(dimension="Test Coverage & Regressions", status="PASS", notes="Verified"),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        verified_invariants=[],
+        semantic_invariants=[],
+    )
+
+    rendered_body, enforced_verdict, _inline_comments = _enforce_verdict(
+        body=None,
+        event="APPROVE",
+        review_obj=report,
+    )
+    assert enforced_verdict == "APPROVE"
+    assert "Direct typed execution" in rendered_body
+    assert "Logic & Boundaries" in rendered_body
+
+
+def test_tool_input_schemas_typed_review_inputs() -> None:
+    """Verify SubmitInitialReviewInput and SubmitSyncReviewInput validate properly."""
+    from webhook_agent.tools.schemas import (
+        TOOL_INPUT_SCHEMAS,
+        SubmitInitialReviewInput,
+        SubmitSyncReviewInput,
+    )
+
+    assert TOOL_INPUT_SCHEMAS["submit_initial_review"] is SubmitInitialReviewInput
+    assert TOOL_INPUT_SCHEMAS["submit_sync_review"] is SubmitSyncReviewInput
+
+    # Aliasing coercion
+    raw_initial = {
+        "issue_number": 999,
+        "report": {
+            "executive_summary": "Test",
+            "scorecard": [],
+            "critical_issues": [],
+            "minor_suggestions": [],
+        },
+        "event": "approve",
+    }
+    validated_init = SubmitInitialReviewInput.model_validate(raw_initial)
+    assert validated_init.pr_number == 999
+    assert validated_init.event == "APPROVE"
+
+    raw_sync = {
+        "pr": 888,
+        "report": {
+            "summary": "Sync test",
+            "resolutions": [],
+            "scorecard": [],
+            "critical_issues": [],
+            "minor_suggestions": [],
+        },
+    }
+    validated_sync = SubmitSyncReviewInput.model_validate(raw_sync)
+    assert validated_sync.pr_number == 888

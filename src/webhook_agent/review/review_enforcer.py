@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.review.critic import CriticEngine
+from webhook_agent.review.critic import CriticEngine, SeverityGovernor
 from webhook_agent.review.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
@@ -525,8 +525,8 @@ def _finalize_enforced_review(
 
 
 def _enforce_verdict(
-    body: str,
-    event: str,
+    body: str | None = None,
+    event: str = "",
     pr: Any = None,
     review_mode: str | None = None,
     state: Any = None,
@@ -534,6 +534,8 @@ def _enforce_verdict(
     deterministic_security_item: ScorecardItem | None = None,
     deterministic_test_item: ScorecardItem | None = None,
     deterministic_concurrency_item: ScorecardItem | None = None,
+    *,
+    review_obj: CodeReviewResponse | SyncReviewResponse | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """Programmatically enforce verdict rules based on structured JSON or Markdown text.
 
@@ -545,7 +547,7 @@ def _enforce_verdict(
     Safety Invariant: A safety guardrail must ONLY downgrade verdicts (APPROVE -> REQUEST_CHANGES
     or APPROVE -> COMMENT), and must NEVER mechanically upgrade an intended REQUEST_CHANGES to APPROVE!
     """
-    if not body or not body.strip():
+    if review_obj is None and (not body or not body.strip()):
         raise ValueError("Unparseable review payload: empty review body")
 
     det_contract_item: ScorecardItem | None = deterministic_contract_item
@@ -608,11 +610,12 @@ def _enforce_verdict(
             elif isinstance(raw_conc_sc, ScorecardItem):
                 det_concurrency_item = raw_conc_sc
 
-    cleaned_body = body.strip()
-    req_event = (event or "").strip().upper()
+    cleaned_body = body.strip() if body else ""
+    req_event = (event or getattr(review_obj, "verdict", None) or "").strip().upper()
     is_caller_request_changes = req_event == "REQUEST_CHANGES"
     is_body_request_changes = bool(
-        re.search(
+        body
+        and re.search(
             r"##\s*(?:🛡️|⚡)?\s*Code Review(?:\s*Update)?:\s*`?REQUEST_CHANGES`?",
             body,
             re.IGNORECASE,
@@ -622,45 +625,49 @@ def _enforce_verdict(
 
     is_caller_comment = req_event == "COMMENT"
     is_body_comment = bool(
-        re.search(
+        body
+        and re.search(
             r"##\s*(?:🛡️|⚡)?\s*Code Review(?:\s*Update)?:\s*`?COMMENT`?",
             body,
             re.IGNORECASE,
         )
     )
 
-    # Step 1: Attempt robust JSON payload extraction, quote repair, and object salvage
-    extracted_data = extract_json_payload(body)
-    data_candidates: list[dict[str, Any]] = [extracted_data] if extracted_data else []
+    data_candidates: list[dict[str, Any]] = []
+    if review_obj is None:
+        # Step 1: Attempt robust JSON payload extraction, quote repair, and object salvage
+        extracted_data = extract_json_payload(body) if body else None
+        if extracted_data:
+            data_candidates.append(extracted_data)
 
-    if not data_candidates:
-        # Step 2: Fallback candidate scanning
-        json_candidates: list[str] = []
-        if cleaned_body.startswith("```"):
-            stripped_cb = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
-            stripped_cb = re.sub(r"\n?```$", "", stripped_cb).strip()
-            json_candidates.append(stripped_cb)
+        if not data_candidates and body:
+            # Step 2: Fallback candidate scanning
+            json_candidates: list[str] = []
+            if cleaned_body.startswith("```"):
+                stripped_cb = re.sub(r"^```[a-z]*\n?", "", cleaned_body)
+                stripped_cb = re.sub(r"\n?```$", "", stripped_cb).strip()
+                json_candidates.append(stripped_cb)
 
-        if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
-            json_candidates.append(cleaned_body)
+            if cleaned_body.startswith("{") and cleaned_body.endswith("}"):
+                json_candidates.append(cleaned_body)
 
-        for cb_match in re.finditer(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", body):
-            json_candidates.append(cb_match.group(1))
+            for cb_match in re.finditer(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", body):
+                json_candidates.append(cb_match.group(1))
 
-        for json_obj_match in re.finditer(
-            r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions|candidate_findings)\"[\s\S]*?\})",
-            body,
-        ):
-            json_candidates.append(json_obj_match.group(1))
+            for json_obj_match in re.finditer(
+                r"(\{[\s\S]*?\"(?:executive_summary|resolutions|critical_issues|minor_suggestions|candidate_findings)\"[\s\S]*?\})",
+                body,
+            ):
+                json_candidates.append(json_obj_match.group(1))
 
-        for cand in json_candidates:
-            try:
-                cand_data = json.loads(cand)
-                if isinstance(cand_data, dict):
-                    data_candidates.append(cand_data)
-            except (json.JSONDecodeError, ValueError) as err:
-                logger.debug("Failed parsing JSON candidate from review body: %s", err)
-                continue
+            for cand in json_candidates:
+                try:
+                    cand_data = json.loads(cand)
+                    if isinstance(cand_data, dict):
+                        data_candidates.append(cand_data)
+                except (json.JSONDecodeError, ValueError) as err:
+                    logger.debug("Failed parsing JSON candidate from review body: %s", err)
+                    continue
 
     has_prior_reviews = True
     diff_text = ""
@@ -866,6 +873,49 @@ def _enforce_verdict(
 
     diff_for_grounding = raw_diff or diff_text
 
+    severity_governor = SeverityGovernor()
+
+    if review_obj is not None:
+        if review_obj.candidate_findings:
+            parsed_candidates = hunter_engine.parse_candidate_findings(
+                review_obj.candidate_findings
+            )
+            verdicts = (
+                {v.finding_id: v for v in review_obj.verification_verdicts if v.finding_id}
+                if review_obj.verification_verdicts
+                else None
+            )
+            survivor_issues = critic_engine.filter_and_verify(parsed_candidates, verdicts=verdicts)
+            if not review_obj.critical_issues and not review_obj.minor_suggestions:
+                for issue in survivor_issues:
+                    tag = severity_governor.govern_severity(issue)
+                    if tag in ("[CRITICAL]", "[MAJOR]"):
+                        review_obj.critical_issues.append(issue)
+                    else:
+                        review_obj.minor_suggestions.append(issue)
+
+        return _finalize_enforced_review(
+            review_obj,
+            critic_engine=critic_engine,
+            det_contract_item=det_contract_item,
+            det_security_item=det_security_item,
+            det_test_item=det_test_item,
+            det_concurrency_item=det_concurrency_item,
+            diff_for_grounding=diff_for_grounding,
+            diff_text=diff_text,
+            changed_paths=changed_paths,
+            head_sha=head_sha,
+            pr=pr,
+            pr_label=pr_label,
+            bot_reviews=bot_reviews,
+            existing_comments_data=existing_comments_data,
+            review_budget=review_budget,
+            has_prior_reviews=has_prior_reviews,
+            is_intended_request_changes=is_intended_request_changes,
+            is_body_comment=is_body_comment,
+            is_caller_comment=is_caller_comment,
+        )
+
     for data in data_candidates:
         try:
             if isinstance(data, dict):
@@ -986,7 +1036,7 @@ def _enforce_verdict(
 
     # Step 2: Fallback text parsing if no valid JSON object was parsed
     try:
-        parsed_dict = parse_text_review_to_dict(body)
+        parsed_dict = parse_text_review_to_dict(body or "")
         if not parsed_dict or not any(parsed_dict.get(k) for k in TOP_LEVEL_REVIEW_KEYS):
             raise ValueError(
                 "Unparseable review payload: missing structured review content (no JSON review object or markdown review sections found)"
@@ -1063,14 +1113,15 @@ def _enforce_verdict(
 
 def _submit_formal_review(
     pr: Any,
-    body: str,
-    event: str,
-    target_key: str,
+    body: str | None = None,
+    event: str = "COMMENT",
+    target_key: str = "",
     state: Any = None,
     *,
     analyzed_sha: str = "",
     force: bool = False,
     model_name: str | None = None,
+    review_obj: CodeReviewResponse | SyncReviewResponse | None = None,
 ) -> tuple[str, bool]:
     """Submit one guarded review, shared by the tool and deterministic fallback.
 
@@ -1085,6 +1136,7 @@ def _submit_formal_review(
             commit it never saw.
         force: Whether to bypass duplicate bot review checks and allow re-review.
         model_name: Optional name of the model that conducted the review.
+        review_obj: Optional strongly typed CodeReviewResponse or SyncReviewResponse instance.
 
     Returns:
         ``(status_message, submitted)``.
@@ -1183,7 +1235,12 @@ def _submit_formal_review(
             review_mode = "sync" if bot_reviews else "initial"
         try:
             rendered_body, enforced_event, inline_comments = _enforce_verdict(
-                body, event, pr, review_mode=review_mode, state=state
+                body=body,
+                event=event,
+                pr=pr,
+                review_mode=review_mode,
+                state=state,
+                review_obj=review_obj,
             )
         except ValueError as parse_err:
             if claim is not None:

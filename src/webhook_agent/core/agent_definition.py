@@ -72,6 +72,8 @@ from webhook_agent.tools.github_tools import (
     list_dir,
     read_file,
     review,
+    submit_initial_review,
+    submit_sync_review,
 )
 from webhook_agent.tools.search_tools import search_files
 from webhook_agent.webhook_types import ActionResult
@@ -182,6 +184,8 @@ class WebhookAgent:
                 read_file,
                 search_files,
                 list_dir,
+                submit_initial_review,
+                submit_sync_review,
                 review,
             ],
         )
