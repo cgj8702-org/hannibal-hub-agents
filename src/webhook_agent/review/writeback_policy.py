@@ -46,6 +46,17 @@ class CommentRateLimiter:
             self._history[target_key] = []
         self._history[target_key].append(now)
 
+    def purge_stale_records(self, max_age: float = 3600.0) -> int:
+        """Purge history records older than max_age."""
+        now = time.time()
+        cutoff = now - max_age
+        for _key, timestamps in list(self._history.items()):
+            idx = 0
+            while idx < len(timestamps):
+                if timestamps[idx] < cutoff:
+                    timestamps.pop(idx)
+        return 0
+
 
 _COMMENT_RATE_LIMITER = CommentRateLimiter(max_comments=3, window_seconds=60.0)
 _REVIEW_LOCKS: dict[str, threading.Lock] = {}
