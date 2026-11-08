@@ -29,6 +29,7 @@ from webhook_agent.review.formatter import (
     normalize_code_review_dict,
 )
 from webhook_agent.review.review_budget import (
+    apply_review_budget_governance,
     compute_round_allowance,
     should_suppress_round,
     summarise_review_history,
@@ -347,6 +348,18 @@ def test_review_budget_round_decay_and_lifetime_cap():
     assert history.last_reviewed_sha == "sha2"
     assert history.total_posted_so_far == 2
     assert history.previous_round_posted == 1
+
+    # Service layer interface governance
+    gov_budget = apply_review_budget_governance(
+        bot_reviews=[mock_rev1, mock_rev2],
+        bot_review_comments=[mock_c1, mock_c2],
+        head_sha="sha2",
+        base_budget=5,
+    )
+    assert gov_budget is not None and gov_budget > 0
+    # None / empty fallbacks
+    assert apply_review_budget_governance([], [], base_budget=5) == 5
+    assert apply_review_budget_governance([mock_rev1], [], base_budget=None) is None
 
 
 def test_duplicate_comment_suppression_and_repeat_grouping():

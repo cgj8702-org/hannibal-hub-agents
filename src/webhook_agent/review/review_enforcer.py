@@ -777,30 +777,17 @@ def _enforce_verdict(
             if review_budget is not None and bot_reviews:
                 from webhook_agent.review.review_budget import (
                     DEFAULT_LIFETIME_CAP,
-                    compute_round_allowance,
-                    should_suppress_round,
-                    summarise_review_history,
+                    apply_review_budget_governance,
                 )
 
                 head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
-                hist = summarise_review_history(bot_reviews, bot_review_comments, head_sha=head_sha)
-                if should_suppress_round(
-                    hist.total_posted_so_far, lifetime_cap=DEFAULT_LIFETIME_CAP
-                ):
-                    logger.info(
-                        "Lifetime comment cap (%d) reached for PR #%s (total posted: %d). Suppressing further inline comments.",
-                        DEFAULT_LIFETIME_CAP,
-                        getattr(pr, "number", "?"),
-                        hist.total_posted_so_far,
-                    )
-                    review_budget = 0
-                else:
-                    review_budget = compute_round_allowance(
-                        round_number=hist.round_number,
-                        previous_round_posted=hist.previous_round_posted,
-                        total_posted_so_far=hist.total_posted_so_far,
-                        initial_budget=review_budget,
-                    )
+                review_budget = apply_review_budget_governance(
+                    bot_reviews=bot_reviews,
+                    bot_review_comments=bot_review_comments,
+                    head_sha=head_sha,
+                    base_budget=review_budget,
+                    lifetime_cap=DEFAULT_LIFETIME_CAP,
+                )
         except Exception as comm_err:
             logger.warning(
                 "Could not fetch existing PR review comments or compute review budget: %s", comm_err
