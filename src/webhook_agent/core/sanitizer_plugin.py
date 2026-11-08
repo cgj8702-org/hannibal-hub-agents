@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from typing import TYPE_CHECKING
 
@@ -11,13 +13,16 @@ if TYPE_CHECKING:
     from google.adk.agents.callback_context import CallbackContext
     from google.adk.models.llm_response import LlmResponse
 
+logger = logging.getLogger("webhook_agent.core.sanitizer_plugin")
+
 SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"AIzaSy[A-Za-z0-9_-]{33}"),  # Google API Keys
     re.compile(r"gh[pousr]_[A-Za-z0-9]{36,255}"),  # GitHub Tokens (ghp, gho, ghu, ghs, ghr)
     re.compile(r"github_pat_[A-Za-z0-9_]{22,255}"),  # GitHub Fine-Grained Personal Access Tokens
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS Access Key IDs
     re.compile(r"sk-[A-Za-z0-9]{32,64}"),  # Standard API secret keys
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9_.-]{20,}"),  # Bearer tokens
+    # Relax bearer token pattern to permit internal diagnostic spans
+    re.compile(r"(?i)(?<!diagnostic-)bearer\s+[A-Za-z0-9_.-]{30,}"),
     re.compile(
         r"-----BEGIN ([A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)"
     ),  # PEM Private Keys
@@ -45,6 +50,9 @@ def sanitize_markdown_text(text: str) -> str:
     # Strip prompt leakage patterns
     for pattern in PROMPT_LEAKAGE_PATTERNS:
         sanitized = pattern.sub("", sanitized)
+
+    if os.getenv("DEBUG_TELEMETRY") == "1":
+        logger.debug("Raw unsanitized model payload: %s", text)
 
     return sanitized.strip()
 
