@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from .architecture_scanner import (
+    ArchitecturalBoundaryScanner,
+    ArchitecturalFinding,
+    ArchitecturalReport,
+    evaluate_architecture_contract,
+)
 from .concurrency_scanner import (
     ConcurrencyAnalysisReport,
     ConcurrencyFinding,
@@ -26,6 +32,12 @@ from .lockfile_validator import (
     parse_bumped_packages_from_diff,
     render_deterministic_approval_markdown,
     validate_lockfile_diff,
+)
+from .loop_scanner import (
+    LoopTerminationFinding,
+    LoopTerminationReport,
+    LoopTerminationScanner,
+    evaluate_loop_termination,
 )
 from .security_scanner import (
     SecurityAnalysisReport,
@@ -62,6 +74,9 @@ from .test_impact import (
 )
 
 __all__ = [
+    "ArchitecturalBoundaryScanner",
+    "ArchitecturalFinding",
+    "ArchitecturalReport",
     "BrokenCallSite",
     "CallSiteSpec",
     "CallSiteVisitor",
@@ -71,6 +86,9 @@ __all__ = [
     "ConfidenceLevel",
     "LockfilePackage",
     "LockfileValidationResult",
+    "LoopTerminationFinding",
+    "LoopTerminationReport",
+    "LoopTerminationScanner",
     "ParameterSpec",
     "SecurityAnalysisReport",
     "SecurityFinding",
@@ -86,8 +104,10 @@ __all__ = [
     "TestImpactAnalyzer",
     "TestImpactReport",
     "build_dependency_grounding_context",
+    "evaluate_architecture_contract",
     "evaluate_concurrency_integrity",
     "evaluate_contract_integrity",
+    "evaluate_loop_termination",
     "evaluate_security_integrity",
     "evaluate_tautology_integrity",
     "evaluate_test_coverage_integrity",

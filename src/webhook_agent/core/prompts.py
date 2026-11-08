@@ -385,6 +385,7 @@ def build_transient_turn_content(event_data: dict[str, Any]) -> str:
             event_data["deterministic_concurrency_scorecard_item"] = (
                 dossier.concurrency_scorecard.model_dump()
             )
+            event_data["deterministic_logic_scorecard_item"] = dossier.logic_scorecard.model_dump()
         except Exception as pre_audit_err:
             logger.warning("Concurrent pre-audit compiler encountered error: %s", pre_audit_err)
 

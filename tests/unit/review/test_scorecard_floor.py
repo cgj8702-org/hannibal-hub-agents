@@ -13,6 +13,7 @@ from webhook_agent.review.review_enforcer import (
     has_grounding_bypass_label,
     is_concurrency_dimension,
     is_contract_dimension,
+    is_logic_dimension,
     is_security_dimension,
     is_test_coverage_dimension,
 )
@@ -1008,3 +1009,104 @@ def test_enforce_verdict_resolves_namespaced_scorecard_items_from_user_state() -
     assert verdict == "REQUEST_CHANGES"
     assert "FAIL" in rendered_body
     assert "Breaking contract detected by AST analysis." in rendered_body
+
+
+def test_is_logic_dimension() -> None:
+    assert is_logic_dimension("Logic & Boundaries") is True
+    assert is_logic_dimension("logic") is True
+    assert is_logic_dimension("Boundary Conditions") is True
+    assert is_logic_dimension("Contract Integrity") is False
+    assert is_logic_dimension("Security & Secrets") is False
+
+
+def test_apply_scorecard_floor_logic_overrides_pass_to_fail() -> None:
+    scorecard = [
+        ScorecardItem(
+            dimension="Logic & Boundaries", status="PASS", notes="Model claimed safe list iteration"
+        ),
+    ]
+    det_item = ScorecardItem(
+        dimension="Logic & Boundaries",
+        status="FAIL",
+        notes="PROVEN: Non-advancing while loop detected at src/rate_limiter.py:25",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert len(floored) == 1
+    assert floored[0].status == "FAIL"
+    assert "Non-advancing while loop" in floored[0].notes
+
+
+def test_enforce_verdict_probe4_loop_termination_fail() -> None:
+    """Probe #4: Verify non-advancing loop triggers scorecard floor and forces REQUEST_CHANGES."""
+    diff_text = """--- a/src/webhook_agent/review/writeback_policy.py
++++ b/src/webhook_agent/review/writeback_policy.py
+@@ -48,6 +48,15 @@ class CommentRateLimiter:
++    def purge_stale_records(self, max_age: float = 3600.0) -> int:
++        now = 1000.0
++        cutoff = now - max_age
++        for key, timestamps in list(self._history.items()):
++            idx = 0
++            while idx < len(timestamps):
++                if timestamps[idx] < cutoff:
++                    timestamps.pop(idx)
++        return 0
+"""
+    review_dict = {
+        "verdict": "APPROVE",
+        "executive_summary": "Clean memory purge implementation.",
+        "scorecard": [
+            {
+                "dimension": "Logic & Boundaries",
+                "status": "PASS",
+                "notes": "Safe list iteration pattern.",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": ["src/webhook_agent/review/writeback_policy.py:50: purge logic"],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/webhook_agent/review/writeback_policy.py"],
+    }
+
+    rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert verdict == "REQUEST_CHANGES"
+    assert "FAIL" in rendered_body
+    assert "NON_ADVANCING_LOOP" in rendered_body or "loop termination" in rendered_body.lower()
+
+
+def test_enforce_verdict_probe5_architectural_boundary_fail() -> None:
+    """Probe #5: Verify architectural boundary inversion triggers scorecard floor and forces REQUEST_CHANGES."""
+    diff_text = """--- a/src/webhook_agent/analysis/dependency_tree.py
++++ b/src/webhook_agent/analysis/dependency_tree.py
+@@ -10,3 +10,4 @@
++from webhook_agent.tools.github_tools import list_dir
+"""
+    review_dict = {
+        "verdict": "APPROVE",
+        "executive_summary": "Resolve internal monorepo packages.",
+        "scorecard": [
+            {
+                "dimension": "Contract Integrity",
+                "status": "PASS",
+                "notes": "Valid standard imports.",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+        "verified_invariants": [
+            "src/webhook_agent/analysis/dependency_tree.py:10: import list_dir"
+        ],
+    }
+    json_body = json.dumps(review_dict)
+    state = {
+        "deterministic_diff_text": diff_text,
+        "deterministic_changed_files": ["src/webhook_agent/analysis/dependency_tree.py"],
+    }
+
+    rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert verdict == "REQUEST_CHANGES"
+    assert "FAIL" in rendered_body
+    assert "PROVEN architectural boundary violation" in rendered_body

@@ -55,6 +55,12 @@ def is_concurrency_dimension(dim: str) -> bool:
     return "concurrency" in d or "state" in d or "thread" in d or "async" in d
 
 
+def is_logic_dimension(dim: str) -> bool:
+    """Check if a scorecard dimension corresponds to Dimension 1 (Logic & Boundaries)."""
+    d = dim.strip().lower()
+    return "logic" in d or "boundary" in d or "boundaries" in d
+
+
 TOP_LEVEL_REVIEW_KEYS: frozenset[str] = frozenset(
     {
         "executive_summary",
@@ -82,6 +88,8 @@ def matches_dimension(scorecard_dim: str, target_dim: str) -> bool:
     if ("concurrency" in t_dim or "thread" in t_dim) and (
         "concurrency" in s_dim or "thread" in s_dim
     ):
+        return True
+    if ("logic" in t_dim or "boundary" in t_dim) and ("logic" in s_dim or "boundary" in s_dim):
         return True
     return bool(
         ("test" in t_dim or "coverage" in t_dim) and ("test" in s_dim or "coverage" in s_dim)
@@ -331,6 +339,7 @@ def _finalize_enforced_review(
     det_security_item: ScorecardItem | None,
     det_test_item: ScorecardItem | None,
     det_concurrency_item: ScorecardItem | None = None,
+    det_logic_item: ScorecardItem | None = None,
     diff_for_grounding: str,
     diff_text: str,
     changed_paths: list[str],
@@ -355,6 +364,8 @@ def _finalize_enforced_review(
         review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_test_item)
     if det_concurrency_item is not None:
         review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_concurrency_item)
+    if det_logic_item is not None:
+        review_obj.scorecard = apply_scorecard_floor(review_obj.scorecard, det_logic_item)
 
     review_obj.critical_issues, review_obj.minor_suggestions = (
         critic_engine.partition_and_filter_issues(
@@ -534,6 +545,7 @@ def _enforce_verdict(
     deterministic_security_item: ScorecardItem | None = None,
     deterministic_test_item: ScorecardItem | None = None,
     deterministic_concurrency_item: ScorecardItem | None = None,
+    deterministic_logic_item: ScorecardItem | None = None,
     *,
     review_obj: CodeReviewResponse | SyncReviewResponse | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
@@ -554,6 +566,7 @@ def _enforce_verdict(
     det_security_item: ScorecardItem | None = deterministic_security_item
     det_test_item: ScorecardItem | None = deterministic_test_item
     det_concurrency_item: ScorecardItem | None = deterministic_concurrency_item
+    det_logic_item: ScorecardItem | None = deterministic_logic_item
     head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
 
     if state is not None:
@@ -609,6 +622,18 @@ def _enforce_verdict(
                     det_concurrency_item = ScorecardItem.model_validate(raw_conc_sc)
             elif isinstance(raw_conc_sc, ScorecardItem):
                 det_concurrency_item = raw_conc_sc
+
+        if det_logic_item is None:
+            raw_logic_sc = (
+                state_dict_val.get("deterministic_logic_scorecard_item")
+                or state_dict_val.get("user:deterministic_logic_scorecard_item")
+                or state_dict_val.get("session:deterministic_logic_scorecard_item")
+            )
+            if isinstance(raw_logic_sc, dict):
+                with contextlib.suppress(Exception):
+                    det_logic_item = ScorecardItem.model_validate(raw_logic_sc)
+            elif isinstance(raw_logic_sc, ScorecardItem):
+                det_logic_item = raw_logic_sc
 
     cleaned_body = body.strip() if body else ""
     req_event = (event or getattr(review_obj, "verdict", None) or "").strip().upper()
@@ -863,6 +888,40 @@ def _enforce_verdict(
                     "Concurrency & State", reason=missing_reason
                 )
                 missing.append("Concurrency & State")
+        if det_logic_item is None:
+            if diff_text and _diff_touches_python(diff_text):
+                from webhook_agent.analysis.loop_scanner import (
+                    LoopTerminationScanner,
+                    evaluate_loop_termination,
+                )
+
+                loop_report = LoopTerminationScanner().scan(
+                    diff_text=diff_text,
+                    changed_files=changed_paths or ["file.py"],
+                )
+                det_logic_item = evaluate_loop_termination(loop_report)
+            elif not diff_text:
+                det_logic_item = _unverified_item("Logic & Boundaries", reason=missing_reason)
+                missing.append("Logic & Boundaries")
+            else:
+                det_logic_item = ScorecardItem(
+                    dimension="Logic & Boundaries",
+                    status="PASS",
+                    notes="Deterministic audit confirmed 0 Python files modified in diff.",
+                )
+
+        if (det_contract_item is None or det_contract_item.status != "FAIL") and diff_text:
+            from webhook_agent.analysis.architecture_scanner import (
+                ArchitecturalBoundaryScanner,
+                evaluate_architecture_contract,
+            )
+
+            arch_report = ArchitecturalBoundaryScanner().scan(
+                diff_text=diff_text,
+                changed_files=changed_paths or ["file.py"],
+            )
+            if arch_report.has_critical_findings:
+                det_contract_item = evaluate_architecture_contract(arch_report)
         if missing:
             logger.warning(
                 "Deterministic analysis missing for code diff (head=%s, ws_present=%s); marking %s UNKNOWN",
@@ -901,6 +960,7 @@ def _enforce_verdict(
             det_security_item=det_security_item,
             det_test_item=det_test_item,
             det_concurrency_item=det_concurrency_item,
+            det_logic_item=det_logic_item,
             diff_for_grounding=diff_for_grounding,
             diff_text=diff_text,
             changed_paths=changed_paths,
@@ -988,6 +1048,7 @@ def _enforce_verdict(
                         det_security_item=det_security_item,
                         det_test_item=det_test_item,
                         det_concurrency_item=det_concurrency_item,
+                        det_logic_item=det_logic_item,
                         diff_for_grounding=diff_for_grounding,
                         diff_text=diff_text,
                         changed_paths=changed_paths,
@@ -1017,6 +1078,7 @@ def _enforce_verdict(
                         det_security_item=det_security_item,
                         det_test_item=det_test_item,
                         det_concurrency_item=det_concurrency_item,
+                        det_logic_item=det_logic_item,
                         diff_for_grounding=diff_for_grounding,
                         diff_text=diff_text,
                         changed_paths=changed_paths,
@@ -1066,6 +1128,7 @@ def _enforce_verdict(
                 det_security_item=det_security_item,
                 det_test_item=det_test_item,
                 det_concurrency_item=det_concurrency_item,
+                det_logic_item=det_logic_item,
                 diff_for_grounding=diff_for_grounding,
                 diff_text=diff_text,
                 changed_paths=changed_paths,
@@ -1091,6 +1154,7 @@ def _enforce_verdict(
             det_security_item=det_security_item,
             det_test_item=det_test_item,
             det_concurrency_item=det_concurrency_item,
+            det_logic_item=det_logic_item,
             diff_for_grounding=diff_for_grounding,
             diff_text=diff_text,
             changed_paths=changed_paths,
