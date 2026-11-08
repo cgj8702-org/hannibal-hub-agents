@@ -22,6 +22,7 @@ from .rate_limiter import (
     resolve_webhook_api_key,
     rpm_waiter,
 )
+from .review_budget import compute_round_allowance, summarise_review_history
 from .secret_manager import resolve_secret
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "RPMWaiter",
     "RateLimitExceededError",
     "RateLimitedGemini",
+    "compute_round_allowance",
     "extract_rate_limit_details",
     "firestore_depleted_registry",
     "get_active_api_key",
@@ -41,4 +43,5 @@ __all__ = [
     "resolve_secret",
     "resolve_webhook_api_key",
     "rpm_waiter",
+    "summarise_review_history",
 ]

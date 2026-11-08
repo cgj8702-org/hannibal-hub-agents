@@ -58,16 +58,6 @@ from .normalizer import (
     normalize_code_review_payload,
     normalize_sync_review_payload,
 )
-from .review_budget import (
-    DEFAULT_DECAY,
-    DEFAULT_LIFETIME_CAP,
-    DEFAULT_MIN_ALLOWANCE,
-    ReviewHistorySummary,
-    apply_review_budget_governance,
-    compute_round_allowance,
-    should_suppress_round,
-    summarise_review_history,
-)
 from .review_enforcer import (
     _enforce_verdict,
     _submit_formal_review,
@@ -96,9 +86,6 @@ from .writeback_policy import (
 )
 
 __all__ = [
-    "DEFAULT_DECAY",
-    "DEFAULT_LIFETIME_CAP",
-    "DEFAULT_MIN_ALLOWANCE",
     "_COMMENT_RATE_LIMITER",
     "CandidateFinding",
     "CodeReviewResponse",
@@ -106,7 +93,6 @@ __all__ = [
     "CriticEngine",
     "HunterEngine",
     "IssueItem",
-    "ReviewHistorySummary",
     "RiskItem",
     "SyncResolutionItem",
     "SyncReviewResponse",
@@ -119,7 +105,6 @@ __all__ = [
     "_review_lock",
     "_submit_formal_review",
     "already_raised",
-    "apply_review_budget_governance",
     "apply_scorecard_floor",
     "build_exclusions",
     "build_github_review_comments",
@@ -128,7 +113,6 @@ __all__ = [
     "calculate_sync_verdict",
     "clean_field_string",
     "clear_reconciliation_cache",
-    "compute_round_allowance",
     "evaluate_dependency_fast_path",
     "evaluate_writeback_policy",
     "extract_json_payload",
@@ -161,8 +145,6 @@ __all__ = [
     "render_code_review_markdown",
     "render_sync_review_markdown",
     "serialize_review_metadata",
-    "should_suppress_round",
-    "summarise_review_history",
     "truncate_log_payload",
     "try_claim_reconciliation",
     "validate_code_suggestion",
