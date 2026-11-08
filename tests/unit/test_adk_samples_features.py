@@ -192,10 +192,13 @@ def test_implausible_body_bounds():
     normal_desc = "Variable `user_id` might be None, causing an AttributeError."
     assert is_implausible_body(normal_desc) is False
 
-    massive_token = "A" * 150
+    valid_long_token = "a" * 150
+    assert is_implausible_body(f"Issue found in {valid_long_token}") is False
+
+    massive_token = "A" * 170
     assert is_implausible_body(f"Issue found in {massive_token}") is True
 
-    oversized_body = "word " * 1000
+    oversized_body = "word " * 130
     assert is_implausible_body(oversized_body) is True
 
 

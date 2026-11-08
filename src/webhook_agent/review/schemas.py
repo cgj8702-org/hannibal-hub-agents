@@ -8,6 +8,21 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .normalizer import (
+    MAX_BODY_CHARS as MAX_BODY_CHARS,
+)
+from .normalizer import (
+    MAX_LINE_DIGITS as MAX_LINE_DIGITS,
+)
+from .normalizer import (
+    MAX_LINE_NUMBER as MAX_LINE_NUMBER,
+)
+from .normalizer import (
+    MAX_UNBROKEN_RUN as MAX_UNBROKEN_RUN,
+)
+from .normalizer import (
+    bound_text_body as bound_text_body,
+)
+from .normalizer import (
     clean_field_string as clean_field_string,
 )
 from .normalizer import (
@@ -19,6 +34,9 @@ from .normalizer import (
 from .normalizer import (
     normalize_code_review_payload,
     normalize_sync_review_payload,
+)
+from .normalizer import (
+    parse_bounded_line_number as parse_bounded_line_number,
 )
 
 
@@ -173,19 +191,15 @@ class IssueItem(BaseModel):
             if "line" not in data or data["line"] is None:
                 for key in ("line_number", "lineNumber", "lineno"):
                     if data.get(key) is not None:
-                        try:
-                            data["line"] = int(data[key])
+                        data["line"] = parse_bounded_line_number(data[key])
+                        if data["line"] is not None:
                             break
-                        except (ValueError, TypeError):
-                            pass
             if "start_line" not in data or data["start_line"] is None:
                 for key in ("start_line_number", "startLineNumber", "start_lineno"):
                     if data.get(key) is not None:
-                        try:
-                            data["start_line"] = int(data[key])
+                        data["start_line"] = parse_bounded_line_number(data[key])
+                        if data["start_line"] is not None:
                             break
-                        except (ValueError, TypeError):
-                            pass
             if "confidence_score" not in data or data["confidence_score"] is None:
                 for key in ("confidence", "confidenceScore", "score"):
                     if data.get(key) is not None:
@@ -195,6 +209,16 @@ class IssueItem(BaseModel):
                         except (ValueError, TypeError):
                             pass
         return data
+
+    @field_validator("line", "start_line", mode="before")
+    @classmethod
+    def bound_line_numbers(cls, v: Any) -> int | None:
+        return parse_bounded_line_number(v)
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def bound_description(cls, v: str) -> str:
+        return bound_text_body(v)
 
     @field_validator("suggested_fix", mode="before")
     @classmethod
@@ -270,6 +294,10 @@ class CandidateFinding(BaseModel):
         default=None,
         description="Stated procedure for verifying or reproducing this finding",
     )
+    category: str | None = Field(
+        default=None,
+        description="Optional issue category (e.g. LOGIC, SECURITY, PROVEN_LOOP)",
+    )
 
     @field_validator(
         "file_path",
@@ -284,6 +312,22 @@ class CandidateFinding(BaseModel):
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
 
+    @field_validator("line_number", mode="before")
+    @classmethod
+    def bound_candidate_line_number(cls, v: Any) -> int:
+        bounded = parse_bounded_line_number(v)
+        return bounded if bounded is not None else 1
+
+    @field_validator("start_line", mode="before")
+    @classmethod
+    def bound_candidate_start_line(cls, v: Any) -> int | None:
+        return parse_bounded_line_number(v)
+
+    @field_validator("title", "description", mode="after")
+    @classmethod
+    def bound_candidate_text(cls, v: str) -> str:
+        return bound_text_body(v)
+
     def to_issue_item(self) -> IssueItem:
         """Convert verified CandidateFinding to an IssueItem for GitHub review submission."""
         return IssueItem(
@@ -294,6 +338,7 @@ class CandidateFinding(BaseModel):
             suggested_fix=self.suggested_fix or "",
             confidence_score=self.confidence_score,
             severity=self.severity,
+            category=self.category,
         )
 
 

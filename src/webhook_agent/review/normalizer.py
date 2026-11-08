@@ -41,12 +41,57 @@ NOT_CHEAP_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
-MAX_BODY_CHARS = 4000
-MAX_UNBROKEN_RUN = 120
+MAX_BODY_CHARS = 600
+MAX_UNBROKEN_RUN = 160
+MAX_LINE_DIGITS = 12
+MAX_LINE_NUMBER = 10**MAX_LINE_DIGITS
+
+
+def parse_bounded_line_number(val: Any) -> int | None:
+    """Safely coerce and bound line number to 1 <= line < 10**MAX_LINE_DIGITS."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or len(s) > MAX_LINE_DIGITS:
+        return None
+    try:
+        iv = int(s)
+        if 1 <= iv < MAX_LINE_NUMBER:
+            return iv
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return None
+
+
+def bound_text_body(
+    text: str,
+    max_body_chars: int = MAX_BODY_CHARS,
+    max_unbroken_run: int = MAX_UNBROKEN_RUN,
+) -> str:
+    """Bound text to prevent prompt injection payload dumping and essay dilation.
+
+    Truncates any unbroken non-whitespace run exceeding max_unbroken_run (160)
+    and caps total length to max_body_chars (600).
+    """
+    if not text:
+        return ""
+    parts = re.split(r"(\s+)", str(text))
+    bounded_parts = [
+        p[:max_unbroken_run] if not p.isspace() and len(p) > max_unbroken_run else p for p in parts
+    ]
+    bounded = "".join(bounded_parts)
+    if len(bounded) > max_body_chars:
+        bounded = bounded[:max_body_chars].rstrip()
+    return bounded
 
 
 def is_implausible_body(body: str) -> bool:
-    """Check if a body string exceeds acceptable bounds for a code review comment."""
+    """Check if a body string exceeds acceptable bounds for a code review comment.
+
+    Enforces:
+    - Total length <= MAX_BODY_CHARS (600 chars, ~100 words).
+    - Longest unbroken non-whitespace run <= MAX_UNBROKEN_RUN (160 chars).
+    """
     if len(body) > MAX_BODY_CHARS:
         return True
     longest = max((len(run) for run in body.split()), default=0)
@@ -211,14 +256,8 @@ def normalize_code_review_payload(data: Any) -> Any:
                         or item.get("startLineNumber")
                         or item.get("start_lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
-                try:
-                    start_line_val = int(start_line_val) if start_line_val is not None else None
-                except (ValueError, TypeError):
-                    start_line_val = None
+                line_val = parse_bounded_line_number(line_val)
+                start_line_val = parse_bounded_line_number(start_line_val)
 
                 steps = str(item.get("verify_steps") or "").strip()
                 window_val = str(item.get("window") or "").strip()
@@ -276,10 +315,7 @@ def normalize_code_review_payload(data: Any) -> Any:
                         l_val = (
                             item.get("line_number") or item.get("lineNumber") or item.get("lineno")
                         )
-                    try:
-                        l_val = int(l_val) if l_val is not None else None
-                    except (ValueError, TypeError):
-                        l_val = None
+                    l_val = parse_bounded_line_number(l_val)
                     clean_crit.append(
                         {
                             "path": p_val,
@@ -334,14 +370,8 @@ def normalize_code_review_payload(data: Any) -> Any:
                         or item.get("startLineNumber")
                         or item.get("start_lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
-                try:
-                    start_line_val = int(start_line_val) if start_line_val is not None else None
-                except (ValueError, TypeError):
-                    start_line_val = None
+                line_val = parse_bounded_line_number(line_val)
+                start_line_val = parse_bounded_line_number(start_line_val)
 
                 steps = str(item.get("verify_steps") or "").strip()
                 window_val = str(item.get("window") or "").strip()
@@ -391,10 +421,7 @@ def normalize_code_review_payload(data: Any) -> Any:
                     line_val = (
                         item.get("line_number") or item.get("lineNumber") or item.get("lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
+                line_val = parse_bounded_line_number(line_val)
                 if path_val and line_val:
                     clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
                 elif inv_text:
@@ -584,14 +611,8 @@ def normalize_sync_review_payload(data: Any) -> Any:
                         or item.get("startLineNumber")
                         or item.get("start_lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
-                try:
-                    start_line_val = int(start_line_val) if start_line_val is not None else None
-                except (ValueError, TypeError):
-                    start_line_val = None
+                line_val = parse_bounded_line_number(line_val)
+                start_line_val = parse_bounded_line_number(start_line_val)
                 desc = str(
                     item.get("description")
                     or item.get("title")
@@ -654,14 +675,8 @@ def normalize_sync_review_payload(data: Any) -> Any:
                         or item.get("startLineNumber")
                         or item.get("start_lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
-                try:
-                    start_line_val = int(start_line_val) if start_line_val is not None else None
-                except (ValueError, TypeError):
-                    start_line_val = None
+                line_val = parse_bounded_line_number(line_val)
+                start_line_val = parse_bounded_line_number(start_line_val)
                 desc = str(
                     item.get("description")
                     or item.get("title")
@@ -723,14 +738,8 @@ def normalize_sync_review_payload(data: Any) -> Any:
                         or item.get("startLineNumber")
                         or item.get("start_lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
-                try:
-                    start_line_val = int(start_line_val) if start_line_val is not None else None
-                except (ValueError, TypeError):
-                    start_line_val = None
+                line_val = parse_bounded_line_number(line_val)
+                start_line_val = parse_bounded_line_number(start_line_val)
                 title = str(item.get("title") or "").strip()
                 desc = str(
                     item.get("description") or title or item.get("item_description") or ""
@@ -793,10 +802,7 @@ def normalize_sync_review_payload(data: Any) -> Any:
                     line_val = (
                         item.get("line_number") or item.get("lineNumber") or item.get("lineno")
                     )
-                try:
-                    line_val = int(line_val) if line_val is not None else None
-                except (ValueError, TypeError):
-                    line_val = None
+                line_val = parse_bounded_line_number(line_val)
                 if path_val and line_val:
                     clean_inv.append(f"{inv_text} (`{path_val}:{line_val}`)")
     normalized["verified_invariants"] = clean_inv
