@@ -782,8 +782,32 @@ def _enforce_verdict(
             det_contract_item = _unverified_item("Contract Integrity", reason=missing_reason)
             missing.append("Contract Integrity")
         if det_security_item is None:
-            det_security_item = _unverified_item("Security & Secrets", reason=missing_reason)
-            missing.append("Security & Secrets")
+            if diff_text:
+                from webhook_agent.analysis.security_scanner import (
+                    SecurityScanner,
+                    evaluate_security_integrity,
+                )
+
+                sec_report = SecurityScanner().scan(
+                    diff_text=diff_text,
+                    changed_files=changed_paths or [],
+                )
+                det_security_item = evaluate_security_integrity(sec_report)
+            else:
+                det_security_item = _unverified_item("Security & Secrets", reason=missing_reason)
+                missing.append("Security & Secrets")
+        elif det_security_item.status != "FAIL" and diff_text:
+            from webhook_agent.analysis.security_scanner import (
+                SecurityScanner,
+                evaluate_security_integrity,
+            )
+
+            sec_report = SecurityScanner().scan(
+                diff_text=diff_text,
+                changed_files=changed_paths or [],
+            )
+            if sec_report.proven_findings():
+                det_security_item = evaluate_security_integrity(sec_report)
         if det_test_item is None:
             if diff_text:
                 from webhook_agent.analysis.tautology_scanner import (
