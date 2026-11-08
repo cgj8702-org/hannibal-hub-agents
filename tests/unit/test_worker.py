@@ -680,6 +680,9 @@ class TestAddEyesReaction:
 
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
+        mock_issue = mock_repo.get_issue.return_value
+        mock_comment = mock_issue.get_comment.return_value
+        mock_comment.create_reaction.return_value = MagicMock()
 
         payload = {
             "canonical": "issue_comment.created",
@@ -689,13 +692,14 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
+        assert rx is not None
+        assert getattr(rx, "_target", None) is mock_comment
         mock_gh.get_repo.assert_called_once_with("owner/repo")
-        mock_issue = mock_repo.get_issue.return_value
         mock_repo.get_issue.assert_called_once_with(42)
         mock_issue.get_comment.assert_called_once_with(101)
-        mock_issue.get_comment.return_value.create_reaction.assert_called_once_with("eyes")
+        mock_comment.create_reaction.assert_called_once_with("eyes")
 
     def test_adds_reaction_to_pr_review_comment(self):
         from unittest.mock import MagicMock
@@ -706,6 +710,7 @@ class TestAddEyesReaction:
         mock_repo = mock_gh.get_repo.return_value
         mock_pr = mock_repo.get_pull.return_value
         mock_comment = mock_pr.get_review_comment.return_value
+        mock_comment.create_reaction.return_value = MagicMock()
 
         payload = {
             "canonical": "pull_request_review_comment.created",
@@ -715,8 +720,10 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
+        assert rx is not None
+        assert getattr(rx, "_target", None) is mock_comment
         mock_repo.get_pull.assert_called_once_with(15)
         mock_pr.get_review_comment.assert_called_once_with(202)
         mock_comment.create_reaction.assert_called_once_with("eyes")
@@ -729,6 +736,7 @@ class TestAddEyesReaction:
         mock_gh = MagicMock()
         mock_repo = mock_gh.get_repo.return_value
         mock_issue = mock_repo.get_issue.return_value
+        mock_issue.create_reaction.return_value = MagicMock()
 
         payload = {
             "canonical": "pull_request.opened",
@@ -737,8 +745,10 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
 
+        assert rx is not None
+        assert getattr(rx, "_target", None) is mock_issue
         mock_repo.get_issue.assert_called_once_with(112)
         mock_issue.create_reaction.assert_called_once_with("eyes")
 
@@ -757,7 +767,8 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        assert rx is None
         mock_gh.get_repo.assert_not_called()
 
     def test_ignores_deleted_comment_events(self):
@@ -776,7 +787,8 @@ class TestAddEyesReaction:
             },
         }
 
-        _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        rx = _add_eyes_reaction(mock_gh, "owner/repo", payload)
+        assert rx is None
         mock_gh.get_repo.assert_not_called()
 
     def test_remove_eyes_reaction_via_reaction_object(self):
@@ -820,6 +832,99 @@ class TestAddEyesReaction:
         removed = _remove_eyes_reaction(mock_gh, "owner/repo", payload)
         assert removed is True
         mock_comment.delete_reaction.assert_called_once_with(555)
+
+    def test_remove_eyes_reaction_via_attached_target(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.processor import _remove_eyes_reaction
+
+        mock_gh = MagicMock()
+        mock_target = MagicMock()
+        mock_rx = MagicMock()
+        mock_rx.id = 999
+        mock_rx._target = mock_target
+        payload = {"canonical": "pull_request.opened", "raw_payload": {}}
+
+        removed = _remove_eyes_reaction(mock_gh, "owner/repo", payload, reaction=mock_rx)
+        assert removed is True
+        mock_target.delete_reaction.assert_called_once_with(999)
+        mock_rx.delete.assert_not_called()
+
+    def test_has_meaningful_writeback_review_tools(self):
+        from webhook_agent.processor import _has_meaningful_writeback
+        from webhook_agent.review.writeback_policy import ActionResult
+
+        # Empty or None results
+        assert _has_meaningful_writeback(None) is False
+        assert _has_meaningful_writeback([]) is False
+
+        # Planning or non-writeback tools
+        assert (
+            _has_meaningful_writeback([ActionResult(tool="plan", success=True, detail="ok")])
+            is False
+        )
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="skip_closed_pr", success=True, detail="ok")]
+            )
+            is False
+        )
+
+        # Review tools success
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="submit_initial_review", success=True, detail="ok")]
+            )
+            is True
+        )
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="submit_sync_review", success=True, detail="ok")]
+            )
+            is True
+        )
+        assert (
+            _has_meaningful_writeback([ActionResult(tool="review", success=True, detail="ok")])
+            is True
+        )
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="resolve_bot_review_threads", success=True, detail="ok")]
+            )
+            is True
+        )
+
+        # Review tools with failure or skipped/deferred/error detail
+        assert (
+            _has_meaningful_writeback(
+                [ActionResult(tool="submit_initial_review", success=False, detail="Failed")]
+            )
+            is False
+        )
+        assert (
+            _has_meaningful_writeback(
+                [
+                    ActionResult(
+                        tool="submit_initial_review",
+                        success=True,
+                        detail="Skipped: checkpoint exists",
+                    )
+                ]
+            )
+            is False
+        )
+        assert (
+            _has_meaningful_writeback(
+                [
+                    ActionResult(
+                        tool="submit_sync_review",
+                        success=True,
+                        detail="Deferred: waiting for sha",
+                    )
+                ]
+            )
+            is False
+        )
 
 
 class TestPreworkPipelines:
@@ -1496,7 +1601,9 @@ class TestBaseBranchMergeSync:
 
         with patch("webhook_agent.processor._prefetch_pr_diff") as mock_prefetch_diff:
             processor.process_event(payload)
+            assert mock_prefetch_diff.call_count == 0
             mock_prefetch_diff.assert_not_called()
+            assert processor._agent_core.run.call_count == 0
             processor._agent_core.run.assert_not_called()
 
     def test_process_event_defers_when_live_head_verification_fails(self, caplog):
@@ -1618,6 +1725,7 @@ class TestBaseBranchMergeSync:
             }
             processor.process_event(payload)
 
+        assert processor._agent_core.run.call_count == 0
         processor._agent_core.run.assert_not_called()
 
     def test_process_event_runs_review_on_explicit_comment_when_auto_review_disabled(
@@ -1655,6 +1763,7 @@ class TestBaseBranchMergeSync:
         }
 
         processor.process_event(payload)
+        assert processor._agent_core.run.call_count == 1
         processor._agent_core.run.assert_called_once()
 
 
@@ -1864,6 +1973,7 @@ class TestWorkerReliability:
                 worker_main()
 
         # Dead letter publish failed -> message MUST NOT be acked
+        assert mock_subscriber.acknowledge.call_count == 0
         mock_subscriber.acknowledge.assert_not_called()
 
     def test_worker_dlq_publish_success_acks(self, monkeypatch):
@@ -1903,6 +2013,7 @@ class TestWorkerReliability:
                 worker_main()
 
         # Dead letter publish succeeded -> message acked
+        assert mock_subscriber.acknowledge.call_count == 1
         mock_subscriber.acknowledge.assert_called_once_with(
             request={
                 "subscription": "projects/cgj8702-webhook-agent/subscriptions/webhooks-sub",
@@ -2110,6 +2221,7 @@ class TestWorkerReliability:
 
         with patch("google.cloud.logging.Client", return_value=mock_client):
             setup_cloud_logging()
+            assert mock_client.setup_logging.call_count == 1
             mock_client.setup_logging.assert_called_once()
 
     def test_setup_cloud_logging_failure(self, caplog):
@@ -2157,4 +2269,5 @@ class TestWorkerReliability:
                 worker_main()
 
         # Without DLQ, message should not be acked on failure to allow retry
+        assert mock_subscriber.acknowledge.call_count == 0
         mock_subscriber.acknowledge.assert_not_called()

@@ -80,9 +80,12 @@ def _has_meaningful_writeback(results: list[ActionResult] | None) -> bool:
         return False
     writeback_tools = {
         "review",
+        "submit_initial_review",
+        "submit_sync_review",
         "add_comment",
         "create_issue",
         "resolve_review_thread",
+        "resolve_bot_review_threads",
         "proactive_reconciliation_summary",
     }
     for r in results:
@@ -90,7 +93,11 @@ def _has_meaningful_writeback(results: list[ActionResult] | None) -> bool:
         success = getattr(r, "success", False)
         detail = str(getattr(r, "detail", "") or "")
         if tool in writeback_tools and success:
-            if tool == "review" and detail.startswith(("Skipped:", "Error:", "Deferred:")):
+            if tool in (
+                "review",
+                "submit_initial_review",
+                "submit_sync_review",
+            ) and detail.startswith(("Skipped:", "Error:", "Deferred:")):
                 continue
             return True
     return False
