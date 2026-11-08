@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
+
+from webhook_agent.tools.github_tools import list_dir
 
 
 @dataclass
@@ -116,3 +119,12 @@ def build_dependency_grounding_context(
 * **Verified Transitive Subtree:** {", ".join(f"`{p}`" for p in verified_transitive)}
 * **Auditor Policy:** Any lockfile updates to packages listed under the *Verified Transitive Subtree* are standard resolver behavior for `{", ".join(bumped_packages)}`. Do NOT flag updates to these verified transitive dependencies as unauthorized scope creep or critical issues.
 """
+
+
+def is_internal_monorepo_package(package_name: str, ctx: Any = None, dir_path: str = "") -> bool:
+    """Check if package_name corresponds to an internal package directory."""
+    try:
+        entries = list_dir(ctx, dir_path=dir_path)
+        return package_name.lower().replace("-", "_") in entries.lower()
+    except Exception:
+        return False

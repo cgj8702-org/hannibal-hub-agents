@@ -1,10 +1,13 @@
 """Unit tests for dependency_tree transitive closure and grounding."""
 
+from unittest.mock import patch
+
 import pytest
 
 from webhook_agent.analysis.dependency_tree import (
     build_dependency_grounding_context,
     get_transitive_closure,
+    is_internal_monorepo_package,
     parse_lockfile_dependency_graph,
 )
 
@@ -72,3 +75,9 @@ def test_build_dependency_grounding_context():
         "Do NOT flag updates to these verified transitive dependencies as unauthorized scope creep"
         in context
     )
+
+
+def test_is_internal_monorepo_package():
+    with patch("webhook_agent.analysis.dependency_tree.list_dir", return_value="src\ntests\npkg_a"):
+        assert is_internal_monorepo_package("pkg-a") is True
+        assert is_internal_monorepo_package("external-pkg") is False
