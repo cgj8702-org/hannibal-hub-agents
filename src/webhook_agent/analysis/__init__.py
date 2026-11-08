@@ -15,7 +15,6 @@ from .concurrency_scanner import (
     evaluate_concurrency_integrity,
 )
 from .dependency_tree import (
-    LockfilePackage,
     build_dependency_grounding_context,
     get_transitive_closure,
     parse_lockfile_dependency_graph,
@@ -84,7 +83,6 @@ __all__ = [
     "ConcurrencyFinding",
     "ConcurrencyScanner",
     "ConfidenceLevel",
-    "LockfilePackage",
     "LockfileValidationResult",
     "LoopTerminationFinding",
     "LoopTerminationReport",

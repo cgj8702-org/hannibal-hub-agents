@@ -278,7 +278,7 @@ class AgentCore:
       (`pr_context.py`, `fast_path.py`) to prevent module bloat.
     """
 
-    def __init__(self, gh_client: Any = None, dry_run: bool = False, planner: Any = None) -> None:
+    def __init__(self, gh_client: Any = None, dry_run: bool = False) -> None:
         self.gh = gh_client
         self.dry_run = dry_run
         self._webhook_agent = WebhookAgent(dry_run=dry_run)

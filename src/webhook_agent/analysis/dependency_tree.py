@@ -7,14 +7,6 @@ to ground the auditor and prevent hallucinations regarding valid resolver bumps.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-
-
-@dataclass
-class LockfilePackage:
-    name: str
-    version: str = ""
-    dependencies: list[str] = field(default_factory=list)
 
 
 def parse_lockfile_dependency_graph(lockfile_text: str) -> dict[str, list[str]]:

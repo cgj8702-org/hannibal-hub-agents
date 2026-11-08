@@ -20,9 +20,3 @@ class ActionResult:
     success: bool
     detail: str
     action_result: Any = None
-
-
-# Backwards-compat import name for a transitional period when other
-# modules may still import from .types — they should be updated to
-# import from .webhook_types instead.
-ActionResultAlias = ActionResult
