@@ -14,12 +14,16 @@ import tempfile
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from webhook_agent.analysis.symbol_graph import (
     SignatureSpec,
     SymbolDefinitionVisitor,
 )
 from webhook_agent.review.schemas import ScorecardItem
+
+if TYPE_CHECKING:
+    from webhook_agent.analysis.tautology_scanner import TautologyReport
 
 logger = logging.getLogger("webhook_agent.analysis.test_impact")
 
@@ -58,6 +62,7 @@ class TestImpactReport:
     modified_source_files: list[str]
     modified_test_files: list[str]
     coverages: list[SymbolTestCoverage]
+    tautology_report: TautologyReport | None = None
 
     @property
     def has_uncovered_symbols(self) -> bool:
@@ -74,9 +79,13 @@ class TestImpactReport:
         """Count of symbols lacking unit tests."""
         return sum(1 for c in self.coverages if c.status == TestCoverageStatus.UNCOVERED)
 
-    def to_markdown(self) -> str:
+    def to_markdown(self, **kwargs: Any) -> str:
         """Render clinical Markdown report suitable for pre-compiler prompt injection."""
         lines: list[str] = ["### 🧪 Deterministic Test Coverage & Regression Impact\n"]
+
+        if self.tautology_report and self.tautology_report.findings:
+            lines.append("#### 🚨 Tautological & Bogus Test Warnings")
+            lines.append(self.tautology_report.to_markdown() + "\n")
 
         if self.modified_test_files:
             test_list = ", ".join(f"`{Path(f).name}`" for f in self.modified_test_files)
@@ -220,10 +229,20 @@ class TestImpactAnalyzer:
                 )
                 coverages.append(cov)
 
+        mod_symbols = {c.symbol_name for c in coverages}
+        from webhook_agent.analysis.tautology_scanner import TautologyScanner
+
+        tautology_scanner = TautologyScanner(repo_root=self.repo_root)
+        tautology_report = tautology_scanner.scan(
+            modified_tests,
+            modified_symbols=mod_symbols,
+        )
+
         return TestImpactReport(
             modified_source_files=modified_sources,
             modified_test_files=modified_tests,
             coverages=coverages,
+            tautology_report=tautology_report,
         )
 
     def _is_test_file(self, file_path: str) -> bool:
@@ -521,11 +540,13 @@ def evaluate_test_coverage_integrity(
     is_pure_dep_pr: bool = False,
     is_docs_or_config_only: bool = False,
     scan_errors: list[str] | None = None,
+    tautology_report: TautologyReport | None = None,
 ) -> ScorecardItem:
     """Evaluate Dimension 5 (Test Coverage & Regressions) deterministically.
 
     Principles (Grounded Review Architecture):
     - Real coverage verification via diff-cover when coverage reports exist.
+    - Deterministic floor on tautological or fraudulent tests (FAIL on self-mocking/vacuous asserts).
     - Soft WARN when coverage data is absent or when modified symbols lack tests;
       NEVER a mechanical FAIL on missing test diffs.
     - PASS when coverage >= 80%, test files are modified, or no executable python source changed.
@@ -537,6 +558,29 @@ def evaluate_test_coverage_integrity(
             dimension="Test Coverage & Regressions",
             status="UNKNOWN",
             notes=f"Test coverage analyzer encountered non-fatal error: {'; '.join(errors)}",
+        )
+
+    # 0. Tautological / Fraudulent test detection (Scorecard Floor: FAIL)
+    active_tautology_report = tautology_report or report.tautology_report
+    if active_tautology_report and active_tautology_report.has_critical_tautologies:
+        findings_str = "; ".join(
+            f"{f.test_name}: {f.description}"
+            for f in active_tautology_report.findings
+            if f.severity == "CRITICAL"
+        )
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="FAIL",
+            notes=f"CRITICAL: Tautological test defect(s) detected: {findings_str}",
+        )
+    if active_tautology_report and active_tautology_report.findings:
+        findings_str = "; ".join(
+            f"{f.test_name}: {f.description}" for f in active_tautology_report.findings[:3]
+        )
+        return ScorecardItem(
+            dimension="Test Coverage & Regressions",
+            status="WARN",
+            notes=f"Suspicious test pattern(s) identified: {findings_str}",
         )
 
     # 1. Non-code changes (lockfile updates, documentation, configuration only)

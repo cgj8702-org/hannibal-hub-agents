@@ -785,8 +785,34 @@ def _enforce_verdict(
             det_security_item = _unverified_item("Security & Secrets", reason=missing_reason)
             missing.append("Security & Secrets")
         if det_test_item is None:
-            det_test_item = _unverified_item("Test Coverage & Regressions", reason=missing_reason)
-            missing.append("Test Coverage & Regressions")
+            if diff_text:
+                from webhook_agent.analysis.tautology_scanner import (
+                    TautologyScanner,
+                    evaluate_tautology_integrity,
+                )
+
+                tautology_report = TautologyScanner().scan_diff(diff_text=diff_text)
+                if tautology_report.has_critical_tautologies or tautology_report.findings:
+                    det_test_item = evaluate_tautology_integrity(tautology_report)
+                else:
+                    det_test_item = _unverified_item(
+                        "Test Coverage & Regressions", reason=missing_reason
+                    )
+                    missing.append("Test Coverage & Regressions")
+            else:
+                det_test_item = _unverified_item(
+                    "Test Coverage & Regressions", reason=missing_reason
+                )
+                missing.append("Test Coverage & Regressions")
+        elif det_test_item.status != "FAIL" and diff_text:
+            from webhook_agent.analysis.tautology_scanner import (
+                TautologyScanner,
+                evaluate_tautology_integrity,
+            )
+
+            tautology_report = TautologyScanner().scan_diff(diff_text=diff_text)
+            if tautology_report.has_critical_tautologies:
+                det_test_item = evaluate_tautology_integrity(tautology_report)
         if det_concurrency_item is None:
             if diff_text:
                 from webhook_agent.analysis.concurrency_scanner import (
