@@ -11,6 +11,7 @@ from webhook_agent.review.review_enforcer import (
     _enforce_verdict,
     apply_scorecard_floor,
     has_grounding_bypass_label,
+    is_concurrency_dimension,
     is_contract_dimension,
     is_security_dimension,
     is_test_coverage_dimension,
@@ -28,6 +29,31 @@ def test_is_contract_dimension() -> None:
     assert is_contract_dimension("Logic & Boundaries") is False
     assert is_contract_dimension("Security & Secrets") is False
     assert is_contract_dimension("Test Coverage & Regressions") is False
+
+
+def test_is_concurrency_dimension() -> None:
+    assert is_concurrency_dimension("Concurrency & State") is True
+    assert is_concurrency_dimension("Thread Safety & Concurrency") is True
+    assert is_concurrency_dimension("state") is True
+    assert is_concurrency_dimension("Contract Integrity") is False
+    assert is_concurrency_dimension("Security & Secrets") is False
+
+
+def test_apply_scorecard_floor_concurrency_overrides_pass_to_fail() -> None:
+    scorecard = [
+        ScorecardItem(
+            dimension="Concurrency & State", status="PASS", notes="Model claimed GIL safe"
+        ),
+    ]
+    det_item = ScorecardItem(
+        dimension="Concurrency & State",
+        status="FAIL",
+        notes="PROVEN: Lock removal in src/state.py introduces TOCTOU race condition",
+    )
+    floored = apply_scorecard_floor(scorecard, det_item)
+    assert len(floored) == 1
+    assert floored[0].status == "FAIL"
+    assert "TOCTOU" in floored[0].notes
 
 
 def test_apply_scorecard_floor_overrides_pass_to_fail() -> None:
@@ -543,6 +569,70 @@ def test_enforce_verdict_locks_approve_to_request_changes_via_state_security_fai
     assert enforced_verdict == "REQUEST_CHANGES"
     assert "Security & Secrets" in rendered_body
     assert "PROVEN: Hardcoded secret detected at src/secrets.py:42" in rendered_body
+
+
+def test_enforce_verdict_locks_approve_to_request_changes_via_state_concurrency_fail() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation is clean and verified.",
+        "confidence": 5,
+        "scorecard": [
+            {"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean."},
+            {
+                "dimension": "Concurrency & State",
+                "status": "PASS",
+                "notes": "Model thought GIL safe.",
+            },
+            {"dimension": "Security & Secrets", "status": "PASS", "notes": "No issues."},
+            {"dimension": "Contract Integrity", "status": "PASS", "notes": "Compatible."},
+            {"dimension": "Test Coverage & Regressions", "status": "PASS", "notes": "Covered."},
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+
+    state = {
+        "deterministic_concurrency_scorecard_item": {
+            "dimension": "Concurrency & State",
+            "status": "FAIL",
+            "notes": "PROVEN: Mutex lock removal in src/state.py introduces TOCTOU race condition",
+        }
+    }
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "Concurrency & State" in rendered_body
+    assert "PROVEN: Mutex lock removal in src/state.py" in rendered_body
+
+
+def test_enforce_verdict_direct_deterministic_concurrency_item_param() -> None:
+    review_dict: dict[str, Any] = {
+        "verdict": "APPROVE",
+        "executive_summary": "Implementation is clean.",
+        "confidence": 5,
+        "scorecard": [
+            {
+                "dimension": "Concurrency & State",
+                "status": "PASS",
+                "notes": "No concurrency issues.",
+            },
+        ],
+        "critical_issues": [],
+        "minor_suggestions": [],
+    }
+    json_body = json.dumps(review_dict)
+    det_item = ScorecardItem(
+        dimension="Concurrency & State",
+        status="FAIL",
+        notes="PROVEN: Stripped with self._local_lock context manager",
+    )
+
+    rendered_body, enforced_verdict, _ = _enforce_verdict(
+        json_body, "APPROVE", deterministic_concurrency_item=det_item
+    )
+    assert enforced_verdict == "REQUEST_CHANGES"
+    assert "Stripped with self._local_lock context manager" in rendered_body
 
 
 def test_enforce_verdict_direct_deterministic_security_item_param() -> None:

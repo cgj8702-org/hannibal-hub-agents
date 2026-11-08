@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from webhook_agent.analysis.concurrency_scanner import (
+    ConcurrencyAnalysisReport,
+    ConcurrencyScanner,
+    evaluate_concurrency_integrity,
+)
 from webhook_agent.analysis.security_scanner import (
     SecurityAnalysisReport,
     SecurityScanner,
@@ -44,6 +49,7 @@ class PreAuditDossier:
     contract_scorecard: ScorecardItem
     test_scorecard: ScorecardItem
     security_scorecard: ScorecardItem
+    concurrency_scorecard: ScorecardItem
     ast_verified: bool = False
     full_files_included: int = 0
 
@@ -163,19 +169,40 @@ def compile_pre_audit_dossier(
             )
             return None, item
 
-    # Execute all 4 static pipelines concurrently, propagating per-thread ContextVar state
+    def _run_concurrency_scan() -> tuple[ConcurrencyAnalysisReport | None, ScorecardItem]:
+        try:
+            scanner = ConcurrencyScanner(repo_root=repo_root_path)
+            report = scanner.scan(
+                diff_text=pr_diff_text,
+                changed_files=changed_files,
+                repo_root=repo_root_path,
+            )
+            item = evaluate_concurrency_integrity(report, has_python_files=bool(py_files))
+            return report, item
+        except Exception as e:
+            logger.warning("Concurrency scanner encountered error: %s", e)
+            item = ScorecardItem(
+                dimension="Concurrency & State",
+                status="UNKNOWN",
+                notes=f"Concurrency scan skipped: {e}",
+            )
+            return None, item
+
+    # Execute all 5 static pipelines concurrently, propagating per-thread ContextVar state
     import contextvars
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         f_ast = executor.submit(contextvars.copy_context().run, _run_ast_scan)
         f_sym = executor.submit(contextvars.copy_context().run, _run_symbol_analysis)
         f_test = executor.submit(contextvars.copy_context().run, _run_test_pipeline)
         f_sec = executor.submit(contextvars.copy_context().run, _run_security_scan)
+        f_conc = executor.submit(contextvars.copy_context().run, _run_concurrency_scan)
 
         ast_items = f_ast.result()
         sym_reports, contract_item = f_sym.result()
         test_report, diff_pct, test_item = f_test.result()
         sec_report, sec_item = f_sec.result()
+        conc_report, conc_item = f_conc.result()
 
     dossier_sections: list[str] = []
 
@@ -276,11 +303,32 @@ def compile_pre_audit_dossier(
             notes="No static security scanner findings.",
         )
 
+    # 6. Concurrency & State Findings
+    if conc_item is not None:
+        if conc_report is not None and (
+            conc_report.findings or conc_item.status in ("FAIL", "WARN")
+        ):
+            dossier_sections.append(
+                f"### ⚡ Deterministic Concurrency Pre-Audit Findings\n"
+                f"{conc_report.to_markdown()}\n\n"
+                f"**Dimension 2 (Concurrency & State) Evaluated Status**: `{conc_item.status}`\n"
+                f"**Notes**: {conc_item.notes}\n\n"
+                f"Enforce Dimension 2 (Concurrency & State) in the review scorecard. "
+                f"Removing locks or transactions around shared state mutations mechanically prevents approval."
+            )
+    else:
+        conc_item = ScorecardItem(
+            dimension="Concurrency & State",
+            status="PASS",
+            notes="No static concurrency scanner findings.",
+        )
+
     return PreAuditDossier(
         dossier_markdown="\n\n".join(dossier_sections),
         contract_scorecard=contract_item,
         test_scorecard=test_item,
         security_scorecard=sec_item,
+        concurrency_scorecard=conc_item,
         ast_verified=bool(ast_items),
         full_files_included=full_files_count,
     )
