@@ -140,6 +140,9 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             raw["head_sha"] = diff_sha
             payload["head_sha"] = diff_sha
 
+        if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
+            _prefetch_previous_bot_reviews(gh, repo_name, payload, pr=pr)
+
         raw_patches: dict[str, str] = {}
         for f in pr.get_files():
             changed_files.append(f.filename)
@@ -159,6 +162,7 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             raw_diff = "\n".join(diff_lines)
             filtered = filter_review_diff(raw_diff)
             raw["pr_diff"] = filtered.filtered_diff or raw_diff
+            raw["full_pr_diff"] = raw["pr_diff"]
             logger.info(
                 "Pre-fetched PR #%d diff (%d files, %d kept, churn=%d, sha=%s) for review execution",
                 pr_num_int,
@@ -168,8 +172,66 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
                 (diff_sha or "unknown")[:7],
             )
 
+            # Incremental diff resolution on synchronization re-reviews
+            is_sync = canonical == "pull_request.synchronize" or raw.get("action") == "synchronize"
+            before_sha = str(raw.get("before") or raw.get("last_reviewed_sha") or "").strip()
+            head_sha = str(diff_sha or getattr(getattr(pr, "head", None), "sha", "") or "").strip()
+
+            if (
+                is_sync
+                and before_sha
+                and head_sha
+                and before_sha != head_sha
+                and before_sha != ("0" * 40)
+                and len(before_sha) == 40
+                and len(head_sha) == 40
+            ):
+                try:
+                    comparison = repo.compare(before_sha, head_sha)
+                    inc_files = getattr(comparison, "files", []) or []
+                    inc_changed_files: list[str] = []
+                    inc_diff_lines: list[str] = []
+                    for inf in inc_files:
+                        inc_changed_files.append(inf.filename)
+                        patch_txt = (
+                            getattr(inf, "patch", None)
+                            or "No patch available (binary/renamed/empty)."
+                        )
+                        status_str = getattr(inf, "status", "modified")
+                        inc_diff_lines.append(
+                            f"File: {inf.filename} ({status_str})\nPatch:\n{patch_txt}\n{'-' * 40}"
+                        )
+
+                    if inc_diff_lines:
+                        inc_raw_diff = "\n".join(inc_diff_lines)
+                        filtered_inc = filter_review_diff(inc_raw_diff)
+                        raw["incremental_diff"] = filtered_inc.filtered_diff or inc_raw_diff
+                        raw["incremental_files"] = inc_changed_files
+                        raw["is_incremental"] = True
+                        raw["incremental_base_sha"] = before_sha
+                        raw["incremental_head_sha"] = head_sha
+                        raw["pr_diff"] = raw["incremental_diff"]
+                        raw["changed_files"] = inc_changed_files
+                        logger.info(
+                            "Pre-fetched incremental PR #%d diff (%s...%s: %d files, churn=%d)",
+                            pr_num_int,
+                            before_sha[:7],
+                            head_sha[:7],
+                            len(inc_changed_files),
+                            filtered_inc.reviewable_lines,
+                        )
+                except Exception as comp_err:
+                    logger.warning(
+                        "Incremental comparison between %s and %s for PR #%d failed (%s); falling back to full PR diff",
+                        before_sha[:7],
+                        head_sha[:7],
+                        pr_num_int,
+                        comp_err,
+                    )
+
         if canonical == "pull_request.synchronize" or raw.get("action") == "synchronize":
-            _prefetch_previous_bot_reviews(gh, repo_name, payload)
+            if "previous_bot_reviews" not in raw:
+                _prefetch_previous_bot_reviews(gh, repo_name, payload, pr=pr)
 
         _prefetch_inline_comment_context(gh, repo_name, payload)
         _prefetch_linked_issue_spec(gh, repo_name, payload)
@@ -256,7 +318,9 @@ def _prefetch_inline_comment_context(gh: Github, repo_name: str, payload: dict[s
         logger.debug("Could not pre-fetch inline comment context: %s", exc)
 
 
-def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str, Any]) -> None:
+def _prefetch_previous_bot_reviews(
+    gh: Github, repo_name: str, payload: dict[str, Any], pr: Any = None
+) -> None:
     """Pre-fetch previous reviews posted by hannibal-hub-agents[bot]."""
     try:
         raw = payload.get("raw_payload")
@@ -276,21 +340,28 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         if not pr_number:
             return
 
-        repo = gh.get_repo(repo_name)
-        try:
-            pr = repo.get_pull(pr_number)
-        except Exception:
-            return
+        if pr is None:
+            repo = gh.get_repo(repo_name)
+            try:
+                pr = repo.get_pull(pr_number)
+            except Exception:
+                return
 
         bot_reviews: list[str] = []
         had_request_changes = False
         had_prior_findings = False
         all_prior_findings: list[dict[str, Any]] = []
+        last_reviewed_sha = ""
 
         for r in pr.get_reviews():
             u = getattr(r, "user", None)
             login = (getattr(u, "login", "") or "").lower() if u else ""
             if is_hannibal_bot_login(login):
+                c_id = getattr(r, "commit_id", None) or (
+                    r.get("commit_id") if isinstance(r, dict) else ""
+                )
+                if c_id:
+                    last_reviewed_sha = str(c_id)
                 state = getattr(r, "state", "COMMENT")
                 if state == "CHANGES_REQUESTED":
                     had_request_changes = True
@@ -306,14 +377,17 @@ def _prefetch_previous_bot_reviews(gh: Github, repo_name: str, payload: dict[str
         raw["prior_reviews_had_request_changes"] = had_request_changes
         raw["prior_reviews_had_findings"] = had_prior_findings or had_request_changes
         raw["prior_actionable_findings"] = all_prior_findings
+        if last_reviewed_sha:
+            raw["last_reviewed_sha"] = last_reviewed_sha
         if bot_reviews:
             raw["previous_bot_reviews"] = "\n\n---\n\n".join(bot_reviews)
             logger.info(
-                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s, findings_count=%d) for PR #%d",
+                "Pre-fetched previous bot reviews (%d reviews, had_request_changes=%s, had_findings=%s, findings_count=%d, last_sha=%s) for PR #%d",
                 len(bot_reviews),
                 had_request_changes,
                 raw["prior_reviews_had_findings"],
                 len(all_prior_findings),
+                last_reviewed_sha[:7] if last_reviewed_sha else "none",
                 pr_number,
             )
 

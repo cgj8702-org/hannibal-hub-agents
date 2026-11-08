@@ -532,6 +532,12 @@ def _finalize_enforced_review(
     else:
         rendered_body = render_code_review_markdown(review_obj, enforced_verdict)
 
+    if review_budget == 0 and bot_reviews:
+        rendered_body = (
+            rendered_body
+            + "\n\n> [!NOTE]\n> PR comment budget/lifetime cap reached for this review round. Further inline comments were suppressed to prevent review fatigue.\n"
+        )
+
     return rendered_body, enforced_verdict, inline_comments
 
 
@@ -751,18 +757,31 @@ def _enforce_verdict(
                 )
             if review_budget is not None and bot_reviews:
                 from webhook_agent.models.review_budget import (
+                    DEFAULT_LIFETIME_CAP,
                     compute_round_allowance,
+                    should_suppress_round,
                     summarise_review_history,
                 )
 
                 head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
                 hist = summarise_review_history(bot_reviews, bot_review_comments, head_sha=head_sha)
-                review_budget = compute_round_allowance(
-                    round_number=hist.round_number,
-                    previous_round_posted=hist.previous_round_posted,
-                    total_posted_so_far=hist.total_posted_so_far,
-                    initial_budget=review_budget,
-                )
+                if should_suppress_round(
+                    hist.total_posted_so_far, lifetime_cap=DEFAULT_LIFETIME_CAP
+                ):
+                    logger.info(
+                        "Lifetime comment cap (%d) reached for PR #%s (total posted: %d). Suppressing further inline comments.",
+                        DEFAULT_LIFETIME_CAP,
+                        getattr(pr, "number", "?"),
+                        hist.total_posted_so_far,
+                    )
+                    review_budget = 0
+                else:
+                    review_budget = compute_round_allowance(
+                        round_number=hist.round_number,
+                        previous_round_posted=hist.previous_round_posted,
+                        total_posted_so_far=hist.total_posted_so_far,
+                        initial_budget=review_budget,
+                    )
         except Exception as comm_err:
             logger.warning(
                 "Could not fetch existing PR review comments or compute review budget: %s", comm_err
@@ -1364,6 +1383,17 @@ def _submit_formal_review(
                         len(inline_comments),
                         review_err,
                     )
+                    # Preserve inline comments into review body during fallback so feedback is never lost
+                    fallback_notes = [
+                        "\n\n---\n\n### 📝 Inline Review Comments (Preserved from Submission Fallback)\n"
+                    ]
+                    for ic in inline_comments:
+                        loc = f"`{ic.get('path', '')}:{ic.get('line', '')}`"
+                        body_txt = str(ic.get("body", "")).strip()
+                        fallback_notes.append(f"- **{loc}**:\n{body_txt}")
+                    review_kwargs["body"] = (
+                        str(review_kwargs.get("body", "")) + "\n" + "\n".join(fallback_notes)
+                    ).strip()
                     rv = pr.create_review(**review_kwargs)
             else:
                 rv = pr.create_review(**review_kwargs)
