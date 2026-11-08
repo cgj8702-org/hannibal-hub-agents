@@ -86,17 +86,16 @@ class ReviewClaimRegistry:
         github_review_exists: bool,
         force: bool = False,
     ) -> ReviewClaim | None:
-        with self._local_lock:
-            existing = self._local_claims.get(key)
-            if not force and existing and existing[0] == "submitted":
-                return None
-            if not force and github_review_exists:
-                self._local_claims[key] = ("submitted", 0.0, token)
-                return None
-            if existing and existing[0] == "processing" and existing[1] > now.timestamp():
-                return None
-            self._local_claims[key] = ("processing", lease_until.timestamp(), token)
-            return ReviewClaim(key, token)
+        existing = self._local_claims.get(key)
+        if not force and existing and existing[0] == "submitted":
+            return None
+        if not force and github_review_exists:
+            self._local_claims[key] = ("submitted", 0.0, token)
+            return None
+        if existing and existing[0] == "processing" and existing[1] > now.timestamp():
+            return None
+        self._local_claims[key] = ("processing", lease_until.timestamp(), token)
+        return ReviewClaim(key, token)
 
     def claim(
         self,
