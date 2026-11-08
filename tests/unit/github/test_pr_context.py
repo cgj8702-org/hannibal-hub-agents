@@ -328,3 +328,79 @@ def test_prefetch_pr_diff_sets_head_sha_for_issue_comment() -> None:
     assert raw["diff_sha"] == "c" * 40
     assert raw["head_sha"] == "c" * 40
     assert payload["head_sha"] == "c" * 40
+
+
+def test_prefetch_pr_diff_synchronize_incremental() -> None:
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+
+    # Full PR files
+    mock_file1 = MagicMock(filename="src/old.py", status="modified", patch="+print('old')")
+    mock_file2 = MagicMock(filename="src/new.py", status="modified", patch="+print('new')")
+    mock_pr.get_files.return_value = [mock_file1, mock_file2]
+    mock_pr.state = "open"
+    mock_pr.merged = False
+    mock_pr.head.sha = "2" * 40
+
+    # Incremental comparison: only src/new.py
+    mock_inc_file = MagicMock(
+        filename="src/new.py", status="modified", patch="+print('new incremental')"
+    )
+    mock_comparison = MagicMock(files=[mock_inc_file])
+    mock_repo.compare.return_value = mock_comparison
+
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "raw_payload": {
+            "pull_request": {"number": 100},
+            "before": "1" * 40,
+        },
+    }
+
+    _prefetch_pr_diff(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert raw["is_incremental"] is True
+    assert raw["incremental_base_sha"] == "1" * 40
+    assert raw["incremental_head_sha"] == "2" * 40
+    assert raw["changed_files"] == ["src/new.py"]
+    assert "src/new.py" in raw["pr_diff"]
+    assert "src/old.py" not in raw["pr_diff"]
+    assert "src/old.py" in raw["full_pr_diff"]
+    assert mock_repo.compare.call_count == 1
+
+
+def test_prefetch_pr_diff_synchronize_incremental_fallback_on_compare_failure() -> None:
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+
+    mock_file = MagicMock(filename="src/full.py", status="modified", patch="+full")
+    mock_pr.get_files.return_value = [mock_file]
+    mock_pr.state = "open"
+    mock_pr.merged = False
+    mock_pr.head.sha = "2" * 40
+
+    mock_repo.compare.side_effect = Exception("404 Not Found")
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "raw_payload": {
+            "pull_request": {"number": 101},
+            "before": "1" * 40,
+        },
+    }
+
+    _prefetch_pr_diff(mock_gh, "owner/repo", payload)
+
+    raw = payload["raw_payload"]
+    assert raw.get("is_incremental") is None or raw.get("is_incremental") is False
+    assert raw["changed_files"] == ["src/full.py"]
+    assert "src/full.py" in raw["pr_diff"]
+    assert mock_repo.compare.call_count == 1

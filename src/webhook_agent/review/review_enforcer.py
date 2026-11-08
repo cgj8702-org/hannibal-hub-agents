@@ -25,6 +25,10 @@ from webhook_agent.review.formatter import (
     render_sync_review_markdown,
 )
 from webhook_agent.review.hunter import HunterEngine
+from webhook_agent.review.review_budget import (
+    DEFAULT_LIFETIME_CAP,
+    apply_review_budget_governance,
+)
 from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem, SyncReviewResponse
 from webhook_agent.review.writeback_policy import _COMMENT_RATE_LIMITER, _review_lock
 from webhook_agent.state.review_idempotency import review_claim_registry
@@ -197,6 +201,25 @@ def _unverified_item(
             f"review ({reason}), so it could not be checked."
         ),
     )
+
+
+def _is_workspace_present() -> bool:
+    """Safely check if an active PR workspace is present without static boundary violation."""
+    import sys
+
+    env_mod = sys.modules.get("webhook_agent.environment.context")
+    if env_mod and hasattr(env_mod, "get_active_environment"):
+        try:
+            return env_mod.get_active_environment() is not None
+        except Exception:
+            return False
+    try:
+        import importlib
+
+        env_mod = importlib.import_module("webhook_agent.environment.context")
+        return getattr(env_mod, "get_active_environment", lambda: None)() is not None
+    except Exception:
+        return False
 
 
 def _has_review_findings_or_warnings(obj: Any) -> bool:
@@ -532,6 +555,12 @@ def _finalize_enforced_review(
     else:
         rendered_body = render_code_review_markdown(review_obj, enforced_verdict)
 
+    if review_budget == 0 and bot_reviews:
+        rendered_body = (
+            rendered_body
+            + "\n\n> [!NOTE]\n> PR comment budget/lifetime cap reached for this review round. Further inline comments were suppressed to prevent review fatigue.\n"
+        )
+
     return rendered_body, enforced_verdict, inline_comments
 
 
@@ -750,18 +779,13 @@ def _enforce_verdict(
                     }
                 )
             if review_budget is not None and bot_reviews:
-                from webhook_agent.models.review_budget import (
-                    compute_round_allowance,
-                    summarise_review_history,
-                )
-
                 head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
-                hist = summarise_review_history(bot_reviews, bot_review_comments, head_sha=head_sha)
-                review_budget = compute_round_allowance(
-                    round_number=hist.round_number,
-                    previous_round_posted=hist.previous_round_posted,
-                    total_posted_so_far=hist.total_posted_so_far,
-                    initial_budget=review_budget,
+                review_budget = apply_review_budget_governance(
+                    bot_reviews=bot_reviews,
+                    bot_review_comments=bot_review_comments,
+                    head_sha=head_sha,
+                    base_budget=review_budget,
+                    lifetime_cap=DEFAULT_LIFETIME_CAP,
                 )
         except Exception as comm_err:
             logger.warning(
@@ -800,9 +824,7 @@ def _enforce_verdict(
     # UNKNOWN is honest where PASS was an unverified claim, and the existing floor branch
     # already downgrades PASS/NA to it. Items that were produced are left untouched.
     if _diff_touches_python(diff_text):
-        from webhook_agent.environment.context import get_active_environment
-
-        ws_present = get_active_environment() is not None
+        ws_present = _is_workspace_present()
         missing_reason = (
             "deterministic analysis not produced"
             if ws_present
@@ -1364,6 +1386,17 @@ def _submit_formal_review(
                         len(inline_comments),
                         review_err,
                     )
+                    # Preserve inline comments into review body during fallback so feedback is never lost
+                    fallback_notes = [
+                        "\n\n---\n\n### 📝 Inline Review Comments (Preserved from Submission Fallback)\n"
+                    ]
+                    for ic in inline_comments:
+                        loc = f"`{ic.get('path', '')}:{ic.get('line', '')}`"
+                        body_txt = str(ic.get("body", "")).strip()
+                        fallback_notes.append(f"- **{loc}**:\n{body_txt}")
+                    review_kwargs["body"] = (
+                        str(review_kwargs.get("body", "")) + "\n" + "\n".join(fallback_notes)
+                    ).strip()
                     rv = pr.create_review(**review_kwargs)
             else:
                 rv = pr.create_review(**review_kwargs)

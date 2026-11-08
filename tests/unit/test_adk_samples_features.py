@@ -10,16 +10,12 @@ Validates:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
-from webhook_agent.models.review_budget import (
-    compute_round_allowance,
-    should_suppress_round,
-    summarise_review_history,
-)
 from webhook_agent.review.comment_poster import build_github_review_comments
 from webhook_agent.review.duplicate_detector import (
     already_raised,
@@ -31,6 +27,12 @@ from webhook_agent.review.formatter import (
     is_implausible_body,
     is_not_cheap_finding,
     normalize_code_review_dict,
+)
+from webhook_agent.review.review_budget import (
+    apply_review_budget_governance,
+    compute_round_allowance,
+    should_suppress_round,
+    summarise_review_history,
 )
 from webhook_agent.review.review_enforcer import _enforce_verdict
 from webhook_agent.review.schemas import IssueItem
@@ -347,6 +349,18 @@ def test_review_budget_round_decay_and_lifetime_cap():
     assert history.total_posted_so_far == 2
     assert history.previous_round_posted == 1
 
+    # Service layer interface governance
+    gov_budget = apply_review_budget_governance(
+        bot_reviews=[mock_rev1, mock_rev2],
+        bot_review_comments=[mock_c1, mock_c2],
+        head_sha="sha2",
+        base_budget=5,
+    )
+    assert gov_budget is not None and gov_budget > 0
+    # None / empty fallbacks
+    assert apply_review_budget_governance([], [], base_budget=5) == 5
+    assert apply_review_budget_governance([mock_rev1], [], base_budget=None) is None
+
 
 def test_duplicate_comment_suppression_and_repeat_grouping():
     """Verify duplicate comment suppression (proximity + token similarity) and 3+ repeat grouping."""
@@ -510,3 +524,135 @@ def test_enforce_verdict_decays_round_budget():
     # In round 2 with 5 previous comments, budget decays 5 * 0.6 = 3.
     # So max 3 inline comments can be produced!
     assert len(inline_comments) == 3
+
+
+def test_enforce_verdict_lifetime_cap_suppression() -> None:
+    """Verify _enforce_verdict suppresses inline comments when PR comment lifetime cap is reached."""
+    mock_pr = MagicMock()
+    mock_pr.number = 42
+    mock_pr.head.sha = "sha_round_5"
+
+    mock_rev_user = MagicMock()
+    mock_rev_user.login = "hannibal-hub-agents[bot]"
+    mock_rev = MagicMock()
+    mock_rev.user = mock_rev_user
+    mock_rev.commit_id = "sha_round_1"
+    mock_pr.get_reviews.return_value = [mock_rev]
+
+    # 25 prior comments already posted on this PR
+    mock_c = MagicMock()
+    mock_c.user = mock_rev_user
+    mock_c.commit_id = "sha_round_1"
+    mock_c.path = "src/foo.py"
+    mock_c.line = 1
+    mock_c.body = "Previous comment"
+    mock_pr.get_review_comments.return_value = [mock_c] * 25
+
+    mock_file = MagicMock()
+    mock_file.filename = "src/foo.py"
+    mock_file.patch = "@@ -0,0 +1,50 @@\n" + "".join(f"+line {i}\n" for i in range(1, 51))
+    mock_pr.get_files.return_value = [mock_file]
+
+    body = """
+    ```json
+    {
+      "executive_summary": "PR update",
+      "critical_issues": [
+        {"path": "src/foo.py", "line": 20, "description": "SQL injection in handler"}
+      ],
+      "minor_suggestions": []
+    }
+    ```
+    """
+
+    rendered_md, _, inline_comments = _enforce_verdict(
+        body,
+        event="pull_request.synchronize",
+        pr=mock_pr,
+        review_mode="sync",
+    )
+
+    # All inline comments must be suppressed when lifetime cap (25) is reached
+    assert len(inline_comments) == 0
+    assert "PR comment budget/lifetime cap reached" in rendered_md
+
+
+def test_submit_review_preserves_inline_comments_on_create_review_fallback() -> None:
+    """Verify _submit_formal_review appends failed inline comments to review body when pr.create_review fails."""
+    from webhook_agent.review.review_enforcer import _submit_formal_review
+
+    mock_pr = MagicMock()
+    mock_pr.number = 99
+    mock_pr.head.sha = "h" * 40
+
+    call_count = 0
+
+    def mock_create_review(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        if kwargs.get("comments"):
+            raise Exception("422 Unprocessable Entity: line not in diff")
+        res = MagicMock()
+        res.id = 12345
+        res.html_url = "https://github.com/owner/repo/pull/99#pullrequestreview-12345"
+        res.body = kwargs.get("body", "")
+        return res
+
+    mock_pr.create_review.side_effect = mock_create_review
+    mock_pr.get_reviews.return_value = []
+    mock_pr.get_review_comments.return_value = []
+    mock_file = MagicMock(
+        filename="src/app.py",
+        patch="@@ -1,15 +1,15 @@\n" + "".join(f"+line {i}\n" for i in range(1, 16)),
+    )
+    mock_pr.get_files.return_value = [mock_file]
+
+    body = """
+    ```json
+    {
+      "executive_summary": "Initial audit",
+      "critical_issues": [
+        {"path": "src/app.py", "line": 10, "description": "Null pointer access"}
+      ],
+      "minor_suggestions": []
+    }
+    ```
+    """
+
+    with (
+        patch(
+            "webhook_agent.review.review_enforcer.review_claim_registry.claim",
+            return_value="claim-123",
+        ),
+        patch("webhook_agent.review.review_enforcer.review_claim_registry.mark_submitted"),
+        patch(
+            "webhook_agent.review.comment_poster.build_github_review_comments",
+            return_value=(
+                [
+                    {
+                        "path": "src/app.py",
+                        "line": 10,
+                        "side": "RIGHT",
+                        "body": "Fix null pointer",
+                    }
+                ],
+                {"src/app.py:10"},
+            ),
+        ),
+    ):
+        msg, submitted = _submit_formal_review(
+            mock_pr,
+            body=body,
+            event="REQUEST_CHANGES",
+            target_key="owner/repo#99",
+            force=True,
+        )
+
+    assert submitted is True
+    assert call_count == 2
+    assert (
+        "Inline Review Comments (Preserved from Submission Fallback)"
+        in mock_pr.create_review.call_args[1]["body"]
+    )
+    assert "Fix null pointer" in mock_pr.create_review.call_args[1]["body"]
+    assert "12345" in msg
