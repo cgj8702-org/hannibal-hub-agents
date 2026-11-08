@@ -250,3 +250,20 @@ def test_extract_rate_limit_details_rpm_and_rpd() -> None:
     extracted_rpd = extract_rate_limit_details(ClientError(code=429, response_json=rpd_json))
     assert extracted_rpd["quota_id"] == "GenerateRequestsPerModelPerDay-FreeTier"
     assert extracted_rpd["quota_type"] == "RPD"
+
+
+@pytest.mark.anyio
+async def test_record_actual_tokens_discounts_cached_tokens(mock_registry: Path) -> None:
+    """Verify cached tokens are discounted from the TPM history window."""
+    waiter = RPMWaiter(registry_path=mock_registry)
+    model = "gemini-3.5-flash-lite"
+
+    # Record 50,000 total tokens with 40,000 cached tokens -> net 10,000 tokens
+    await waiter.record_actual_tokens(model=model, actual_tokens=50000, cached_tokens=40000)
+
+    norm = waiter._norm(model)
+    history = waiter.token_histories.get(norm, [])
+    assert len(history) == 1
+    # Entry records net tokens (10,000), not gross tokens (50,000)
+    assert history[0][1] == 10000
+    assert history[0][2] is True

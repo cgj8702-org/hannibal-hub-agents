@@ -29,6 +29,10 @@ class WebhookHistoryPruningPlugin(BasePlugin):
         self, *, callback_context: CallbackContext, llm_request: Any
     ) -> Any:
         if hasattr(llm_request, "contents") and isinstance(llm_request.contents, list):
+            # Compact bulky Turn 0 context on multi-turn retries/followups to prevent TPM blowup
+            if len(llm_request.contents) > 1:
+                self._compact_initial_turn(llm_request.contents[0])
+
             if len(llm_request.contents) > self.max_events:
                 old_count = len(llm_request.contents)
                 # Determine candidate start index
@@ -59,6 +63,54 @@ class WebhookHistoryPruningPlugin(BasePlugin):
                     len(llm_request.contents),
                 )
         return None
+
+    @staticmethod
+    def _compact_initial_turn(turn_content: Any) -> None:
+        """Strip bulky diffs and AST dumps from Turn 0 once subsequent turns begin."""
+        parts = getattr(turn_content, "parts", None)
+        if isinstance(turn_content, dict):
+            parts = turn_content.get("parts")
+
+        if not parts or not isinstance(parts, list):
+            return
+
+        for part in parts:
+            text = getattr(part, "text", None)
+            is_dict_part = False
+            if text is None and isinstance(part, dict):
+                text = part.get("text")
+                is_dict_part = True
+
+            if not text or len(text) < 4000:
+                continue
+
+            distilled = text
+            for section_marker in (
+                "### 📂 Unified Diff / Changed Files",
+                "### 🔍 Surgical AST Enclosing Scopes",
+                "### 📊 Deterministic Pre-Audit Dossier",
+                "### 📋 Pre-Fetched Prior Review Findings to Verify",
+            ):
+                if section_marker in distilled:
+                    head, rest = distilled.split(section_marker, 1)
+                    next_header_idx = rest.find("\n### ")
+                    tail = rest[next_header_idx:] if next_header_idx != -1 else ""
+                    distilled = (
+                        head
+                        + f"{section_marker}\n*(Context distilled for follow-up turns. Refer to Turn 1 in conversation history.)*\n"
+                        + tail
+                    )
+
+            if len(distilled) < len(text):
+                logger.info(
+                    "Compacted Turn 0 initial prompt for multi-turn execution (%d -> %d chars)",
+                    len(text),
+                    len(distilled),
+                )
+                if is_dict_part:
+                    part["text"] = distilled
+                else:
+                    part.text = distilled
 
 
 class ToolOutputPruningPlugin(BasePlugin):

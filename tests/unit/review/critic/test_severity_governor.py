@@ -193,3 +193,40 @@ def test_deterministic_categories_require_compiler_match() -> None:
         category="LOCKFILE",
     )
     assert gov.govern_severity(cand_lockfile_unproven) == TAG_MAJOR
+
+
+def test_govern_severity_critical_container_baseline() -> None:
+    """Verify findings in critical_issues container inherit CRITICAL and never demote to MINOR."""
+    gov = SeverityGovernor()
+    # Unset severity inside critical_issues
+    item = IssueItem(
+        path="src/service.py",
+        line=42,
+        description="Severe resource leak",
+    )
+    # With default_severity="CRITICAL", inherits CRITICAL, governed to MAJOR (unproven), never MINOR
+    assert gov.govern_severity(item, default_severity="CRITICAL") == TAG_MAJOR
+
+    # With proven deterministic match, allowed to be CRITICAL
+    gov_proven = SeverityGovernor(deterministic_failing_locations={("src/service.py", 42)})
+    assert gov_proven.govern_severity(item, default_severity="CRITICAL") == TAG_CRITICAL
+
+
+def test_govern_severity_boundary_and_architecture_categories() -> None:
+    """Verify ARCHITECTURE, BOUNDARY, and CONTRACT categories map to TAG_MAJOR."""
+    gov = SeverityGovernor()
+    assert gov.govern_severity({"category": "ARCHITECTURE"}) == TAG_MAJOR
+    assert gov.govern_severity({"category": "BOUNDARY"}) == TAG_MAJOR
+    assert gov.govern_severity({"category": "CONTRACT"}) == TAG_MAJOR
+
+
+def test_apply_governance_to_issues_container_baseline() -> None:
+    """Verify apply_governance_to_issues updates issue.severity honoring container defaults."""
+    gov = SeverityGovernor(deterministic_failing_locations={("src/proven.py", 12)})
+    issues = [
+        IssueItem(path="src/proven.py", line=12, description="Proven boundary issue"),
+        IssueItem(path="src/unproven.py", line=34, description="Heuristic flaw"),
+    ]
+    governed = gov.apply_governance_to_issues(issues, default_severity="CRITICAL")
+    assert governed[0].severity == "CRITICAL"
+    assert governed[1].severity == "MAJOR"  # Floored at MAJOR, not demoted to MINOR!

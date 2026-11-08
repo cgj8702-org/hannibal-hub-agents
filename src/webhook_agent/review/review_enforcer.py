@@ -373,6 +373,7 @@ def _finalize_enforced_review(
     is_body_comment: bool,
     is_caller_comment: bool,
     is_text: bool = False,
+    deterministic_locations: set[tuple[str, int]] | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """Finalize review object by applying scorecard floors, invariants, grounding, guardrails, comments, and markdown rendering."""
     if det_contract_item is not None:
@@ -542,6 +543,7 @@ def _finalize_enforced_review(
             diff_text,
             existing_comments=existing_comments_data,
             max_comments=review_budget,
+            deterministic_locations=deterministic_locations,
         )
 
     if isinstance(review_obj, SyncReviewResponse):
@@ -805,6 +807,15 @@ def _enforce_verdict(
 
     critic_engine = CriticEngine()
     hunter_engine = HunterEngine()
+    deterministic_locations: set[tuple[str, int]] = set()
+
+    if state is not None:
+        det_locs = state_dict_val.get("deterministic_failing_locations")
+        if det_locs:
+            for loc in det_locs:
+                if loc and len(loc) >= 2:
+                    with contextlib.suppress(ValueError, TypeError):
+                        deterministic_locations.add((str(loc[0]).strip().lower(), int(loc[1])))
 
     # Fail closed on the deterministic dimensions when their analysis never ran.
     #
@@ -842,6 +853,12 @@ def _enforce_verdict(
                     changed_files=changed_paths or [],
                 )
                 det_security_item = evaluate_security_integrity(sec_report)
+                if sec_report and sec_report.findings:
+                    for f in sec_report.findings:
+                        if f.file_path and f.line_number is not None:
+                            deterministic_locations.add(
+                                (f.file_path.strip().lower(), f.line_number)
+                            )
             else:
                 det_security_item = _unverified_item("Security & Secrets", reason=missing_reason)
                 missing.append("Security & Secrets")
@@ -857,6 +874,9 @@ def _enforce_verdict(
             )
             if sec_report.proven_findings():
                 det_security_item = evaluate_security_integrity(sec_report)
+                for f in sec_report.findings:
+                    if f.file_path and f.line_number is not None:
+                        deterministic_locations.add((f.file_path.strip().lower(), f.line_number))
         if det_test_item is None:
             if diff_text:
                 from webhook_agent.analysis.tautology_scanner import (
@@ -939,6 +959,10 @@ def _enforce_verdict(
             )
             if arch_report.has_critical_findings:
                 det_contract_item = evaluate_architecture_contract(arch_report)
+            if arch_report and arch_report.findings:
+                for f in arch_report.findings:
+                    if f.file_path and f.line_number is not None:
+                        deterministic_locations.add((f.file_path.strip().lower(), f.line_number))
         if missing:
             logger.warning(
                 "Deterministic analysis missing for code diff (head=%s, ws_present=%s); marking %s UNKNOWN",
@@ -949,7 +973,7 @@ def _enforce_verdict(
 
     diff_for_grounding = raw_diff or diff_text
 
-    severity_governor = SeverityGovernor()
+    severity_governor = SeverityGovernor(deterministic_failing_locations=deterministic_locations)
 
     if review_obj is not None:
         if review_obj.candidate_findings:
@@ -991,6 +1015,7 @@ def _enforce_verdict(
             is_intended_request_changes=is_intended_request_changes,
             is_body_comment=is_body_comment,
             is_caller_comment=is_caller_comment,
+            deterministic_locations=deterministic_locations,
         )
 
     for data in data_candidates:

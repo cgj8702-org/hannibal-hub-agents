@@ -423,11 +423,21 @@ class RPMWaiter:
             sleeper_func = self.sleeper or asyncio.sleep
             await sleeper_func(wait_time)
 
-    async def record_actual_tokens(self, model: str = "default", actual_tokens: int = 0) -> None:
-        """Update or record real token usage returned in the provider API response."""
+    async def record_actual_tokens(
+        self,
+        model: str = "default",
+        actual_tokens: int = 0,
+        cached_tokens: int = 0,
+    ) -> None:
+        """Update or record real token usage returned in the provider API response.
+
+        Cached tokens are discounted from the TPM consumption window since provider
+        APIs (Gemini) do not bill or rate-limit cached context against input TPM.
+        """
         if actual_tokens <= 0:
             return
 
+        net_tokens = max(1, actual_tokens - max(0, cached_tokens))
         norm_model = self._norm(model)
         async with self.lock:
             now = self.clock()
@@ -438,7 +448,7 @@ class RPMWaiter:
             # Update the earliest estimated (unfinalized) token reservation
             unfinalized = next((entry for entry in token_history if not entry[2]), None)
             if unfinalized:
-                unfinalized[1] = actual_tokens
+                unfinalized[1] = net_tokens
                 unfinalized[2] = True
             else:
                 # Deduplicate: if the most recent entry was already finalized recently (within 5 seconds)
@@ -447,10 +457,10 @@ class RPMWaiter:
                     token_history
                     and token_history[-1][2]
                     and abs(now - token_history[-1][0]) <= 5.0
-                    and token_history[-1][1] == actual_tokens
+                    and token_history[-1][1] == net_tokens
                 ):
                     return
-                token_history.append([now, actual_tokens, True])
+                token_history.append([now, net_tokens, True])
 
 
 RateLimiter = RPMWaiter
