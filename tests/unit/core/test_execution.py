@@ -2000,6 +2000,109 @@ async def test_execute_adk_runner_terminates_loop_when_review_already_submitted(
     assert any(r.tool == "review" and r.success for r in results)
 
 
+@pytest.mark.anyio
+async def test_execute_adk_runner_terminates_loop_when_typed_review_submitted() -> None:
+    """Verify _execute_adk_runner terminates in 1 turn when submit_initial_review or submit_sync_review succeeds."""
+    from google.genai import types as genai_types
+
+    for tool_name in ["submit_initial_review", "submit_sync_review"]:
+        calls = 0
+
+        class MockRunner:
+            def __init__(self, t_name: str) -> None:
+                self.target_tool_name = t_name
+
+            async def run_async(self, **kwargs: Any) -> Any:
+                nonlocal calls
+                calls += 1
+                fn_resp = MagicMock()
+                fn_resp.name = self.target_tool_name
+                fn_resp.response = {"result": "ok"}
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp],
+                    content=None,
+                )
+
+        runner = MockRunner(tool_name)
+        results: list[ActionResult] = []
+        emitted_texts: list[str] = []
+        user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+        await _execute_adk_runner(
+            active_runner=runner,
+            user_id="user1",
+            session_id="sess1",
+            user_message=user_msg,
+            current_model_name="gemini-3.5-flash-lite",
+            trace_id=f"tr-test-{tool_name}",
+            results=results,
+            emitted_texts=emitted_texts,
+            is_code_audit=True,
+            single_turn_review=True,
+        )
+
+        assert calls == 1
+        assert any(r.tool == tool_name and r.success for r in results)
+
+
+@pytest.mark.anyio
+async def test_execute_adk_runner_single_turn_directs_review_submission_on_turn_2() -> None:
+    """When single_turn_review=True and turn 1 produces no review tool, turn 2 directs review submission."""
+    from google.genai import types as genai_types
+
+    calls = 0
+    prompt_history: list[str] = []
+
+    class MockRunner:
+        async def run_async(self, new_message: genai_types.Content, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if new_message.parts:
+                prompt_history.append(new_message.parts[0].text or "")
+            if calls == 1:
+                # Turn 1: model just outputs text without calling review tool
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=list,
+                    content=MagicMock(parts=[MagicMock(text="Analyzing...", thought=False)]),
+                )
+            elif calls == 2:
+                # Turn 2: model responds by submitting review
+                fn_resp = MagicMock()
+                fn_resp.name = "submit_initial_review"
+                fn_resp.response = {"status": "success"}
+                yield MagicMock(
+                    usage_metadata=None,
+                    get_function_responses=lambda: [fn_resp],
+                    content=None,
+                )
+
+    runner = MockRunner()
+    results: list[ActionResult] = []
+    emitted_texts: list[str] = []
+    user_msg = genai_types.Content(parts=[genai_types.Part.from_text(text="Audit PR")])
+
+    await _execute_adk_runner(
+        active_runner=runner,
+        user_id="user1",
+        session_id="sess1",
+        user_message=user_msg,
+        current_model_name="gemini-3.5-flash-lite",
+        trace_id="tr-test-single-turn-followup",
+        results=results,
+        emitted_texts=emitted_texts,
+        is_code_audit=True,
+        single_turn_review=True,
+    )
+
+    assert calls == 2
+    assert any(
+        "Please finalize and submit your formal code review now" in p for p in prompt_history
+    )
+    assert any(r.tool == "submit_initial_review" and r.success for r in results)
+
+
 def test_execute_agent_event_skips_pr_workspace_on_pure_issue() -> None:
     """Non-PR issue events must skip pr_workspace context creation."""
     mock_agent = MagicMock()

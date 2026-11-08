@@ -5,11 +5,15 @@ Adapted directly from adk-samples/.github/scripts/prepare_review_diff.py for han
 
 from __future__ import annotations
 
+import ast
+import logging
 import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("webhook_agent.analysis.diff_filter")
 
 # What never earns a review comment: (pattern, reason), matched
 # case-insensitively against the full path.
@@ -139,6 +143,17 @@ class DiffSection:
 
 
 @dataclass
+class EnclosingScopeBlock:
+    """An enclosing AST function or class block surrounding a diff hunk."""
+
+    file_path: str
+    scope_name: str
+    start_line: int
+    end_line: int
+    code: str
+
+
+@dataclass
 class DiffFilterResult:
     filtered_diff: str
     reviewable_lines: int
@@ -148,6 +163,8 @@ class DiffFilterResult:
     budget: int
     ast_risk_score: float = 0.0
     ast_impact_counts: dict[str, int] = field(default_factory=dict)
+    enclosing_scopes: list[EnclosingScopeBlock] = field(default_factory=list)
+    enclosing_scopes_markdown: str = ""
 
 
 def split_diff_into_sections(diff_text: str) -> list[DiffSection]:
@@ -206,10 +223,175 @@ def split_diff_into_sections(diff_text: str) -> list[DiffSection]:
     return sections
 
 
+HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def extract_hunk_ranges(diff_text: str) -> dict[str, list[tuple[int, int]]]:
+    """Extract modified new-file line ranges `(start, end)` per file path from a unified diff."""
+    sections = split_diff_into_sections(diff_text)
+    file_ranges: dict[str, list[tuple[int, int]]] = {}
+    for sec in sections:
+        ranges: list[tuple[int, int]] = []
+        for line in sec.lines:
+            m = HUNK_HEADER.match(line)
+            if m:
+                start = int(m.group(1))
+                count = int(m.group(2)) if m.group(2) else 1
+                end = start + max(count, 1) - 1
+                ranges.append((start, end))
+        if ranges:
+            file_ranges[sec.path] = ranges
+    return file_ranges
+
+
+class _ScopeCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.class_stack: list[str] = []
+        self.scopes: list[tuple[int, int, str]] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        qual = ".".join([*self.class_stack, node.name])
+        end = getattr(node, "end_lineno", node.lineno)
+        self.scopes.append((node.lineno, end, f"class {qual}"))
+        self.class_stack.append(node.name)
+        self.generic_visit(node)
+        self.class_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        qual = ".".join([*self.class_stack, node.name])
+        end = getattr(node, "end_lineno", node.lineno)
+        self.scopes.append((node.lineno, end, f"def {qual}"))
+        self.class_stack.append(node.name)
+        self.generic_visit(node)
+        self.class_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        qual = ".".join([*self.class_stack, node.name])
+        end = getattr(node, "end_lineno", node.lineno)
+        self.scopes.append((node.lineno, end, f"async def {qual}"))
+        self.class_stack.append(node.name)
+        self.generic_visit(node)
+        self.class_stack.pop()
+
+
+def extract_enclosing_ast_blocks(
+    diff_text: str,
+    repo_root: Path | str | None = None,
+    max_lines_per_block: int = 50,
+) -> list[EnclosingScopeBlock]:
+    """Extract enclosing AST function/class definitions around modified diff hunks.
+
+    For each modified hunk in a Python file, locates the narrowest enclosing AST
+    scope (function, async function, or class) from the repository workspace and
+    slices the surrounding code to provide clinical context without sending the entire file.
+    """
+    if not diff_text or not diff_text.strip():
+        return []
+
+    root_path: Path | None = None
+    if repo_root is not None:
+        root_path = Path(repo_root)
+    else:
+        try:
+            from webhook_agent.environment.context import get_active_environment
+
+            env = get_active_environment()
+            if env is not None and hasattr(env, "root_path"):
+                root_path = env.root_path
+        except Exception:
+            root_path = None
+
+    if root_path is None or not root_path.exists():
+        return []
+
+    hunk_map = extract_hunk_ranges(diff_text)
+    blocks: list[EnclosingScopeBlock] = []
+    seen_scopes: set[tuple[str, int, int]] = set()
+
+    for file_rel_path, ranges in hunk_map.items():
+        if not file_rel_path.endswith(".py"):
+            continue
+        file_disk_path = root_path / file_rel_path
+        if not file_disk_path.exists() or not file_disk_path.is_file():
+            continue
+
+        try:
+            source = file_disk_path.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(source, filename=str(file_disk_path))
+        except (SyntaxError, UnicodeDecodeError, OSError):
+            continue
+
+        source_lines = source.splitlines()
+        collector = _ScopeCollector()
+        collector.visit(tree)
+        scopes = collector.scopes
+
+        for h_start, h_end in ranges:
+            enclosing: tuple[int, int, str] | None = None
+            min_span = math.inf
+            for s_start, s_end, s_name in scopes:
+                if s_start <= h_start <= s_end:
+                    span = s_end - s_start
+                    if span < min_span:
+                        min_span = span
+                        enclosing = (s_start, s_end, s_name)
+
+            if enclosing is not None:
+                scope_start, scope_end, scope_name = enclosing
+                scope_key = (file_rel_path, scope_start, scope_end)
+                if scope_key in seen_scopes:
+                    continue
+                seen_scopes.add(scope_key)
+
+                scope_slice = source_lines[scope_start - 1 : scope_end]
+                if len(scope_slice) <= max_lines_per_block:
+                    code_block = "\n".join(scope_slice)
+                else:
+                    head_lines = scope_slice[:3]
+                    w_start = max(scope_start, h_start - 4)
+                    w_end = min(scope_end, h_end + 4)
+                    body_lines = source_lines[w_start - 1 : w_end]
+                    code_block = (
+                        "\n".join(head_lines)
+                        + "\n    # ... [context omitted] ...\n"
+                        + "\n".join(body_lines)
+                    )
+
+                blocks.append(
+                    EnclosingScopeBlock(
+                        file_path=file_rel_path,
+                        scope_name=scope_name,
+                        start_line=scope_start,
+                        end_line=scope_end,
+                        code=code_block,
+                    )
+                )
+
+    return blocks
+
+
+def format_enclosing_scopes_markdown(blocks: list[EnclosingScopeBlock]) -> str:
+    """Format extracted enclosing AST scopes into clean GitHub Markdown."""
+    if not blocks:
+        return ""
+    lines: list[str] = [
+        "### 🧩 Enclosing AST Scopes for Modified Hunks\n"
+        "The following enclosing function and class scopes were extracted directly from the repository "
+        "to provide complete local behavioral context for modified lines without reading entire files:\n"
+    ]
+    for b in blocks:
+        lines.append(
+            f"#### `{b.file_path}` (`{b.scope_name}`, lines {b.start_line}-{b.end_line})\n"
+            f"```python\n{b.code}\n```\n"
+        )
+    return "\n".join(lines)
+
+
 def filter_review_diff(
     diff_text: str,
     only_files: list[str] | set[str] | None = None,
     max_bytes: int | None = None,
+    repo_root: Path | str | None = None,
 ) -> DiffFilterResult:
     """Filter out noise, vendored code, lockfiles, and non-PR changes from a diff.
 
@@ -218,9 +400,11 @@ def filter_review_diff(
         only_files: Optional allowlist of files belonging to this PR (e.g., from PR API).
         max_bytes: Maximum byte size for the filtered diff string.
             If None, resolves dynamically: 5,000,000 bytes on paid tier, 125,000 bytes on free tier.
+        repo_root: Optional root directory of repository workspace to extract enclosing AST scopes.
 
     Returns:
-        DiffFilterResult with clean diff text, reviewable churn stats, and recommended comment budget.
+        DiffFilterResult with clean diff text, reviewable churn stats, recommended comment budget,
+        and surgical enclosing AST scope blocks.
     """
     if max_bytes is None:
         try:
@@ -240,6 +424,8 @@ def filter_review_diff(
             budget=0,
             ast_risk_score=0.0,
             ast_impact_counts={},
+            enclosing_scopes=[],
+            enclosing_scopes_markdown="",
         )
 
     sections = split_diff_into_sections(diff_text)
@@ -281,6 +467,9 @@ def filter_review_diff(
     is_reviewable = bool(kept_files and reviewable_lines > 0)
     budget = budget_for(reviewable_lines) if is_reviewable else 0
 
+    scopes = extract_enclosing_ast_blocks(filtered_text, repo_root=repo_root)
+    scopes_md = format_enclosing_scopes_markdown(scopes)
+
     return DiffFilterResult(
         filtered_diff=filtered_text,
         reviewable_lines=reviewable_lines,
@@ -290,4 +479,6 @@ def filter_review_diff(
         budget=budget,
         ast_risk_score=0.0,
         ast_impact_counts={},
+        enclosing_scopes=scopes,
+        enclosing_scopes_markdown=scopes_md,
     )

@@ -21,6 +21,13 @@ from webhook_agent.analysis.concurrency_scanner import (
     ConcurrencyScanner,
     evaluate_concurrency_integrity,
 )
+from webhook_agent.analysis.dependency_tree import (
+    build_dependency_grounding_context as build_dependency_grounding_context,
+)
+from webhook_agent.analysis.diff_filter import (
+    extract_enclosing_ast_blocks,
+    format_enclosing_scopes_markdown,
+)
 from webhook_agent.analysis.loop_scanner import (
     LoopTerminationReport,
     LoopTerminationScanner,
@@ -272,25 +279,31 @@ def compile_pre_audit_dossier(
             f"Use these findings to focus your audit on structural defects, risk areas, and verified AST nodes."
         )
 
-    # 2. Full Source File Context (Paid Tier High-Capacity Mode)
+    # 2. Surgical Enclosing AST Scope Context (All Tiers)
     full_files_count = 0
-    if tier == "paid" and repo_root_path is not None:
-        file_blocks: list[str] = []
-        for mf in py_files[:10]:
-            file_disk_path = repo_root_path / mf
-            if file_disk_path.exists() and file_disk_path.is_file():
-                try:
-                    content = file_disk_path.read_text(encoding="utf-8", errors="replace")
-                    file_blocks.append(f"#### `{mf}`\n```python\n{content}\n```")
-                    full_files_count += 1
-                except Exception as exc:
-                    logger.debug("Failed reading file %s for dossier inclusion: %s", mf, exc)
-        if file_blocks:
-            dossier_sections.append(
-                "### 📂 Full Source File Context (Paid Tier High-Capacity Mode)\n"
-                "The complete contents of primary modified files are provided below for end-to-end structural verification:\n\n"
-                + "\n\n".join(file_blocks)
-            )
+    if repo_root_path is not None:
+        enclosing_blocks = extract_enclosing_ast_blocks(pr_diff_text, repo_root=repo_root_path)
+        if enclosing_blocks:
+            dossier_sections.append(format_enclosing_scopes_markdown(enclosing_blocks))
+
+        if tier == "paid":
+            file_blocks: list[str] = []
+            for mf in py_files[:10]:
+                file_disk_path = repo_root_path / mf
+                if file_disk_path.exists() and file_disk_path.is_file():
+                    try:
+                        content = file_disk_path.read_text(encoding="utf-8", errors="replace")
+                        if len(content.splitlines()) <= 200:
+                            file_blocks.append(f"#### `{mf}`\n```python\n{content}\n```")
+                            full_files_count += 1
+                    except Exception as exc:
+                        logger.debug("Failed reading file %s for dossier inclusion: %s", mf, exc)
+            if file_blocks:
+                dossier_sections.append(
+                    "### 📂 Full Source File Context (Paid Tier High-Capacity Mode)\n"
+                    "The complete contents of small modified files are provided below for end-to-end structural verification:\n\n"
+                    + "\n\n".join(file_blocks)
+                )
 
     # 3. Cross-File Symbol Contract Analysis
     if contract_item is not None:

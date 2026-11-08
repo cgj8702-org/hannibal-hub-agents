@@ -615,8 +615,19 @@ async def before_tool_callback(
             }
 
     # Mandatory Investigation Gate: block review tool if code audit has not used investigative tools yet
-    if tool.name in review_tools and (
-        tool_context.state.get("is_code_audit") or tool_context.state.get("user:is_code_audit")
+    # When single-turn review is active (ENABLE_SINGLE_TURN_REVIEW=1 and single_turn_review=True),
+    # surgical AST enclosing scopes and compiler findings are pre-compiled and inlined into Turn 1,
+    # permitting immediate review submission without exploratory tool calls.
+    single_turn_active = os.environ.get("ENABLE_SINGLE_TURN_REVIEW", "1") == "1" and bool(
+        tool_context.state.get("single_turn_review")
+        or tool_context.state.get("user:single_turn_review")
+    )
+    if (
+        not single_turn_active
+        and tool.name in review_tools
+        and (
+            tool_context.state.get("is_code_audit") or tool_context.state.get("user:is_code_audit")
+        )
     ):
         # Code audit investigation requires deep code inspection via read_file or search_files.
         # list_dir alone is layout reconnaissance and does not satisfy the code investigation requirement.
