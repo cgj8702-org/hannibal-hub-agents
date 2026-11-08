@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from webhook_agent.review.schemas import ScorecardItem
 
@@ -84,7 +84,7 @@ class ConcurrencyAnalysisReport:
         """Return advisory findings where manual verification is warranted."""
         return [f for f in self.findings if f.confidence == "SUSPECTED"]
 
-    def to_markdown(self) -> str:
+    def to_markdown(self, **kwargs: Any) -> str:
         """Render a concise Markdown summary for the pre-audit dossier."""
         if not self.findings and not self.scan_errors:
             return "No concurrency risks or lock removals detected."
