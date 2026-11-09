@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any
 from unittest.mock import NonCallableMock
 
+from webhook_agent.commands import has_review_slash_command
 from webhook_agent.constants import DEFAULT_ENABLE_AUTOMATIC_PR_REVIEWS
 from webhook_agent.core.cancellation import pr_closed_registry
 from webhook_agent.review.ci_gate import (
@@ -182,6 +183,7 @@ def handle_tier_1_programmatic(
     # Short-circuit if target PR is closed or merged
     raw = payload.get("raw_payload") or {}
     pr_data = raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
+    issue_data = raw.get("issue") or {}
     canonical = payload.get("canonical", "")
     is_pr_event = bool(pr_data) or canonical.startswith(
         (
@@ -190,9 +192,7 @@ def handle_tier_1_programmatic(
             "pull_request_review_comment.",
         )
     )
-    pr_number = (raw.get("pull_request") or {}).get("number") or (raw.get("issue") or {}).get(
-        "number"
-    )
+    pr_number = (raw.get("pull_request") or {}).get("number") or issue_data.get("number")
 
     pr_num_int: int | None = None
     if is_pr_event and pr_number is not None:
@@ -201,7 +201,12 @@ def handle_tier_1_programmatic(
         except (TypeError, ValueError):
             pr_num_int = None
 
-        raw_state = pr_data.get("state") if isinstance(pr_data, dict) else ""
+        raw_state = ""
+        if isinstance(pr_data, dict) and pr_data.get("state"):
+            raw_state = pr_data["state"]
+        elif isinstance(issue_data, dict) and issue_data.get("state"):
+            raw_state = issue_data["state"]
+
         pr_state = raw_state.lower() if isinstance(raw_state, str) else ""
         merged_at_val = pr_data.get("merged_at") if isinstance(pr_data, dict) else None
         is_merged = (
@@ -210,7 +215,33 @@ def handle_tier_1_programmatic(
             if isinstance(pr_data, dict)
             else False
         )
-        if (
+
+        comment_body = (raw.get("comment") or {}).get("body", "")
+        has_slash_override = bool(comment_body and has_review_slash_command(comment_body))
+
+        # If slash command override is present or PR is verified open, ensure registry is un-closed
+        if has_slash_override and pr_num_int is not None:
+            if pr_closed_registry.is_closed(repo_name, pr_num_int) and gh is not None:
+                try:
+                    live_pr = gh.get_repo(repo_name).get_pull(pr_num_int)
+                    if getattr(live_pr, "state", "").lower() == "open" and not getattr(
+                        live_pr, "merged", False
+                    ):
+                        pr_closed_registry.unmark_closed(repo_name, pr_num_int)
+                        pr_state = "open"
+                        is_merged = False
+                        logger.info(
+                            "🔓 Slash command override verified PR %s#%s is OPEN on GitHub; cleared closed registry.",
+                            repo_name,
+                            pr_number,
+                        )
+                except Exception as ex:
+                    logger.debug("Failed live PR check for slash command override: %s", ex)
+
+        if pr_state == "open" and not is_merged:
+            if pr_num_int is not None:
+                pr_closed_registry.unmark_closed(repo_name, pr_num_int)
+        elif (
             pr_state == "closed"
             or is_merged
             or (pr_num_int is not None and pr_closed_registry.is_closed(repo_name, pr_num_int))
