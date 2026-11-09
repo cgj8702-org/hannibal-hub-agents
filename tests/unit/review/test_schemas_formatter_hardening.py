@@ -124,21 +124,21 @@ Overview.
     assert "Consider renaming variable" in legacy["minor_suggestions"][0]["description"]
 
 
-def test_get_actionable_findings_skips_contained_scorecard_warning() -> None:
-    """get_actionable_findings does not convert contained or false-positive scorecard WARN notes into findings."""
-    body_with_contained_warn = """
+def test_get_actionable_findings_ignores_scorecard_rows() -> None:
+    """get_actionable_findings does not convert scorecard rows into actionable findings."""
+    body_with_scorecard_warn = """
 ## 🛡️ Code Review: `COMMENT`
 
 ### 1. Executive Summary
 Audit.
 
-<!-- hannibal-review-metadata: {"scorecard":[{"dimension":"Contract Integrity","status":"WARN","notes":"Warning identified by symbol impact analysis. These look like potential false-positives or reflection-based usage in ADK. Given these are dev-tools (not runtime core), contract risk is contained."},{"dimension":"Test Coverage & Regressions","status":"WARN","notes":"Modified code lacks direct unit test coverage. Unit tests are required to prevent regressions."}]} -->
+<!-- hannibal-review-metadata: {"scorecard":[{"dimension":"Contract Integrity","status":"WARN","notes":"Warning identified by symbol impact analysis."},{"dimension":"Test Coverage & Regressions","status":"WARN","notes":"Modified code lacks direct unit test coverage."}],"minor_suggestions":[{"path":"src/app.py","line":10,"description":"Consider refactoring helper"}]} -->
 """
-    findings = get_actionable_findings(body_with_contained_warn)
-    # The contained contract warning is skipped, while the real test coverage warning is kept
+    findings = get_actionable_findings(body_with_scorecard_warn)
+    # Scorecard rows are ignored; only real findings (minor_suggestions, critical_issues, risks) are returned
     assert len(findings) == 1
     assert findings[0]["category"] == "SUGGESTION"
-    assert "Test Coverage & Regressions" in findings[0]["description"]
+    assert findings[0]["description"] == "Consider refactoring helper"
 
 
 def test_grounding_bare_symbols_masks_paths_and_detects_pascal_case() -> None:

@@ -295,43 +295,6 @@ def get_actionable_findings(body: str) -> list[dict[str, Any]]:
                         "recommendation": risk.get("recommendation"),
                     }
                 )
-        for sc in metadata.get("scorecard", []):
-            if isinstance(sc, dict):
-                sc_status = str(sc.get("status", "")).upper()
-                if sc_status in ("WARN", "FAIL", "ERROR"):
-                    dim = sc.get("dimension", "Scorecard")
-                    notes = sc.get("notes", "")
-                    if sc_status == "WARN" and any(
-                        phrase in notes.lower()
-                        for phrase in (
-                            "potential false-positive",
-                            "potential false positive",
-                            "risk is contained",
-                            "acceptable mismatch",
-                            "no action required",
-                            "contained risk",
-                        )
-                    ):
-                        continue
-                    cat = "CRITICAL" if sc_status in ("FAIL", "ERROR") else "SUGGESTION"
-                    file_path = None
-                    line_num = None
-                    path_match = re.search(
-                        r"\b([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9_]+)(?::(\d+))?", notes
-                    )
-                    if path_match:
-                        file_path = path_match.group(1)
-                        if path_match.group(2):
-                            with contextlib.suppress(ValueError):
-                                line_num = int(path_match.group(2))
-                    findings.append(
-                        {
-                            "category": cat,
-                            "description": f"[{dim}] {notes}",
-                            "file_path": file_path,
-                            "line_number": line_num,
-                        }
-                    )
         return findings
 
     # Fallback to legacy parser
