@@ -147,7 +147,7 @@ class ScorecardItem(BaseModel):
             else:
                 safe_notes = "No details provided."
         else:
-            safe_notes = raw_notes.replace("|", "\\|")
+            safe_notes = " ".join(raw_notes.splitlines()).replace("|", "\\|")
         return f"| **{self.dimension}** | {badge} | {safe_notes} |"
 
 
@@ -248,12 +248,26 @@ class IssueItem(BaseModel):
         item_str = f"* {prefix_str}{loc}: {self.description}"
         if self.suggested_fix and self.suggested_fix.strip():
             fix = self.suggested_fix.strip()
+            lang = ""
+            if self.path:
+                ext = self.path.rsplit(".", 1)[-1].lower() if "." in self.path else ""
+                if ext in ("py", "pyi"):
+                    lang = "python"
+                elif ext in ("sh", "bash"):
+                    lang = "bash"
+                elif ext in ("js", "ts"):
+                    lang = ext
+                elif ext in ("md", "markdown"):
+                    lang = "markdown"
+                elif ext in ("json", "yaml", "yml", "toml"):
+                    lang = ext
+
             if "```" in fix:
                 indented = "\n".join(f"    {line}" for line in fix.splitlines())
                 item_str += f"\n  * *Suggested Fix*:\n{indented}"
             elif "\n" in fix:
                 indented = "\n".join(f"    {line}" for line in fix.splitlines())
-                item_str += f"\n  * *Suggested Fix*:\n    ```\n{indented}\n    ```"
+                item_str += f"\n  * *Suggested Fix*:\n    ```{lang}\n{indented}\n    ```"
             else:
                 if not (fix.startswith("`") and fix.endswith("`")):
                     fix = f"`{fix}`"
@@ -374,11 +388,35 @@ class SyncResolutionItem(BaseModel):
         default="CRITICAL",
         description="Category of the prior finding: CRITICAL, SUGGESTION, or RISK",
     )
+    path: str | None = Field(default=None, description="Target file path if applicable")
+    line: int | None = Field(default=None, description="Target line number if applicable")
 
-    @field_validator("item_description", "evidence", mode="before")
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "path" not in data or not data["path"]:
+                for key in ("file_path", "filename", "filepath"):
+                    if data.get(key):
+                        data["path"] = data[key]
+                        break
+            if "line" not in data or data["line"] is None:
+                for key in ("line_number", "lineNumber", "lineno"):
+                    if data.get(key) is not None:
+                        data["line"] = parse_bounded_line_number(data[key])
+                        if data["line"] is not None:
+                            break
+        return data
+
+    @field_validator("item_description", "evidence", "path", mode="before")
     @classmethod
     def sanitize_fields(cls, v: Any) -> Any:
         return clean_field_string(v)
+
+    @field_validator("line", mode="before")
+    @classmethod
+    def bound_line(cls, v: Any) -> int | None:
+        return parse_bounded_line_number(v)
 
     @field_validator("category", mode="before")
     @classmethod
@@ -499,6 +537,11 @@ class CodeReviewResponse(BaseModel):
         cleaned = clean_field_string(v)
         return cleaned if cleaned else "Autonomous PR code review report."
 
+    @property
+    def summary(self) -> str:
+        """Alias for executive_summary for cross-compatibility with SyncReviewResponse."""
+        return self.executive_summary
+
     def to_markdown(
         self,
         verdict: str | None = None,
@@ -544,6 +587,10 @@ class SyncReviewResponse(BaseModel):
         default_factory=list,
         description="Non-blocking minor suggestions or maintainability notes introduced in this update",
     )
+    risks_and_edge_cases: list[RiskItem] = Field(
+        default_factory=list,
+        description="Key risks or edge cases identified during analysis",
+    )
     verified_invariants: list[str] = Field(
         default_factory=list,
         description="Concrete, diff-grounded behavioral guarantees or invariants verified during audit",
@@ -571,6 +618,11 @@ class SyncReviewResponse(BaseModel):
     def sanitize_summary(cls, v: Any) -> Any:
         cleaned = clean_field_string(v)
         return cleaned if cleaned else "Pull request synchronization review update."
+
+    @property
+    def executive_summary(self) -> str:
+        """Alias for summary for cross-compatibility with CodeReviewResponse."""
+        return self.summary
 
     def to_markdown(
         self,

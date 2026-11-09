@@ -564,14 +564,27 @@ def normalize_sync_review_payload(data: Any) -> Any:
                     norm_cat = "RISK"
                 else:
                     norm_cat = "CRITICAL"
-                clean_res.append(
-                    {
-                        "item_description": desc,
-                        "status": status,
-                        "evidence": ev,
-                        "category": norm_cat,
-                    }
+                item_path = str(
+                    item.get("path")
+                    or item.get("file_path")
+                    or item.get("filename")
+                    or item.get("filepath")
+                    or ""
+                ).strip()
+                item_line = parse_bounded_line_number(
+                    item.get("line") or item.get("line_number") or item.get("lineno")
                 )
+                res_dict: dict[str, Any] = {
+                    "item_description": desc,
+                    "status": status,
+                    "evidence": ev,
+                    "category": norm_cat,
+                }
+                if item_path:
+                    res_dict["path"] = item_path
+                if item_line is not None:
+                    res_dict["line"] = item_line
+                clean_res.append(res_dict)
     normalized["resolutions"] = clean_res
 
     raw_crit = normalized.get("critical_issues") or normalized.get("new_critical_issues")
@@ -766,6 +779,48 @@ def normalize_sync_review_payload(data: Any) -> Any:
                         clean_crit.append(issue_dict)
     normalized["critical_issues"] = clean_crit
     normalized["minor_suggestions"] = clean_minor
+
+    raw_risks = normalized.get("risks_and_edge_cases") or normalized.get("risks")
+    clean_risks: list[dict[str, str]] = []
+    if isinstance(raw_risks, list):
+        for item in raw_risks:
+            if isinstance(item, BaseModel):
+                item = item.model_dump()
+            if isinstance(item, str) and item.strip():
+                r_text = item.strip()
+                if not any(
+                    hdr in r_text.lower()
+                    for hdr in (
+                        "edge-case analysis",
+                        "mandatory risk",
+                        "section 4",
+                        "scorecard summary",
+                    )
+                ) and not r_text.startswith("#"):
+                    clean_risks.append({"risk": r_text, "recommendation": ""})
+            elif isinstance(item, dict):
+                r_text = str(item.get("risk") or item.get("description") or "").strip()
+                rec_text = str(
+                    item.get("recommendation")
+                    or item.get("suggested_fix")
+                    or item.get("remediation")
+                    or ""
+                ).strip()
+                if (
+                    r_text
+                    and not any(
+                        hdr in r_text.lower()
+                        for hdr in (
+                            "edge-case analysis",
+                            "mandatory risk",
+                            "section 4",
+                            "scorecard summary",
+                        )
+                    )
+                    and not r_text.startswith("#")
+                ):
+                    clean_risks.append({"risk": r_text, "recommendation": rec_text})
+    normalized["risks_and_edge_cases"] = clean_risks
 
     raw_unverified = (
         normalized.get("unverified_claims")

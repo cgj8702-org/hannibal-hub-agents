@@ -112,6 +112,27 @@ def verify_resolutions(
             symbol_in_removed = any(sym in path_removed_text.lower() for sym in cited_symbols)
             if not (symbol_in_added or symbol_in_removed):
                 evidence_ok = False
+        else:
+            test_keywords = (
+                "test coverage",
+                "unit test",
+                "untested",
+                "missing test",
+                "lack of test",
+                "test suite",
+                "tests for",
+            )
+            is_test_related = any(kw in combined_text.lower() for kw in test_keywords)
+            if is_test_related and cited_paths:
+                for cp in cited_paths:
+                    if (
+                        cp.startswith("tests/")
+                        or "test_" in cp
+                        or "_test." in cp
+                        or cp.endswith("_test.py")
+                    ) and bool(line_text.get(cp)):
+                        evidence_ok = True
+                        break
 
         if not path_ok or not evidence_ok:
             item_dict["status"] = "UNRESOLVED"
