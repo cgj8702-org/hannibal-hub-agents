@@ -26,7 +26,8 @@ def serialize_review_metadata(metadata: dict[str, Any]) -> str:
     single-line or tight multi-line comment rendering that is hidden on GitHub.
     """
     compact_json = json.dumps(metadata, separators=(",", ":"), ensure_ascii=False)
-    return f"<!-- hannibal-review-metadata: {compact_json} -->"
+    escaped_json = compact_json.replace("-->", "--\\u003e")
+    return f"<!-- hannibal-review-metadata: {escaped_json} -->"
 
 
 def extract_review_metadata(body: str) -> dict[str, Any] | None:
@@ -113,7 +114,7 @@ def parse_legacy_review_findings(body: str) -> dict[str, list[dict[str, Any]]]:
 
     # Extract Critical section
     crit_match = re.search(
-        r"####\s*(?:🔴)?\s*Critical[^\n]*\n([\s\S]*?)(?=\n####|\n###|\n---|\Z)",
+        r"#{3,4}\s*(?:\d+\.)?\s*(?:🔴)?\s*Critical[^\n]*\n([\s\S]*?)(?=\n#{3,4}|\n---|\Z)",
         normalized,
         re.IGNORECASE,
     )
@@ -136,7 +137,7 @@ def parse_legacy_review_findings(body: str) -> dict[str, list[dict[str, Any]]]:
 
     # Extract Suggestions section
     sugg_match = re.search(
-        r"####\s*(?:🟡)?\s*Suggestions[^\n]*\n([\s\S]*?)(?=\n####|\n###|\n---|\Z)",
+        r"#{3,4}\s*(?:\d+\.)?\s*(?:🟡)?\s*(?:Minor\s+)?Suggestions[^\n]*\n([\s\S]*?)(?=\n#{3,4}|\n---|\Z)",
         normalized,
         re.IGNORECASE,
     )
@@ -159,7 +160,7 @@ def parse_legacy_review_findings(body: str) -> dict[str, list[dict[str, Any]]]:
 
     # Extract Risks section
     risk_match = re.search(
-        r"###\s*(?:\d+\.)?\s*Potential Risks[^\n]*\n([\s\S]*?)(?=\n###|\n---|\Z)",
+        r"#{3,4}\s*(?:\d+\.)?\s*Potential Risks[^\n]*\n([\s\S]*?)(?=\n#{3,4}|\n---|\Z)",
         normalized,
         re.IGNORECASE,
     )
@@ -300,6 +301,18 @@ def get_actionable_findings(body: str) -> list[dict[str, Any]]:
                 if sc_status in ("WARN", "FAIL", "ERROR"):
                     dim = sc.get("dimension", "Scorecard")
                     notes = sc.get("notes", "")
+                    if sc_status == "WARN" and any(
+                        phrase in notes.lower()
+                        for phrase in (
+                            "potential false-positive",
+                            "potential false positive",
+                            "risk is contained",
+                            "acceptable mismatch",
+                            "no action required",
+                            "contained risk",
+                        )
+                    ):
+                        continue
                     cat = "CRITICAL" if sc_status in ("FAIL", "ERROR") else "SUGGESTION"
                     file_path = None
                     line_num = None

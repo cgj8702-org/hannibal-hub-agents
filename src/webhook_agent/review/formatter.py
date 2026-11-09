@@ -849,7 +849,15 @@ def render_sync_review_markdown(
         )
         if not has_categories:
             for item in review.resolutions:
-                icon = "✅" if item.status == "RESOLVED" else "🔴"
+                cat = getattr(item, "category", "CRITICAL")
+                if item.status == "RESOLVED":
+                    icon = "✅"
+                elif cat == "SUGGESTION":
+                    icon = "🟡"
+                elif cat == "RISK":
+                    icon = "🛡️"
+                else:
+                    icon = "🔴"
                 res_lines.append(
                     f"* {icon} **[{item.status}]** {item.item_description}\n  * *Evidence*: {item.evidence}"
                 )
@@ -946,6 +954,24 @@ def render_sync_review_markdown(
             )
         section_counter += 1
 
+    if getattr(review, "risks_and_edge_cases", None):
+        risk_lines: list[str] = []
+        for r_item in review.risks_and_edge_cases:
+            risk_lines.append(f"* **Risk:** {r_item.risk}")
+            if r_item.recommendation and r_item.recommendation.strip():
+                risk_lines.append(f"  * *Recommendation*: {r_item.recommendation.strip()}")
+        markdown_parts.extend(
+            [
+                "",
+                "---",
+                "",
+                f"### {section_counter}. Potential Risks & Edge Cases",
+                "",
+                "\n".join(risk_lines),
+            ]
+        )
+        section_counter += 1
+
     if review.verified_invariants:
         inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
         markdown_parts.extend(
@@ -1021,6 +1047,14 @@ def render_sync_review_markdown(
                 "category": "SUGGESTION",
             }
             for sugg in review.minor_suggestions
+        ],
+        "risks": [
+            {
+                "risk": r_item.risk,
+                "recommendation": r_item.recommendation,
+                "category": "RISK",
+            }
+            for r_item in getattr(review, "risks_and_edge_cases", []) or []
         ],
         "unverified_claims": list(review.unverified_claims),
     }

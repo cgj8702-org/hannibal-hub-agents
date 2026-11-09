@@ -83,6 +83,7 @@ def extract_bare_symbols(text: str) -> set[str]:
     for match in _BACKTICK_RE.finditer(text):
         backticked.update(t.lower() for t in _IDENTIFIER_RE.findall(match.group(1)))
     bare = re.sub(_BACKTICK_RE, " ", text)
+    bare = re.sub(_PATH_RE, " ", bare)
     symbols: set[str] = set()
     for token in _IDENTIFIER_RE.findall(bare):
         lowered = token.lower()
@@ -91,7 +92,7 @@ def extract_bare_symbols(text: str) -> set[str]:
         if (
             "_" in token
             or token.startswith("__")
-            or (token[0].islower() and any(c.isupper() for c in token[1:]))
+            or (any(c.islower() for c in token) and any(c.isupper() for c in token[1:]))
         ):
             symbols.add(lowered)
     return symbols
