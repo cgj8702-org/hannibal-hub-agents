@@ -154,3 +154,120 @@ def test_plan_and_execute_skips_when_pr_in_registry():
     assert len(results) == 1
     assert results[0].tool == "skip_closed_pr"
     assert results[0].success is True
+
+
+def test_pr_closed_registry_unmark_and_mark_open():
+    """Verify unmark_closed and mark_open remove PRs from the registry."""
+    pr_closed_registry.mark_closed("cgj8702-org/test-repo", 707)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 707) is True
+
+    pr_closed_registry.unmark_closed("cgj8702-org/test-repo", 707)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 707) is False
+
+    pr_closed_registry.mark_closed("cgj8702-org/test-repo", 708)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 708) is True
+
+    pr_closed_registry.mark_open("cgj8702-org/test-repo", 708)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 708) is False
+
+
+def test_event_filter_unmarks_reopened_pr():
+    """Verify event_filter unmarks PR from registry on pull_request.reopened."""
+    from webhook_agent.events.event_filter import filter_tier_0
+
+    pr_closed_registry.mark_closed("cgj8702-org/test-repo", 808)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 808) is True
+
+    payload = {
+        "event_name": "pull_request",
+        "action": "reopened",
+        "canonical": "pull_request.reopened",
+        "raw_payload": {
+            "repository": {"full_name": "cgj8702-org/test-repo"},
+            "pull_request": {"number": 808, "state": "open"},
+        },
+    }
+
+    should_drop, _reason = filter_tier_0(payload)
+    assert should_drop is False
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 808) is False
+
+
+def test_tier1_router_reopened_pr_clears_registry_and_advances(monkeypatch: pytest.MonkeyPatch):
+    """Verify tier1_router clears closed registry when PR event indicates state=open."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.events.tier1_router import Tier1Status, handle_tier_1_programmatic
+
+    monkeypatch.setenv("ENABLE_AUTOMATIC_PR_REVIEWS", "1")
+    monkeypatch.setenv("ENABLE_CI_GATE", "0")
+
+    pr_closed_registry.mark_closed("cgj8702-org/test-repo", 909)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 909) is True
+
+    payload = {
+        "canonical": "pull_request.synchronize",
+        "repo_name": "cgj8702-org/test-repo",
+        "raw_payload": {
+            "repository": {"full_name": "cgj8702-org/test-repo"},
+            "pull_request": {
+                "number": 909,
+                "state": "open",
+                "merged": False,
+                "head": {"sha": "abc1234"},
+            },
+        },
+    }
+
+    mock_gh = MagicMock()
+    mock_repo = mock_gh.get_repo.return_value
+    mock_pr = MagicMock()
+    mock_pr.state = "open"
+    mock_pr.merged = False
+    mock_pr.head.sha = "abc1234"
+    mock_repo.get_pull.return_value = mock_pr
+
+    status = handle_tier_1_programmatic(
+        mock_gh, payload, "event_key", "delivery_id", ci_verified=True
+    )
+    assert status == Tier1Status.ADVANCE
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 909) is False
+
+
+def test_tier1_router_slash_command_clears_closed_registry_on_live_open_pr():
+    """Verify slash command override clears closed registry if live PR check is open."""
+    from unittest.mock import MagicMock
+
+    from webhook_agent.events.tier1_router import Tier1Status, handle_tier_1_programmatic
+
+    pr_closed_registry.mark_closed("cgj8702-org/test-repo", 1010)
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 1010) is True
+
+    payload = {
+        "canonical": "issue_comment.created",
+        "repo_name": "cgj8702-org/test-repo",
+        "raw_payload": {
+            "repository": {"full_name": "cgj8702-org/test-repo"},
+            "issue": {
+                "number": 1010,
+                "state": "open",
+                "pull_request": {
+                    "url": "https://api.github.com/repos/cgj8702-org/test-repo/pulls/1010"
+                },
+            },
+            "comment": {
+                "body": "/force-review please review this now",
+            },
+        },
+    }
+
+    mock_gh = MagicMock()
+    mock_repo = mock_gh.get_repo.return_value
+    mock_pr = MagicMock()
+    mock_pr.state = "open"
+    mock_pr.merged = False
+    mock_repo.get_pull.return_value = mock_pr
+
+    status = handle_tier_1_programmatic(mock_gh, payload, "event_key", "delivery_id")
+    assert status == Tier1Status.ADVANCE
+    assert pr_closed_registry.is_closed("cgj8702-org/test-repo", 1010) is False

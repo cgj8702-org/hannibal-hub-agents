@@ -562,6 +562,10 @@ def review(
             raise AbortAgentExecution(
                 f"PR {repo_name}#{pr_number} is closed or merged. Skipping review submission."
             )
+        else:
+            from webhook_agent.core.cancellation import pr_closed_registry
+
+            pr_closed_registry.unmark_closed(repo_name, pr_number)
 
         patches: dict[str, str | None] = {}
         retrieval_ok: bool | None = None

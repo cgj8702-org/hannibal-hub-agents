@@ -646,10 +646,26 @@ class WebhookProcessor:
                 updated_pr = (
                     raw.get("pull_request") or (raw.get("issue") or {}).get("pull_request") or {}
                 )
-                updated_state = (
-                    (updated_pr.get("state") or "").lower() if isinstance(updated_pr, dict) else ""
+                updated_issue = raw.get("issue") or {}
+                raw_updated_state = (
+                    (updated_pr.get("state") if isinstance(updated_pr, dict) else "")
+                    or (updated_issue.get("state") if isinstance(updated_issue, dict) else "")
+                    or ""
                 )
-                if updated_state == "closed" or pr_closed_registry.is_closed(repo_name, pr_num_int):
+                updated_state = raw_updated_state.lower()
+                is_merged = (
+                    updated_pr.get("merged") is True
+                    or bool(str(updated_pr.get("merged_at") or "").strip())
+                    if isinstance(updated_pr, dict)
+                    else False
+                )
+                if updated_state == "open" and not is_merged:
+                    pr_closed_registry.unmark_closed(repo_name, pr_num_int)
+                elif (
+                    updated_state == "closed"
+                    or is_merged
+                    or pr_closed_registry.is_closed(repo_name, pr_num_int)
+                ):
                     logger.debug(
                         "🔒 PR %s#%s was closed or merged on GitHub; skipping agent execution.",
                         repo_name,

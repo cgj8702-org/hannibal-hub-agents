@@ -38,6 +38,18 @@ class PRClosedRegistry:
             self._closed[key] = time.time()
         logger.debug("🔒 Registered PR %s as CLOSED for short-circuiting", key)
 
+    def unmark_closed(self, repo_full_name: str, pr_number: int) -> None:
+        """Remove a PR from the closed registry (e.g. upon reopening)."""
+        key = self._key(repo_full_name, pr_number)
+        with self._lock:
+            removed = self._closed.pop(key, None) is not None
+        if removed:
+            logger.info("🔓 Unregistered PR %s from CLOSED registry", key)
+
+    def mark_open(self, repo_full_name: str, pr_number: int) -> None:
+        """Alias for unmark_closed."""
+        self.unmark_closed(repo_full_name, pr_number)
+
     def is_closed(self, repo_full_name: str, pr_number: int) -> bool:
         key = self._key(repo_full_name, pr_number)
         with self._lock:

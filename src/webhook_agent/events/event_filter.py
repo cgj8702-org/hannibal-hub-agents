@@ -287,6 +287,27 @@ def filter_tier_0(
                 )
         return True, "closed PR event"
 
+    # Immediately unmark PR from closed registry upon reopening
+    if canonical in ("pull_request.reopened", "pr.reopened") or (
+        event_name in ("pull_request", "pr") and action == "reopened"
+    ):
+        repo = raw.get("repository") or {}
+        repo_full_name = repo.get("full_name", "")
+        pr_data = raw.get("pull_request") or {}
+        pr_number = pr_data.get("number")
+        if repo_full_name and pr_number:
+            try:
+                from webhook_agent.core.cancellation import pr_closed_registry
+
+                pr_closed_registry.unmark_closed(repo_full_name, int(pr_number))
+            except Exception as ex:
+                logger.warning(
+                    "Failed to unmark PR %s#%s in closed registry: %s",
+                    repo_full_name,
+                    pr_number,
+                    ex,
+                )
+
     if canonical.startswith("pull_request_review_thread."):
         return True, "review thread event"
 

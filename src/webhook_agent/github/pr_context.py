@@ -128,6 +128,8 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
                 is_merged,
             )
             return
+        else:
+            pr_closed_registry.unmark_closed(repo_name, pr_num_int)
 
         changed_files: list[str] = []
         diff_lines: list[str] = []
