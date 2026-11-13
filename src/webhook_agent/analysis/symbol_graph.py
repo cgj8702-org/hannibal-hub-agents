@@ -320,8 +320,10 @@ class CallerImportMap:
     resolved_direct_names: dict[str, str] = field(default_factory=dict)
     other_imported_names: dict[str, str] = field(default_factory=dict)
     resolved_receivers: dict[str, str] = field(default_factory=dict)
+    target_imported_symbols: dict[str, str] = field(default_factory=dict)
     local_definitions: set[str] = field(default_factory=set)
     has_target_wildcard: bool = False
+    imports_target_module: bool = False
 
 
 def extract_caller_import_map(
@@ -343,12 +345,14 @@ def extract_caller_import_map(
                 if alias.name in target_candidates:
                     receiver = alias.asname or alias.name.split(".")[-1]
                     cmap.resolved_receivers[receiver] = alias.name
+                    cmap.imports_target_module = True
                 elif alias.name == target_symbol:
                     cmap.other_imported_names[alias.asname or alias.name] = alias.name
 
         elif isinstance(node, ast.ImportFrom):
             resolved_mod = _resolve_relative_import(node, caller_file_path)
             if resolved_mod and resolved_mod in target_candidates:
+                cmap.imports_target_module = True
                 for alias in node.names:
                     if alias.name == "*":
                         cmap.has_target_wildcard = True
@@ -357,9 +361,9 @@ def extract_caller_import_map(
                         cmap.resolved_direct_names[local_name] = resolved_mod
                     else:
                         submod = f"{resolved_mod}.{alias.name}"
-                        if submod in target_candidates or alias.name in target_candidates:
-                            receiver = alias.asname or alias.name
-                            cmap.resolved_receivers[receiver] = submod
+                        receiver = alias.asname or alias.name
+                        cmap.resolved_receivers[receiver] = submod
+                        cmap.target_imported_symbols[alias.asname or alias.name] = resolved_mod
             else:
                 for alias in node.names:
                     if alias.name == target_symbol:
@@ -407,52 +411,77 @@ class CallSiteVisitor(ast.NodeVisitor):
                 self.import_map is not None and func_id in self.import_map.resolved_direct_names
             )
             if is_target_name or is_resolved_alias:
-                is_match = True
                 callee_name = func_id
                 is_attribute_call = False
 
                 if self.target_file_path is None:
+                    is_match = True
                     is_import_resolved = None
                 elif self.file_path and self.file_path == self.target_file_path:
+                    is_match = True
                     is_import_resolved = True
                     imported_from = self.target_file_path
                 elif self.import_map is not None:
                     if func_id in self.import_map.resolved_direct_names:
+                        is_match = True
                         is_import_resolved = True
                         imported_from = self.import_map.resolved_direct_names[func_id]
-                    elif func_id in self.import_map.other_imported_names:
-                        is_import_resolved = False
-                        imported_from = self.import_map.other_imported_names[func_id]
                     elif func_id in self.import_map.local_definitions:
-                        is_import_resolved = False
-                        imported_from = "local_definition"
+                        # Local definition in this file: not a call site of the target symbol in target_file_path
+                        is_match = False
                     elif self.import_map.has_target_wildcard:
+                        is_match = True
                         is_import_resolved = True
                         imported_from = "wildcard"
+                    elif func_id in self.import_map.other_imported_names:
+                        is_match = True
+                        is_import_resolved = False
+                        imported_from = self.import_map.other_imported_names[func_id]
                     else:
+                        is_match = True
                         is_import_resolved = False
                         imported_from = None
                 else:
+                    is_match = True
                     is_import_resolved = False
 
         # Attribute call: obj.method(...)
         elif isinstance(node.func, ast.Attribute) and node.func.attr == self.target_symbol:
-            is_match = True
-            callee_name = node.func.attr
-            is_attribute_call = True
             if isinstance(node.func.value, ast.Name):
                 receiver_name = node.func.value.id
 
             if self.target_file_path is None:
+                is_match = True
                 is_receiver_resolved = None
+            elif self.file_path and self.file_path == self.target_file_path:
+                is_match = True
+                is_receiver_resolved = True
+                imported_from = self.target_file_path
             elif self.import_map is not None:
-                if receiver_name and receiver_name in self.import_map.resolved_receivers:
-                    is_receiver_resolved = True
-                    imported_from = self.import_map.resolved_receivers[receiver_name]
+                # If target_file_path is specified, but the caller file does not import
+                # target_file_path (no module import, no wildcard, no imported symbols),
+                # an attribute call on an unrelated receiver in an unrelated module is NOT a call site.
+                if not (
+                    self.import_map.imports_target_module
+                    or self.import_map.has_target_wildcard
+                    or self.import_map.resolved_receivers
+                    or self.import_map.resolved_direct_names
+                ):
+                    is_match = False
                 else:
-                    is_receiver_resolved = False
+                    is_match = True
+                    if receiver_name and receiver_name in self.import_map.resolved_receivers:
+                        is_receiver_resolved = True
+                        imported_from = self.import_map.resolved_receivers[receiver_name]
+                    else:
+                        is_receiver_resolved = False
             else:
+                is_match = True
                 is_receiver_resolved = False
+
+            if is_match:
+                callee_name = node.func.attr
+                is_attribute_call = True
 
         if is_match:
             has_star = any(isinstance(a, ast.Starred) for a in node.args)

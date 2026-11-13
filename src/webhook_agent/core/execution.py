@@ -672,22 +672,49 @@ def execute_agent_event(
         else ""
     )
 
-    if is_pr_context and not head_sha and gh_client and pr_number:
+    base_sha = (
+        str(
+            (raw.get("pull_request") or {}).get("base", {}).get("sha")
+            or raw.get("base_sha")
+            or event_data.get("base_sha")
+            or (raw.get("check_suite") or {})
+            .get("pull_requests", [{}])[0]
+            .get("base", {})
+            .get("sha")
+            or ""
+        )
+        if is_pr_context
+        else ""
+    )
+
+    if is_pr_context and (not head_sha or not base_sha) and gh_client and pr_number:
         try:
             pr_obj = gh_client.get_repo(repo_full_name).get_pull(int(pr_number))
-            head_sha = str(getattr(getattr(pr_obj, "head", None), "sha", "") or "")
-            if head_sha:
-                raw["head_sha"] = head_sha
-                raw["diff_sha"] = raw.get("diff_sha") or head_sha
-                event_data["head_sha"] = head_sha
+            if not head_sha:
+                head_sha = str(getattr(getattr(pr_obj, "head", None), "sha", "") or "")
+                if head_sha:
+                    raw["head_sha"] = head_sha
+                    raw["diff_sha"] = raw.get("diff_sha") or head_sha
+                    event_data["head_sha"] = head_sha
+            if not base_sha:
+                base_sha = str(getattr(getattr(pr_obj, "base", None), "sha", "") or "")
+                if base_sha:
+                    raw["base_sha"] = base_sha
+                    event_data["base_sha"] = base_sha
         except Exception as exc:
-            logger.debug("Could not resolve head_sha from GitHub: %s", exc)
+            logger.debug("Could not resolve head_sha or base_sha from GitHub: %s", exc)
 
     if head_sha:
         if not raw.get("head_sha"):
             raw["head_sha"] = head_sha
         if not event_data.get("head_sha"):
             event_data["head_sha"] = head_sha
+
+    if base_sha:
+        if not raw.get("base_sha"):
+            raw["base_sha"] = base_sha
+        if not event_data.get("base_sha"):
+            event_data["base_sha"] = base_sha
 
     logger.debug(
         "🔍 [execute_agent_event] is_pr_context=%s, head_sha=%s, repo=%s, pr_number=%s, review_commit_id=%s",
