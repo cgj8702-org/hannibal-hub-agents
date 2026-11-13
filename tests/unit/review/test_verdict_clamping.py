@@ -182,3 +182,69 @@ def test_strict_verdict_clean_review_approves() -> None:
         minor_suggestions=[],
     )
     assert calculate_strict_verdict(cr) == "APPROVE"
+
+
+def test_strict_verdict_scorecard_warning_demotes_unspecified_verdict_to_comment() -> None:
+    """Scorecard WARN, UNKNOWN, or ERROR demotes unspecified verdict (None) to COMMENT."""
+    for warn_status in ("WARN", "UNKNOWN", "ERROR"):
+        cr = CodeReviewResponse(
+            executive_summary="Review with warning.",
+            verdict=None,
+            scorecard=[
+                ScorecardItem(dimension="Contract Integrity", status=warn_status, notes="Warning"),
+                ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+            ],
+            critical_issues=[],
+            minor_suggestions=[],
+        )
+        assert calculate_strict_verdict(cr) == "COMMENT"
+
+
+def test_strict_verdict_unverified_claims_demotes_unspecified_verdict_to_comment() -> None:
+    """Unverified claims demote unspecified verdict (None) to COMMENT."""
+    cr = CodeReviewResponse(
+        executive_summary="Review with unverified claims.",
+        verdict=None,
+        scorecard=[
+            ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Clean"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        unverified_claims=["Some claim that could not be grounded in the diff"],
+    )
+    assert calculate_strict_verdict(cr) == "COMMENT"
+
+
+def test_sync_verdict_scorecard_warning_demotes_unspecified_verdict_to_comment() -> None:
+    """Sync scorecard WARN, UNKNOWN, or ERROR demotes unspecified verdict (None) to COMMENT."""
+    for warn_status in ("WARN", "UNKNOWN", "ERROR"):
+        sync_resp = SyncReviewResponse(
+            summary="Sync review with warning.",
+            verdict=None,
+            resolutions=[],
+            scorecard=[
+                ScorecardItem(dimension="Contract Integrity", status=warn_status, notes="Warning"),
+                ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+            ],
+            critical_issues=[],
+            minor_suggestions=[],
+        )
+        assert calculate_sync_verdict(sync_resp) == "COMMENT"
+
+
+def test_sync_verdict_unverified_claims_demotes_unspecified_verdict_to_comment() -> None:
+    """Sync review with unverified claims demotes unspecified verdict (None) to COMMENT."""
+    sync_resp = SyncReviewResponse(
+        summary="Sync review with unverified claims.",
+        verdict=None,
+        resolutions=[],
+        scorecard=[
+            ScorecardItem(dimension="Logic & Boundaries", status="PASS", notes="Clean"),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Clean"),
+        ],
+        critical_issues=[],
+        minor_suggestions=[],
+        unverified_claims=["Unverified claim in update"],
+    )
+    assert calculate_sync_verdict(sync_resp) == "COMMENT"

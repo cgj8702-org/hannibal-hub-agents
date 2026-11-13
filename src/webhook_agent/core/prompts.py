@@ -127,7 +127,7 @@ Use **`CodeReviewResponse`** for initial PR reviews (`pull_request.opened`) and 
 5. **semantic_invariants**: 0-2 high-level architectural, domain, or behavioral guarantees asserted by model reasoning without mechanical line citations. Machine-proven verified_invariants MUST dominate: on code PRs, len(verified_invariants) >= len(semantic_invariants), and semantic_invariants is strictly capped at 2. If you assert guarantees, anchor them to diff lines with path:line citations so they qualify as verified_invariants.
 6. **critical_issues**: Blocking defects only (must fix before merge). If the PR is sound and regression-free, return empty (`[]`).
 7. **minor_suggestions**: Non-blocking improvements for maintainability or readability. If clean, return empty (`[]`).
-8. **risks_and_edge_cases**: Potential runtime risks, traffic burst behaviors, or external boundaries.
+8. **risks_and_edge_cases**: Genuine runtime risks, traffic burst behaviors, or external boundaries. Do NOT speculate on theoretical latency or overhead of defensive fallback paths that only execute when primary context is absent. Empty (`[]`) if none.
 
 #### 3b. `SyncReviewResponse` (Synchronization Re-Reviews)
 1. **summary**: 1-2 concise sentences summarizing incremental commit changes and their impact.
