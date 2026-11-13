@@ -110,13 +110,13 @@ def test_code_review_response_embeds_metadata() -> None:
 
 
 def test_code_review_metadata_omits_verified_invariants() -> None:
-    """Verified invariants are purged from review schemas and metadata."""
+    """Verified invariants are omitted from metadata when empty."""
     cr = CodeReviewResponse(
         executive_summary="Audit pass.",
         verdict="APPROVE",
     )
     md = cr.to_markdown(verdict="APPROVE")
-    assert "Verified Invariants" not in md
+    assert "### 6. Verified Invariants\n\n_None recorded._" in md
 
     meta = extract_review_metadata(md)
     assert meta is not None
@@ -131,7 +131,7 @@ def test_metadata_roundtrip_includes_unverified_claims() -> None:
         unverified_claims=["Distributed lock behavior under split-brain"],
     )
     md = cr.to_markdown(verdict="COMMENT")
-    assert "Unverified Claims & Residual Uncertainty" in md
+    assert "Residual Uncertainty & Context Gaps" in md
     assert "Distributed lock behavior under split-brain" in md
 
     meta = extract_review_metadata(md)

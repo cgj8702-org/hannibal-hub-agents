@@ -434,9 +434,9 @@ def test_enforce_verdict_partitions_unverified_invariants() -> None:
     rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
 
     assert verdict == "APPROVE"
-    assert "### 3. Verified Invariants" in rendered_body
+    assert "### 6. Verified Invariants" in rendered_body
     assert "- [x] Worker execution logic verified (`src/app.py:1`)" in rendered_body
-    assert "### 4. Semantic Invariants (Model-Asserted)" in rendered_body
+    assert "### 7. Semantic Invariants (Model-Asserted)" in rendered_body
     assert "* Gracefully handles transient network disconnections without crash." in rendered_body
 
     meta = extract_review_metadata(rendered_body)
@@ -480,14 +480,14 @@ def test_enforce_verdict_purges_hallucinated_semantic_invariants() -> None:
     rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
 
     assert verdict == "APPROVE"
-    assert "### 3. Verified Invariants" in rendered_body
+    assert "### 6. Verified Invariants" in rendered_body
     assert "- [x] Worker execution logic verified (`src/app.py:1`)" in rendered_body
-    assert "### 4. Semantic Invariants (Model-Asserted)" in rendered_body
+    assert "### 7. Semantic Invariants (Model-Asserted)" in rendered_body
     assert "* Gracefully handles transient network disconnections without crash." in rendered_body
     assert "phantom_db.py" not in rendered_body
     assert "test_phantom_concurrency_race_condition" not in rendered_body
     assert "PhantomDistributedMutex" not in rendered_body
-    assert "### ❓ Unverified Claims & Residual Uncertainty" in rendered_body
+    assert "### 8. Residual Uncertainty & Context Gaps" in rendered_body
     assert "* Residual uncertainty regarding global cluster memory scaling" in rendered_body
 
     meta = extract_review_metadata(rendered_body)
@@ -960,7 +960,7 @@ def test_enforce_verdict_recovers_scorecard_invariants() -> None:
 
     rendered_body, verdict, _ = _enforce_verdict(json_body, "APPROVE", state=state)
     assert verdict == "APPROVE"
-    assert "### 3. Verified Invariants" in rendered_body
+    assert "### 6. Verified Invariants" in rendered_body
     assert "- [x] src/app.py:10: Logic & Boundaries check verified in PR diff." in rendered_body
 
     meta = extract_review_metadata(rendered_body)

@@ -86,12 +86,12 @@ def test_sync_review_drops_placeholder_resolutions_without_grounding() -> None:
 
     sync_obj = SyncReviewResponse.model_validate(data)
     assert sync_obj.resolutions == []
-    # No zombie rows rendered — Resolution Tracker section omitted entirely when empty
+    # No zombie rows rendered — Resolution Tracker section renders _None recorded._ when empty
     md = sync_obj.to_markdown(verdict="APPROVE")
     assert "Review finding resolution" not in md
     assert "Verified in commit diff." not in md
     assert "No prior review items tracked." not in md
-    assert "Resolution Tracker" not in md
+    assert "### 2. Resolution Tracker\n\n_None recorded._" in md
 
 
 def test_sync_review_drops_string_only_resolutions() -> None:
@@ -161,8 +161,8 @@ def test_sync_review_preserves_resolutions_from_approved_review_with_suggestions
     assert "No prior review items tracked" not in rendered_body
 
 
-def test_sync_review_empty_resolutions_omits_resolution_tracker_section() -> None:
-    """When resolutions is empty, the Resolution Tracker section must be omitted entirely."""
+def test_sync_review_empty_resolutions_renders_placeholder_in_resolution_tracker() -> None:
+    """When resolutions is empty, the Resolution Tracker section renders _None recorded._ and scorecard is Section 3."""
     data = {
         "summary": "Clean incremental update, no prior items to resolve.",
         "resolutions": [],
@@ -174,11 +174,9 @@ def test_sync_review_empty_resolutions_omits_resolution_tracker_section() -> Non
     }
     sync_obj = SyncReviewResponse.model_validate(data)
     md = sync_obj.to_markdown(verdict="APPROVE")
-    # Resolution Tracker section must not appear at all
-    assert "Resolution Tracker" not in md
+    assert "### 2. Resolution Tracker\n\n_None recorded._" in md
     assert "No prior review items tracked" not in md
-    # Scorecard should start at section 2 (not 3)
-    assert "### 2. Audit Dimension Scorecard" in md
+    assert "### 3. Audit Dimension Scorecard" in md
     assert "### 1. Synchronization Summary" in md
 
 

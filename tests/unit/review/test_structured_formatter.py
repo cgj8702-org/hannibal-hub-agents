@@ -448,7 +448,7 @@ def test_parse_text_review_approval_bullets_not_critical():
 """
     rendered_md, verdict, _inline_comments = _enforce_verdict(text_review, "APPROVE")
     assert verdict == "APPROVE"
-    assert "Action Items" not in rendered_md
+    assert "codebase: 5/5" not in rendered_md
     assert "None found" not in rendered_md
     assert "Summary & Justification:** Summary & Justification:**" not in rendered_md
 
@@ -1058,7 +1058,7 @@ def test_sync_review_three_tier_resolution_rendering():
 
 
 def test_sync_review_unresolved_suggestion_does_not_block_approval():
-    """Verify that an unresolved optional suggestion does not force REQUEST_CHANGES."""
+    """Verify that an unresolved optional suggestion does not force REQUEST_CHANGES (demotes to COMMENT)."""
     sync_resp = SyncReviewResponse(
         summary="Resolved critical bug, left optional style suggestion for later.",
         resolutions=[
@@ -1080,7 +1080,7 @@ def test_sync_review_unresolved_suggestion_does_not_block_approval():
         confidence=5,
     )
     verdict = calculate_sync_verdict(sync_resp)
-    assert verdict == "APPROVE"
+    assert verdict == "COMMENT"
 
 
 def test_sync_review_unresolved_critical_blocks_approval():
@@ -1252,13 +1252,13 @@ def test_audit_dimension_scorecard_rendering():
         ],
     )
     md = cr.to_markdown(verdict="APPROVE")
-    assert "### 2. Audit Dimension Scorecard" in md
+    assert "### 3. Audit Dimension Scorecard" in md
     assert (
         "| **Logic & Boundaries** | `✅ PASS` | Off-by-one errors guarded by boundary check. |"
         in md
     )
     assert "| **Concurrency & State** | `✅ PASS` | Locks held across state mutation. |" in md
-    assert "### 3. Verified Invariants" in md
+    assert "### 6. Verified Invariants" in md
     assert "- [x] Rate limiter fast-fail executes without thread blocking." in md
 
 

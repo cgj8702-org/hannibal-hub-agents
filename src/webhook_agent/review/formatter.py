@@ -255,39 +255,61 @@ def normalize_sync_review_dict(data: dict[str, Any]) -> dict[str, Any]:
     return res
 
 
+STRICTNESS_MAP = {"REQUEST_CHANGES": 3, "COMMENT": 2, "APPROVE": 1}
+
+
+def clamp_verdict(mechanical_verdict: str, llm_verdict: str | None) -> str:
+    """Clamp review verdict: the LLM may only increase strictness, never loosen it."""
+    mech_level = STRICTNESS_MAP.get((mechanical_verdict or "").upper(), 1)
+    llm_level = STRICTNESS_MAP.get((llm_verdict or "").upper(), 1) if llm_verdict else 1
+    final_level = max(mech_level, llm_level)
+    for v, lvl in STRICTNESS_MAP.items():
+        if lvl == final_level:
+            return v
+    return mechanical_verdict
+
+
 def calculate_strict_verdict(review: CodeReviewResponse) -> str:
     """Calculate PR review verdict mechanically from structured issues, scorecard, and invariants."""
+    # Hard blocker: any critical issue or failing scorecard dimension -> REQUEST_CHANGES
     if len(review.critical_issues) > 0:
         logger.info(
             "Mechanical verdict: REQUEST_CHANGES (%d critical issues)",
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
-    has_unverified_or_warning = False
+
     for sc in getattr(review, "scorecard", []) or []:
         sc_status = (getattr(sc, "status", "") or "").upper()
         if sc_status == "FAIL":
             logger.info(
-                "Mechanical verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
+                "Mechanical verdict: REQUEST_CHANGES (scorecard dimension failed: %s)",
+                sc.dimension,
             )
             return "REQUEST_CHANGES"
-        elif sc_status in ("WARN", "UNKNOWN", "ERROR"):
+
+    has_unverified_or_warning = False
+    for sc in getattr(review, "scorecard", []) or []:
+        sc_status = (getattr(sc, "status", "") or "").upper()
+        if sc_status in ("WARN", "UNKNOWN", "ERROR"):
             has_unverified_or_warning = True
             logger.info(
                 "Scorecard dimension has unverified or warning status (%s): %s",
                 sc_status,
                 sc.dimension,
             )
+
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
-        logger.debug("Mechanical verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
+
+    # When verdict is None (unspecified), warnings or unverified claims demote to COMMENT
     if getattr(review, "verdict", None) is None and (
         has_unverified_or_warning or bool(getattr(review, "unverified_claims", None))
     ):
         return "COMMENT"
-    logger.debug("Mechanical verdict: APPROVE (0 critical issues)")
+
     return "APPROVE"
 
 
@@ -305,7 +327,7 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
             len(review.critical_issues),
         )
         return "REQUEST_CHANGES"
-    has_unverified_or_warning = False
+
     for sc in getattr(review, "scorecard", []) or []:
         sc_status = (getattr(sc, "status", "") or "").upper()
         if sc_status == "FAIL":
@@ -313,26 +335,44 @@ def calculate_sync_verdict(review: SyncReviewResponse) -> str:
                 "Sync verdict: REQUEST_CHANGES (scorecard dimension failed: %s)", sc.dimension
             )
             return "REQUEST_CHANGES"
-        elif sc_status in ("WARN", "UNKNOWN", "ERROR"):
+
+    # Any unresolved non-critical resolution (SUGGESTION or RISK) strictly blocks APPROVE!
+    unresolved_non_critical = [
+        r
+        for r in review.resolutions
+        if r.status == "UNRESOLVED" and getattr(r, "category", "CRITICAL") != "CRITICAL"
+    ]
+
+    has_unverified_or_warning = False
+    for sc in getattr(review, "scorecard", []) or []:
+        sc_status = (getattr(sc, "status", "") or "").upper()
+        if sc_status in ("WARN", "UNKNOWN", "ERROR"):
             has_unverified_or_warning = True
             logger.info(
                 "Sync scorecard dimension has unverified or warning status (%s): %s",
                 sc_status,
                 sc.dimension,
             )
+
     if getattr(review, "verdict", None) == "REQUEST_CHANGES":
-        logger.debug("Sync verdict: REQUEST_CHANGES (explicit review verdict)")
         return "REQUEST_CHANGES"
+
+    # If ANY prior item is unresolved, verdict CANNOT be APPROVE: it MUST be COMMENT!
+    if unresolved_non_critical:
+        logger.info(
+            "Sync verdict: COMMENT (%d unresolved non-critical items cannot approve)",
+            len(unresolved_non_critical),
+        )
+        return "COMMENT"
+
     if getattr(review, "verdict", None) == "COMMENT":
         return "COMMENT"
+
     if getattr(review, "verdict", None) is None and (
         has_unverified_or_warning or bool(getattr(review, "unverified_claims", None))
     ):
         return "COMMENT"
-    logger.debug(
-        "Sync verdict: APPROVE (all critical items RESOLVED, %d minor suggestions)",
-        len(review.minor_suggestions),
-    )
+
     return "APPROVE"
 
 
@@ -630,7 +670,7 @@ def parse_text_review_to_dict(body: str) -> dict[str, Any]:
 def render_code_review_markdown(
     review: CodeReviewResponse, verdict: str | None = None, **kwargs: Any
 ) -> str:
-    """Render CodeReviewResponse into clean, modern GitHub Markdown."""
+    """Render CodeReviewResponse into clean, modern GitHub Markdown with persistent 8-section layout."""
     if verdict is None:
         verdict = calculate_strict_verdict(review)
     verdict_str = verdict or review.verdict or "COMMENT"
@@ -642,116 +682,113 @@ def render_code_review_markdown(
         "### 1. Executive Summary",
         "",
         review.executive_summary,
+        "",
+        "---",
+        "",
+        "### 2. Resolution Tracker",
+        "",
+        "_Initial review round; no prior resolutions._",
     ]
 
-    section_counter = 2
-
+    # Section 3: Audit Dimension Scorecard
+    scorecard_lines = ["", "---", "", "### 3. Audit Dimension Scorecard", ""]
     if review.scorecard:
         scorecard_rows = [item.to_table_row() for item in review.scorecard]
-        markdown_parts.extend(
+        scorecard_lines.extend(
             [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Audit Dimension Scorecard",
-                "",
                 "| Dimension | Status | Notes |",
                 "| :--- | :---: | :--- |",
                 *scorecard_rows,
             ]
         )
-        section_counter += 1
+    else:
+        scorecard_lines.append("_None recorded._")
+    markdown_parts.extend(scorecard_lines)
 
-    if review.critical_issues or review.minor_suggestions:
-        markdown_parts.extend(["", "---", "", f"### {section_counter}. Action Items"])
-        if review.critical_issues:
-            markdown_parts.extend(
-                [
-                    "",
-                    "#### 🔴 Critical (Must Fix Before Merge)",
-                    "\n".join(issue.to_markdown() for issue in review.critical_issues),
-                ]
-            )
-        if review.minor_suggestions:
-            markdown_parts.extend(
-                [
-                    "",
-                    "#### 🟡 Suggestions & Maintainability",
-                    "\n".join(sugg.to_markdown() for sugg in review.minor_suggestions),
-                ]
-            )
-        section_counter += 1
+    # Section 4: Action Items & Findings
+    action_lines = ["", "---", "", "### 4. Action Items & Findings"]
+    action_lines.extend(
+        [
+            "",
+            "#### 🔴 Critical (Must Fix Before Merge)",
+            "\n".join(issue.to_markdown() for issue in review.critical_issues)
+            if review.critical_issues
+            else "_None recorded._",
+        ]
+    )
+    action_lines.extend(
+        [
+            "",
+            "#### 🟡 Suggestions & Maintainability",
+            "\n".join(sugg.to_markdown() for sugg in review.minor_suggestions)
+            if review.minor_suggestions
+            else "_None recorded._",
+        ]
+    )
+    markdown_parts.extend(action_lines)
 
+    # Section 5: Potential Risks & Edge Cases
+    risk_lines: list[str] = []
     if review.risks_and_edge_cases:
-        risk_lines: list[str] = []
         for item in review.risks_and_edge_cases:
             risk_lines.append(f"* **Risk:** {item.risk}")
             if item.recommendation and item.recommendation.strip():
                 risk_lines.append(f"  * *Recommendation*: {item.recommendation.strip()}")
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Potential Risks & Edge Cases",
-                "",
-                "\n".join(risk_lines),
-            ]
-        )
-        section_counter += 1
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 5. Potential Risks & Edge Cases",
+            "",
+            "\n".join(risk_lines) if risk_lines else "_None recorded._",
+        ]
+    )
 
-    if review.verified_invariants:
-        inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Verified Invariants",
-                "",
-                "\n".join(inv_lines),
-            ]
-        )
-        section_counter += 1
+    # Section 6: Verified Invariants
+    inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 6. Verified Invariants",
+            "",
+            "\n".join(inv_lines) if inv_lines else "_None recorded._",
+        ]
+    )
 
-    if review.semantic_invariants:
-        sem_lines = [f"* {inv}" for inv in review.semantic_invariants]
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Semantic Invariants (Model-Asserted)",
-                "",
-                "\n".join(sem_lines),
-            ]
-        )
-        section_counter += 1
+    # Section 7: Semantic Invariants (Model-Asserted)
+    sem_lines = [f"* {inv}" for inv in review.semantic_invariants]
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 7. Semantic Invariants (Model-Asserted)",
+            "",
+            "\n".join(sem_lines) if sem_lines else "_None recorded._",
+        ]
+    )
 
+    # Section 8: Unverified Claims & Residual Uncertainty
+    gap_lines: list[str] = []
     if review.unverified_claims:
-        u_lines = [f"* {claim}" for claim in review.unverified_claims]
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                "### ❓ Unverified Claims & Residual Uncertainty",
-                "",
-                "\n".join(u_lines),
-            ]
-        )
-
+        for claim in review.unverified_claims:
+            gap_lines.append(f"* {claim}")
     if review.context_gaps:
         gaps_str = ", ".join(review.context_gaps)
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                "### Verification Notes",
-                f"* **Context Gaps:** {gaps_str}",
-            ]
-        )
+        gap_lines.append(f"* **Context Gaps:** {gaps_str}")
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 8. Residual Uncertainty & Context Gaps",
+            "",
+            "\n".join(gap_lines) if gap_lines else "_None recorded._",
+        ]
+    )
 
     meta = {
         "version": 1,
@@ -899,119 +936,102 @@ def render_sync_review_markdown(
         "### 1. Synchronization Summary",
         "",
         review.summary,
+        "",
+        "---",
+        "",
+        "### 2. Resolution Tracker",
+        "",
+        "\n".join(res_lines) if res_lines else "_None recorded._",
     ]
 
-    section_counter = 2
-
-    if review.resolutions:
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Resolution Tracker",
-                "",
-                "\n".join(res_lines),
-            ]
-        )
-        section_counter += 1
-
+    # Section 3: Audit Dimension Scorecard
+    scorecard_lines = ["", "---", "", "### 3. Audit Dimension Scorecard", ""]
     if review.scorecard:
         scorecard_rows = [item.to_table_row() for item in review.scorecard]
-        markdown_parts.extend(
+        scorecard_lines.extend(
             [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Audit Dimension Scorecard",
-                "",
                 "| Dimension | Status | Notes |",
                 "| :--- | :---: | :--- |",
                 *scorecard_rows,
             ]
         )
-        section_counter += 1
+    else:
+        scorecard_lines.append("_None recorded._")
+    markdown_parts.extend(scorecard_lines)
 
-    if review.critical_issues or review.minor_suggestions:
-        markdown_parts.extend(
-            ["", "---", "", f"### {section_counter}. New Findings (Introduced in Update)"]
-        )
-        if review.critical_issues:
-            markdown_parts.extend(
-                [
-                    "",
-                    "#### 🔴 Critical (Must Fix Before Merge)",
-                    "\n".join(crit_lines),
-                ]
-            )
-        if review.minor_suggestions:
-            markdown_parts.extend(
-                [
-                    "",
-                    "#### 🟡 Suggestions & Maintainability",
-                    "\n".join(minor_lines),
-                ]
-            )
-        section_counter += 1
+    # Section 4: New Findings (Introduced in Update)
+    finding_lines = ["", "---", "", "### 4. New Findings (Introduced in Update)"]
+    finding_lines.extend(
+        [
+            "",
+            "#### 🔴 Critical (Must Fix Before Merge)",
+            "\n".join(crit_lines) if crit_lines else "_None recorded._",
+        ]
+    )
+    finding_lines.extend(
+        [
+            "",
+            "#### 🟡 Suggestions & Maintainability",
+            "\n".join(minor_lines) if minor_lines else "_None recorded._",
+        ]
+    )
+    markdown_parts.extend(finding_lines)
 
-    if getattr(review, "risks_and_edge_cases", None):
-        risk_lines: list[str] = []
-        for r_item in review.risks_and_edge_cases:
-            risk_lines.append(f"* **Risk:** {r_item.risk}")
-            if r_item.recommendation and r_item.recommendation.strip():
-                risk_lines.append(f"  * *Recommendation*: {r_item.recommendation.strip()}")
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Potential Risks & Edge Cases",
-                "",
-                "\n".join(risk_lines),
-            ]
-        )
-        section_counter += 1
+    # Section 5: Potential Risks & Edge Cases
+    risk_lines: list[str] = []
+    for r_item in getattr(review, "risks_and_edge_cases", []) or []:
+        risk_lines.append(f"* **Risk:** {r_item.risk}")
+        if r_item.recommendation and r_item.recommendation.strip():
+            risk_lines.append(f"  * *Recommendation*: {r_item.recommendation.strip()}")
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 5. Potential Risks & Edge Cases",
+            "",
+            "\n".join(risk_lines) if risk_lines else "_None recorded._",
+        ]
+    )
 
-    if review.verified_invariants:
-        inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Verified Invariants",
-                "",
-                "\n".join(inv_lines),
-            ]
-        )
-        section_counter += 1
+    # Section 6: Verified Invariants
+    inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 6. Verified Invariants",
+            "",
+            "\n".join(inv_lines) if inv_lines else "_None recorded._",
+        ]
+    )
 
-    if review.semantic_invariants:
-        sem_lines = [f"* {inv}" for inv in review.semantic_invariants]
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                f"### {section_counter}. Semantic Invariants (Model-Asserted)",
-                "",
-                "\n".join(sem_lines),
-            ]
-        )
-        section_counter += 1
+    # Section 7: Semantic Invariants (Model-Asserted)
+    sem_lines = [f"* {inv}" for inv in review.semantic_invariants]
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 7. Semantic Invariants (Model-Asserted)",
+            "",
+            "\n".join(sem_lines) if sem_lines else "_None recorded._",
+        ]
+    )
 
-    if review.unverified_claims:
-        u_lines = [f"* {claim}" for claim in review.unverified_claims]
-        markdown_parts.extend(
-            [
-                "",
-                "---",
-                "",
-                "### ❓ Unverified Claims & Residual Uncertainty",
-                "",
-                "\n".join(u_lines),
-            ]
-        )
+    # Section 8: Residual Uncertainty & Context Gaps
+    u_lines = [f"* {claim}" for claim in review.unverified_claims]
+    markdown_parts.extend(
+        [
+            "",
+            "---",
+            "",
+            "### 8. Residual Uncertainty & Context Gaps",
+            "",
+            "\n".join(u_lines) if u_lines else "_None recorded._",
+        ]
+    )
 
     meta = {
         "version": 1,

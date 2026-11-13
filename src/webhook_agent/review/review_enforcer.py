@@ -408,11 +408,8 @@ def _finalize_enforced_review(
                 (getattr(sc, "status", "") or "").upper() in ("FAIL", "WARN", "UNKNOWN", "ERROR")
                 for sc in (getattr(review_obj, "scorecard", []) or [])
             )
-            has_unresolved_critical = any(
-                r.status == "UNRESOLVED" and getattr(r, "category", "CRITICAL") == "CRITICAL"
-                for r in review_obj.resolutions
-            )
-            if not has_scorecard_warning and not has_unresolved_critical:
+            has_unresolved_items = any(r.status == "UNRESOLVED" for r in review_obj.resolutions)
+            if not has_scorecard_warning and not has_unresolved_items:
                 logger.info(
                     "Late-Round Blocker Narrowing (round %d > 2): Upgraded verdict COMMENT -> APPROVE (all blockers clear)",
                     round_number,
