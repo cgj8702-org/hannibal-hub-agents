@@ -196,3 +196,41 @@ def test_compile_pre_audit_dossier_propagates_repo_root_to_ast(tmp_path: Path) -
         )
     assert dossier.ast_verified is True
     assert "sample_worker_func" in dossier.dossier_markdown
+
+
+def test_compile_pre_audit_dossier_resolves_base_sha_fallback() -> None:
+    """Verify compile_pre_audit_dossier resolves base_sha via gh_client fallback when missing."""
+    mock_gh = MagicMock()
+    mock_repo = MagicMock()
+    mock_pr = MagicMock()
+    mock_pr.base.sha = "fallback_base_sha_999"
+    mock_repo.get_pull.return_value = mock_pr
+    mock_gh.get_repo.return_value = mock_repo
+
+    event_data = {
+        "repository": {"full_name": "hannibal/hannibal-hub-agents"},
+        "pr_number": 123,
+        "gh_client": mock_gh,
+    }
+
+    with patch("webhook_agent.analysis.pre_audit_compiler.SymbolImpactAnalyzer") as mock_sym_cls:
+        mock_instance = MagicMock()
+        mock_instance.analyze_modified_files.return_value = []
+        mock_instance.parse_errors = []
+        mock_sym_cls.return_value = mock_instance
+
+        with patch("webhook_agent.analysis.pre_audit_compiler.get_active_environment") as mock_env:
+            mock_env_obj = MagicMock()
+            mock_env_obj.root = Path("/fake/root")
+            mock_env.return_value = mock_env_obj
+
+            compile_pre_audit_dossier(
+                changed_files=["src/worker.py"],
+                pr_diff_text="",
+                event_data=event_data,
+            )
+
+    mock_repo.get_pull.assert_called_once_with(123)
+    assert event_data["base_sha"] == "fallback_base_sha_999"
+    loader = mock_instance.analyze_modified_files.call_args[1]["baseline_loader"]
+    assert loader is not None

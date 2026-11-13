@@ -604,6 +604,7 @@ class WebhookProcessor:
             )
             return
         head_sha = (pr_data.get("head") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
+        base_sha = (pr_data.get("base") or {}).get("sha", "") if isinstance(pr_data, dict) else ""
 
         resumed_checkpoint: dict[str, Any] | None = None
         if is_pr_event and pr_num_int is not None and head_sha:
@@ -622,6 +623,9 @@ class WebhookProcessor:
                     raw["pr_diff"] = resumed_checkpoint["pr_diff"]
                 if not raw.get("diff_sha") and resumed_checkpoint.get("diff_sha"):
                     raw["diff_sha"] = resumed_checkpoint["diff_sha"]
+                if not raw.get("base_sha") and resumed_checkpoint.get("base_sha"):
+                    raw["base_sha"] = resumed_checkpoint["base_sha"]
+                    payload["base_sha"] = resumed_checkpoint["base_sha"]
                 if not payload.get("precompiled_dossier") and resumed_checkpoint.get(
                     "precompiled_dossier"
                 ):
@@ -640,6 +644,10 @@ class WebhookProcessor:
             elif not head_sha and raw.get("head_sha"):
                 head_sha = str(raw["head_sha"])
                 payload["head_sha"] = head_sha
+
+            if not base_sha and raw.get("base_sha"):
+                base_sha = str(raw["base_sha"])
+                payload["base_sha"] = base_sha
 
             # Re-check closed/merged state if live prefetch discovered it was closed on GitHub
             if is_pr_event and pr_num_int is not None:

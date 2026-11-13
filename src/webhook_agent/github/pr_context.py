@@ -142,6 +142,11 @@ def _prefetch_pr_diff(gh: Github, repo_name: str, payload: dict[str, Any]) -> No
             raw["head_sha"] = diff_sha
             payload["head_sha"] = diff_sha
 
+        base_sha = str(getattr(getattr(pr, "base", None), "sha", "") or "")
+        if base_sha:
+            raw["base_sha"] = base_sha
+            payload["base_sha"] = base_sha
+
         raw_patches: dict[str, str] = {}
         for f in pr.get_files():
             changed_files.append(f.filename)

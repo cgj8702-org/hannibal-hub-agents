@@ -114,9 +114,26 @@ def compile_pre_audit_dossier(
     base_sha = str(
         (raw.get("pull_request") or {}).get("base", {}).get("sha")
         or event_data.get("base_sha")
+        or raw.get("base_sha")
         or ""
     )
     gh_client = event_data.get("gh_client")
+
+    if not base_sha and gh_client and repo_full_name:
+        pr_num = (
+            event_data.get("pr_number")
+            or raw.get("number")
+            or (raw.get("issue") or {}).get("number")
+        )
+        if pr_num:
+            try:
+                pr_item = gh_client.get_repo(repo_full_name).get_pull(int(pr_num))
+                base_sha = str(getattr(getattr(pr_item, "base", None), "sha", "") or "")
+                if base_sha:
+                    event_data["base_sha"] = base_sha
+                    raw["base_sha"] = base_sha
+            except Exception as pull_err:
+                logger.debug("Failed to resolve fallback base_sha from pull request: %s", pull_err)
 
     baseline_loader = None
     if gh_client and repo_full_name and base_sha:
@@ -132,6 +149,27 @@ def compile_pre_audit_dossier(
                 return None
 
         baseline_loader = _gh_baseline_loader
+    elif repo_root_path and (repo_root_path / ".git").is_dir() and base_sha:
+        import shutil
+        import subprocess
+
+        git_bin = shutil.which("git") or "/usr/bin/git"
+
+        def _git_baseline_loader(file_path: str) -> str | None:
+            try:
+                res = subprocess.run(  # noqa: S603
+                    [git_bin, "-C", str(repo_root_path), "show", f"{base_sha}:{file_path}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                return res.stdout if res.returncode == 0 else None
+            except Exception as git_err:
+                logger.debug("Local git baseline loader failed for %s: %s", file_path, git_err)
+                return None
+
+        baseline_loader = _git_baseline_loader
 
     py_files = [f for f in changed_files if f.endswith(".py")]
     ast_limit = 50 if tier == "paid" else 5

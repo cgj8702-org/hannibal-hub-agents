@@ -545,3 +545,60 @@ def test_evaluate_contract_integrity_pass():
     assert empty_item.dimension == "Contract Integrity"
     assert empty_item.status == "PASS"
     assert "PASS: No breaking contract changes detected." in empty_item.notes
+
+
+def test_symbol_impact_analyzer_attribute_call_isolated_to_importing_modules(tmp_path: Path):
+    """Attribute calls on unrelated classes in non-importing files must not be falsely matched."""
+    src = tmp_path / "src"
+    src.mkdir(parents=True)
+
+    # Target class in target file
+    (src / "target.py").write_text(
+        "class TargetService:\n    def execute(self, a, b):\n        return a + b\n"
+    )
+
+    # Legit caller importing target and calling with missing argument
+    (src / "legit_caller.py").write_text(
+        "from src.target import TargetService\n\nsrv = TargetService()\nsrv.execute(1)\n"
+    )
+
+    # Unrelated caller with identical method name on unrelated class (zero imports from target)
+    (src / "unrelated.py").write_text(
+        "class UnrelatedEngine:\n"
+        "    def execute(self, x):\n"
+        "        pass\n"
+        "\n"
+        "engine = UnrelatedEngine()\n"
+        "engine.execute(1)\n"
+    )
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/target.py"], baseline_loader=None)
+
+    execute_reports = [r for r in reports if r.symbol_name == "execute"]
+    assert len(execute_reports) == 1
+    rep = execute_reports[0]
+    # Exactly one broken call site from legit_caller.py, none from unrelated.py
+    assert len(rep.broken_call_sites) == 1
+    broken = rep.broken_call_sites[0]
+    assert broken.call_site.file_path == "src/legit_caller.py"
+    assert broken.error_type == "MISSING_REQUIRED_ARG"
+
+
+def test_symbol_impact_analyzer_local_function_precedence(tmp_path: Path):
+    """Direct calls to locally defined functions must not be treated as callers of external files."""
+    src = tmp_path / "src"
+    src.mkdir(parents=True)
+
+    # Target file defining run()
+    (src / "doc_loop.py").write_text("def run(topic: str) -> None:\n    pass\n")
+
+    # File with local helper function run(cmd, check=True)
+    (src / "deploy.py").write_text('def run(cmd, check=True):\n    pass\n\nrun(["git", "init"])\n')
+
+    analyzer = SymbolImpactAnalyzer(repo_root=tmp_path)
+    reports = analyzer.analyze_modified_files(["src/doc_loop.py"], baseline_loader=None)
+
+    run_reports = [r for r in reports if r.symbol_name == "run"]
+    # Local run in deploy.py must not be flagged as a broken caller of doc_loop.run
+    assert not run_reports or not run_reports[0].broken_call_sites
