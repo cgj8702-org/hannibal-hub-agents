@@ -7,12 +7,14 @@ from pathlib import Path
 import pytest
 
 from webhook_agent.analysis.diff_filter import (
+    DiffSection,
     budget_for,
     extract_enclosing_ast_blocks,
     extract_hunk_ranges,
     filter_review_diff,
     format_enclosing_scopes_markdown,
     is_reviewable_path,
+    pack_to_budget,
     reviewable_file_paths,
     skip_reason,
 )
@@ -101,20 +103,54 @@ def test_filter_review_diff_tier_byte_budget(monkeypatch: pytest.MonkeyPatch) ->
         )
     huge_diff = "\n".join(large_sections)
 
-    # Free tier -> truncated at 125,000 bytes
+    # Free tier -> truncated at 125,000 bytes via pack_to_budget
     monkeypatch.setenv("WEBHOOK_TIER", "free")
     res_free = filter_review_diff(huge_diff)
-    assert "[... remaining files truncated to fit 125000 byte budget ...]" in res_free.filtered_diff
-    assert len(res_free.filtered_diff.encode("utf-8")) <= 135000
+    assert "omitted entirely to fit the prompt budget" in res_free.filtered_diff
+    assert len(res_free.filtered_diff.encode("utf-8")) <= 125000
 
     # Paid tier -> 5MB budget, no truncation
     monkeypatch.setenv("WEBHOOK_TIER", "paid")
     res_paid = filter_review_diff(huge_diff)
-    assert "remaining files truncated" not in res_paid.filtered_diff
+    assert "omitted entirely to fit the prompt budget" not in res_paid.filtered_diff
     assert len(res_paid.filtered_diff.encode("utf-8")) > 150000
 
 
-def test_extract_hunk_ranges() -> None:
+def test_pack_to_budget_tier_priority() -> None:
+    """Verify that source code is prioritized over tests, which are prioritized over docs."""
+    source_sec = DiffSection(
+        path="src/core.py",
+        lines=["diff --git a/src/core.py b/src/core.py\n", "@@ -1,1 +1,2 @@\n", "+x = 1\n"],
+        added=1,
+    )
+    test_sec = DiffSection(
+        path="tests/test_core.py",
+        lines=[
+            "diff --git a/tests/test_core.py b/tests/test_core.py\n",
+            "@@ -1,1 +1,2 @@\n",
+            "+assert x\n",
+        ],
+        added=1,
+    )
+    doc_sec = DiffSection(
+        path="docs/README.md",
+        lines=["diff --git a/docs/README.md b/docs/README.md\n", "@@ -1,1 +1,2 @@\n", "+# Docs\n"],
+        added=1,
+    )
+
+    # If budget only fits source and test (excluding the large doc), doc is omitted
+    doc_sec = DiffSection(
+        path="docs/README.md",
+        lines=["diff --git a/docs/README.md b/docs/README.md\n", "@@ -1,1 +1,2 @@\n"]
+        + ["+x = 1\n"] * 500,
+        added=500,
+    )
+    budget = len("".join(source_sec.lines).encode()) + len("".join(test_sec.lines).encode()) + 400
+    out, _partial, omitted = pack_to_budget([doc_sec, test_sec, source_sec], budget)
+    assert "src/core.py" in out
+    assert "tests/test_core.py" in out
+    assert "docs/README.md" in omitted
+
     diff_text = (
         "diff --git a/src/app.py b/src/app.py\n"
         "--- a/src/app.py\n"
