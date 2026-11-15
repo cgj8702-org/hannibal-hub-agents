@@ -47,9 +47,13 @@ flowchart TD
 ├── .agents/skills/          # Localized agent operational skills
 │   ├── gcloud-logging/      # GCP logging inspection protocol & project matrix
 │   └── github-pr-manager/   # End-to-end GitHub PR lifecycle management
-├── .github/workflows/       # GitHub Actions CI PR gate & VM deployment workflows
-│   ├── ci.yml               # Automated lint, formatting, typecheck, and test gate
-│   └── deploy.yml           # Automated CI/CD deployment to VM via IAP SSH ($GITHUB_SHA pinned)
+├── .github/                 # GitHub workflows, configuration, & maintenance scripts
+│   ├── policy.yml           # Branch stale policy & repo governance thresholds
+│   ├── scripts/             # GitHub Action automation scripts (sweep_stale_branches.py)
+│   └── workflows/           # CI PR gate, deployment, and branch sweep workflows
+│       ├── ci.yml           # Automated lint, formatting, typecheck, and test gate
+│       ├── deploy.yml       # Automated CI/CD deployment to VM via IAP SSH ($GITHUB_SHA pinned)
+│       └── stale-branch-sweep.yml # Scheduled sweep pruning stale merged/closed branches
 ├── .githooks/pre-commit     # Tracked commit gate (lint, format, typecheck on staged Python)
 ├── assets/                  # Static assets and model registries
 │   └── registries/          # Gemini model specs and capabilities (gemini_models.json)
@@ -62,6 +66,7 @@ flowchart TD
 │   ├── review_rules.md      # Review policies, invariants, and scorecard rules
 │   └── slash_commands_catalog.md # Supported webhook slash commands & architecture guide
 ├── scripts/
+│   ├── deploy_router.sh     # Cloud Run webhook router build & deployment helper
 │   ├── load_secrets.sh      # Load environment variables dynamically from GCP Secret Manager
 │   ├── setup_vm_user_service.sh   # VM user-space systemd service setup script
 │   ├── hannibal-webhook-agent.service # User-space systemd unit file template
@@ -160,6 +165,9 @@ Key runtime switches and defaults:
 | `ENABLE_REVIEW_RESUME` | `0` | Enable periodic background sweep resuming paused review checkpoints. |
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Interval in seconds between checkpoint resume sweeps. |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
+| `ENABLE_DYNAMIC_MODEL_ROUTING` | `1` | Enable dynamic cascade routing and depleted model tracking across providers. |
+| `ENABLE_CODERABBIT_AUTO_RESOLVE` | `true` | Automatically resolve stale CodeRabbit bot threads when resolved or ungrounded. |
+| `NATIVE_STALE_REVIEW_DISMISSAL_REPOS` | `cgj8702-org/hannibal-hub-agents` | Comma-separated repos permitted to dismiss stale bot reviews on push events. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1`, downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
 | `LOG_MODEL_THOUGHTS` | `1` | Enable detailed debug logging for model prompts, responses, and token usage in Cloud Logging. |
 | `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |
