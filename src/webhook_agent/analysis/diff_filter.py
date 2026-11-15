@@ -166,6 +166,140 @@ class DiffFilterResult:
     enclosing_scopes_markdown: str = ""
 
 
+TEST_PATH = re.compile(r"(^|/)tests?/|(^|/)test_[^/]*$|_test\.[a-z]+$", re.IGNORECASE)
+PROSE_EXT = {".md", ".markdown", ".rst", ".txt", ".adoc"}
+MIN_PARTIAL_BYTES = 1000
+TRUNCATED_MARKER = "[... this file was truncated here ...]"
+TRUNCATED_MARKER_BYTES = len(TRUNCATED_MARKER.encode("utf-8")) + 2
+OMISSION_NOTICE_BYTES = 256
+HUNK_COUNTS = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def review_tier(path: str) -> int:
+    """Classify file path into review priority tier: 0 source, 1 test, 2 prose."""
+    if Path(path).suffix.lower() in PROSE_EXT:
+        return 2
+    if TEST_PATH.search(path):
+        return 1
+    return 0
+
+
+def _hunk_is_complete(rows: list[str]) -> bool:
+    """Return True if all added/removed lines declared in the hunk header survived."""
+    header = HUNK_COUNTS.match(rows[0]) if rows else None
+    if not header:
+        return False
+    want_old = int(header.group(1) or 1)
+    want_new = int(header.group(2) or 1)
+    old = new = 0
+    for row in rows[1:]:
+        if row.startswith("\\"):
+            continue
+        if row.startswith("+"):
+            new += 1
+        elif row.startswith("-"):
+            old += 1
+        else:
+            old += 1
+            new += 1
+    return old >= want_old and new >= want_new
+
+
+def _truncate_at_hunk(text: str, limit: int) -> str:
+    """Truncate unified diff text to limit bytes, keeping hunk boundaries intact."""
+    rows = text.splitlines(keepends=True)
+    kept: list[str] = []
+    size = 0
+    for row in rows:
+        cost = len(row.encode("utf-8"))
+        if size + cost > limit:
+            break
+        kept.append(row)
+        size += cost
+    if len(kept) == len(rows):
+        return text
+
+    for index in range(len(kept) - 1, 0, -1):
+        if kept[index].startswith("@@"):
+            if index > 1 and not _hunk_is_complete(kept[index:]):
+                kept = kept[:index]
+            break
+    return "".join(kept)
+
+
+def _omission_notice(omitted: list[str], partial: list[str]) -> str:
+    """Generate diagnostic warning for model about omitted/partially included files."""
+    if not omitted and not partial:
+        return ""
+    parts = []
+    if omitted:
+        parts.append(f"{len(omitted)} file(s) omitted entirely")
+    if partial:
+        parts.append(f"{len(partial)} shown only in part")
+    return (
+        f"\n[... {', '.join(parts)} to fit the prompt budget. Review ONLY "
+        f"what is shown above; say nothing about code you were not shown "
+        f"...]\n"
+    )
+
+
+def pack_to_budget(sections: list[DiffSection], max_bytes: int) -> tuple[str, list[str], list[str]]:
+    """Pack diff sections into max_bytes prioritizing source code, then tests, then docs.
+
+    Returns:
+        (packed_diff_text, partial_file_paths, omitted_file_paths)
+    """
+    if max_bytes <= 0:
+        return "".join("".join(s.lines) for s in sections), [], []
+
+    total_bytes = sum(len("".join(s.lines).encode("utf-8")) for s in sections)
+    if total_bytes <= max_bytes:
+        return "".join("".join(s.lines) for s in sections), [], []
+
+    room = max_bytes - OMISSION_NOTICE_BYTES
+
+    order = sorted(
+        range(len(sections)),
+        key=lambda i: (
+            review_tier(sections[i].path),
+            len("".join(sections[i].lines).encode("utf-8")),
+            sections[i].path,
+        ),
+    )
+
+    chosen: dict[int, str] = {}
+    partial: list[str] = []
+    dropped: list[int] = []
+
+    for i in order:
+        sec = sections[i]
+        sec_text = "".join(sec.lines)
+        cost = len(sec_text.encode("utf-8"))
+        if cost <= room:
+            chosen[i] = sec_text
+            room -= cost
+        elif room >= MIN_PARTIAL_BYTES and not partial:
+            cut = _truncate_at_hunk(sec_text, room - TRUNCATED_MARKER_BYTES)
+            if len(cut.encode("utf-8")) >= MIN_PARTIAL_BYTES:
+                chosen[i] = f"{cut.rstrip()}\n{TRUNCATED_MARKER}\n"
+                partial.append(sec.path)
+                room = 0
+            else:
+                dropped.append(i)
+        else:
+            dropped.append(i)
+
+    omitted = [sections[i].path for i in sorted(dropped)]
+
+    rows: list[str] = [chosen[i] for i in sorted(chosen)]
+    out = "".join(rows)
+    notice = _omission_notice(omitted, partial)
+    if notice:
+        out += notice
+
+    return out, partial, omitted
+
+
 def split_diff_into_sections(diff_text: str) -> list[DiffSection]:
     """Parse a unified diff into per-file sections with churn counts."""
     sections: list[DiffSection] = []
@@ -437,20 +571,11 @@ def filter_review_diff(
         kept_files.append(sec.path)
         reviewable_lines += sec.churn
 
-    out_lines: list[str] = []
-    current_bytes = 0
-    for sec in kept_sections:
-        sec_text = "".join(sec.lines)
-        sec_bytes = len(sec_text.encode("utf-8"))
-        if current_bytes + sec_bytes > max_bytes and current_bytes > 0:
-            out_lines.append(
-                f"\n[... remaining files truncated to fit {max_bytes} byte budget ...]\n"
-            )
-            break
-        out_lines.append(sec_text)
-        current_bytes += sec_bytes
-
-    filtered_text = "".join(out_lines)
+    filtered_text, partial_files, omitted_files = pack_to_budget(kept_sections, max_bytes)
+    for p in omitted_files:
+        skipped_files[p] = f"budget limit ({max_bytes} bytes)"
+    for p in partial_files:
+        skipped_files[p] = "truncated to fit budget"
     is_reviewable = bool(kept_files and reviewable_lines > 0)
     budget = budget_for(reviewable_lines) if is_reviewable else 0
 
