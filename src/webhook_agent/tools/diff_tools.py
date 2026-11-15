@@ -84,6 +84,22 @@ def added_line_anchors(diff: str) -> dict[str, set[int]]:
     return walk_right_side(diff)[0]
 
 
+def restrict_to_pr(anchors: dict[str, set[int]], pr_diff: str) -> dict[str, set[int]]:
+    """Keep only the anchors the PR's own base...head diff also adds.
+
+    An incremental diff (last reviewed commit...head) taken across a merge of
+    the base branch marks everything that landed on base in between as
+    added. Those lines are not in the PR's diff, so GitHub rejects a comment
+    on one with HTTP 422, and when every comment in a run is such a line the
+    post job fails. Both diffs end at head, so new-file line numbers agree
+    and a plain intersection is enough.
+
+    Adapted from adk-samples/.github/scripts/post_review_comments.py.
+    """
+    pr_anchors = added_line_anchors(pr_diff)
+    return {path: lines & pr_anchors.get(path, set()) for path, lines in anchors.items()}
+
+
 def _window_rows(window: object, default_line: int | None = None) -> list[tuple[int, str]]:
     """Extract [(line_number, text)] from a window string or code block."""
     rows: list[tuple[int, str]] = []

@@ -1,0 +1,11 @@
+# Branch and staleness policies for hannibal-hub-agents
+stale_policy:
+  branches:
+    merged_after_days: 7
+    closed_pr_after_days: 30
+    orphan_after_days: 90
+    max_delete_per_run: 20
+    protected:
+      - main
+      - prod
+      - hannibal-agent
