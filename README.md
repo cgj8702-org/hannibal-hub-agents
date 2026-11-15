@@ -56,6 +56,7 @@ flowchart TD
 ├── dev/                     # Developer tools (rate limits, fixture recording, token analysis)
 ├── docs/                    # Canonical architectural & operational documentation
 │   ├── CHECKPOINT_RESUME.md # PR review resume & checkpoint mechanics
+│   ├── EVENT_POLICY.md      # Event policy resolution & action gating documentation
 │   ├── LOG_SINK_SETUP.md    # Cloud Logging setup and export configuration
 │   ├── MODEL_CHAIN.md       # Model fallback chains, tiering, and rate limits
 │   ├── review_rules.md      # Review policies, invariants, and scorecard rules
@@ -134,6 +135,13 @@ The project includes built-in strategies to maximize context efficiency, elimina
 
 9. **Guarded Programmatic 👀 Reaction**:
    - Immediately adds an `eyes` reaction to user comments and actionable PR events once deduplication locks pass.
+
+10. **Tiered Diff Budget Packing (`analysis/diff_filter.py`)**:
+    - Prioritizes diff sections into 3 tiers: source code (tier 0) -> tests (tier 1) -> docs/markdown (tier 2), packing smallest whole files first within each tier.
+    - Hunk boundaries are preserved (`_truncate_at_hunk`) and explicit omission notices (`_omission_notice`) alert the model to unreviewed files so audit scores remain grounded.
+
+11. **Automated Stale Branch Sweeper (`.github/workflows/stale-branch-sweep.yml`)**:
+    - Weekly scheduled cleanup of remote branches governed by `.github/policy.yml` (7d for merged PRs, 30d for closed PRs, 90d for unmerged orphans). Protective circuit breakers prevent mass accidental deletions.
 
 ---
 
