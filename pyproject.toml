@@ -111,6 +111,7 @@ known-first-party = ["webhook_agent"]
 
 [tool.ruff.lint.per-file-ignores]
 ".agents/**" = ["F821", "T201"]
+".github/scripts/**" = ["T201", "S603", "S607"]
 "dev/**" = ["E402", "T201", "B008", "RUF012", "S603", "S607"]
 "scripts/**" = ["T201"]
 "tests/**" = ["F841", "F401", "E402", "T201", "S101", "S103", "S105", "S106", "S108"]
