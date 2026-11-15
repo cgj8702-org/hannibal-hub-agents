@@ -9,3 +9,4 @@ stale_policy:
       - main
       - prod
       - hannibal-agent
+      - assets

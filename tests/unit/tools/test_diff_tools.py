@@ -3,6 +3,7 @@
 from webhook_agent.tools.diff_tools import (
     added_line_anchors,
     parse_patches_from_unified_diff,
+    restrict_to_pr,
     verify_line_reference,
     walk_right_side,
 )
@@ -106,3 +107,26 @@ index 1111111..2222222 100644
     assert 'version = "1.9.1"' in text["uv.lock"][372]
     assert verify_line_reference(diff, "uv.lock", 372) is True
     assert verify_line_reference(diff, "uv.lock", 9999) is False
+
+
+def test_restrict_to_pr_filters_unanchored_lines():
+    incremental_diff = """diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,3 +10,5 @@ def foo():
+     x = 1
++    y = 2
++    z = 3
+"""
+    pr_diff = """diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,2 +10,3 @@ def foo():
+     x = 1
++    y = 2
+"""
+    anchors = added_line_anchors(incremental_diff)
+    assert anchors["src/app.py"] == {11, 12}
+
+    restricted = restrict_to_pr(anchors, pr_diff)
+    assert restricted["src/app.py"] == {11}
