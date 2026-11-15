@@ -243,9 +243,19 @@ def review_file_loader(pr: Any = None) -> Callable[[str], str | None]:
     Prefers the active PR workspace (a local checkout at the analysed commit) and
     falls back to the GitHub contents API at the PR head when no workspace is set.
     """
-    from webhook_agent.environment.context import get_active_environment
+    env: Any = None
+    with contextlib.suppress(Exception):
+        import sys
 
-    env = get_active_environment()
+        env_mod = sys.modules.get("webhook_agent.environment.context")
+        if not env_mod:
+            import importlib
+
+            env_mod = importlib.import_module("webhook_agent.environment.context")
+        getter = getattr(env_mod, "get_active_environment", None)
+        if getter:
+            env = getter()
+
     cache: dict[str, str | None] = {}
     head_sha = str(getattr(getattr(pr, "head", None), "sha", "") or "")
 

@@ -221,6 +221,88 @@ _INVARIANT_OPERATIVE_VERBS: frozenset[str] = frozenset(
         "asserts",
         "assert",
         "asserting",
+        "asserted",
+        "prevented",
+        "guaranteed",
+        "enforced",
+        "required",
+        "handled",
+        "validated",
+        "rejected",
+        "dropped",
+        "allowed",
+        "disallowed",
+        "restricted",
+        "coordinated",
+        "triggered",
+        "isolated",
+        "executed",
+        "delegated",
+        "retained",
+        "mapped",
+        "survived",
+        "terminated",
+        "synchronized",
+        "protected",
+        "provided",
+        "guarded",
+        "bounded",
+        "limited",
+        "ignored",
+        "skipped",
+        "filtered",
+        "tracked",
+        "blocked",
+        "avoided",
+        "mitigated",
+        "scopes",
+        "scope",
+        "scoping",
+        "scoped",
+        "eliminates",
+        "eliminate",
+        "eliminating",
+        "eliminated",
+        "constrains",
+        "constrain",
+        "constraining",
+        "constrained",
+        "propagates",
+        "propagate",
+        "propagating",
+        "propagated",
+        "intercepts",
+        "intercept",
+        "intercepting",
+        "intercepted",
+        "routes",
+        "route",
+        "routing",
+        "routed",
+        "dispatches",
+        "dispatch",
+        "dispatching",
+        "dispatched",
+        "sanitizes",
+        "sanitize",
+        "sanitizing",
+        "sanitized",
+        "standardizes",
+        "standardize",
+        "standardizing",
+        "standardized",
+        "quarantines",
+        "quarantine",
+        "quarantining",
+        "quarantined",
+        "shields",
+        "shield",
+        "shielding",
+        "shielded",
+        "restores",
+        "restore",
+        "restoring",
+        "restored",
     }
 )
 
@@ -434,11 +516,18 @@ def _resolve_repo_root(repo_root: Path | str | None = None) -> Path | None:
         p = Path(repo_root)
         return p if p.is_dir() else None
     with contextlib.suppress(Exception):
-        from webhook_agent.environment.context import get_active_environment
+        import sys
 
-        env = get_active_environment()
-        if env and env.root and Path(env.root).is_dir():
-            return Path(env.root)
+        env_mod = sys.modules.get("webhook_agent.environment.context")
+        if not env_mod:
+            import importlib
+
+            env_mod = importlib.import_module("webhook_agent.environment.context")
+        getter = getattr(env_mod, "get_active_environment", None)
+        if getter:
+            env = getter()
+            if env and env.root and Path(env.root).is_dir():
+                return Path(env.root)
     # Only fall back to local cwd when running under pytest so offline tests
     # can inspect the local test suite and codebase.
     if "PYTEST_CURRENT_TEST" in os.environ:

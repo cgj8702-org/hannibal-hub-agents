@@ -10,13 +10,14 @@ import json
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, Literal, cast
 
 from webhook_agent.analysis.diff_filter import filter_review_diff
 from webhook_agent.review.critic import CriticEngine, SeverityGovernor
 from webhook_agent.review.formatter import (
     calculate_strict_verdict,
     calculate_sync_verdict,
+    clamp_verdict,
     extract_json_payload,
     normalize_code_review_dict,
     normalize_sync_review_dict,
@@ -532,6 +533,15 @@ def _finalize_enforced_review(
             enforced_verdict=enforced_verdict,
         )
 
+    # Re-evaluate mechanical verdict post-grounding and dominance enforcement
+    # so any invariants demoted to unverified_claims strictly clamp the verdict.
+    post_grounding_verdict = (
+        calculate_sync_verdict(review_obj)
+        if isinstance(review_obj, SyncReviewResponse)
+        else calculate_strict_verdict(review_obj)
+    )
+    enforced_verdict = clamp_verdict(post_grounding_verdict, enforced_verdict)
+
     mode_label = (
         "sync " if isinstance(review_obj, SyncReviewResponse) else ("text " if is_text else "")
     )
@@ -549,6 +559,15 @@ def _finalize_enforced_review(
             mode_label,
         )
         enforced_verdict = "COMMENT"
+
+    if hasattr(review_obj, "verdict") and enforced_verdict in (
+        "APPROVE",
+        "REQUEST_CHANGES",
+        "COMMENT",
+    ):
+        review_obj.verdict = cast(
+            Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"], enforced_verdict
+        )
 
     inline_comments: list[dict[str, Any]] = []
     if diff_text:

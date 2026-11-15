@@ -117,6 +117,18 @@ def test_verify_semantic_invariant_requires_operative_verb() -> None:
     assert "operative invariant verb" in reason_passive
 
 
+def test_verify_semantic_invariant_accepts_architectural_verbs() -> None:
+    """verify_semantic_invariant accepts architectural action verbs like scoped, eliminating, filtered, isolated."""
+    claims = [
+        "Attribute call site identification is strictly scoped to importing modules, eliminating noise",
+        "Filtered candidate call sites are isolated from external modules",
+        "Propagated base_sha ensures consistent baseline resolution",
+    ]
+    for claim in claims:
+        status, reason = verify_semantic_invariant(claim, SAMPLE_DIFF, ["src/worker.py"])
+        assert status == "GROUNDED", f"Claim failed grounding: {claim} -> {status} ({reason})"
+
+
 def test_verify_semantic_invariant_rejects_phantom_bare_symbols() -> None:
     """verify_semantic_invariant detects and rejects unbackticked phantom snake_case symbols."""
     phantom_claim = "Ensures phantom_distributed_lock protects against duplicate sweeps"
@@ -157,7 +169,7 @@ def test_review_enforcer_dominance_integration() -> None:
 
     pr_mock = MagicMock()
     pr_mock.labels = []
-    _finalize_enforced_review(
+    _rendered_body, enforced_verdict, _inline = _finalize_enforced_review(
         cr,
         critic_engine=CriticEngine(),
         det_contract_item=None,
@@ -186,6 +198,9 @@ def test_review_enforcer_dominance_integration() -> None:
     assert len(cr.semantic_invariants) <= 2
     # Excess must be demoted to unverified_claims
     assert len(cr.unverified_claims) >= 1
+    # Demoted unverified claims must clamp enforced_verdict to COMMENT
+    assert enforced_verdict == "COMMENT"
+    assert cr.verdict == "COMMENT"
 
 
 def test_github_tools_review_rejects_semantic_dominance_violation() -> None:
