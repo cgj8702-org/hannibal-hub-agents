@@ -29,8 +29,8 @@ flowchart TD
     Worker -->|"Audit Claim Check"| Reconcile["Reconciliation & Idempotency (state/)"]
     Worker -->|"Optional Checkpoint Resume"| Resume["Resume Sweep (ENABLE_REVIEW_RESUME=1)"]
     
-    Worker -->|"ADK Workflow Evaluation"| StateGraph["ADK Workflow Runner (google.adk.workflow.Workflow)"]
-    StateGraph -->|"Investigation Gate"| Gate{"Code Explored?"}
+    Worker -->|"ADK Workflow Evaluation"| ADKWorkflow["ADK Workflow Runner (google.adk.workflow.Workflow)"]
+    ADKWorkflow -->|"Investigation Gate"| Gate{"Code Explored?"}
     Gate -->|"No"| Block["Block Premature Review & Prompt Tool Investigation"]
     Gate -->|"Yes"| Policy{"Mutations Allowed by Policy?"}
     Policy -->|"Yes"| Exec["Execute Typed Tool Actions (submit_initial_review / submit_sync_review)"]
@@ -47,9 +47,13 @@ flowchart TD
 ├── .agents/skills/          # Localized agent operational skills
 │   ├── gcloud-logging/      # GCP logging inspection protocol & project matrix
 │   └── github-pr-manager/   # End-to-end GitHub PR lifecycle management
-├── .github/workflows/       # GitHub Actions CI PR gate & VM deployment workflows
-│   ├── ci.yml               # Automated lint, formatting, typecheck, and test gate
-│   └── deploy.yml           # Automated CI/CD deployment to VM via IAP SSH ($GITHUB_SHA pinned)
+├── .github/                 # GitHub workflows, configuration, & maintenance scripts
+│   ├── policy.yml           # Branch stale policy & repo governance thresholds
+│   ├── scripts/             # GitHub Action automation scripts (sweep_stale_branches.py)
+│   └── workflows/           # CI PR gate, deployment, and branch sweep workflows
+│       ├── ci.yml           # Automated lint, formatting, typecheck, and test gate
+│       ├── deploy.yml       # Automated CI/CD deployment to VM via IAP SSH ($GITHUB_SHA pinned)
+│       └── stale-branch-sweep.yml # Scheduled sweep pruning stale merged/closed branches
 ├── .githooks/pre-commit     # Tracked commit gate (lint, format, typecheck on staged Python)
 ├── assets/                  # Static assets and model registries
 │   └── registries/          # Gemini model specs and capabilities (gemini_models.json)
@@ -62,6 +66,7 @@ flowchart TD
 │   ├── review_rules.md      # Review policies, invariants, and scorecard rules
 │   └── slash_commands_catalog.md # Supported webhook slash commands & architecture guide
 ├── scripts/
+│   ├── deploy_router.sh     # Cloud Run webhook router build & deployment helper
 │   ├── load_secrets.sh      # Load environment variables dynamically from GCP Secret Manager
 │   ├── setup_vm_user_service.sh   # VM user-space systemd service setup script
 │   ├── hannibal-webhook-agent.service # User-space systemd unit file template
@@ -93,7 +98,7 @@ flowchart TD
 └── README.md                # Repository documentation
 ```
 
-> **Note:** `router/` is deployed independently of this repository's workflows — `.github/workflows/deploy.yml` only updates the VM worker, so changes under `router/` require a manual function redeploy.
+> **Note:** `router/` is deployed to Google Cloud Run independently of this repository's VM deploy workflow — `.github/workflows/deploy.yml` updates the VM worker, while changes to `router/` are deployed via `scripts/deploy_router.sh`.
 
 ---
 
@@ -123,8 +128,8 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Review tools (`submit_initial_review`, `submit_sync_review`, `review`) are locked to `FORMAL_AUDIT` mode.
 
 6. **Tier-Aware Model Chains & 503 Failover**:
-   - Dynamically cascades models per request: primary `gemini-3.5-flash-lite` across tiers, escalating to `gemini-3.8-flash` for deep audits.
-   - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
+   - Dynamically cascades models per request: primary `gemini-3.1-flash-lite` on Free Tier (500 RPD / 250k TPM) and `gemini-3.5-flash` on Paid Tier (150k RPD / 4M TPM), escalating to `gemini-3.8-flash` on heavy diffs or explicit `/deep` / `/audit` commands.
+   - Quarantines server overload / `503 UNAVAILABLE` errors in a cross-process depleted registry (`120s` cooldown) and advances to the next model in the fallback chain after a brief `0.5s` backoff, while preserving full 429 rate limit backoff.
 
 7. **Deterministic Pre-Audits & Audit Reconciliation**:
    - Pre-audits symbol dependencies, test coverage impacts, and diff filters before invoking the agent.
@@ -160,6 +165,9 @@ Key runtime switches and defaults:
 | `ENABLE_REVIEW_RESUME` | `0` | Enable periodic background sweep resuming paused review checkpoints. |
 | `REVIEW_RESUME_INTERVAL_SECONDS` | `60` | Interval in seconds between checkpoint resume sweeps. |
 | `WEBHOOK_TIER` | `free` | Active model tier (`free` or `paid`), determining Gemini model cascade and API keys. |
+| `ENABLE_DYNAMIC_MODEL_ROUTING` | `1` | Enable dynamic cascade routing and depleted model tracking across providers. |
+| `ENABLE_CODERABBIT_AUTO_RESOLVE` | `true` | Automatically resolve stale CodeRabbit bot threads when resolved or ungrounded. |
+| `NATIVE_STALE_REVIEW_DISMISSAL_REPOS` | `cgj8702-org/hannibal-hub-agents` | Comma-separated repos permitted to dismiss stale bot reviews on push events. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1`, downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |
 | `LOG_MODEL_THOUGHTS` | `1` | Enable detailed debug logging for model prompts, responses, and token usage in Cloud Logging. |
 | `DRY_RUN` | `0` | Log every planned mutation without writing anything back to GitHub. |
