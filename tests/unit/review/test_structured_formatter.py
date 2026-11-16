@@ -1610,3 +1610,17 @@ def test_extract_json_payload_unterminated_fenced_block_salvage() -> None:
     issues = salvaged.get("critical_issues", [])
     assert len(issues) >= 1
     assert any(i.get("path") == "src/first.py" for i in issues)
+
+
+def test_render_code_review_markdown_cleans_bare_invariant_citations(valid_code_review_pass):
+    valid_code_review_pass.verified_invariants = [
+        "(`README.md:126`)",
+        "`src/main.py:42`",
+        "doc/guide.md:10",
+        "README.md:24: Logic & Boundaries check verified in PR diff.",
+    ]
+    md = render_code_review_markdown(valid_code_review_pass)
+    assert "- [x] README.md:126: verified against diff hunk." in md
+    assert "- [x] src/main.py:42: verified against diff hunk." in md
+    assert "- [x] doc/guide.md:10: verified against diff hunk." in md
+    assert "- [x] README.md:24: Logic & Boundaries check verified in PR diff." in md

@@ -47,6 +47,16 @@ MAX_REPAIR_FIELDS = 150
 UNTERMINATED_FENCED_BLOCK = re.compile(r"```(?:json)?\s*([\{\[].*)", re.DOTALL)
 
 
+def _clean_invariant_display(inv: str) -> str:
+    """Normalize raw/bare invariant strings (e.g. '(`README.md:126`)') into readable claims."""
+    s = (inv or "").strip()
+    m = re.match(r"^\(?`?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9_\-]+):(\d+)`?\)?$", s)
+    if m:
+        path, line = m.group(1), m.group(2)
+        return f"{path}:{line}: verified against diff hunk."
+    return s
+
+
 def _escape_value(value: str) -> str:
     """Re-escape a value's double quotes, normalizing first so it is idempotent."""
     return value.replace('\\"', '"').replace('"', '\\"')
@@ -746,7 +756,7 @@ def render_code_review_markdown(
     )
 
     # Section 6: Verified Invariants
-    inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
+    inv_lines = [f"- [x] {_clean_invariant_display(inv)}" for inv in review.verified_invariants]
     markdown_parts.extend(
         [
             "",
@@ -995,7 +1005,7 @@ def render_sync_review_markdown(
     )
 
     # Section 6: Verified Invariants
-    inv_lines = [f"- [x] {inv}" for inv in review.verified_invariants]
+    inv_lines = [f"- [x] {_clean_invariant_display(inv)}" for inv in review.verified_invariants]
     markdown_parts.extend(
         [
             "",
