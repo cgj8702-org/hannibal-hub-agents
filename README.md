@@ -29,8 +29,8 @@ flowchart TD
     Worker -->|"Audit Claim Check"| Reconcile["Reconciliation & Idempotency (state/)"]
     Worker -->|"Optional Checkpoint Resume"| Resume["Resume Sweep (ENABLE_REVIEW_RESUME=1)"]
     
-    Worker -->|"ADK Workflow Evaluation"| StateGraph["ADK Workflow Runner (google.adk.workflow.Workflow)"]
-    StateGraph -->|"Investigation Gate"| Gate{"Code Explored?"}
+    Worker -->|"ADK Workflow Evaluation"| ADKWorkflow["ADK Workflow Runner (google.adk.workflow.Workflow)"]
+    ADKWorkflow -->|"Investigation Gate"| Gate{"Code Explored?"}
     Gate -->|"No"| Block["Block Premature Review & Prompt Tool Investigation"]
     Gate -->|"Yes"| Policy{"Mutations Allowed by Policy?"}
     Policy -->|"Yes"| Exec["Execute Typed Tool Actions (submit_initial_review / submit_sync_review)"]
@@ -98,7 +98,7 @@ flowchart TD
 └── README.md                # Repository documentation
 ```
 
-> **Note:** `router/` is deployed independently of this repository's workflows — `.github/workflows/deploy.yml` only updates the VM worker, so changes under `router/` require a manual function redeploy.
+> **Note:** `router/` is deployed to Google Cloud Run independently of this repository's VM deploy workflow — `.github/workflows/deploy.yml` updates the VM worker, while changes to `router/` are deployed via `scripts/deploy_router.sh`.
 
 ---
 
@@ -128,8 +128,8 @@ The project includes built-in strategies to maximize context efficiency, elimina
    - Review tools (`submit_initial_review`, `submit_sync_review`, `review`) are locked to `FORMAL_AUDIT` mode.
 
 6. **Tier-Aware Model Chains & 503 Failover**:
-   - Dynamically cascades models per request: primary `gemini-3.5-flash-lite` across tiers, escalating to `gemini-3.8-flash` for deep audits.
-   - Features instant `0.5s` failover on `503 UNAVAILABLE` high-demand server spikes while preserving 429 rate limit backoff.
+   - Dynamically cascades models per request: primary `gemini-3.1-flash-lite` on Free Tier (500 RPD / 250k TPM) and `gemini-3.5-flash` on Paid Tier (150k RPD / 4M TPM), escalating to `gemini-3.8-flash` on heavy diffs or explicit `/deep` / `/audit` commands.
+   - Quarantines server overload / `503 UNAVAILABLE` errors in a cross-process depleted registry (`120s` cooldown) and advances to the next model in the fallback chain after a brief `0.5s` backoff, while preserving full 429 rate limit backoff.
 
 7. **Deterministic Pre-Audits & Audit Reconciliation**:
    - Pre-audits symbol dependencies, test coverage impacts, and diff filters before invoking the agent.
