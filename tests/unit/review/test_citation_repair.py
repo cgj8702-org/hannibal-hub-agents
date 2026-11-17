@@ -143,3 +143,57 @@ def test_find_snippet_line_handles_multiline_quote() -> None:
     lines = ["# a", "if ready:", "    run()", "# b"]
 
     assert find_snippet_line(lines, "if ready: run()", anchor=3) == 2
+
+
+def test_repair_review_object_citations_syncs_scorecard_invariants_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Structured citation repair updates verified_invariants, scorecard notes, and rendered metadata together."""
+    from webhook_agent.review.citation_repair import repair_review_object_citations
+    from webhook_agent.review.formatter import render_code_review_markdown
+    from webhook_agent.review.metadata import extract_review_metadata
+    from webhook_agent.review.schemas import CodeReviewResponse, ScorecardItem
+
+    source = "\n".join(
+        [
+            "line 1",
+            "def _clean_invariant_display(inv: str) -> str:",
+            "    s = (inv or '').strip()",
+            "    m = re.match(r'^test:(\\d+)$', s)",
+            "    return s",
+        ]
+    )
+    monkeypatch.setattr(
+        "webhook_agent.review.citation_repair.review_file_loader",
+        lambda _pr=None: _loader(source, path="src/webhook_agent/review/formatter.py"),
+    )
+
+    review = CodeReviewResponse(
+        executive_summary="Clean invariant normalization.",
+        scorecard=[
+            ScorecardItem(
+                dimension="Logic & Boundaries",
+                status="PASS",
+                notes="Regex defined in src/webhook_agent/review/formatter.py:3.",
+            ),
+            ScorecardItem(dimension="Concurrency & State", status="PASS", notes="Pure function."),
+            ScorecardItem(dimension="Security & Secrets", status="PASS", notes="Safe."),
+            ScorecardItem(dimension="Contract Integrity", status="PASS", notes="Internal."),
+            ScorecardItem(dimension="Test Coverage & Regressions", status="PASS", notes="Tested."),
+        ],
+        verified_invariants=[
+            "src/webhook_agent/review/formatter.py:3: `re.match(r'^test:(\\d+)$', s)` isolates line."
+        ],
+    )
+
+    repairs = repair_review_object_citations(review)
+    assert any(r.original_line == 3 and r.repaired_line == 4 for r in repairs)
+    assert "formatter.py:4:" in review.verified_invariants[0]
+    assert "formatter.py:4." in review.scorecard[0].notes
+
+    rendered = render_code_review_markdown(review, "APPROVE")
+    meta = extract_review_metadata(rendered)
+    assert meta is not None
+    assert "formatter.py:4:" in meta["verified_invariants"][0]
+    assert "formatter.py:4." in meta["scorecard"][0]["notes"]
+    assert "formatter.py:3" not in rendered

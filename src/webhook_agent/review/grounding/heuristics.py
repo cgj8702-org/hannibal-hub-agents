@@ -57,7 +57,12 @@ def extract_cited_paths(text: str) -> set[str]:
     """
     paths: set[str] = set()
     for match in _PATH_RE.finditer(text or ""):
-        candidate = match.group(0).strip("./").lower()
+        candidate = match.group(0).lower()
+        while candidate.startswith("./"):
+            candidate = candidate[2:]
+        candidate = candidate.lstrip("/").rstrip("./")
+        if not candidate:
+            continue
         if any(candidate.startswith(pfx) for pfx in _KNOWN_STDLIB_MODULE_PREFIXES):
             continue
         if "/" in candidate:

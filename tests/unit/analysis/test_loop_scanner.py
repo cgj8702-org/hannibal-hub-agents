@@ -148,3 +148,27 @@ def test_scan_diff_hunks_detects_non_advancing_loop() -> None:
 
     assert report.has_critical_findings is True
     assert report.findings[0].finding_type == "NON_ADVANCING_LOOP"
+
+
+def test_event_wait_and_is_set_loops_pass_evaluation(tmp_path: Path) -> None:
+    """Externally signaled Event .wait() / .is_set() loops must not trigger NON_ADVANCING_LOOP."""
+    code = textwrap.dedent(
+        """
+        def run_heartbeat(stop_event, interval_seconds):
+            while not stop_event.wait(interval_seconds):
+                extend_lease()
+
+        def run_poller(shutdown_event):
+            while not shutdown_event.is_set():
+                poll_once()
+        """
+    )
+    target = tmp_path / "heartbeat.py"
+    target.write_text(code, encoding="utf-8")
+
+    scanner = LoopTerminationScanner(repo_root=tmp_path)
+    report = scanner.scan(changed_files=["heartbeat.py"])
+
+    assert report.has_critical_findings is False
+    assert report.findings == []
+    assert evaluate_loop_termination(report).status == "PASS"

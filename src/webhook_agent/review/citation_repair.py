@@ -27,6 +27,7 @@ __all__ = [
     "find_snippet_line",
     "repair_line_citations",
     "repair_rendered_citations",
+    "repair_review_object_citations",
     "review_file_loader",
 ]
 
@@ -283,13 +284,41 @@ def review_file_loader(pr: Any = None) -> Callable[[str], str | None]:
     return load
 
 
-def repair_rendered_citations(
-    body: str,
-    pr: Any = None,
-    max_drift: int = DEFAULT_MAX_DRIFT,
-) -> str:
-    """Repair citations in a rendered review body, logging every rewrite."""
-    repaired_body, repairs = repair_line_citations(body, review_file_loader(pr), max_drift)
+def _apply_known_repairs(
+    text: str,
+    repair_map: dict[tuple[str, int], int],
+) -> tuple[str, list[CitationRepair]]:
+    """Propagate unambiguously repaired (path, original_line) pairs to bare citations in text."""
+    if not text or not repair_map:
+        return text, []
+
+    replacements: list[tuple[int, int, int]] = []
+    applied: list[CitationRepair] = []
+    for match in CITATION_RE.finditer(text):
+        path = match.group("path")
+        try:
+            original = int(match.group("line"))
+        except ValueError:  # pragma: no cover - regex guarantees digits
+            continue
+        repaired = repair_map.get((path, original))
+        if repaired is not None and repaired != original:
+            replacements.append((match.start("line"), match.end("line"), repaired))
+            applied.append(CitationRepair(path, original, repaired))
+
+    if not replacements:
+        return text, []
+
+    pieces: list[str] = []
+    cursor = 0
+    for start, end, new_line in replacements:
+        pieces.append(text[cursor:start])
+        pieces.append(str(new_line))
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces), applied
+
+
+def _log_repairs(repairs: Sequence[CitationRepair]) -> None:
     seen_repairs: set[tuple[str, int, int]] = set()
     for repair in repairs:
         key = (repair.path, repair.original_line, repair.repaired_line)
@@ -301,4 +330,87 @@ def repair_rendered_citations(
                 repair.original_line,
                 repair.repaired_line,
             )
+
+
+def repair_review_object_citations(
+    review_obj: Any,
+    pr: Any = None,
+    max_drift: int = DEFAULT_MAX_DRIFT,
+) -> list[CitationRepair]:
+    """Repair citations inside a structured review object before Markdown/metadata serialization.
+
+    Mutates verified_invariants, critical_issues, minor_suggestions, and scorecard notes
+    in place so Section 3 (Scorecard), Section 6 (Verified Invariants), and the embedded
+    JSON metadata block stay strictly consistent.
+    """
+    if review_obj is None:
+        return []
+
+    loader = review_file_loader(pr)
+    all_repairs: list[CitationRepair] = []
+    repair_map: dict[tuple[str, int], int] = {}
+
+    def _record(repairs: Sequence[CitationRepair]) -> None:
+        for r in repairs:
+            all_repairs.append(r)
+            repair_map[(r.path, r.original_line)] = r.repaired_line
+
+    # 1. Verified invariants (strongest code-quote signal)
+    verified = getattr(review_obj, "verified_invariants", None)
+    if isinstance(verified, list) and verified:
+        updated_invs: list[str] = []
+        for inv in verified:
+            if isinstance(inv, str) and inv:
+                fixed, reps = repair_line_citations(inv, loader, max_drift)
+                _record(reps)
+                updated_invs.append(fixed)
+            else:
+                updated_invs.append(inv)
+        review_obj.verified_invariants = updated_invs
+
+    # 2. Critical issues and minor suggestions
+    for attr in ("critical_issues", "minor_suggestions"):
+        items = getattr(review_obj, attr, None)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            desc = getattr(item, "description", None)
+            if isinstance(desc, str) and desc:
+                fixed_desc, reps = repair_line_citations(desc, loader, max_drift)
+                _record(reps)
+                item.description = fixed_desc
+            item_path = getattr(item, "path", None)
+            item_line = getattr(item, "line", None)
+            if isinstance(item_path, str) and isinstance(item_line, int):
+                mapped = repair_map.get((item_path, item_line))
+                if mapped is not None and mapped != item_line:
+                    item.line = mapped
+
+    # 3. Scorecard notes: direct code-quote repair, then propagate known (path, line) fixes
+    # so bare scorecard references like 'formatter.py:52' stay aligned with repaired invariants.
+    scorecard = getattr(review_obj, "scorecard", None)
+    if isinstance(scorecard, list):
+        for sc_item in scorecard:
+            notes = getattr(sc_item, "notes", None)
+            if not isinstance(notes, str) or not notes:
+                continue
+            fixed_notes, reps = repair_line_citations(notes, loader, max_drift)
+            _record(reps)
+            if repair_map:
+                fixed_notes, prop_reps = _apply_known_repairs(fixed_notes, repair_map)
+                all_repairs.extend(prop_reps)
+            sc_item.notes = fixed_notes
+
+    _log_repairs(all_repairs)
+    return all_repairs
+
+
+def repair_rendered_citations(
+    body: str,
+    pr: Any = None,
+    max_drift: int = DEFAULT_MAX_DRIFT,
+) -> str:
+    """Repair citations in a rendered review body, logging every rewrite."""
+    repaired_body, repairs = repair_line_citations(body, review_file_loader(pr), max_drift)
+    _log_repairs(repairs)
     return repaired_body

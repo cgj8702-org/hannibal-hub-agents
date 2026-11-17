@@ -164,19 +164,27 @@ def _lease_extender(
     """Periodically extend the Pub/Sub message ack deadline while processing is in flight."""
     stop_event = threading.Event()
 
-    def _heartbeat() -> None:
-        while not stop_event.wait(interval_seconds):
-            try:
-                subscriber.modify_ack_deadline(
-                    request={
-                        "subscription": subscription_path,
-                        "ack_ids": [ack_id],
-                        "ack_deadline_seconds": ack_deadline_seconds,
-                    }
-                )
-            except Exception as exc:
-                logger.debug("Pub/Sub lease extension heartbeat skipped: %s", exc)
+    def _extend_once() -> None:
+        try:
+            subscriber.modify_ack_deadline(
+                request={
+                    "subscription": subscription_path,
+                    "ack_ids": [ack_id],
+                    "ack_deadline_seconds": ack_deadline_seconds,
+                }
+            )
+        except Exception as exc:
+            logger.debug("Pub/Sub lease extension heartbeat skipped: %s", exc)
 
+    def _heartbeat() -> None:
+        while True:
+            if stop_event.wait(interval_seconds):
+                break
+            _extend_once()
+
+    # Extend immediately on entry so short subscription ack deadlines (e.g. 10s)
+    # do not expire before the first periodic heartbeat fires.
+    _extend_once()
     thread = threading.Thread(target=_heartbeat, name="PubSubLeaseExtender", daemon=True)
     thread.start()
     try:

@@ -246,15 +246,30 @@ You are actively collaborating with a human engineer in a GitHub Pull Request or
 """
 
 
+REPO_PRIMARY_STACKS: dict[str, str] = {
+    "cgj8702-org/hannibal-hub-agents": (
+        "Python 3.13, uv, Google ADK, PyGithub, Pub/Sub, Firestore"
+    ),
+    "cgj8702-org/hannibal-hub": (
+        "Python 3.13, uv, FastAPI, Google GenAI, Cloud Run RAG (ChromaDB/BM25), SillyTavern"
+    ),
+}
+DEFAULT_PRIMARY_STACK = "Python 3.13, uv, Google Cloud"
+
+
 def build_repo_profile_context(
     repo_name: str,
-    primary_stack: str = "Python 3.13, uv, Google ADK, PyGithub, Pub/Sub, Firestore",
+    primary_stack: str | None = None,
     memory_bank_heuristics: list[str] | None = None,
 ) -> str:
     """Build semi-stable Tier 2 repository profile and heuristics context.
 
     Remains stable across all PRs targeting the same repository to maximize prefix caching.
     """
+    resolved_stack = primary_stack or REPO_PRIMARY_STACKS.get(
+        (repo_name or "").strip().lower(),
+        DEFAULT_PRIMARY_STACK,
+    )
     heuristics_section = ""
     if memory_bank_heuristics:
         items = "\n".join(f"- {h}" for h in memory_bank_heuristics)
@@ -262,7 +277,7 @@ def build_repo_profile_context(
 
     return (
         f"### Repository Profile: {repo_name}\n"
-        f"- Primary Stack: {primary_stack}\n"
+        f"- Primary Stack: {resolved_stack}\n"
         f"- Operating Protocols: Zero-Bypass Architecture (all changes via reviewed PR), strictly read-only auditor invariant.\n"
         f"{heuristics_section}"
     ).strip()

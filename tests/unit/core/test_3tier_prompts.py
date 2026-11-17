@@ -131,3 +131,16 @@ def test_build_user_message_tier_assembly() -> None:
     # Tier 3 follows
     assert "Canonical Event: pull_request.opened" in text
     assert "PR Number: 101" in text
+
+
+def test_build_repo_profile_context_repo_specific_stacks() -> None:
+    """build_repo_profile_context resolves repo-specific stacks instead of leaking hannibal-hub-agents stack."""
+    hub_profile = build_repo_profile_context("cgj8702-org/hannibal-hub")
+    assert "FastAPI" in hub_profile
+    assert "Cloud Run RAG" in hub_profile
+    assert "PyGithub" not in hub_profile
+    assert "Pub/Sub" not in hub_profile
+
+    unknown_profile = build_repo_profile_context("example-org/other-repo")
+    assert "Primary Stack: Python 3.13, uv, Google Cloud" in unknown_profile
+    assert "PyGithub" not in unknown_profile

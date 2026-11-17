@@ -251,3 +251,15 @@ def test_github_tools_review_rejects_semantic_dominance_violation() -> None:
         assert (
             "semantic_invariants (count 3) outnumbers machine-proven verified_invariants" in result
         )
+
+
+def test_verify_semantic_invariant_accepts_declarative_documentation_verbs() -> None:
+    """Grounded declarative claims using verbs like reflects, identifies, remains stay GROUNDED."""
+    claims = [
+        "The documentation correctly identifies the deployment workflow for the worker.",
+        "README documentation accurately reflects the decoupled deployment architecture.",
+        "The configuration table remains consistent with active runtime defaults.",
+    ]
+    for claim in claims:
+        status, reason = verify_semantic_invariant(claim, SAMPLE_DIFF, ["src/worker.py"])
+        assert status == "GROUNDED", f"Claim wrongly demoted: {claim} -> {status} ({reason})"

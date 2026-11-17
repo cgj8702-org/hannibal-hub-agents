@@ -2728,3 +2728,68 @@ async def test_execute_adk_runner_feeds_back_review_validation_error() -> None:
     assert "Review Submission Error Feedback:" in received_directives[1]
     assert "scorecard dimension 'Contract Integrity' missing notes" in received_directives[1]
     assert any(r.tool == "review" and r.success for r in results)
+
+
+def test_switch_model_rebuilds_workflow_and_app_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_switch_model must rebuild Workflow, App, and Runner so ADK graph nodes use the new model."""
+    import asyncio
+
+    from webhook_agent.core.agent_definition import WebhookAgent
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-dummy-key")
+    with (
+        patch(
+            "webhook_agent.core.agent_definition.get_model_chain",
+            return_value=["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemma-4-31b-it"],
+        ),
+        patch(
+            "webhook_agent.core.agent_definition.get_active_api_key",
+            return_value="test-dummy-key",
+        ),
+    ):
+        agent = WebhookAgent()
+        initial_plugins = list(agent._app.plugins)
+        initial_session_service = agent._session_service
+        assert agent._agent.graph.nodes[1].model.model == "gemini-3.1-flash-lite"
+
+        # Seed a live session before switching models to prove Workflow/App/Runner
+        # rebuilds preserve long-running session state without disruption.
+        asyncio.run(
+            agent._session_service.create_session(
+                app_name=agent._app_name,
+                user_id="owner/repo#42",
+                session_id="owner/repo/42",
+                state={"review_critique": "preserved-across-switch"},
+            )
+        )
+
+        agent._switch_model("gemini-3.5-flash-lite")
+
+        assert agent._current_model_name == "gemini-3.5-flash-lite"
+        assert agent._code_auditor.model.model == "gemini-3.5-flash-lite"
+        assert agent._agent.graph.nodes[1].model.model == "gemini-3.5-flash-lite"
+        assert agent._app.root_agent is agent._agent
+        assert agent._app.root_agent.graph.nodes[1].model.model == "gemini-3.5-flash-lite"
+        assert agent._app.context_cache_config is not None
+        assert len(agent._app.plugins) == len(initial_plugins)
+        assert agent._conversational_workflow.graph.nodes[1].model.model == "gemini-3.5-flash-lite"
+        assert agent._conversational_app.root_agent is agent._conversational_workflow
+
+        # Verify session service identity and in-flight session state survive the rebuild intact
+        assert agent._session_service is initial_session_service
+        assert agent._runner.session_service is initial_session_service
+        preserved = asyncio.run(
+            agent._session_service.get_session(
+                app_name=agent._app_name,
+                user_id="owner/repo#42",
+                session_id="owner/repo/42",
+            )
+        )
+        assert preserved is not None
+        assert preserved.state.get("review_critique") == "preserved-across-switch"
+
+        # Switching to a non-Gemini-3+ model must also disable context_cache_config
+        agent._switch_model("gemma-4-31b-it")
+        assert agent._agent.graph.nodes[1].model.model == "gemma-4-31b-it"
+        assert agent._app.context_cache_config is None
+        assert agent._conversational_app.context_cache_config is None

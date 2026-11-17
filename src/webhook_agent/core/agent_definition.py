@@ -333,7 +333,7 @@ class WebhookAgent:
         return next_model
 
     def _switch_model(self, next_model: str) -> None:
-        """Switch active model across code auditor, conversational agent, and runners."""
+        """Switch active model across code auditor, conversational agent, workflows, apps, and runners."""
         self._current_model_name = next_model
         self._attempted_model_names.add(self._normalize_model_name(next_model))
         new_model_instance = get_adk_model(
@@ -347,27 +347,67 @@ class WebhookAgent:
 
         # Dynamically toggle context caching based on model family:
         # Strictly enable only for Gemini 3+ models; disable for Gemma / legacy models.
-        if is_gemini_3_plus(next_model):
-            cache_cfg = ContextCacheConfig(
+        cache_cfg = (
+            ContextCacheConfig(
                 min_tokens=4096,
                 ttl_seconds=1800,
                 cache_intervals=10,
             )
+            if is_gemini_3_plus(next_model)
+            else None
+        )
+
+        # ADK 2.0+ Workflow clones its node agents into wf.graph.nodes at construction
+        # time, so mutating self._code_auditor.model alone leaves the compiled Workflow
+        # graph pinned to the initial model. Rebuild Workflow + App + Runner so model
+        # routing and 429/503 failover take effect on live executions.
+        # Session state is owned by self._session_service (preserved across rebuilds),
+        # so rebuilding the stateless Workflow/App/Runner graph between turns or retries
+        # never drops or disrupts ongoing session history.
+        if hasattr(self, "_code_auditor") and self._code_auditor is not None:
+            self._agent = Workflow(
+                name="webhook_agent",
+                edges=[
+                    (START, self._code_auditor),
+                ],
+            )
             if hasattr(self, "_app") and self._app is not None:
-                self._app.context_cache_config = cache_cfg
+                plugins = list(getattr(self._app, "plugins", None) or [])
+                app_name = getattr(self._app, "name", getattr(self, "_app_name", "webhook_agent"))
+                self._app = App(
+                    name=app_name,
+                    root_agent=self._agent,
+                    context_cache_config=cache_cfg,
+                    plugins=plugins,
+                )
+
+        if hasattr(self, "_conversational_agent") and self._conversational_agent is not None:
+            self._conversational_workflow = Workflow(
+                name="conversational_workflow",
+                edges=[
+                    (START, self._conversational_agent),
+                ],
+            )
             if hasattr(self, "_conversational_app") and self._conversational_app is not None:
-                self._conversational_app.context_cache_config = cache_cfg
-        else:
-            if hasattr(self, "_app") and self._app is not None:
-                self._app.context_cache_config = None
-            if hasattr(self, "_conversational_app") and self._conversational_app is not None:
-                self._conversational_app.context_cache_config = None
+                conv_plugins = list(getattr(self._conversational_app, "plugins", None) or [])
+                conv_app_name = getattr(
+                    self._conversational_app,
+                    "name",
+                    f"{getattr(self, '_app_name', 'webhook_agent')}_conversational",
+                )
+                self._conversational_app = App(
+                    name=conv_app_name,
+                    root_agent=self._conversational_workflow,
+                    context_cache_config=cache_cfg,
+                    plugins=conv_plugins,
+                )
 
         runner_cls = Runner
-        self._runner = runner_cls(
-            app=self._app,
-            session_service=self._session_service,
-        )
+        if hasattr(self, "_app") and self._app is not None:
+            self._runner = runner_cls(
+                app=self._app,
+                session_service=self._session_service,
+            )
         if hasattr(self, "_conversational_app") and self._conversational_app is not None:
             self._conversational_runner = runner_cls(
                 app=self._conversational_app,

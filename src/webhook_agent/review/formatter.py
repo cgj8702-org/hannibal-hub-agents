@@ -842,7 +842,9 @@ def render_code_review_markdown(
             for s in review.scorecard
         ]
     if review.verified_invariants:
-        meta["verified_invariants"] = list(review.verified_invariants)
+        meta["verified_invariants"] = [
+            _clean_invariant_display(inv) for inv in review.verified_invariants
+        ]
     if review.semantic_invariants:
         meta["semantic_invariants"] = list(review.semantic_invariants)
     if review.model:
@@ -1094,7 +1096,9 @@ def render_sync_review_markdown(
             for s in review.scorecard
         ]
     if review.verified_invariants:
-        meta["verified_invariants"] = list(review.verified_invariants)
+        meta["verified_invariants"] = [
+            _clean_invariant_display(inv) for inv in review.verified_invariants
+        ]
     if review.semantic_invariants:
         meta["semantic_invariants"] = list(review.semantic_invariants)
     if review.model:
