@@ -177,7 +177,9 @@ def _lease_extender(
             logger.debug("Pub/Sub lease extension heartbeat skipped: %s", exc)
 
     def _heartbeat() -> None:
-        while not stop_event.wait(interval_seconds):
+        while True:
+            if stop_event.wait(interval_seconds):
+                break
             _extend_once()
 
     # Extend immediately on entry so short subscription ack deadlines (e.g. 10s)

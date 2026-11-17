@@ -130,6 +130,12 @@ class _LoopVisitor(ast.NodeVisitor):
                 )
             return
 
+        # Externally signaled event-wait loops (e.g., `while not stop_event.wait(interval):`
+        # or `while not stop_event.is_set():`) terminate via cross-thread/task signaling
+        # rather than mutating the event or timeout variable inside the loop body.
+        if self._is_external_wait_condition(node.test):
+            return
+
         # Extract loop control variables
         loop_vars = self._extract_names(node.test)
         if not loop_vars:
@@ -158,6 +164,18 @@ class _LoopVisitor(ast.NodeVisitor):
     def _is_constant_true(self, test: ast.expr) -> bool:
         if isinstance(test, ast.Constant):
             return bool(test.value)
+        return False
+
+    def _is_external_wait_condition(self, test: ast.expr) -> bool:
+        """Return True when the loop test waits on an externally signaled Event (.wait / .is_set)."""
+        expr = test
+        if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
+            expr = expr.operand
+        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute):
+            if expr.func.attr in ("wait", "is_set"):
+                return True
+        if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+            return any(self._is_external_wait_condition(v) for v in test.values)
         return False
 
     def _extract_names(self, node: ast.AST) -> set[str]:
