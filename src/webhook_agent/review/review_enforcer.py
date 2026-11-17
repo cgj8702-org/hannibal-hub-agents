@@ -519,6 +519,13 @@ def _finalize_enforced_review(
             if dd not in review_obj.unverified_claims:
                 review_obj.unverified_claims.append(dd)
 
+        # Repair model line-number drift BEFORE citation grounding telemetry,
+        # inline comment anchoring, Markdown rendering, and JSON metadata serialization
+        # so 1-line hunk drift does not emit false soft:context_only_line warnings.
+        from .citation_repair import repair_review_object_citations
+
+        repair_review_object_citations(review_obj, pr=pr)
+
         grounding_issues, has_hard = _apply_citation_grounding(
             review_obj,
             diff_for_grounding,
@@ -532,6 +539,10 @@ def _finalize_enforced_review(
             pr_label=pr_label,
             enforced_verdict=enforced_verdict,
         )
+    elif pr is not None:
+        from .citation_repair import repair_review_object_citations
+
+        repair_review_object_citations(review_obj, pr=pr)
 
     # Re-evaluate mechanical verdict post-grounding and dominance enforcement
     # so any invariants demoted to unverified_claims strictly clamp the verdict.
@@ -568,14 +579,6 @@ def _finalize_enforced_review(
         review_obj.verdict = cast(
             Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"], enforced_verdict
         )
-
-    # Repair model line-number drift inside the structured review object BEFORE
-    # building inline comments, rendering Markdown, and serializing the JSON
-    # metadata footer so Section 3 (Scorecard), Section 6 (Verified Invariants),
-    # inline comments, and metadata stay in sync.
-    from .citation_repair import repair_review_object_citations
-
-    repair_review_object_citations(review_obj, pr=pr)
 
     inline_comments: list[dict[str, Any]] = []
     if diff_text:

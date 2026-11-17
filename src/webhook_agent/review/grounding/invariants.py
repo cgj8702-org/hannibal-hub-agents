@@ -23,7 +23,10 @@ from webhook_agent.review.grounding.citations import (
     _KNOWN_EXTENSIONS,
     _KNOWN_STDLIB_MODULE_PREFIXES,
     PLACEHOLDER_PATHS,
+    _compact_code_for_evidence,
+    _evidence_quote_in_diff,
     _is_path_citation,
+    _norm_diff_for_evidence,
     _norm_evidence,
     bare_path,
 )
@@ -363,12 +366,64 @@ _INVARIANT_OPERATIVE_VERBS: frozenset[str] = frozenset(
         "intercepted",
         "dispatches",
         "dispatch",
-        "dispatching",
-        "dispatched",
+        "partitions",
+        "partition",
+        "partitioning",
+        "partitioned",
+        "separates",
+        "separate",
+        "separating",
+        "separated",
+        "distinguishes",
+        "distinguish",
+        "distinguishing",
+        "distinguished",
+        "extracts",
+        "extract",
+        "extracting",
+        "extracted",
         "sanitizes",
         "sanitize",
         "sanitizing",
         "sanitized",
+        "redacts",
+        "redact",
+        "redacting",
+        "redacted",
+        "classifies",
+        "classify",
+        "classifying",
+        "classified",
+        "retries",
+        "retry",
+        "retrying",
+        "retried",
+        "closes",
+        "close",
+        "closing",
+        "closed",
+        "strips",
+        "strip",
+        "stripping",
+        "stripped",
+        "caps",
+        "cap",
+        "capping",
+        "capped",
+        "parses",
+        "parse",
+        "parsing",
+        "parsed",
+        "enables",
+        "enable",
+        "enabling",
+        "enabled",
+        "disables",
+        "disable",
+        "disabling",
+        "disabled",
+        "dispatching",
+        "dispatched",
         "standardizes",
         "standardize",
         "standardizing",
@@ -411,7 +466,8 @@ def is_machine_verified_invariant(
     if not raw_inv or not diff_text:
         return False
 
-    norm_diff = _norm_evidence(diff_text)
+    norm_diff = _norm_diff_for_evidence(diff_text)
+    compact_diff = _compact_code_for_evidence(norm_diff)
     match = _INVARIANT_CITATION_RE.search(raw_inv)
 
     if match:
@@ -449,13 +505,15 @@ def is_machine_verified_invariant(
         raw_quotes.extend(single_quotes)
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
         for q in code_quotes:
-            if len(_norm_evidence(q)) > 24 and _norm_evidence(q) not in norm_diff:
+            if len(_norm_evidence(q)) > 24 and not _evidence_quote_in_diff(
+                q, norm_diff, compact_diff
+            ):
                 return False
 
         ev = raw_inv.lower()
         is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
         has_diff_quote = bool(code_quotes) and all(
-            _norm_evidence(q) in norm_diff for q in code_quotes
+            _evidence_quote_in_diff(q, norm_diff, compact_diff) for q in code_quotes
         )
         has_test = re.search(r"\btest_\w+", ev) is not None
 
@@ -494,7 +552,8 @@ def is_machine_verified_invariant(
     raw_quotes.extend(single_quotes)
     code_quotes = [q for q in raw_quotes if not _is_path_citation(q)]
     has_matching_quote = any(
-        len(_norm_evidence(q)) >= 16 and _norm_evidence(q) in norm_diff for q in code_quotes
+        len(_norm_evidence(q)) >= 16 and _evidence_quote_in_diff(q, norm_diff, compact_diff)
+        for q in code_quotes
     )
     has_test = bool(re.search(r"\btest_\w+", raw_inv)) and any(
         t in norm_diff for t in re.findall(r"\btest_\w+", raw_inv.lower())

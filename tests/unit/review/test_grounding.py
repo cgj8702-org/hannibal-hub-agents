@@ -1001,3 +1001,149 @@ def test_verify_resolutions_ignores_none_path_and_matches_basenames() -> None:
     verified = verify_resolutions([item_no_path, item_basename], diff)
     assert verified[0]["status"] == "RESOLVED"
     assert verified[1]["status"] == "RESOLVED"
+
+
+def test_grounding_accepts_multiline_diff_quotes_and_parenthesized_with() -> None:
+    """Evidence matching strips unified-diff +/- line markers and normalizes Ruff parenthesized with."""
+    from webhook_agent.review.grounding.invariants import is_machine_verified_invariant
+
+    diff = (
+        "--- a/src/webhook_agent/models/model_chain.py\n"
+        "+++ b/src/webhook_agent/models/model_chain.py\n"
+        "@@ -303,2 +303,4 @@ def _is_transient_error(error: Exception) -> bool:\n"
+        '     """Docstring."""\n'
+        "+    if isinstance(error, TimeoutError):\n"
+        "+        return True\n"
+        "     if isinstance(error, GenAIServerError):\n"
+        "--- a/src/webhook_agent/models/model_factory.py\n"
+        "+++ b/src/webhook_agent/models/model_factory.py\n"
+        "@@ -116,2 +116,6 @@ async def _call_model_with_timeout_retry():\n"
+        "         try:\n"
+        "+            async with (\n"
+        "+                asyncio.timeout(effective_timeout),\n"
+        "+                contextlib.aclosing(generate()) as attempt,\n"
+        "+            ):\n"
+        "+                responses = [response async for response in attempt]\n"
+    )
+
+    findings = [
+        Finding(
+            kind="invariant",
+            path="src/webhook_agent/models/model_chain.py",
+            line=304,
+            evidence=(
+                "src/webhook_agent/models/model_chain.py:304: "
+                "`if isinstance(error, TimeoutError): return True` classifies timeouts as transient."
+            ),
+        ),
+        Finding(
+            kind="invariant",
+            path="src/webhook_agent/models/model_factory.py",
+            line=117,
+            evidence=(
+                "src/webhook_agent/models/model_factory.py:117: "
+                "`async with asyncio.timeout(effective_timeout), contextlib.aclosing(generate()) as attempt:` "
+                "bounds and closes stalled generators."
+            ),
+        ),
+    ]
+    issues = verify_citations(findings, diff)
+    hard = [i for i in issues if i.is_hard]
+    assert hard == [], f"Unexpected hard grounding issues: {hard}"
+    assert is_machine_verified_invariant(findings[0].evidence, diff) is True
+    assert is_machine_verified_invariant(findings[1].evidence, diff) is True
+
+    # Fabricated code quotes must still fail hard grounding
+    fabricated = [
+        Finding(
+            kind="invariant",
+            path="src/webhook_agent/models/model_chain.py",
+            line=304,
+            evidence=(
+                "src/webhook_agent/models/model_chain.py:304: "
+                "`if isinstance(error, CompletelyMadeUpError): return False` does not exist."
+            ),
+        )
+    ]
+    fab_issues = verify_citations(fabricated, diff)
+    assert any(i.code == "evidence_not_in_diff" and i.is_hard for i in fab_issues)
+
+
+def test_verify_semantic_invariant_accepts_partitioning_verbs() -> None:
+    """Valid architectural invariants using separation/partitioning verbs stay GROUNDED."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    diff = (
+        "--- a/src/webhook_agent/core/callbacks.py\n"
+        "+++ b/src/webhook_agent/core/callbacks.py\n"
+        "@@ -42,1 +42,3 @@\n"
+        "+def _is_thought_part(part: Any) -> bool:\n"
+        "+    return getattr(part, 'thought', None) is True\n"
+    )
+    inv = (
+        "Model thoughts and visible response text are robustly partitioned across "
+        "response parts without mixing internal reasoning into user-facing output."
+    )
+    status, reason = verify_semantic_invariant(
+        inv,
+        diff,
+        changed_paths=["src/webhook_agent/core/callbacks.py"],
+    )
+    assert status == "GROUNDED", f"Expected GROUNDED, got {status}: {reason}"
+
+
+def test_enforce_verdict_repairs_citations_before_grounding_telemetry(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Line drift repaired before grounding telemetry must not emit false context_only_line logs."""
+    import logging
+    from unittest.mock import MagicMock
+
+    from webhook_agent.environment.context import use_environment
+    from webhook_agent.environment.local import LocalEnvironment
+    from webhook_agent.review.review_enforcer import _enforce_verdict
+
+    target_file = tmp_path / "src" / "webhook_agent" / "models" / "model_chain.py"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    # Put 'if isinstance(error, TimeoutError):' at line 304 (1-indexed)
+    lines = ["# pad"] * 302 + [
+        '    """Docstring."""',
+        "    if isinstance(error, TimeoutError):",
+        "        return True",
+        "    if isinstance(error, GenAIServerError):",
+    ]
+    target_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    mock_file = MagicMock()
+    mock_file.filename = "src/webhook_agent/models/model_chain.py"
+    mock_file.patch = (
+        "@@ -303,2 +303,4 @@ def _is_transient_error(error: Exception) -> bool:\n"
+        '     """Docstring."""\n'
+        "+    if isinstance(error, TimeoutError):\n"
+        "+        return True\n"
+        "     if isinstance(error, GenAIServerError):\n"
+    )
+    mock_pr = MagicMock()
+    mock_pr.get_files.return_value = [mock_file]
+    mock_pr.get_reviews.return_value = []
+
+    payload = (
+        '{"executive_summary": "Classify timeouts as transient.", '
+        '"verdict": "APPROVE", '
+        '"scorecard": [{"dimension": "Logic & Boundaries", "status": "PASS", "notes": "Clean"}], '
+        '"critical_issues": [], "minor_suggestions": [], '
+        '"verified_invariants": ['
+        '"src/webhook_agent/models/model_chain.py:303: `if isinstance(error, TimeoutError):` classifies timeouts as transient."'
+        "]}"
+    )
+
+    with (
+        use_environment(LocalEnvironment(tmp_path)),
+        caplog.at_level(logging.INFO, logger="webhook_agent.review"),
+    ):
+        rendered, verdict, _ = _enforce_verdict(payload, "APPROVE", pr=mock_pr)
+
+    assert verdict == "APPROVE"
+    assert "src/webhook_agent/models/model_chain.py:304" in rendered
+    assert "soft:context_only_line" not in caplog.text
