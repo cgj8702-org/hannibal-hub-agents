@@ -168,6 +168,7 @@ Key runtime switches and defaults:
 | `ENABLE_DYNAMIC_MODEL_ROUTING` | `1` | Enable dynamic cascade routing and depleted model tracking across providers. |
 | `MODEL_CALL_TIMEOUT_SECONDS` | `180` | Per-attempt wall-clock timeout in seconds for ADK Gemini model calls (`<= 0` disables). |
 | `MODEL_CALL_ATTEMPTS` | `2` | Maximum attempts per model call on timeout before failing over to the next model in the chain. |
+| `AUDITOR_THINKING_LEVEL` | `MEDIUM` | Native Gemini 3+ thinking level (`MINIMAL`, `LOW`, `MEDIUM`, `HIGH`) for formal code audits (`AUDITOR_THINKING_BUDGET` applies on Gemini 2.5 fallbacks). |
 | `ENABLE_CODERABBIT_AUTO_RESOLVE` | `true` | Automatically resolve stale CodeRabbit bot threads when resolved or ungrounded. |
 | `NATIVE_STALE_REVIEW_DISMISSAL_REPOS` | `cgj8702-org/hannibal-hub-agents` | Comma-separated repos permitted to dismiss stale bot reviews on push events. |
 | `STRICT_REVIEW_GROUNDING` | `1` | When `1`, downgrade review submissions whose citations cannot be verified against the diff. Set `0` to log only. |

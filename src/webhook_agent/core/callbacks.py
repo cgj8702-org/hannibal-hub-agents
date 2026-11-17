@@ -223,8 +223,11 @@ async def before_model_callback(
         # cast to Any to suppress MyPy attribute error for dynamic rate limit tracking
         llm_request._rate_limit_checked = True  # type: ignore[attr-defined]
 
-    # Context Caching Model Guard: Strictly only Gemini 3+ models support context caching.
-    # Gemma models (e.g. gemma-4-31b-it) and pre-Gemini-3 models do NOT support caching.
+    # Context Caching & Thinking Config Model Guard:
+    # - Gemini 3+ supports context caching (4096-token floor) and native thinking_level.
+    # - Gemini 2.5 uses legacy thinking_budget (no context caching here, no thinking_level).
+    # - Gemma models do NOT support context caching or thinking_config.
+    from webhook_agent.core.policy import build_thinking_config
     from webhook_agent.models.model_chain import is_gemini_3_plus
 
     if not is_gemini_3_plus(target_model):
@@ -235,9 +238,16 @@ async def before_model_callback(
         if hasattr(llm_request, "cacheable_contents_token_count"):
             llm_request.cacheable_contents_token_count = None
         clean_target = (target_model or "").replace("models/", "").strip().lower()
-        if "gemma" in clean_target and hasattr(llm_request, "config") and llm_request.config:
-            if getattr(llm_request.config, "thinking_config", None) is not None:
-                llm_request.config.thinking_config = None
+        if hasattr(llm_request, "config") and llm_request.config:
+            existing_tc = getattr(llm_request.config, "thinking_config", None)
+            if "gemma" in clean_target:
+                if existing_tc is not None:
+                    llm_request.config.thinking_config = None
+            elif (
+                existing_tc is not None and getattr(existing_tc, "thinking_level", None) is not None
+            ):
+                # Gemini 2.5 rejects Gemini 3 thinking_level; swap to legacy thinking_budget.
+                llm_request.config.thinking_config = build_thinking_config(target_model)
     else:
         # For Gemini 3+, ensure context cache config is active with 4096-token floor
         if getattr(llm_request, "cache_config", None) is None:
@@ -250,14 +260,12 @@ async def before_model_callback(
                     cache_intervals=10,
                 )
 
-        # Enable thinking for Gemini 3+ models
+        # Ensure Gemini 3+ uses native thinking_level (never legacy thinking_budget)
         if getattr(llm_request, "config", None) is None:
             llm_request.config = genai_types.GenerateContentConfig()
-        if getattr(llm_request.config, "thinking_config", None) is None:
-            llm_request.config.thinking_config = genai_types.ThinkingConfig(
-                include_thoughts=True,
-                thinking_budget=1024,
-            )
+        existing_tc = getattr(llm_request.config, "thinking_config", None)
+        if existing_tc is None or getattr(existing_tc, "thinking_level", None) is None:
+            llm_request.config.thinking_config = build_thinking_config(target_model)
 
     callback_context.state["prompt_tokens"] = exact_tokens
     callback_context.state["active_model"] = target_model

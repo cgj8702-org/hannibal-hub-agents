@@ -751,6 +751,41 @@ def test_extract_thoughts_and_response_text_with_real_genai_parts() -> None:
     assert response_text == "All checks passed.\nFinal verdict ready."
 
 
+def test_build_thinking_config_model_families(monkeypatch: pytest.MonkeyPatch) -> None:
+    """build_thinking_config selects native thinking_level for Gemini 3+, budget for 2.5, None for Gemma."""
+    from google.genai import types as genai_types
+
+    from webhook_agent.core.policy import build_thinking_config
+
+    monkeypatch.delenv("AUDITOR_THINKING_LEVEL", raising=False)
+    monkeypatch.delenv("AUDITOR_THINKING_BUDGET", raising=False)
+
+    g3 = build_thinking_config("gemini-3.5-flash-lite")
+    assert g3 is not None
+    assert g3.include_thoughts is True
+    assert g3.thinking_level == genai_types.ThinkingLevel.MEDIUM
+    assert g3.thinking_budget is None
+
+    g3_conv = build_thinking_config("gemini-3.5-flash-lite", conversational=True)
+    assert g3_conv is not None
+    assert g3_conv.thinking_level == genai_types.ThinkingLevel.LOW
+    assert g3_conv.thinking_budget is None
+
+    g25 = build_thinking_config("gemini-2.5-pro")
+    assert g25 is not None
+    assert g25.include_thoughts is True
+    assert g25.thinking_budget == 4096
+    assert g25.thinking_level is None
+
+    assert build_thinking_config("gemma-4-31b-it") is None
+
+    # Invalid env value falls back to MEDIUM cleanly
+    monkeypatch.setenv("AUDITOR_THINKING_LEVEL", "INVALID")
+    g3_fallback = build_thinking_config("gemini-3.5-flash-lite")
+    assert g3_fallback is not None
+    assert g3_fallback.thinking_level == genai_types.ThinkingLevel.MEDIUM
+
+
 @pytest.mark.anyio
 async def test_before_tool_callback_create_issue_gating_blocks_when_disallowed() -> None:
     """before_tool_callback blocks create_issue when may_create_issue is False."""

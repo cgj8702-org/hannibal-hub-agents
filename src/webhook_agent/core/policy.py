@@ -16,10 +16,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from google.genai import types as genai_types
+
 from webhook_agent.core.commands import (
     has_review_slash_command,
 )
 from webhook_agent.github.bot_identity import is_hannibal_bot_login
+from webhook_agent.models.model_chain import is_gemini_3_plus
 
 # Bot logins that are never actionable (own bot loop avoidance or automated reviewers)
 SUPPRESSED_BOT_LOGINS: frozenset[str] = frozenset(
@@ -41,15 +44,58 @@ PARTNER_BOT_LOGINS: frozenset[str] = frozenset(
 
 
 DEFAULT_AUDITOR_THINKING_BUDGET = 4096
+DEFAULT_AUDITOR_THINKING_LEVEL = "MEDIUM"
+DEFAULT_CONVERSATIONAL_THINKING_LEVEL = "LOW"
+
+_VALID_THINKING_LEVELS: dict[str, genai_types.ThinkingLevel] = {
+    "MINIMAL": genai_types.ThinkingLevel.MINIMAL,
+    "LOW": genai_types.ThinkingLevel.LOW,
+    "MEDIUM": genai_types.ThinkingLevel.MEDIUM,
+    "HIGH": genai_types.ThinkingLevel.HIGH,
+}
 
 
 def get_auditor_thinking_budget() -> int:
-    """Return configured thinking budget for the code auditor, falling back to 4096."""
+    """Return configured thinking budget for legacy Gemini 2.5 models, falling back to 4096."""
     raw = os.environ.get("AUDITOR_THINKING_BUDGET", "").strip()
     try:
         return int(raw)
     except ValueError:
         return DEFAULT_AUDITOR_THINKING_BUDGET
+
+
+def get_auditor_thinking_level() -> genai_types.ThinkingLevel:
+    """Return configured native ThinkingLevel for Gemini 3+ auditor calls, defaulting to MEDIUM."""
+    raw = os.environ.get("AUDITOR_THINKING_LEVEL", DEFAULT_AUDITOR_THINKING_LEVEL).strip().upper()
+    return _VALID_THINKING_LEVELS.get(raw, genai_types.ThinkingLevel.MEDIUM)
+
+
+def build_thinking_config(
+    model_name: str | None,
+    *,
+    conversational: bool = False,
+) -> genai_types.ThinkingConfig | None:
+    """Build a model-family-appropriate ThinkingConfig.
+
+    - Gemini 3+ models use native ``thinking_level`` with ``include_thoughts=True``
+      (never setting ``thinking_budget`` simultaneously, which causes HTTP 400).
+    - Gemma models do not support ``thinking_config`` and receive ``None``.
+    - Legacy Gemini 2.5 models use ``thinking_budget`` with ``include_thoughts=True``.
+    """
+    clean = (model_name or "").replace("models/", "").strip().lower()
+    if "gemma" in clean:
+        return None
+    if is_gemini_3_plus(model_name):
+        level = genai_types.ThinkingLevel.LOW if conversational else get_auditor_thinking_level()
+        return genai_types.ThinkingConfig(
+            include_thoughts=True,
+            thinking_level=level,
+        )
+    budget = get_auditor_thinking_budget()
+    return genai_types.ThinkingConfig(
+        include_thoughts=True,
+        thinking_budget=min(budget, 512) if conversational else budget,
+    )
 
 
 # Canonical PR lifecycle events that trigger formal review

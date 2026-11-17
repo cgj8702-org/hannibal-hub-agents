@@ -534,18 +534,45 @@ class TestToolRegistration:
         assert tool_names.isdisjoint(removed), f"Found removed tools: {tool_names & removed}"
 
     def test_code_auditor_bounded_thinking_budget(self, monkeypatch):
-        """Auditor thinking budget must default to 4096 or respect AUDITOR_THINKING_BUDGET."""
+        """Gemini 3+ uses native thinking_level, Gemini 2.5 uses thinking_budget, Gemma disables planner."""
+        from google.genai import types as genai_types
+
         from webhook_agent.core.agent_definition import WebhookAgent
 
-        agent_default = WebhookAgent(dry_run=True)
-        assert agent_default._code_auditor.planner.thinking_config.thinking_budget == 4096
-        assert agent_default._code_auditor.planner.thinking_config.include_thoughts is True
-        assert agent_default._conversational_agent.planner.thinking_config.include_thoughts is True
+        monkeypatch.delenv("AUDITOR_THINKING_LEVEL", raising=False)
+        monkeypatch.delenv("AUDITOR_THINKING_BUDGET", raising=False)
 
+        agent_default = WebhookAgent(dry_run=True)
+        auditor_tc = agent_default._code_auditor.planner.thinking_config
+        conv_tc = agent_default._conversational_agent.planner.thinking_config
+        assert auditor_tc.include_thoughts is True
+        assert auditor_tc.thinking_level == genai_types.ThinkingLevel.MEDIUM
+        assert auditor_tc.thinking_budget is None
+        assert conv_tc.include_thoughts is True
+        assert conv_tc.thinking_level == genai_types.ThinkingLevel.LOW
+        assert conv_tc.thinking_budget is None
+
+        # AUDITOR_THINKING_LEVEL override on Gemini 3+
+        monkeypatch.setenv("AUDITOR_THINKING_LEVEL", "HIGH")
+        agent_high = WebhookAgent(dry_run=True)
+        assert (
+            agent_high._code_auditor.planner.thinking_config.thinking_level
+            == genai_types.ThinkingLevel.HIGH
+        )
+        assert agent_high._code_auditor.planner.thinking_config.thinking_budget is None
+
+        # Switching to legacy Gemini 2.5 swaps cleanly to thinking_budget (never thinking_level)
         monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "8192")
-        agent_custom = WebhookAgent(dry_run=True)
-        assert agent_custom._code_auditor.planner.thinking_config.thinking_budget == 8192
-        assert agent_custom._code_auditor.planner.thinking_config.include_thoughts is True
+        agent_default._switch_model("gemini-2.5-flash")
+        legacy_tc = agent_default._code_auditor.planner.thinking_config
+        assert legacy_tc.include_thoughts is True
+        assert legacy_tc.thinking_budget == 8192
+        assert legacy_tc.thinking_level is None
+
+        # Switching to Gemma clears planner completely
+        agent_default._switch_model("gemma-4-31b-it")
+        assert agent_default._code_auditor.planner is None
+        assert agent_default._conversational_agent.planner is None
 
     def test_review_accepts_deterministic_precompiled_ast(self):
         """Deterministic precompiled AST satisfies review gate without runtime tool execution."""
