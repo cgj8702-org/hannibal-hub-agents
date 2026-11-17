@@ -190,3 +190,177 @@ async def test_rate_limited_gemini_calls_count_tokens_when_not_checked(
         estimated_tokens=42,
         tier="free",
     )
+
+
+@pytest.mark.anyio
+async def test_rate_limited_gemini_retries_timeout_and_closes_stalled_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out attempt must close its generator before retrying and stamp custom_metadata."""
+    import asyncio
+    from collections.abc import AsyncGenerator
+    from types import SimpleNamespace
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    from webhook_agent.models.model_factory import TIMEOUT_RETRIES_METADATA_KEY
+
+    model = RateLimitedGemini(
+        model="gemini-3.5-flash-lite",
+        client_kwargs={"api_key": "test_key"},
+        call_timeout_seconds=0.05,
+        call_attempts=2,
+    )
+
+    events: list[str] = []
+    attempts = 0
+
+    async def mock_super_gen(*args: Any, **kwargs: Any) -> AsyncGenerator[Any]:
+        nonlocal attempts
+        attempts += 1
+        current = attempts
+        events.append(f"start:{current}")
+        try:
+            if current == 1:
+                await asyncio.sleep(5.0)
+            yield SimpleNamespace(text="ok", custom_metadata={"existing": True})
+        finally:
+            events.append(f"close:{current}")
+
+    monkeypatch.setattr(Gemini, "generate_content_async", mock_super_gen)
+
+    llm_request = MagicMock()
+    llm_request.model = "gemini-3.5-flash-lite"
+    llm_request.contents = ["hello"]
+    llm_request._rate_limit_checked = True
+
+    chunks = [chunk async for chunk in model.generate_content_async(llm_request)]
+
+    assert attempts == 2
+    assert len(chunks) == 1
+    assert chunks[0].text == "ok"
+    assert chunks[0].custom_metadata == {
+        "existing": True,
+        TIMEOUT_RETRIES_METADATA_KEY: 1,
+    }
+    # Attempt 1's generator must be closed BEFORE attempt 2 starts.
+    assert events == ["start:1", "close:1", "start:2", "close:2"]
+
+
+@pytest.mark.anyio
+async def test_rate_limited_gemini_propagates_timeout_after_exhausting_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every attempt times out, TimeoutError must propagate so execution can fail over."""
+    import asyncio
+    from collections.abc import AsyncGenerator
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    model = RateLimitedGemini(
+        model="gemini-3.5-flash-lite",
+        client_kwargs={"api_key": "test_key"},
+        call_timeout_seconds=0.03,
+        call_attempts=2,
+    )
+
+    closed: list[int] = []
+    attempts = 0
+
+    async def mock_super_gen(*args: Any, **kwargs: Any) -> AsyncGenerator[Any]:
+        nonlocal attempts
+        attempts += 1
+        current = attempts
+        try:
+            await asyncio.sleep(5.0)
+            yield "never"  # pragma: no cover
+        finally:
+            closed.append(current)
+
+    monkeypatch.setattr(Gemini, "generate_content_async", mock_super_gen)
+
+    llm_request = MagicMock()
+    llm_request.model = "gemini-3.5-flash-lite"
+    llm_request.contents = ["hello"]
+    llm_request._rate_limit_checked = True
+
+    with pytest.raises(TimeoutError):
+        async for _ in model.generate_content_async(llm_request):
+            pass
+
+    assert attempts == 2
+    assert closed == [1, 2]
+
+
+@pytest.mark.anyio
+async def test_rate_limited_gemini_streaming_timeout_does_not_duplicate_yielded_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In streaming mode, a timeout after chunks were yielded propagates without retrying."""
+    import asyncio
+    from collections.abc import AsyncGenerator
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    model = RateLimitedGemini(
+        model="gemini-3.5-flash-lite",
+        client_kwargs={"api_key": "test_key"},
+        call_timeout_seconds=0.05,
+        call_attempts=3,
+    )
+
+    attempts = 0
+    closed = 0
+
+    async def mock_super_gen(*args: Any, **kwargs: Any) -> AsyncGenerator[Any]:
+        nonlocal attempts, closed
+        attempts += 1
+        try:
+            yield "partial_chunk"
+            await asyncio.sleep(5.0)
+        finally:
+            closed += 1
+
+    monkeypatch.setattr(Gemini, "generate_content_async", mock_super_gen)
+
+    llm_request = MagicMock()
+    llm_request.model = "gemini-3.5-flash-lite"
+    llm_request.contents = ["hello"]
+    llm_request._rate_limit_checked = True
+
+    received: list[Any] = []
+    with pytest.raises(TimeoutError):
+        async for chunk in model.generate_content_async(llm_request, stream=True):
+            received.append(chunk)
+
+    assert received == ["partial_chunk"]
+    assert attempts == 1
+    assert closed == 1
+
+
+def test_model_call_timeout_env_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify env parsing for MODEL_CALL_TIMEOUT_SECONDS and MODEL_CALL_ATTEMPTS."""
+    from webhook_agent.models.model_factory import (
+        _get_model_call_attempts,
+        _get_model_call_timeout_seconds,
+    )
+
+    monkeypatch.delenv("MODEL_CALL_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("MODEL_CALL_ATTEMPTS", raising=False)
+    assert _get_model_call_timeout_seconds() == 180.0
+    assert _get_model_call_attempts() == 2
+
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("MODEL_CALL_ATTEMPTS", "0")
+    assert _get_model_call_timeout_seconds() is None
+    assert _get_model_call_attempts() == 1
+
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_SECONDS", "not-a-number")
+    monkeypatch.setenv("MODEL_CALL_ATTEMPTS", "bad")
+    assert _get_model_call_timeout_seconds() == 180.0
+    assert _get_model_call_attempts() == 2
+
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_SECONDS", "nan")
+    assert _get_model_call_timeout_seconds() == 180.0
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_SECONDS", "inf")
+    assert _get_model_call_timeout_seconds() == 180.0

@@ -285,6 +285,9 @@ def test_is_transient_error() -> None:
 
     assert _is_transient_error(ResourceExhaustedError("Quota")) is True
 
+    # Per-call timeout errors trigger failover
+    assert _is_transient_error(TimeoutError("model call timed out")) is True
+
     # Non-transient errors
     assert _is_transient_error(ValueError("Invalid syntax")) is False
     assert _is_transient_error(KeyError("missing_key")) is False

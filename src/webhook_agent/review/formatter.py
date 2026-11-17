@@ -151,6 +151,30 @@ def _salvage_objects(block: str) -> list[dict[str, Any]]:
     return salvaged
 
 
+_FINDING_TEXT_KEYS = ("description", "title", "risk", "item_description", "body")
+
+
+def _has_finding_text(raw: Any) -> bool:
+    """Return True if raw is a finding dict carrying non-blank finding text."""
+    if not isinstance(raw, dict):
+        return False
+    for key in _FINDING_TEXT_KEYS:
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            return True
+    return False
+
+
+def _is_findings_list(value: Any) -> bool:
+    """Return True if value is an empty list or holds at least one usable finding dict.
+
+    A non-empty list with no valid finding -- such as strings, numbers, or
+    objects using unrelated field names -- is rejected as malformed rather than
+    silently normalized into an empty clean review.
+    """
+    return isinstance(value, list) and (not value or any(_has_finding_text(item) for item in value))
+
+
 def extract_json_payload(text: str) -> dict[str, Any] | None:
     """Extract, repair, or salvage structured JSON payload from reviewer output."""
     if not text or not text.strip():
@@ -183,7 +207,7 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
             parsed = json.loads(block)
             if isinstance(parsed, dict):
                 return parsed
-            if isinstance(parsed, list):
+            if _is_findings_list(parsed):
                 return {"critical_issues": parsed}
         except (ValueError, json.JSONDecodeError):
             pass
@@ -195,7 +219,7 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
                 parsed = json.loads(clean_block)
                 if isinstance(parsed, dict):
                     return parsed
-                if isinstance(parsed, list):
+                if _is_findings_list(parsed):
                     return {"critical_issues": parsed}
             except (ValueError, json.JSONDecodeError):
                 pass
@@ -217,7 +241,7 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
                 ):
                     logger.info("Successfully repaired malformed JSON review object")
                     return repaired
-            elif isinstance(repaired, list):
+            elif _is_findings_list(repaired):
                 logger.info("Successfully repaired malformed JSON review list")
                 return {"critical_issues": repaired}
         salvaged = _salvage_objects(block)
@@ -226,8 +250,12 @@ def extract_json_payload(text: str) -> dict[str, Any] | None:
                 if any(k in obj for k in ("critical_issues", "resolutions", "executive_summary")):
                     logger.info("Salvaged top-level review response object from malformed JSON")
                     return obj
-            logger.info("Salvaged %d individual review items from malformed JSON", len(salvaged))
-            return {"critical_issues": salvaged}
+            valid_items = [obj for obj in salvaged if _has_finding_text(obj)]
+            if valid_items:
+                logger.info(
+                    "Salvaged %d individual review items from malformed JSON", len(valid_items)
+                )
+                return {"critical_issues": valid_items}
     return None
 
 

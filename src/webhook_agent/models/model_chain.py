@@ -299,8 +299,11 @@ def _is_transient_error(error: Exception) -> bool:
     """Check if an error is transient and should be retried.
 
     Transient errors include server unavailability (503), rate limiting (429),
-    RESOURCE_EXHAUSTED errors, TPM/quota limit fast-fails, and other temporary issues.
+    RESOURCE_EXHAUSTED errors, TPM/quota limit fast-fails, per-call timeouts,
+    and other temporary issues.
     """
+    if isinstance(error, TimeoutError):
+        return True
     if isinstance(error, GenAIServerError):
         error_code = getattr(error, "code", None)
         return error_code in (503, 500, 429, 502, 504)

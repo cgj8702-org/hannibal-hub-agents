@@ -17,6 +17,34 @@ logger = logging.getLogger("webhook_agent.core.plugins")
 
 PRUNE_MARKER = "[output pruned to reclaim context — re-run the tool if needed]"
 
+_TOOL_OUTPUT_KEYS = ("output", "result", "error")
+
+
+def _is_already_pruned(resp: Any) -> bool:
+    """Return True if a tool response dict already represents a pruned stub."""
+    return isinstance(resp, dict) and (
+        resp.get("pruned") == PRUNE_MARKER or resp.get("pruned") is True
+    )
+
+
+def _extract_tool_output_chars(resp: Any) -> int:
+    """Measure original character length from standard tool-response payload keys."""
+    if isinstance(resp, dict):
+        text = next(
+            (resp[key] for key in _TOOL_OUTPUT_KEYS if key in resp),
+            resp,
+        )
+        return len(str(text))
+    return len(str(resp))
+
+
+def _build_pruned_response(resp: Any) -> dict[str, Any]:
+    """Build the pruned stub retaining the original output's character count."""
+    return {
+        "pruned": PRUNE_MARKER,
+        "chars": _extract_tool_output_chars(resp),
+    }
+
 
 class WebhookHistoryPruningPlugin(BasePlugin):
     """Retains only the latest N events in active model context for multi-turn sessions."""
@@ -164,7 +192,7 @@ class ToolOutputPruningPlugin(BasePlugin):
                 if fr is None:
                     continue
                 resp = getattr(fr, "response", None)
-                if isinstance(resp, dict) and resp.get("pruned") == PRUNE_MARKER:
+                if _is_already_pruned(resp):
                     continue
                 est_tokens = len(str(resp)) // 4
                 if est_tokens >= self.min_part_tokens:
@@ -174,7 +202,9 @@ class ToolOutputPruningPlugin(BasePlugin):
         if total_reclaim >= self.min_reclaim_tokens:
             for event, idx, _ in candidates:
                 part = event.content.parts[idx]
-                part.function_response.response = {"pruned": PRUNE_MARKER}
+                part.function_response.response = _build_pruned_response(
+                    part.function_response.response
+                )
             logger.info(
                 "🧹 ToolOutputPruningPlugin: Zeroed %d stale tool output(s), reclaimed ~%d tokens",
                 len(candidates),

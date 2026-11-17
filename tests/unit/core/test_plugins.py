@@ -137,10 +137,65 @@ async def test_tool_output_pruning_zeroes_stale_tool_outputs() -> None:
     await plugin.before_model_callback(callback_context=ctx, llm_request=req)
 
     stale_part = stale_tool_event.content.parts[0]
-    assert stale_part.function_response.response == {"pruned": PRUNE_MARKER}
+    assert stale_part.function_response.response == {"pruned": PRUNE_MARKER, "chars": 1000}
 
     recent_part = recent_tool_event.content.parts[0]
     assert recent_part.function_response.response == "OK"
+
+
+@pytest.mark.anyio
+async def test_tool_output_pruning_measures_output_result_error_and_fallback_keys() -> None:
+    """Pruned stubs record original character count across result, output, error, and fallback dicts."""
+    plugin = ToolOutputPruningPlugin(
+        protect_recent_turns=1, min_part_tokens=10, min_reclaim_tokens=50
+    )
+
+    result_event = _make_tool_event("read_file", {"result": "R" * 400})
+    output_event = _make_tool_event("run_cmd", {"output": "O" * 300})
+    error_event = _make_tool_event("broken_tool", {"error": "E" * 200})
+    fallback_payload = {"matches": [{"path": "a.py", "text": "M" * 250}], "total": 1}
+    fallback_event = _make_tool_event("search_files", fallback_payload)
+    bool_pruned_event = _make_tool_event("old_tool", {"pruned": True, "chars": 9999})
+    user_turn_old = _make_user_event("Inspect files")
+    user_turn_recent = _make_user_event("Done?")
+
+    events = [
+        result_event,
+        output_event,
+        error_event,
+        fallback_event,
+        bool_pruned_event,
+        user_turn_old,
+        user_turn_recent,
+    ]
+
+    ctx = MagicMock()
+    ctx._invocation_context.session.events = events
+    req = MagicMock()
+
+    await plugin.before_model_callback(callback_context=ctx, llm_request=req)
+
+    assert result_event.content.parts[0].function_response.response == {
+        "pruned": PRUNE_MARKER,
+        "chars": 400,
+    }
+    assert output_event.content.parts[0].function_response.response == {
+        "pruned": PRUNE_MARKER,
+        "chars": 300,
+    }
+    assert error_event.content.parts[0].function_response.response == {
+        "pruned": PRUNE_MARKER,
+        "chars": 200,
+    }
+    assert fallback_event.content.parts[0].function_response.response == {
+        "pruned": PRUNE_MARKER,
+        "chars": len(str(fallback_payload)),
+    }
+    # Already pruned with boolean sentinel must not be re-pruned or overwritten.
+    assert bool_pruned_event.content.parts[0].function_response.response == {
+        "pruned": True,
+        "chars": 9999,
+    }
 
 
 @pytest.mark.anyio

@@ -510,3 +510,40 @@ def test_enforce_verdict_decays_round_budget():
     # In round 2 with 5 previous comments, budget decays 5 * 0.6 = 3.
     # So max 3 inline comments can be produced!
     assert len(inline_comments) == 3
+
+
+def test_extract_json_payload_rejects_malformed_findings_lists() -> None:
+    """Non-empty JSON lists without valid finding dicts must not masquerade as clean reviews."""
+    # Non-empty lists of numbers, strings, or wrong-key dicts are rejected
+    assert extract_json_payload("```json\n[1, 2, 3]\n```") is None
+    assert extract_json_payload('```json\n["not a finding", "still not"]\n```') is None
+    assert extract_json_payload('```json\n[{"wrong_key": "value"}]\n```') is None
+    assert extract_json_payload('```json\n[{"path": "src/a.py", "line": 5}]\n```') is None
+
+    # Trailing bogus list block must not shadow an earlier valid review JSON dict
+    mixed = """
+    ```json
+    {
+      "executive_summary": "Real review.",
+      "critical_issues": [
+        {"path": "src/a.py", "line": 10, "description": "Real bug"}
+      ]
+    }
+    ```
+    Example unrelated JSON snippet:
+    ```json
+    [{"wrong_key": "ignore me"}]
+    ```
+    """
+    extracted = extract_json_payload(mixed)
+    assert extracted is not None
+    assert extracted.get("executive_summary") == "Real review."
+    assert len(extracted["critical_issues"]) == 1
+
+    # Empty list and valid findings list remain accepted
+    assert extract_json_payload("```json\n[]\n```") == {"critical_issues": []}
+    valid_list = extract_json_payload(
+        '```json\n[{"path": "src/a.py", "line": 4, "description": "Null check missing"}]\n```'
+    )
+    assert valid_list is not None
+    assert len(valid_list["critical_issues"]) == 1
