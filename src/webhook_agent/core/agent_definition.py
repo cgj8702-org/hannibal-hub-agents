@@ -34,7 +34,7 @@ from webhook_agent.core.plugins import (
     ToolOutputPruningPlugin,
     WebhookHistoryPruningPlugin,
 )
-from webhook_agent.core.policy import get_auditor_thinking_budget
+from webhook_agent.core.policy import build_thinking_config
 from webhook_agent.core.prompts import (
     AUDITOR_CONTEXT_INSTRUCTION,
     CONVERSATIONAL_INSTRUCTION,
@@ -159,7 +159,8 @@ class WebhookAgent:
 
         # Streamlined workflow: START -> code_auditor
         # Single-pass high-velocity auditor eliminating redundant sub-agent hops.
-        auditor_thinking_budget = get_auditor_thinking_budget()
+        auditor_tc = build_thinking_config(self._current_model_name, conversational=False)
+        conv_tc = build_thinking_config(self._current_model_name, conversational=True)
 
         self._code_auditor = LlmAgent(
             name="code_auditor",
@@ -168,12 +169,7 @@ class WebhookAgent:
             description="Conducts AST diff-grounded risk audit using Gemini Thinking Mode.",
             instruction=build_static_review_instruction(),
             output_key="code_review_analysis",
-            planner=BuiltInPlanner(
-                thinking_config=genai_types.ThinkingConfig(
-                    include_thoughts=True,
-                    thinking_budget=auditor_thinking_budget,
-                )
-            ),
+            planner=BuiltInPlanner(thinking_config=auditor_tc) if auditor_tc is not None else None,
             before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
@@ -204,12 +200,7 @@ class WebhookAgent:
             description="Collaborative pair programming engineer for conversational discussions in GitHub threads.",
             instruction=CONVERSATIONAL_INSTRUCTION,
             output_key="conversational_reply",
-            planner=BuiltInPlanner(
-                thinking_config=genai_types.ThinkingConfig(
-                    include_thoughts=True,
-                    thinking_budget=min(auditor_thinking_budget, 512),
-                )
-            ),
+            planner=BuiltInPlanner(thinking_config=conv_tc) if conv_tc is not None else None,
             before_agent_callback=before_agent_callback,
             before_model_callback=before_model_callback,
             after_model_callback=after_model_callback,
@@ -340,10 +331,18 @@ class WebhookAgent:
             model_name=next_model,
             api_key=get_active_api_key(),
         )
+        auditor_tc = build_thinking_config(next_model, conversational=False)
+        conv_tc = build_thinking_config(next_model, conversational=True)
         if hasattr(self, "_code_auditor") and self._code_auditor is not None:
             self._code_auditor.model = new_model_instance
+            self._code_auditor.planner = (
+                BuiltInPlanner(thinking_config=auditor_tc) if auditor_tc is not None else None
+            )
         if hasattr(self, "_conversational_agent") and self._conversational_agent is not None:
             self._conversational_agent.model = new_model_instance
+            self._conversational_agent.planner = (
+                BuiltInPlanner(thinking_config=conv_tc) if conv_tc is not None else None
+            )
 
         # Dynamically toggle context caching based on model family:
         # Strictly enable only for Gemini 3+ models; disable for Gemma / legacy models.
