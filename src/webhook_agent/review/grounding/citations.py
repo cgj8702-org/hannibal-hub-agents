@@ -197,10 +197,81 @@ def bare_path(path: str) -> str:
     return path
 
 
+_WITH_OPEN_RE = re.compile(r"\b(async\s+with|with)\s*\(")
+_TRAILING_COMMA_DELIM_RE = re.compile(r",\s*([)\]\}])")
+
+
+def _unwrap_parenthesized_with(text: str) -> str:
+    """Unwrap Python 3.10+ multi-line ``with (...):`` / ``async with (...):`` parens."""
+    out: list[str] = []
+    pos = 0
+    for m in _WITH_OPEN_RE.finditer(text):
+        if m.start() < pos:
+            continue
+        depth = 1
+        idx = m.end()
+        while idx < len(text) and depth > 0:
+            ch = text[idx]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            idx += 1
+        if depth == 0 and text[idx:].lstrip().startswith(":"):
+            colon_idx = text.find(":", idx)
+            inner = text[m.end() : idx - 1].strip().rstrip(",")
+            out.append(text[pos : m.start()])
+            out.append(f"{m.group(1)} {inner}:")
+            pos = colon_idx + 1
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def _norm_evidence(text: str) -> str:
     """Normalize text by stripping backticks, collapsing whitespace, and lowercasing."""
     cleaned = (text or "").replace("`", "")
     return re.sub(r"\s+", " ", cleaned).strip().lower()
+
+
+def _norm_diff_for_evidence(diff_text: str) -> str:
+    """Normalize unified diff text for evidence matching by stripping line prefixes.
+
+    Unified diff hunks prefix each added, removed, or context line with ``+``, ``-``,
+    or space. Stripping those single-character diff markers before collapsing
+    whitespace allows multi-line code quotes (such as ``if cond: return True``) to
+    match the diff lines cleanly without stray ``+`` tokens breaking the substring.
+    """
+    if not diff_text:
+        return ""
+    body_lines: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith(("diff --git ", "index ", "--- ", "+++ ", "@@ ")):
+            continue
+        if line and line[0] in ("+", "-", " "):
+            body_lines.append(line[1:])
+        else:
+            body_lines.append(line)
+    return _norm_evidence("\n".join(body_lines))
+
+
+def _compact_code_for_evidence(norm_text: str) -> str:
+    """Normalize Ruff multi-line formatting differences (trailing commas, parenthesized with)."""
+    compact = _TRAILING_COMMA_DELIM_RE.sub(r"\1", norm_text)
+    compact = _unwrap_parenthesized_with(compact)
+    return re.sub(r"\s+", " ", compact).strip()
+
+
+def _evidence_quote_in_diff(quote: str, norm_diff: str, compact_diff: str | None = None) -> bool:
+    """Return True if a backticked code quote appears in the normalized diff text."""
+    norm_code = _norm_evidence(quote)
+    if not norm_code:
+        return True
+    if norm_code in norm_diff:
+        return True
+    eff_compact_diff = (
+        compact_diff if compact_diff is not None else _compact_code_for_evidence(norm_diff)
+    )
+    return _compact_code_for_evidence(norm_code) in eff_compact_diff
 
 
 def touched_lines_by_file(patches: Mapping[str, str | None]) -> dict[str, set[int]]:
@@ -554,11 +625,11 @@ def _check_one(
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
         if diff_text and finding.kind not in ("scorecard", "suggestion"):
-            norm_diff = _norm_evidence(diff_text)
+            norm_diff = _norm_diff_for_evidence(diff_text)
+            compact_diff = _compact_code_for_evidence(norm_diff)
             for quote in code_quotes:
                 if len(_norm_evidence(quote)) > 24:
-                    norm_code = _norm_evidence(quote)
-                    if norm_code not in norm_diff:
+                    if not _evidence_quote_in_diff(quote, norm_diff, compact_diff):
                         issues.append(
                             _issue(
                                 "soft" if is_deletion_refactor else "hard",
@@ -574,9 +645,10 @@ def _check_one(
         is_behavioral = any(kw in ev for kw in BEHAVIORAL_KEYWORDS)
         raw_quotes = [q.strip() for q in _BACKTICK_RE.findall(finding.evidence or "") if q.strip()]
         code_quotes = [q for q in raw_quotes if not _is_path_citation(q, path)]
-        norm_diff = _norm_evidence(diff_text)
+        norm_diff = _norm_diff_for_evidence(diff_text)
+        compact_diff = _compact_code_for_evidence(norm_diff)
         has_diff_quote = bool(code_quotes) and all(
-            _norm_evidence(q) in norm_diff for q in code_quotes
+            _evidence_quote_in_diff(q, norm_diff, compact_diff) for q in code_quotes
         )
         has_test = re.search(r"\btest_\w+", ev) is not None
         has_concrete_quote_or_test = has_diff_quote or has_test
