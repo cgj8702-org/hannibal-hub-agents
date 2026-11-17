@@ -361,6 +361,9 @@ class WebhookAgent:
         # time, so mutating self._code_auditor.model alone leaves the compiled Workflow
         # graph pinned to the initial model. Rebuild Workflow + App + Runner so model
         # routing and 429/503 failover take effect on live executions.
+        # Session state is owned by self._session_service (preserved across rebuilds),
+        # so rebuilding the stateless Workflow/App/Runner graph between turns or retries
+        # never drops or disrupts ongoing session history.
         if hasattr(self, "_code_auditor") and self._code_auditor is not None:
             self._agent = Workflow(
                 name="webhook_agent",
