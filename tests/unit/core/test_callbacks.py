@@ -719,6 +719,38 @@ def test_extract_response_text_no_content() -> None:
     assert result == ""
 
 
+def test_extract_thoughts_and_response_text_with_real_genai_parts() -> None:
+    """Real google.genai.types.Part objects separate boolean thought=True parts from visible text."""
+    from types import SimpleNamespace
+
+    from google.genai import types as genai_types
+
+    from webhook_agent.core.callbacks import (
+        _extract_response_text,
+        _extract_thoughts_from_response,
+    )
+
+    thought_part = genai_types.Part(text="Step 1: inspect timeout handling.", thought=True)
+    visible_part = genai_types.Part(text="All checks passed.", thought=None)
+    signed_visible_part = genai_types.Part(
+        text="Final verdict ready.",
+        thought=None,
+        thought_signature=b"opaque-replay-token",
+    )
+    resp = SimpleNamespace(
+        content=genai_types.Content(
+            role="model",
+            parts=[thought_part, visible_part, signed_visible_part],
+        )
+    )
+
+    thoughts = _extract_thoughts_from_response(resp)  # type: ignore[arg-type]
+    response_text = _extract_response_text(resp)  # type: ignore[arg-type]
+
+    assert thoughts == "Step 1: inspect timeout handling."
+    assert response_text == "All checks passed.\nFinal verdict ready."
+
+
 @pytest.mark.anyio
 async def test_before_tool_callback_create_issue_gating_blocks_when_disallowed() -> None:
     """before_tool_callback blocks create_issue when may_create_issue is False."""

@@ -539,10 +539,13 @@ class TestToolRegistration:
 
         agent_default = WebhookAgent(dry_run=True)
         assert agent_default._code_auditor.planner.thinking_config.thinking_budget == 4096
+        assert agent_default._code_auditor.planner.thinking_config.include_thoughts is True
+        assert agent_default._conversational_agent.planner.thinking_config.include_thoughts is True
 
         monkeypatch.setenv("AUDITOR_THINKING_BUDGET", "8192")
         agent_custom = WebhookAgent(dry_run=True)
         assert agent_custom._code_auditor.planner.thinking_config.thinking_budget == 8192
+        assert agent_custom._code_auditor.planner.thinking_config.include_thoughts is True
 
     def test_review_accepts_deterministic_precompiled_ast(self):
         """Deterministic precompiled AST satisfies review gate without runtime tool execution."""

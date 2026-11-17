@@ -170,7 +170,7 @@ class WebhookAgent:
             output_key="code_review_analysis",
             planner=BuiltInPlanner(
                 thinking_config=genai_types.ThinkingConfig(
-                    include_thoughts=False,
+                    include_thoughts=True,
                     thinking_budget=auditor_thinking_budget,
                 )
             ),
@@ -206,7 +206,7 @@ class WebhookAgent:
             output_key="conversational_reply",
             planner=BuiltInPlanner(
                 thinking_config=genai_types.ThinkingConfig(
-                    include_thoughts=False,
+                    include_thoughts=True,
                     thinking_budget=min(auditor_thinking_budget, 512),
                 )
             ),
