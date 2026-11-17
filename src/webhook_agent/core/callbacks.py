@@ -39,33 +39,48 @@ def _is_model_thoughts_logging_enabled() -> bool:
     )
 
 
+def _is_thought_part(part: Any) -> bool:
+    """Return True if a response part carries model thought/reasoning content."""
+    thought = getattr(part, "thought", None)
+    if thought is True:
+        return True
+    if isinstance(thought, str) and bool(thought.strip()):
+        return True
+    # Preserve legacy string thought_signature doubles; real SDK bytes signatures
+    # accompany normal answer/function-call parts on Gemini 3+ and do not mark thought text.
+    sig = getattr(part, "thought_signature", None)
+    return isinstance(sig, str) and bool(sig)
+
+
 def _extract_thoughts_from_response(llm_response: LlmResponse) -> str:
     """Extract thoughts/reasoning content from LLM response."""
-    thoughts_parts = []
+    thoughts_parts: list[str] = []
     if hasattr(llm_response, "content") and llm_response.content:
         parts = getattr(llm_response.content, "parts", None) or []
         for part in parts:
-            # Check for thought content in the part
             thought = getattr(part, "thought", None)
-            if thought:
-                thoughts_parts.append(str(thought))
-            # Also check for text that might be thoughts
             text = getattr(part, "text", None)
-            if text and hasattr(part, "thought_signature"):
-                # This is likely a thought block
-                thoughts_parts.append(str(text))
+            if isinstance(thought, str) and thought:
+                thoughts_parts.append(thought)
+            elif thought is True:
+                if isinstance(text, str) and text:
+                    thoughts_parts.append(text)
+            else:
+                sig = getattr(part, "thought_signature", None)
+                if isinstance(text, str) and text and isinstance(sig, str) and sig:
+                    thoughts_parts.append(text)
     return "\n".join(thoughts_parts) if thoughts_parts else ""
 
 
 def _extract_response_text(llm_response: LlmResponse) -> str:
-    """Extract text content from LLM response."""
-    text_parts = []
+    """Extract visible (non-thought) text content from LLM response."""
+    text_parts: list[str] = []
     if hasattr(llm_response, "content") and llm_response.content:
         parts = getattr(llm_response.content, "parts", None) or []
         for part in parts:
             text = getattr(part, "text", None)
-            if text and not hasattr(part, "thought_signature"):
-                text_parts.append(str(text))
+            if isinstance(text, str) and text and not _is_thought_part(part):
+                text_parts.append(text)
     return "\n".join(text_parts) if text_parts else ""
 
 
