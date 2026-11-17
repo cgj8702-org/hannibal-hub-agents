@@ -62,6 +62,12 @@ DEFAULT_TRIGGER_EXEMPT_LOGINS = "cgj8702,cgj8702-agents,dependabot[bot]"
 # The bot skips manual review dismissal on these repositories (comma-separated).
 DEFAULT_NATIVE_STALE_REVIEW_DISMISSAL_REPOS = "cgj8702-org/hannibal-hub-agents"
 
+# --- Model Call Timeout & Retry Defaults ---
+# Per-attempt wall-clock timeout in seconds for ADK Gemini model calls (<= 0 disables).
+DEFAULT_MODEL_CALL_TIMEOUT_SECONDS = "180"
+# Maximum attempts per individual model call when an attempt times out.
+DEFAULT_MODEL_CALL_ATTEMPTS = "2"
+
 # --- Debug Logging ---
 # Enable debug logging for model thoughts and responses per turn.
 # Set LOG_MODEL_THOUGHTS=1 to capture prompt/response/thoughts in Cloud Logging at DEBUG level.

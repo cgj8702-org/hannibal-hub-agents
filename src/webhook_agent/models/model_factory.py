@@ -6,13 +6,20 @@ to unify model instantiation, rate limiting, and API key handling across agents.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import math
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from google.adk.models import Gemini
 
+from webhook_agent.constants import (
+    DEFAULT_MODEL_CALL_ATTEMPTS,
+    DEFAULT_MODEL_CALL_TIMEOUT_SECONDS,
+)
 from webhook_agent.models.rate_limiter import (
     _resolve_tier,
     get_active_api_key,
@@ -20,6 +27,110 @@ from webhook_agent.models.rate_limiter import (
 )
 
 logger = logging.getLogger("webhook_agent.models.model_factory")
+
+TIMEOUT_RETRIES_METADATA_KEY = "timeout_retries"
+
+
+def _get_model_call_timeout_seconds() -> float | None:
+    """Resolve per-attempt model call timeout in seconds from env (<= 0 disables)."""
+    raw = os.getenv("MODEL_CALL_TIMEOUT_SECONDS", DEFAULT_MODEL_CALL_TIMEOUT_SECONDS).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid MODEL_CALL_TIMEOUT_SECONDS=%r; falling back to %ss",
+            raw,
+            DEFAULT_MODEL_CALL_TIMEOUT_SECONDS,
+        )
+        return float(DEFAULT_MODEL_CALL_TIMEOUT_SECONDS)
+    if not math.isfinite(value):
+        logger.warning(
+            "Non-finite MODEL_CALL_TIMEOUT_SECONDS=%r; falling back to %ss",
+            raw,
+            DEFAULT_MODEL_CALL_TIMEOUT_SECONDS,
+        )
+        return float(DEFAULT_MODEL_CALL_TIMEOUT_SECONDS)
+    return value if value > 0 else None
+
+
+def _get_model_call_attempts() -> int:
+    """Resolve max attempts per model call on timeout from env (clamped to >= 1)."""
+    raw = os.getenv("MODEL_CALL_ATTEMPTS", DEFAULT_MODEL_CALL_ATTEMPTS).strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning(
+            "Invalid MODEL_CALL_ATTEMPTS=%r; falling back to %s",
+            raw,
+            DEFAULT_MODEL_CALL_ATTEMPTS,
+        )
+        return int(DEFAULT_MODEL_CALL_ATTEMPTS)
+
+
+async def _call_model_with_timeout_retry(
+    generate: Callable[[], AsyncGenerator[Any]],
+    *,
+    timeout_seconds: float | None,
+    max_attempts: int,
+    model_name: str,
+) -> list[Any]:
+    """Run a non-streaming model call, retrying attempts that time out.
+
+    Each attempt is bounded by `timeout_seconds` (when positive) and wrapped in
+    `contextlib.aclosing()` so a stalled underlying HTTP stream is closed before
+    a retry begins. Responses are buffered per attempt so a retry never repeats
+    a previously yielded response.
+
+    Args:
+        generate: Zero-argument factory starting one model call async generator.
+        timeout_seconds: Per-attempt timeout in seconds, or None/<=0 to disable.
+        max_attempts: Total number of attempts before propagating TimeoutError.
+        model_name: Model name for diagnostic warning logs.
+
+    Returns:
+        Buffered responses from the first attempt that finished in time. After a
+        timeout retry, each response supporting ``custom_metadata`` records the
+        number of timed-out attempts under `TIMEOUT_RETRIES_METADATA_KEY`.
+
+    Raises:
+        TimeoutError: If the final attempt times out.
+    """
+    attempts = max(1, max_attempts)
+    effective_timeout = (
+        timeout_seconds if (timeout_seconds is not None and timeout_seconds > 0) else None
+    )
+    retries = 0
+    responses: list[Any] = []
+    for attempt_idx in range(attempts):
+        is_last = attempt_idx + 1 >= attempts
+        try:
+            async with (
+                asyncio.timeout(effective_timeout),
+                contextlib.aclosing(generate()) as attempt,
+            ):
+                responses = [response async for response in attempt]
+            break
+        except TimeoutError as exc:
+            if is_last:
+                raise
+            retries += 1
+            logger.warning(
+                "Model '%s' call attempt %d of %d timed out after %ss (%s); retrying",
+                model_name,
+                retries,
+                attempts,
+                effective_timeout,
+                type(exc).__name__,
+            )
+    if retries:
+        for response in responses:
+            if hasattr(response, "custom_metadata"):
+                existing = getattr(response, "custom_metadata", None) or {}
+                response.custom_metadata = {
+                    **existing,
+                    TIMEOUT_RETRIES_METADATA_KEY: retries,
+                }
+    return responses
 
 
 class _SuppressApiKeyWarningFilter(logging.Filter):
@@ -32,6 +143,9 @@ logging.getLogger("google_genai._api_client").addFilter(_SuppressApiKeyWarningFi
 
 class RateLimitedGemini(Gemini):
     """Production-grade Rate-Limited Gemini wrapper for ADK agents."""
+
+    call_timeout_seconds: float | None = None
+    call_attempts: int | None = None
 
     async def generate_content_async(
         self, llm_request: Any, stream: bool = False
@@ -73,11 +187,55 @@ class RateLimitedGemini(Gemini):
                     exc,
                 )
 
+        if self.call_timeout_seconds is not None:
+            timeout_seconds: float | None = (
+                self.call_timeout_seconds if self.call_timeout_seconds > 0 else None
+            )
+        else:
+            timeout_seconds = _get_model_call_timeout_seconds()
+        max_attempts = (
+            max(1, self.call_attempts)
+            if self.call_attempts is not None
+            else _get_model_call_attempts()
+        )
+        parent_generate = super().generate_content_async
+
         yielded_any = False
         try:
-            async for response in super().generate_content_async(llm_request, stream=stream):
-                yielded_any = True
-                yield response
+            if not stream:
+                responses = await _call_model_with_timeout_retry(
+                    lambda: parent_generate(llm_request, stream=False),
+                    timeout_seconds=timeout_seconds,
+                    max_attempts=max_attempts,
+                    model_name=model_name,
+                )
+                for response in responses:
+                    yielded_any = True
+                    yield response
+                return
+
+            for attempt_idx in range(max_attempts):
+                is_last = attempt_idx + 1 >= max_attempts
+                try:
+                    async with (
+                        asyncio.timeout(timeout_seconds),
+                        contextlib.aclosing(parent_generate(llm_request, stream=True)) as attempt,
+                    ):
+                        async for response in attempt:
+                            yielded_any = True
+                            yield response
+                    return
+                except TimeoutError as exc:
+                    if yielded_any or is_last:
+                        raise
+                    logger.warning(
+                        "Model '%s' streaming call attempt %d of %d timed out after %ss (%s); retrying",
+                        model_name,
+                        attempt_idx + 1,
+                        max_attempts,
+                        timeout_seconds,
+                        type(exc).__name__,
+                    )
             return
         except Exception as exc:
             if yielded_any:
