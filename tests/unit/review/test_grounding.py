@@ -969,3 +969,35 @@ def test_verify_semantic_invariant_accepts_dotfile_paths(tmp_path: Path) -> None
         repo_root=tmp_path,
     )
     assert status == "GROUNDED", f"Expected GROUNDED, got {status}: {reason}"
+
+
+def test_verify_resolutions_ignores_none_path_and_matches_basenames() -> None:
+    """SyncResolutionItem(path=None) must not turn None into 'None' and demote grounded resolutions."""
+    from webhook_agent.review.grounding import verify_resolutions
+    from webhook_agent.review.schemas import SyncResolutionItem
+
+    diff = (
+        "--- a/tests/unit/core/test_execution.py\n"
+        "+++ b/tests/unit/core/test_execution.py\n"
+        "@@ -2730,1 +2730,4 @@\n"
+        "+def test_switch_model_rebuilds_workflow_and_app_nodes():\n"
+        "+    assert agent._session_service is initial_session_service\n"
+    )
+    item_no_path = SyncResolutionItem(
+        item_description="Rebuilding Workflow graph at runtime could interrupt stateful execution.",
+        status="RESOLVED",
+        evidence="Verified via `test_switch_model_rebuilds_workflow_and_app_nodes` that `_session_service` is preserved.",
+        category="RISK",
+        path=None,
+    )
+    item_basename = SyncResolutionItem(
+        item_description="Missing session preservation test in test_execution.py.",
+        status="RESOLVED",
+        evidence="Added `test_switch_model_rebuilds_workflow_and_app_nodes` in test_execution.py.",
+        category="RISK",
+        path=None,
+    )
+
+    verified = verify_resolutions([item_no_path, item_basename], diff)
+    assert verified[0]["status"] == "RESOLVED"
+    assert verified[1]["status"] == "RESOLVED"
