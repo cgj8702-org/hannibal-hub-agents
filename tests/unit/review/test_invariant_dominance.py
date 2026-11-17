@@ -117,6 +117,31 @@ def test_verify_semantic_invariant_requires_operative_verb() -> None:
     assert "operative invariant verb" in reason_passive
 
 
+def test_structural_predicate_check_avoids_verb_whitelist_whack_a_mole() -> None:
+    """Structural predicate detection accepts unlisted verbs while rejecting bare noun phrases."""
+    from webhook_agent.review.grounding.invariants import _has_operative_predicate
+
+    valid_claims = [
+        "Model thoughts and visible response text are robustly partitioned across parts.",
+        "src/webhook_agent/review/grounding/invariants.py expands validation to classify invariants.",
+        "The parser normalizes timestamps and deduplicates entries.",
+        "Timeout wrapper closes stalled streams without leaking sockets.",
+        "Documentation corresponds to the repository layout after incorporating policy files.",
+    ]
+    for claim in valid_claims:
+        assert _has_operative_predicate(claim) is True, f"Expected predicate in: {claim}"
+
+    bare_labels = [
+        "Worker heartbeat module implementation details",
+        "Updated configuration file",
+        "API logging and testing settings",
+        "Code quality summary",
+        "src/worker.py",
+    ]
+    for label in bare_labels:
+        assert _has_operative_predicate(label) is False, f"Unexpected predicate in: {label}"
+
+
 def test_verify_semantic_invariant_accepts_architectural_verbs() -> None:
     """verify_semantic_invariant accepts architectural action verbs like scoped, eliminating, filtered, isolated."""
     claims = [
