@@ -569,6 +569,14 @@ def _finalize_enforced_review(
             Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"], enforced_verdict
         )
 
+    # Repair model line-number drift inside the structured review object BEFORE
+    # building inline comments, rendering Markdown, and serializing the JSON
+    # metadata footer so Section 3 (Scorecard), Section 6 (Verified Invariants),
+    # inline comments, and metadata stay in sync.
+    from .citation_repair import repair_review_object_citations
+
+    repair_review_object_citations(review_obj, pr=pr)
+
     inline_comments: list[dict[str, Any]] = []
     if diff_text:
         from .comment_poster import (
@@ -1332,6 +1340,8 @@ def _submit_formal_review(
         resolved_model: str | None = None
         cand_model = (
             model_name
+            or state_dict.get("active_model")
+            or state_dict.get("user:active_model")
             or state_dict.get("model_name")
             or state_dict.get("user:model_name")
             or state_dict.get("model")

@@ -1624,3 +1624,13 @@ def test_render_code_review_markdown_cleans_bare_invariant_citations(valid_code_
     assert "- [x] src/main.py:42: verified against diff hunk." in md
     assert "- [x] doc/guide.md:10: verified against diff hunk." in md
     assert "- [x] README.md:24: Logic & Boundaries check verified in PR diff." in md
+    from webhook_agent.review.metadata import extract_review_metadata
+
+    meta = extract_review_metadata(md)
+    assert meta is not None
+    assert meta["verified_invariants"] == [
+        "README.md:126: verified against diff hunk.",
+        "src/main.py:42: verified against diff hunk.",
+        "doc/guide.md:10: verified against diff hunk.",
+        "README.md:24: Logic & Boundaries check verified in PR diff.",
+    ]

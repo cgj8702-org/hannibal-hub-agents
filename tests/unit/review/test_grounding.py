@@ -930,3 +930,42 @@ def test_replay_harness_subsystem_is_purged() -> None:
     assert not hasattr(review_module, "BaselineReport")
     assert not hasattr(review_module, "ReviewEvaluation")
     assert not hasattr(review_module, "evaluate_fixture")
+
+
+def test_extract_cited_paths_preserves_dotfiles() -> None:
+    """Dotfile paths like .github/policy.yml must keep their leading dot."""
+    from webhook_agent.review.grounding import extract_cited_paths
+
+    paths = extract_cited_paths(
+        "Updated `.github/policy.yml`, `./.githooks/pre-commit`, `./src/main.py`, and `.ruff.toml`."
+    )
+    assert ".github/policy.yml" in paths
+    assert "github/policy.yml" not in paths
+    assert ".githooks/pre-commit" in paths
+    assert "src/main.py" in paths
+    assert ".ruff.toml" in paths
+
+
+def test_verify_semantic_invariant_accepts_dotfile_paths(tmp_path: Path) -> None:
+    """Semantic invariants citing real dotfiles like .github/policy.yml must not be falsely purged."""
+    from webhook_agent.review.grounding import verify_semantic_invariant
+
+    github_dir = tmp_path / ".github"
+    github_dir.mkdir()
+    (github_dir / "policy.yml").write_text("stale_days: 30\n", encoding="utf-8")
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "deploy_router.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    diff = "--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,2 @@\n+# Docs\n+Added `.github/policy.yml` and `scripts/deploy_router.sh`\n"
+    inv = (
+        "The directory structure documentation corresponds to the updated repository layout "
+        "after incorporating `.github/policy.yml` and `scripts/deploy_router.sh`."
+    )
+    status, reason = verify_semantic_invariant(
+        inv,
+        diff,
+        changed_paths=["README.md"],
+        repo_root=tmp_path,
+    )
+    assert status == "GROUNDED", f"Expected GROUNDED, got {status}: {reason}"

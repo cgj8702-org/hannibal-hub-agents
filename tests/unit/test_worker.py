@@ -1854,6 +1854,32 @@ class TestPubSubLeaseExtender:
 
         assert subscriber.modify_ack_deadline.call_count >= 2
 
+    def test_lease_extender_extends_immediately_on_entry(self):
+        from unittest.mock import MagicMock
+
+        from webhook_agent.worker import _lease_extender
+
+        subscriber = MagicMock()
+        subscription_path = "projects/test-project/subscriptions/test-sub"
+        ack_id = "ack-immediate"
+
+        # Even with a long heartbeat interval and immediate exit, the lease must be
+        # extended immediately on entry so short Pub/Sub deadlines (e.g. 10s) never expire.
+        with _lease_extender(
+            subscriber=subscriber,
+            subscription_path=subscription_path,
+            ack_id=ack_id,
+            ack_deadline_seconds=60,
+            interval_seconds=60.0,
+        ):
+            pass
+
+        assert subscriber.modify_ack_deadline.call_count == 1
+        call_kwargs = subscriber.modify_ack_deadline.call_args[1]["request"]
+        assert call_kwargs["subscription"] == subscription_path
+        assert call_kwargs["ack_ids"] == [ack_id]
+        assert call_kwargs["ack_deadline_seconds"] == 60
+
 
 class TestWorkerReliability:
     """Tests for worker reliability, error handling, transient retries, and dead-letter queue."""
