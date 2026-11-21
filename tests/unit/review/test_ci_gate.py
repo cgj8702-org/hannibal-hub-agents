@@ -117,6 +117,19 @@ def test_evaluate_ci_treats_api_errors_as_pending() -> None:
     assert evaluate_ci(gh, REPO, SHA) is CIState.PENDING
 
 
+def test_evaluate_ci_no_workflows_enabled_returns_pass() -> None:
+    """Repo without GitHub Actions: get_workflows() 404s -> no CI to wait for -> PASS."""
+    gh = MagicMock()
+    repo = gh.get_repo.return_value
+    commit = repo.get_commit.return_value
+    commit.get_check_runs.return_value = []
+    commit.get_combined_status.return_value = SimpleNamespace(total_count=0, state="pending")
+    repo.get_workflows.side_effect = RuntimeError(
+        "404: GitHub Actions is not enabled for this repository"
+    )
+    assert evaluate_ci(gh, REPO, SHA) is CIState.PASS
+
+
 def test_gate_is_on_by_default_and_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("REVIEW_WAIT_FOR_CI", raising=False)
     assert is_ci_gate_enabled() is True

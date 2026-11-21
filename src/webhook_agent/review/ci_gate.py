@@ -97,7 +97,13 @@ def evaluate_ci(gh: Any, repo_name: str, head_sha: str) -> CIState:
         if signals == 0:
             # Nothing reported yet. If the repo has CI workflows, runs are still being
             # created for this commit; otherwise there is no CI to wait for.
-            if repo.get_workflows().totalCount > 0:
+            try:
+                workflow_count = repo.get_workflows().totalCount
+            except Exception:
+                # Repo has no GitHub Actions enabled (e.g. 404 from the API).
+                # Treat as "no CI to wait for" so the PR is not frozen in PENDING.
+                workflow_count = 0
+            if workflow_count > 0:
                 return CIState.PENDING
         return CIState.PASS
     except Exception as exc:
