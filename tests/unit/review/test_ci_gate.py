@@ -245,12 +245,11 @@ def test_review_waits_while_ci_is_running(processor: WebhookProcessor) -> None:
     assert not is_reconciliation_claimed(build_reconciliation_cache_key(REPO, 7, SHA))
 
 
-def test_review_is_skipped_silently_when_ci_failed(processor: WebhookProcessor) -> None:
+def test_review_proceeds_when_ci_failed(processor: WebhookProcessor) -> None:
+    """Failed CI no longer blocks review — the review proceeds."""
     processor._gh = _gh([_run(conclusion="failure")])
     processor.process_event(_pr_event())
-    processor._agent_core.run.assert_not_called()
-    # Silent: nothing posted anywhere.
-    processor._gh.get_repo.return_value.get_pull.assert_not_called()
+    processor._agent_core.run.assert_called_once()
 
 
 @pytest.mark.parametrize("action", ["opened", "synchronize", "reopened", "ready_for_review"])
