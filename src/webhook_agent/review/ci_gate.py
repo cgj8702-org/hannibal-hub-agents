@@ -31,6 +31,7 @@ GATED_EVENTS = frozenset(
         "pull_request.synchronize",
         "pull_request.reopened",
         "pull_request.ready_for_review",
+        "issue_comment.created",
     }
 )
 

@@ -195,6 +195,7 @@ def handle_tier_1_programmatic(
     pr_number = (raw.get("pull_request") or {}).get("number") or issue_data.get("number")
 
     pr_num_int: int | None = None
+    has_slash_override = False
     if is_pr_event and pr_number is not None:
         try:
             pr_num_int = int(pr_number)
@@ -276,7 +277,13 @@ def handle_tier_1_programmatic(
     # consume the claim and block the review once CI turns green.
     check_ci_enabled = _resolve_helper("is_ci_gate_enabled", is_ci_gate_enabled)
     eval_ci_fn = _resolve_helper("evaluate_ci", evaluate_ci)
-    if not ci_verified and canonical in GATED_EVENTS and head_sha and pr_num_int is not None:
+    if (
+        not ci_verified
+        and canonical in GATED_EVENTS
+        and head_sha
+        and pr_num_int is not None
+        and not has_slash_override
+    ):
         if check_ci_enabled():
             ci_state = eval_ci_fn(gh, repo_name, head_sha)
             if ci_state is not CIState.PASS:
