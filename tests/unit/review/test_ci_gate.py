@@ -245,12 +245,11 @@ def test_review_waits_while_ci_is_running(processor: WebhookProcessor) -> None:
     assert not is_reconciliation_claimed(build_reconciliation_cache_key(REPO, 7, SHA))
 
 
-def test_review_is_skipped_silently_when_ci_failed(processor: WebhookProcessor) -> None:
+def test_review_proceeds_when_ci_failed(processor: WebhookProcessor) -> None:
+    """Failed CI no longer blocks review — the review proceeds."""
     processor._gh = _gh([_run(conclusion="failure")])
     processor.process_event(_pr_event())
-    processor._agent_core.run.assert_not_called()
-    # Silent: nothing posted anywhere.
-    processor._gh.get_repo.return_value.get_pull.assert_not_called()
+    processor._agent_core.run.assert_called_once()
 
 
 @pytest.mark.parametrize("action", ["opened", "synchronize", "reopened", "ready_for_review"])
@@ -285,6 +284,45 @@ def test_manual_review_comment_ignores_ci(processor: WebhookProcessor) -> None:
             },
         }
     )
+    processor._agent_core.run.assert_called_once()
+
+
+def _comment_event(body: str = "", head_sha: str = SHA) -> dict[str, Any]:
+    return {
+        "delivery_id": "c-1",
+        "event_name": "issue_comment",
+        "action": "created",
+        "sender": {"login": "alice", "type": "User"},
+        "raw_payload": {
+            "action": "created",
+            "repository": {"full_name": REPO},
+            "issue": {
+                "number": 7,
+                "pull_request": {"url": "x", "head": {"sha": head_sha}},
+            },
+            "comment": {"body": body, "user": {"login": "alice", "type": "User"}},
+        },
+    }
+
+
+def test_comment_without_slash_defers_when_ci_pending(processor: WebhookProcessor) -> None:
+    """Comment on a PR with pending CI should be deferred, not reviewed."""
+    processor._gh = _gh([_run("in_progress", None)])
+    processor.process_event(_comment_event(body="looks good"))
+    processor._agent_core.run.assert_not_called()
+
+
+def test_comment_with_slash_proceeds_when_ci_pending(processor: WebhookProcessor) -> None:
+    """``/review`` comment bypasses the CI gate even when CI is pending."""
+    processor._gh = _gh([_run("in_progress", None)])
+    processor.process_event(_comment_event(body="/review"))
+    processor._agent_core.run.assert_called_once()
+
+
+def test_comment_with_green_ci_proceeds(processor: WebhookProcessor) -> None:
+    """Comment on a PR with green CI proceeds to review."""
+    processor._gh = _gh([_run()])
+    processor.process_event(_comment_event(body="looks good"))
     processor._agent_core.run.assert_called_once()
 
 
