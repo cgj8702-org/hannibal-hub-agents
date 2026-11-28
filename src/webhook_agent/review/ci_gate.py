@@ -1,10 +1,10 @@
 """CI gate: review a pull request only after its CI has finished green.
 
-Automatic reviews (PR opened / pushed / reopened / ready for review) are held back until every
-check on the PR's head commit has completed successfully:
+Automatic reviews (PR opened / pushed / reopened / ready for review, and comments on a PR)
+are held back until every check on the PR's head commit has completed successfully:
 
 * CI still running            -> defer silently; ``check_suite.completed`` re-evaluates later.
-* CI failed                   -> skip silently. A new push, or a green re-run, re-evaluates.
+* CI failed                   -> review proceeds (a red suite no longer blocks review).
 * CI green                    -> review.
 
 Manual ``/review`` comments never pass through this gate.
@@ -31,6 +31,7 @@ GATED_EVENTS = frozenset(
         "pull_request.synchronize",
         "pull_request.reopened",
         "pull_request.ready_for_review",
+        "issue_comment.created",
     }
 )
 

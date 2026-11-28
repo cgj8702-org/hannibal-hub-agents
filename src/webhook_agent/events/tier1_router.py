@@ -195,6 +195,7 @@ def handle_tier_1_programmatic(
     pr_number = (raw.get("pull_request") or {}).get("number") or issue_data.get("number")
 
     pr_num_int: int | None = None
+    has_slash_override = False
     if is_pr_event and pr_number is not None:
         try:
             pr_num_int = int(pr_number)
@@ -271,15 +272,23 @@ def handle_tier_1_programmatic(
         )
         return Tier1Status.TERMINAL
 
-    # CI gate: automatic reviews wait for fully green CI. Silent on pending or failed CI.
+    # CI gate: automatic reviews wait for pending CI. Failed CI no longer blocks
+    # review — the review proceeds so PRs aren't stuck when CI is red. A slash-command
+    # override (``/review``) bypasses the gate entirely.
     # This runs before the in-flight dedup claim below so that a deferred event does not
     # consume the claim and block the review once CI turns green.
     check_ci_enabled = _resolve_helper("is_ci_gate_enabled", is_ci_gate_enabled)
     eval_ci_fn = _resolve_helper("evaluate_ci", evaluate_ci)
-    if not ci_verified and canonical in GATED_EVENTS and head_sha and pr_num_int is not None:
+    if (
+        not ci_verified
+        and canonical in GATED_EVENTS
+        and head_sha
+        and pr_num_int is not None
+        and not has_slash_override
+    ):
         if check_ci_enabled():
             ci_state = eval_ci_fn(gh, repo_name, head_sha)
-            if ci_state is not CIState.PASS:
+            if ci_state is CIState.PENDING:
                 logger.info(
                     "CI gate: PR %s#%s (commit %s) CI is %s; not reviewing now.",
                     repo_name,
